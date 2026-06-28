@@ -1,0 +1,104 @@
+import type { AppSettings, EntryType, PaymentMethod } from "./types.js";
+
+export const ENTRY_TYPES: EntryType[] = [
+  "Venda",
+  "Mesa",
+  "Onibus",
+  "Dinheiro/Troco",
+  "Divisao de conta",
+  "Taxa",
+  "Extra",
+  "Cancelado/Estorno",
+  "Personalizado"
+];
+
+export const PAYMENT_METHODS: PaymentMethod[] = [
+  "Nao informado",
+  "Dinheiro",
+  "Pix",
+  "Debito",
+  "Credito",
+  "Voucher",
+  "Misto"
+];
+
+export const DEFAULT_COLUMNS = [
+  "Data",
+  "Hora",
+  "Tipo",
+  "Valor original",
+  "Valor final",
+  "Pessoas",
+  "Valor por pessoa",
+  "Arredondamento",
+  "Sobra/diferenca",
+  "Descricao",
+  "Mesa",
+  "Onibus",
+  "Forma de pagamento",
+  "Pago com",
+  "Troco",
+  "Observacoes",
+  "Dispositivo/origem",
+  "ID do lancamento",
+  "Status"
+];
+
+export const DEFAULT_FLOATING_FIELDS = ["type", "value", "people", "description", "submit"];
+
+export function createDefaultSettings(outputDirectory: string): AppSettings {
+  return {
+    outputDirectory,
+    fileFormat: "xlsx",
+    fileStrategy: "daily",
+    dateFormat: "yyyy-MM-dd",
+    csvSeparator: ";",
+    currency: "BRL",
+    visibleColumns: DEFAULT_COLUMNS,
+    backupEnabled: true,
+    defaultType: "Venda",
+    defaultPeople: 1,
+    defaultRoundingStep: 0.25,
+    defaultRoundingDirection: "up",
+    theme: "dark",
+    accentColor: "#17c964",
+    fieldSize: "medium",
+    density: "normal",
+    layout: "complete",
+    activeProfile: "Perfil PC",
+    profiles: {
+      "Perfil PC": {},
+      "Perfil Notebook": { density: "compact", layout: "compact" },
+      "Perfil tela pequena": { density: "compact", fieldSize: "small", layout: "sidePanel" },
+      "Perfil fixado": { layout: "pinnedBar", density: "compact" }
+    },
+    floating: {
+      visibleFields: DEFAULT_FLOATING_FIELDS,
+      opacity: 0.96,
+      borderless: false,
+      lockPosition: false
+    },
+    server: {
+      port: 4317,
+      password: "",
+      permissions: {
+        view: true,
+        create: true,
+        edit: false,
+        delete: false
+      }
+    },
+    shortcuts: {
+      submit: "Enter",
+      submitAndClear: "Ctrl+Enter",
+      money: "Ctrl+D",
+      table: "Ctrl+M",
+      bus: "Ctrl+O",
+      pin: "Ctrl+F",
+      history: "Ctrl+H",
+      settings: "Ctrl+,",
+      repeatLast: "Ctrl+R",
+      escape: "Esc"
+    }
+  };
+}
