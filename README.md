@@ -4,6 +4,10 @@ Aplicativo desktop para registrar vendas, mesas, onibus, pagamentos em dinheiro,
 
 Esta primeira versao foi pensada para uso diario em caixa: abrir, digitar valor, descrever a mesa/cliente/onibus, registrar e manter o arquivo do dia sempre atualizado.
 
+## Plano de remake
+
+O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/plano-remake.md). Ele organiza barra fixada, temas, relatorios, configuracoes, servidor, permissoes, icone, atualizacoes e qualidade em fases testaveis.
+
 ## Stack escolhida
 
 - **Electron**: melhor encaixe para app desktop real, janela sempre visivel, acesso a arquivos locais, dialogos de pasta e empacotamento Windows.
