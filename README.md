@@ -24,7 +24,8 @@ Esta primeira versao foi pensada para uso diario em caixa: abrir, digitar valor,
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia, mes com abas, arquivo fixo ou arquivos separados por tipo.
 - Configuracoes persistentes: tema, cor principal, densidade, layout, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
-- Modo fixado/flutuante com janela sempre por cima, redimensionavel, opacidade e campos essenciais.
+- Modo fixado/flutuante com barra rapida, alternancia Conta/Dinheiro, divisao por pessoas, campo Pago com e troco direto na barra.
+- Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL.
 - Servidor local com senha, permissoes e atualizacao em tempo real via WebSocket.
 - Smoke test da interface com Playwright.
 

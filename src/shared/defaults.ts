@@ -26,6 +26,7 @@ export const DEFAULT_COLUMNS = [
   "Data",
   "Hora",
   "Tipo",
+  "Valor pago",
   "Valor original",
   "Valor final",
   "Pessoas",
@@ -44,6 +45,8 @@ export const DEFAULT_COLUMNS = [
   "Status"
 ];
 
+export const SIMPLE_COLUMNS = ["Data", "Hora", "Valor pago", "Descricao", "Tipo", "Pessoas", "Pago com", "Troco"];
+
 export const DEFAULT_FLOATING_FIELDS = ["type", "value", "people", "description", "submit"];
 
 export function createDefaultSettings(outputDirectory: string): AppSettings {
@@ -51,10 +54,11 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     outputDirectory,
     fileFormat: "xlsx",
     fileStrategy: "daily",
+    spreadsheetMode: "simple",
     dateFormat: "yyyy-MM-dd",
     csvSeparator: ";",
     currency: "BRL",
-    visibleColumns: DEFAULT_COLUMNS,
+    visibleColumns: SIMPLE_COLUMNS,
     backupEnabled: true,
     defaultType: "Venda",
     defaultPeople: 1,
@@ -74,7 +78,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     },
     floating: {
       visibleFields: DEFAULT_FLOATING_FIELDS,
-      opacity: 0.96,
+      opacity: 1,
       borderless: false,
       lockPosition: false
     },

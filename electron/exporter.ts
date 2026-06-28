@@ -1,8 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
-import { DEFAULT_COLUMNS } from "../src/shared/defaults.js";
-import { formatDateTime, roundMoney } from "../src/shared/calculations.js";
+import { DEFAULT_COLUMNS, SIMPLE_COLUMNS } from "../src/shared/defaults.js";
+import { formatDateTime, getEntryAmount, roundMoney } from "../src/shared/calculations.js";
 import type { AppSettings, ExportStatus, LedgerEntry } from "../src/shared/types.js";
 
 interface ExportState {
@@ -78,7 +78,12 @@ export class LedgerExporter {
 
   private buildTargets(entries: LedgerEntry[], settings: AppSettings) {
     const extension = settings.fileFormat;
-    const visibleColumns = settings.visibleColumns.length ? settings.visibleColumns : DEFAULT_COLUMNS;
+    const visibleColumns =
+      settings.spreadsheetMode === "simple"
+        ? SIMPLE_COLUMNS
+        : settings.visibleColumns.length
+          ? settings.visibleColumns
+          : DEFAULT_COLUMNS;
 
     if (settings.fileStrategy === "byType") {
       const grouped = groupBy(entries, (entry) => sanitizeFilePart(entry.type));
@@ -126,7 +131,7 @@ export class LedgerExporter {
 
     const worksheets = zip.folder("xl")?.folder("worksheets");
     safeSheets.forEach((sheet, index) => {
-      worksheets?.file(`sheet${index + 1}.xml`, worksheetXml(sheet.rows));
+      worksheets?.file(`sheet${index + 1}.xml`, worksheetXml(withTotalRow(sheet.rows)));
     });
 
     const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
@@ -134,10 +139,11 @@ export class LedgerExporter {
   }
 
   private async writeCsv(filePath: string, rows: Record<string, unknown>[], separator: string) {
-    const columns = rows.length ? Object.keys(rows[0]) : DEFAULT_COLUMNS;
+    const rowsWithTotal = withTotalRow(rows);
+    const columns = rowsWithTotal.length ? Object.keys(rowsWithTotal[0]) : DEFAULT_COLUMNS;
     const lines = [
       columns.map((column) => escapeCsv(column, separator)).join(separator),
-      ...rows.map((row) => columns.map((column) => escapeCsv(row[column], separator)).join(separator))
+      ...rowsWithTotal.map((row) => columns.map((column) => escapeCsv(row[column], separator)).join(separator))
     ];
     await fs.writeFile(filePath, lines.join("\n"), "utf8");
   }
@@ -181,6 +187,7 @@ function toRow(entry: LedgerEntry, visibleColumns: string[]) {
     Data: date,
     Hora: time,
     Tipo: entry.customType || entry.type,
+    "Valor pago": roundMoney(getEntryAmount(entry)),
     "Valor original": roundMoney(entry.originalValue),
     "Valor final": roundMoney(entry.finalValue),
     Pessoas: entry.people,
@@ -203,6 +210,41 @@ function toRow(entry: LedgerEntry, visibleColumns: string[]) {
     row[column] = allColumns[column] ?? "";
     return row;
   }, {});
+}
+
+function withTotalRow(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  if (!rows.length) {
+    return rows;
+  }
+
+  const columns = Object.keys(rows[0]);
+  const totalRow = columns.reduce<Record<string, unknown>>((acc, column, index) => {
+    if (index === 0) {
+      acc[column] = "TOTAL";
+      return acc;
+    }
+
+    if (isSummableColumn(column)) {
+      acc[column] = roundMoney(
+        rows.reduce((sum, row) => {
+          const value = row[column];
+          return sum + (typeof value === "number" && Number.isFinite(value) ? value : 0);
+        }, 0)
+      );
+      return acc;
+    }
+
+    acc[column] = "";
+    return acc;
+  }, {});
+
+  return [...rows, totalRow];
+}
+
+function isSummableColumn(column: string): boolean {
+  return ["Valor pago", "Valor original", "Valor final", "Valor por pessoa", "Sobra/diferenca", "Pago com", "Troco"].includes(
+    column
+  );
 }
 
 function formatDateToken(date: Date, settings: AppSettings): string {

@@ -195,16 +195,27 @@ function registerIpc() {
       return pinned;
     }
 
-    mainWindow.setAlwaysOnTop(enabled, "floating");
+    mainWindow.setAlwaysOnTop(enabled, enabled ? "screen-saver" : "normal", enabled ? 1 : 0);
     mainWindow.setOpacity(options?.opacity ?? 1);
     mainWindow.setMovable(!(enabled && options?.lockPosition));
     mainWindow.setResizable(true);
+    mainWindow.setSkipTaskbar(enabled);
+    mainWindow.setFullScreenable(!enabled);
+    try {
+      mainWindow.setVisibleOnAllWorkspaces(enabled, { visibleOnFullScreen: true });
+    } catch {
+      mainWindow.setVisibleOnAllWorkspaces(enabled);
+    }
     if (enabled) {
-      mainWindow.setMinimumSize(360, 150);
-      mainWindow.setSize(720, 220, true);
+      mainWindow.setMinimumSize(520, 118);
+      mainWindow.setSize(1180, 146, true);
+      mainWindow.showInactive();
+      mainWindow.moveTop();
     } else {
       mainWindow.setMinimumSize(420, 360);
       mainWindow.setSize(1220, 820, true);
+      mainWindow.setOpacity(1);
+      mainWindow.show();
     }
     mainWindow.webContents.send("entries:changed");
     return pinned;

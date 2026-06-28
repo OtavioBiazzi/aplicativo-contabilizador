@@ -89,6 +89,20 @@ def main() -> int:
       expect(page.get_by_text("Mesa 4").first).to_be_visible()
       page.get_by_role("button", name="Relatorios").click()
       expect(page.get_by_text("Total do periodo")).to_be_visible()
+      page.get_by_role("button", name="Registro").click()
+      page.get_by_role("button", name="Fixar na tela").click()
+      expect(page.locator(".floating-bar")).to_be_visible(timeout=15000)
+      expect(page.get_by_text("Caixa rapido")).not_to_be_visible()
+      expect(page.locator(".floating-mode")).to_contain_text("Dinheiro")
+      page.locator(".floating-mode").click()
+      expect(page.locator(".floating-mode")).to_contain_text("Conta")
+      expect(page.get_by_text("TROCO")).to_be_visible()
+      page.locator(".amount-field input").fill("87,50")
+      page.locator(".paid-field input").fill("100,00")
+      expect(page.locator(".floating-result strong")).to_contain_text("12,50")
+      page.locator(".floating-description input").fill("Pagamento fixado")
+      page.locator(".floating-send").click()
+      expect(page.get_by_text("Lancamento registrado.")).to_be_visible(timeout=15000)
       browser.close()
       if console_errors:
         print("\n".join(console_errors), file=sys.stderr)
@@ -100,4 +114,3 @@ def main() -> int:
 
 if __name__ == "__main__":
   raise SystemExit(main())
-

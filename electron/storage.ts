@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { createDefaultSettings } from "../src/shared/defaults.js";
+import { SIMPLE_COLUMNS, createDefaultSettings } from "../src/shared/defaults.js";
 import { calculateCash, roundMoney } from "../src/shared/calculations.js";
 import type { AppSettings, EntryDraft, LedgerEntry } from "../src/shared/types.js";
 
@@ -191,7 +191,7 @@ async function writeJsonAtomic(filePath: string, value: unknown) {
 }
 
 function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppSettings {
-  return {
+  const merged = {
     ...defaults,
     ...saved,
     floating: {
@@ -214,5 +214,10 @@ function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppS
       ...defaults.profiles,
       ...saved.profiles
     }
+  };
+
+  return {
+    ...merged,
+    visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns
   };
 }

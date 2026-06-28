@@ -25,7 +25,7 @@ import {
   Wallet,
   X
 } from "lucide-react";
-import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, DEFAULT_FLOATING_FIELDS } from "./shared/defaults";
+import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, DEFAULT_FLOATING_FIELDS, SIMPLE_COLUMNS } from "./shared/defaults";
 import {
   calculateCash,
   calculateSplit,
@@ -212,19 +212,13 @@ export function App() {
   if (pinned) {
     return (
       <div className="pinned-app">
-        <div className="pinned-topbar">
-          <strong>Caixa rapido</strong>
-          <span>{formatCurrency(summary.total)}</span>
-          <button className="icon-button" onClick={togglePinned} title="Voltar ao modo normal">
-            <Undo2 size={16} />
-          </button>
-        </div>
         <QuickEntry
           entries={entries}
           settings={settings}
           pinned
           modeCommand={modeCommand}
           onSubmit={addEntry}
+          onUnpin={togglePinned}
         />
         {toast && <Toast toast={toast} />}
       </div>
@@ -290,6 +284,7 @@ export function App() {
               pinned={false}
               modeCommand={modeCommand}
               onSubmit={addEntry}
+              onUnpin={togglePinned}
             />
             <TodayPanel summary={summary} entries={entries} onMode={commandMode} />
           </div>
@@ -338,13 +333,15 @@ function QuickEntry({
   settings,
   pinned,
   modeCommand,
-  onSubmit
+  onSubmit,
+  onUnpin
 }: {
   entries: LedgerEntry[];
   settings: AppSettings;
   pinned: boolean;
   modeCommand: ModeCommand | null;
   onSubmit: (draft: EntryDraft) => Promise<void>;
+  onUnpin?: () => Promise<void> | void;
 }) {
   const [type, setType] = useState<EntryType>(settings.defaultType);
   const [valueText, setValueText] = useState("");
@@ -398,18 +395,22 @@ function QuickEntry({
       return;
     }
     setSubmitting(true);
+    const effectiveType: EntryType =
+      pinned && type !== "Dinheiro/Troco" && people > 1 ? "Divisao de conta" : type;
+    const effectiveSplit = effectiveType === "Divisao de conta" ? split : undefined;
+    const effectiveCash = effectiveType === "Dinheiro/Troco" ? cash : undefined;
     const draft: EntryDraft = {
-      type,
+      type: effectiveType,
       value,
       description,
-      people,
+      people: effectiveSplit?.people ?? people,
       tableNumber,
       busNumber,
-      paymentMethod,
+      paymentMethod: effectiveType === "Dinheiro/Troco" ? "Dinheiro" : paymentMethod,
       paidWith,
       observations,
-      splitDetails: type === "Divisao de conta" ? split : undefined,
-      cashDetails: type === "Dinheiro/Troco" ? cash : undefined
+      splitDetails: effectiveSplit,
+      cashDetails: effectiveCash
     };
     try {
       await onSubmit(draft);
@@ -423,6 +424,111 @@ function QuickEntry({
     event.preventDefault();
     await submit();
   };
+
+  if (pinned) {
+    const isMoney = type === "Dinheiro/Troco";
+    const nextModeLabel = isMoney ? "Conta" : "Dinheiro";
+    const moneyDisabled = isMoney && (value <= 0 || paidWith <= 0);
+    const disabled = submitting || value <= 0 || moneyDisabled;
+
+    return (
+      <form className={`floating-bar ${isMoney ? "money" : "account"}`} onSubmit={onSubmitForm}>
+        <div className="floating-grip" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </div>
+
+        <button
+          className="floating-mode"
+          type="button"
+          onClick={() => setType(isMoney ? "Venda" : "Dinheiro/Troco")}
+        >
+          <span>← →</span>
+          {nextModeLabel}
+        </button>
+
+        <label className="floating-field amount-field">
+          <span>VALOR DA CONTA</span>
+          <div className="money-input">
+            <b>R$</b>
+            <input
+              autoFocus
+              inputMode="decimal"
+              value={valueText}
+              onChange={(event) => setValueText(event.target.value)}
+              placeholder="0,00"
+            />
+          </div>
+        </label>
+
+        {isMoney ? (
+          <label className="floating-field paid-field">
+            <span>PAGO COM</span>
+            <div className="money-input warm">
+              <b>R$</b>
+              <input
+                inputMode="decimal"
+                value={paidWithText}
+                onChange={(event) => setPaidWithText(event.target.value)}
+                placeholder="0,00"
+              />
+            </div>
+          </label>
+        ) : (
+          <div className="floating-field people-field">
+            <span>PESSOAS</span>
+            <div className="people-stepper">
+              <button type="button" onClick={() => setPeople(Math.max(1, people - 1))}>
+                -
+              </button>
+              <input
+                type="number"
+                min={1}
+                value={people}
+                onChange={(event) => setPeople(Math.max(1, Number(event.target.value || 1)))}
+              />
+              <button type="button" onClick={() => setPeople(people + 1)}>
+                +
+              </button>
+            </div>
+          </div>
+        )}
+
+        <label className="floating-field floating-description">
+          <span>DESCRICAO</span>
+          <input
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Descricao opcional"
+          />
+        </label>
+
+        {isMoney ? (
+          <div className="floating-result">
+            <span>TROCO</span>
+            <strong>{formatCurrency(cash.change)}</strong>
+          </div>
+        ) : (
+          people > 1 && (
+            <div className="floating-result">
+              <span>POR PESSOA</span>
+              <strong>{formatCurrency(split.perPersonRounded)}</strong>
+            </div>
+          )
+        )}
+
+        <button className="floating-send" type="submit" disabled={disabled}>
+          {submitting ? <RefreshCw size={17} className="spin" /> : <Send size={18} />}
+          Enviar
+        </button>
+
+        <button className="floating-close" type="button" onClick={onUnpin} title="Voltar ao app completo">
+          <Undo2 size={16} />
+        </button>
+      </form>
+    );
+  }
 
   return (
     <form className={`quick-entry ${pinned ? "pinned" : ""}`} onSubmit={onSubmitForm}>
@@ -1184,6 +1290,22 @@ function SettingsPanel({
               <option value="byType">Arquivos por tipo</option>
             </select>
           </label>
+          <label className="field"><span>Modo da planilha</span>
+            <select
+              value={draft.spreadsheetMode}
+              onChange={(event) => {
+                const spreadsheetMode = event.target.value as AppSettings["spreadsheetMode"];
+                setDraft((current) => ({
+                  ...current,
+                  spreadsheetMode,
+                  visibleColumns: spreadsheetMode === "simple" ? SIMPLE_COLUMNS : DEFAULT_COLUMNS
+                }));
+              }}
+            >
+              <option value="simple">Simples: valor pago e total</option>
+              <option value="advanced">Avancado: todas as colunas</option>
+            </select>
+          </label>
           <label className="field"><span>Formato da data</span>
             <select value={draft.dateFormat} onChange={(event) => update("dateFormat", event.target.value as AppSettings["dateFormat"])}>
               <option value="yyyy-MM-dd">2026-06-28</option>
@@ -1217,13 +1339,19 @@ function SettingsPanel({
 
         <section className="settings-group wide">
           <h3>Colunas do arquivo</h3>
+          {draft.spreadsheetMode === "simple" && (
+            <p className="settings-note">
+              O modo simples usa Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e uma linha TOTAL.
+              Troque para avancado para reordenar todas as colunas.
+            </p>
+          )}
           <div className="column-list">
             {DEFAULT_COLUMNS.map((column) => (
               <div key={column} className={draft.visibleColumns.includes(column) ? "" : "disabled"}>
-                <label><input type="checkbox" checked={draft.visibleColumns.includes(column)} onChange={() => toggleColumn(column)} /> {column}</label>
+                <label><input type="checkbox" disabled={draft.spreadsheetMode === "simple"} checked={draft.visibleColumns.includes(column)} onChange={() => toggleColumn(column)} /> {column}</label>
                 <span>
-                  <button onClick={() => moveColumn(column, -1)}><ArrowUp size={14} /></button>
-                  <button onClick={() => moveColumn(column, 1)}><ArrowDown size={14} /></button>
+                  <button disabled={draft.spreadsheetMode === "simple"} onClick={() => moveColumn(column, -1)}><ArrowUp size={14} /></button>
+                  <button disabled={draft.spreadsheetMode === "simple"} onClick={() => moveColumn(column, 1)}><ArrowDown size={14} /></button>
                 </span>
               </div>
             ))}
