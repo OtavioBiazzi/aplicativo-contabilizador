@@ -19,13 +19,14 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #f6f8f4;
+  --bg: #eef5f2;
   --panel: #ffffff;
-  --panel-2: #eef3ee;
-  --line: #d9e1d9;
-  --text: #121614;
-  --muted: #617067;
-  --shadow: 0 18px 45px rgba(29, 45, 36, 0.12);
+  --panel-2: #f5faf8;
+  --line: #d6e5df;
+  --text: #11221c;
+  --muted: #657a72;
+  --accent-strong: color-mix(in srgb, var(--accent) 78%, #063f35);
+  --shadow: 0 18px 45px rgba(29, 77, 61, 0.12);
 }
 
 :root[data-theme="contrast"] {
@@ -72,9 +73,14 @@ body,
 body {
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(23, 201, 100, 0.08), transparent 34%),
-    radial-gradient(circle at 78% 8%, rgba(255, 255, 255, 0.08), transparent 24%),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%),
+    radial-gradient(circle at 78% 8%, rgba(255, 255, 255, 0.72), transparent 24%),
     var(--bg);
+}
+
+body.is-floating-window {
+  overflow: hidden;
+  background: transparent;
 }
 
 button,
@@ -94,7 +100,7 @@ select {
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: var(--field-pad);
-  background: color-mix(in srgb, var(--panel) 90%, black 10%);
+  background: color-mix(in srgb, var(--panel) 96%, var(--bg) 4%);
   color: var(--text);
   outline: none;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
@@ -145,7 +151,7 @@ input[type="range"] {
   padding: 18px;
   border-right: 1px solid var(--line);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--panel) 92%, var(--accent) 8%), var(--panel));
+    linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, var(--accent) 6%), var(--panel));
 }
 
 .brand-block {
@@ -257,6 +263,11 @@ input[type="range"] {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  box-shadow: 0 10px 28px rgba(29, 77, 61, 0.06);
 }
 
 .eyebrow {
@@ -339,7 +350,7 @@ h3 {
 .settings-group {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: color-mix(in srgb, var(--panel) 94%, var(--accent) 6%);
+  background: color-mix(in srgb, var(--panel) 97%, var(--accent) 3%);
   box-shadow: var(--shadow);
 }
 
@@ -410,6 +421,7 @@ h3 {
   letter-spacing: 0;
   padding-top: 16px;
   padding-bottom: 16px;
+  background: color-mix(in srgb, var(--panel) 98%, var(--accent) 2%);
 }
 
 .small-field {
@@ -951,7 +963,7 @@ th {
   height: 100vh;
   min-width: 0;
   padding: 8px;
-  background: #f6fbf8;
+  background: transparent;
   color: #1b2a24;
   -webkit-app-region: drag;
 }
@@ -963,7 +975,7 @@ th {
   --bar-button-text: #ffffff;
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(160px, 250px) minmax(160px, 220px) minmax(260px, 1fr) auto auto;
+  grid-template-columns: auto minmax(104px, 130px) minmax(150px, 220px) minmax(120px, 160px) minmax(260px, 1fr) auto auto;
   align-items: end;
   gap: 8px;
   width: 100%;
@@ -972,7 +984,7 @@ th {
   border-radius: 10px;
   padding: 14px 8px 14px 10px;
   background: #ffffff;
-  box-shadow: 0 8px 28px rgba(15, 56, 42, 0.12);
+  box-shadow: 0 10px 32px rgba(15, 56, 42, 0.18);
   -webkit-app-region: drag;
 }
 
@@ -983,7 +995,8 @@ th {
 }
 
 .floating-bar button,
-.floating-bar input {
+.floating-bar input,
+.floating-bar select {
   -webkit-app-region: no-drag;
 }
 
@@ -1052,7 +1065,19 @@ th {
   box-shadow: inset 0 0 0 1px transparent, 0 2px 10px rgba(24, 37, 31, 0.04);
 }
 
-.floating-field input:focus {
+.floating-field select {
+  height: 40px;
+  border: 1px solid color-mix(in srgb, var(--bar-accent) 34%, #dfe9e5);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #18251f;
+  font-weight: 850;
+  outline: none;
+}
+
+.floating-field input:focus,
+.floating-field select:focus {
   border-color: var(--bar-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--bar-accent) 18%, transparent);
 }
@@ -1104,6 +1129,10 @@ th {
   min-width: 240px;
 }
 
+.floating-detail {
+  min-width: 96px;
+}
+
 .floating-result {
   display: grid;
   align-self: end;
@@ -1149,6 +1178,32 @@ th {
   background: #ffffff;
   color: #53635d;
   cursor: pointer;
+}
+
+:root[data-theme="dark"] .floating-bar {
+  background: #111a16;
+  border-color: color-mix(in srgb, var(--bar-accent) 34%, #23352d);
+  color: #eff8f3;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.38);
+}
+
+:root[data-theme="dark"] .floating-field > span,
+:root[data-theme="dark"] .floating-result span {
+  color: #9fb4ab;
+}
+
+:root[data-theme="dark"] .floating-field input,
+:root[data-theme="dark"] .floating-field select,
+:root[data-theme="dark"] .money-input,
+:root[data-theme="dark"] .people-stepper button,
+:root[data-theme="dark"] .floating-close {
+  background: #17231e;
+  border-color: #2c4038;
+  color: #eff8f3;
+}
+
+:root[data-theme="dark"] .money-input input {
+  background: transparent;
 }
 
 .spin {
@@ -1243,18 +1298,22 @@ th {
 
 @media (max-width: 860px) {
   .floating-bar {
-    grid-template-columns: auto minmax(150px, 1fr) minmax(150px, 1fr) auto;
+    grid-template-columns: auto minmax(110px, 140px) minmax(150px, 1fr) minmax(150px, 1fr) auto;
     min-height: 154px;
     align-content: center;
   }
 
   .floating-description {
-    grid-column: 2 / span 2;
+    grid-column: 3 / span 2;
   }
 
   .floating-result {
-    grid-column: 4;
+    grid-column: 5;
     grid-row: 1;
+  }
+
+  .floating-detail {
+    grid-column: 2;
   }
 }
 

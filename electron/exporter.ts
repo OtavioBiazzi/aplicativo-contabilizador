@@ -78,6 +78,7 @@ export class LedgerExporter {
 
   private buildTargets(entries: LedgerEntry[], settings: AppSettings) {
     const extension = settings.fileFormat;
+    const exportableEntries = entries.filter((entry) => entry.status !== "deleted");
     const visibleColumns =
       settings.spreadsheetMode === "simple"
         ? SIMPLE_COLUMNS
@@ -86,7 +87,7 @@ export class LedgerExporter {
           : DEFAULT_COLUMNS;
 
     if (settings.fileStrategy === "byType") {
-      const grouped = groupBy(entries, (entry) => sanitizeFilePart(entry.type));
+      const grouped = groupBy(exportableEntries, (entry) => sanitizeFilePart(entry.type));
       return Object.entries(grouped).map(([type, rows]) => ({
         filePath: path.join(settings.outputDirectory, `${type}-${formatDateToken(new Date(), settings)}.${extension}`),
         sheets: [{ name: "Lancamentos", rows: rows.map((entry) => toRow(entry, visibleColumns)) }]
@@ -94,7 +95,7 @@ export class LedgerExporter {
     }
 
     if (settings.fileStrategy === "monthlyTabs" && settings.fileFormat === "xlsx") {
-      const grouped = groupBy(entries, (entry) => formatDateToken(new Date(entry.createdAt), settings));
+      const grouped = groupBy(exportableEntries, (entry) => formatDateToken(new Date(entry.createdAt), settings));
       const month = new Date().toISOString().slice(0, 7);
       return [
         {
@@ -115,7 +116,7 @@ export class LedgerExporter {
     return [
       {
         filePath: path.join(settings.outputDirectory, fileName),
-        sheets: [{ name: "Lancamentos", rows: entries.map((entry) => toRow(entry, visibleColumns)) }]
+        sheets: [{ name: "Lancamentos", rows: exportableEntries.map((entry) => toRow(entry, visibleColumns)) }]
       }
     ];
   }

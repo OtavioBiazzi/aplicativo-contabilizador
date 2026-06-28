@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from zipfile import ZipFile
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -25,12 +26,14 @@ def wait_for_cdp() -> None:
   raise RuntimeError("Electron did not expose the debugging endpoint.")
 
 
-def find_app_page(browser):
+def find_app_page(browser, floating: bool = False):
   deadline = time.time() + 20
   while time.time() < deadline:
     for context in browser.contexts:
       for page in context.pages:
-        if page.url.startswith("app://local/"):
+        is_app = page.url.startswith("app://local/")
+        is_floating = "floating=1" in page.url
+        if is_app and is_floating == floating:
           return page
     time.sleep(0.25)
   raise RuntimeError("Electron app page was not found.")
@@ -76,7 +79,7 @@ def main() -> int:
     wait_for_cdp()
     with sync_playwright() as playwright:
       browser = playwright.chromium.connect_over_cdp(DEBUG_URL)
-      page = find_app_page(browser)
+      page = find_app_page(browser, floating=False)
       console_errors = []
       page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
       page.wait_for_load_state("networkidle")
@@ -90,22 +93,52 @@ def main() -> int:
       page.get_by_role("button", name="Relatorios").click()
       expect(page.get_by_text("Total do periodo")).to_be_visible()
       page.get_by_role("button", name="Registro").click()
-      page.get_by_role("button", name="Fixar na tela").click()
-      expect(page.locator(".floating-bar")).to_be_visible(timeout=15000)
-      expect(page.get_by_text("Caixa rapido")).not_to_be_visible()
-      expect(page.locator(".floating-mode")).to_contain_text("Dinheiro")
-      page.locator(".floating-mode").click()
-      expect(page.locator(".floating-mode")).to_contain_text("Conta")
-      expect(page.get_by_text("TROCO")).to_be_visible()
-      page.locator(".amount-field input").fill("87,50")
-      page.locator(".paid-field input").fill("100,00")
-      expect(page.locator(".floating-result strong")).to_contain_text("12,50")
-      page.locator(".floating-description input").fill("Pagamento fixado")
-      page.locator(".floating-send").click()
-      expect(page.get_by_text("Lancamento registrado.")).to_be_visible(timeout=15000)
+      page.get_by_role("button", name="Abrir barra fixada").click()
+      expect(page.locator(".app-shell")).to_be_visible()
+      browser.close()
+      browser = playwright.chromium.connect_over_cdp(DEBUG_URL)
+      page = find_app_page(browser, floating=False)
+      floating_page = find_app_page(browser, floating=True)
+      floating_page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+      expect(floating_page.locator(".floating-bar")).to_be_visible(timeout=15000)
+      expect(floating_page.get_by_text("Caixa rapido")).not_to_be_visible()
+      expect(floating_page.locator(".floating-kind select")).to_be_visible()
+      floating_page.locator(".floating-kind select").select_option("Onibus")
+      expect(floating_page.locator(".floating-detail input")).to_be_visible()
+      floating_page.locator(".floating-mode").click()
+      expect(floating_page.locator(".floating-mode")).to_contain_text("Conta")
+      expect(floating_page.get_by_text("TROCO")).to_be_visible()
+      floating_page.locator(".amount-field input").fill("87,50")
+      floating_page.locator(".paid-field input").fill("100,00")
+      expect(floating_page.locator(".floating-result strong")).to_contain_text("12,50")
+      floating_page.locator(".floating-description input").fill("Pagamento fixado")
+      floating_page.locator(".floating-send").click()
+      expect(floating_page.get_by_text("Lancamento registrado.")).to_be_visible(timeout=15000)
+      removed = page.evaluate(
+        """async () => {
+          const snapshot = await window.caixa.getSnapshot();
+          const entry = snapshot.entries.find((item) => item.description === 'Mesa 4');
+          if (!entry) return false;
+          await window.caixa.removeEntry(entry.id);
+          return true;
+        }"""
+      )
+      if not removed:
+        print("Could not remove the test entry.", file=sys.stderr)
+        return 1
+      page.wait_for_timeout(500)
       browser.close()
       if console_errors:
         print("\n".join(console_errors), file=sys.stderr)
+        return 1
+      exported_files = list((SMOKE_DIR / "exports").glob("*.xlsx"))
+      if not exported_files:
+        print("No exported xlsx file found.", file=sys.stderr)
+        return 1
+      with ZipFile(exported_files[0]) as zip_file:
+        sheet = zip_file.read("xl/worksheets/sheet1.xml").decode("utf-8")
+      if "Mesa 4" in sheet or "Pagamento fixado" not in sheet or "TOTAL" not in sheet:
+        print("Exported xlsx did not reflect removal/total correctly.", file=sys.stderr)
         return 1
     return 0
   finally:

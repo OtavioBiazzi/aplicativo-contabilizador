@@ -25,7 +25,7 @@ import {
   Wallet,
   X
 } from "lucide-react";
-import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, DEFAULT_FLOATING_FIELDS, SIMPLE_COLUMNS } from "./shared/defaults";
+import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS } from "./shared/defaults";
 import {
   calculateCash,
   calculateSplit,
@@ -67,6 +67,8 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
   { key: "settings", label: "Ajustes", icon: Settings }
 ];
 
+const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floating") === "1";
+
 export function App() {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -92,9 +94,11 @@ export function App() {
     reload();
     const offEntries = window.caixa.onEntriesChanged(reload);
     const offServer = window.caixa.onServerChanged((state) => setServer(state));
+    const offPinned = window.caixa.onPinnedChanged((nextPinned) => setPinnedState(nextPinned));
     return () => {
       offEntries();
       offServer();
+      offPinned();
     };
   }, []);
 
@@ -106,7 +110,8 @@ export function App() {
     document.documentElement.dataset.density = settings.density;
     document.documentElement.dataset.fieldSize = settings.fieldSize;
     document.documentElement.style.setProperty("--accent", settings.accentColor);
-    document.body.classList.toggle("is-pinned", pinned);
+    document.body.classList.toggle("is-pinned", pinned || IS_FLOATING_WINDOW);
+    document.body.classList.toggle("is-floating-window", IS_FLOATING_WINDOW);
   }, [settings, pinned]);
 
   useEffect(() => {
@@ -209,7 +214,7 @@ export function App() {
     );
   }
 
-  if (pinned) {
+  if (IS_FLOATING_WINDOW) {
     return (
       <div className="pinned-app">
         <QuickEntry
@@ -260,7 +265,7 @@ export function App() {
 
         <button className="pin-button" onClick={togglePinned}>
           <Pin size={18} />
-          Fixar na tela
+          {pinned ? "Fechar barra fixada" : "Abrir barra fixada"}
         </button>
       </aside>
 
@@ -430,9 +435,11 @@ function QuickEntry({
     const nextModeLabel = isMoney ? "Conta" : "Dinheiro";
     const moneyDisabled = isMoney && (value <= 0 || paidWith <= 0);
     const disabled = submitting || value <= 0 || moneyDisabled;
+    const floatingTypes: EntryType[] = ["Venda", "Mesa", "Onibus", "Extra", "Taxa", "Personalizado"];
+    const detailKind = type === "Mesa" ? "mesa" : type === "Onibus" ? "onibus" : "";
 
     return (
-      <form className={`floating-bar ${isMoney ? "money" : "account"}`} onSubmit={onSubmitForm}>
+      <form className={`floating-bar ${isMoney ? "money" : "account"} ${detailKind ? "has-detail" : ""}`} onSubmit={onSubmitForm}>
         <div className="floating-grip" aria-hidden="true">
           <i />
           <i />
@@ -447,6 +454,17 @@ function QuickEntry({
           <span>← →</span>
           {nextModeLabel}
         </button>
+
+        {!isMoney && (
+          <label className="floating-field floating-kind">
+            <span>TIPO</span>
+            <select value={type} onChange={(event) => setType(event.target.value as EntryType)}>
+              {floatingTypes.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <label className="floating-field amount-field">
           <span>VALOR DA CONTA</span>
@@ -493,6 +511,23 @@ function QuickEntry({
               </button>
             </div>
           </div>
+        )}
+
+        {!isMoney && detailKind && (
+          <label className="floating-field floating-detail">
+            <span>{detailKind === "mesa" ? "MESA" : "ONIBUS"}</span>
+            <input
+              value={detailKind === "mesa" ? tableNumber : busNumber}
+              onChange={(event) => {
+                if (detailKind === "mesa") {
+                  setTableNumber(event.target.value);
+                } else {
+                  setBusNumber(event.target.value);
+                }
+              }}
+              placeholder={detailKind === "mesa" ? "8" : "2"}
+            />
+          </label>
         )}
 
         <label className="floating-field floating-description">
@@ -1196,16 +1231,6 @@ function SettingsPanel({
     update("visibleColumns", exists ? draft.visibleColumns.filter((item) => item !== column) : [...draft.visibleColumns, column]);
   };
 
-  const toggleFloatingField = (field: string) => {
-    const exists = draft.floating.visibleFields.includes(field);
-    update("floating", {
-      ...draft.floating,
-      visibleFields: exists
-        ? draft.floating.visibleFields.filter((item) => item !== field)
-        : [...draft.floating.visibleFields, field]
-    });
-  };
-
   return (
     <section className="panel settings-panel">
       <div className="preset-row">
@@ -1326,15 +1351,11 @@ function SettingsPanel({
         <section className="settings-group wide">
           <h3>Modo fixado</h3>
           <label className="field"><span>Opacidade</span><input type="range" min={0.5} max={1} step={0.01} value={draft.floating.opacity} onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })} /></label>
-          <label className="switch-line"><input type="checkbox" checked={draft.floating.borderless} onChange={(event) => update("floating", { ...draft.floating, borderless: event.target.checked })} /> Esconder bordas</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar posicao</label>
-          <div className="chip-grid">
-            {DEFAULT_FLOATING_FIELDS.concat(["table", "bus", "payment"]).map((field) => (
-              <button key={field} className={draft.floating.visibleFields.includes(field) ? "selected" : ""} onClick={() => toggleFloatingField(field)}>
-                {field}
-              </button>
-            ))}
-          </div>
+          <p className="settings-note">
+            A barra fixada abre em uma janela separada, sem moldura, com Tipo, Valor, Pessoas ou Pago com,
+            Descricao, Troco e Enviar. Mesa e Onibus aparecem automaticamente quando esse tipo e selecionado.
+          </p>
         </section>
 
         <section className="settings-group wide">

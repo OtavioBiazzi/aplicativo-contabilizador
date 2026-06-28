@@ -9,10 +9,10 @@ import type { EntryDraft, LedgerEntry } from "../src/shared/types.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
+let floatingWindow: BrowserWindow | null = null;
 let store: LedgerStore;
 let exporter: LedgerExporter;
 let localServer: LocalServer;
-let pinned = false;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
@@ -47,12 +47,78 @@ async function createWindow() {
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
   });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+    if (floatingWindow && !floatingWindow.isDestroyed()) {
+      floatingWindow.close();
+    }
+  });
 
   if (isDev) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL as string);
   } else {
     await mainWindow.loadURL("app://local/index.html");
   }
+}
+
+async function createFloatingWindow(options?: { opacity?: number; lockPosition?: boolean }) {
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    floatingWindow.showInactive();
+    floatingWindow.moveTop();
+    return floatingWindow;
+  }
+
+  floatingWindow = new BrowserWindow({
+    width: 1240,
+    height: 132,
+    minWidth: 560,
+    minHeight: 110,
+    show: false,
+    frame: false,
+    transparent: true,
+    hasShadow: false,
+    resizable: true,
+    movable: !options?.lockPosition,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: "#00000000",
+    title: "Contabilizador Fixado",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  floatingWindow.setAlwaysOnTop(true, "screen-saver", 1);
+  floatingWindow.setOpacity(options?.opacity ?? 1);
+  try {
+    floatingWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  } catch {
+    floatingWindow.setVisibleOnAllWorkspaces(true);
+  }
+
+  floatingWindow.once("ready-to-show", () => {
+    floatingWindow?.showInactive();
+    floatingWindow?.moveTop();
+  });
+  floatingWindow.on("closed", () => {
+    floatingWindow = null;
+    sendToMain("window:pinnedChanged", false);
+  });
+
+  if (isDev) {
+    await floatingWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?floating=1`);
+  } else {
+    await floatingWindow.loadURL("app://local/index.html?floating=1");
+  }
+
+  sendToMain("window:pinnedChanged", true);
+  return floatingWindow;
 }
 
 async function bootstrap() {
@@ -74,8 +140,8 @@ async function bootstrap() {
       return entry;
     },
     onRemoteChange: () => {
-      mainWindow?.webContents.send("entries:changed");
-      mainWindow?.webContents.send("server:changed", localServer.getState());
+      sendToAll("entries:changed");
+      sendToAll("server:changed", localServer.getState());
     }
   });
 
@@ -99,6 +165,19 @@ function registerAppProtocol() {
   });
 }
 
+function sendToMain(channel: string, ...args: unknown[]) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, ...args);
+  }
+}
+
+function sendToAll(channel: string, ...args: unknown[]) {
+  sendToMain(channel, ...args);
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    floatingWindow.webContents.send(channel, ...args);
+  }
+}
+
 function registerIpc() {
   ipcMain.handle("app:getSnapshot", async () => ({
     entries: await store.getEntries(),
@@ -111,7 +190,7 @@ function registerIpc() {
     const entry = await store.addEntry(draft);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
     localServer.broadcast({ type: "entry-added", entry });
-    mainWindow?.webContents.send("entries:changed");
+    sendToAll("entries:changed");
     return { entry, exportStatus };
   });
 
@@ -119,7 +198,7 @@ function registerIpc() {
     const entry = await store.updateEntry(id, patch);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
     localServer.broadcast({ type: "entry-updated", entry });
-    mainWindow?.webContents.send("entries:changed");
+    sendToAll("entries:changed");
     return { entry, exportStatus };
   });
 
@@ -127,7 +206,7 @@ function registerIpc() {
     await store.removeEntry(id);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
     localServer.broadcast({ type: "entry-removed", id });
-    mainWindow?.webContents.send("entries:changed");
+    sendToAll("entries:changed");
     return { exportStatus };
   });
 
@@ -135,7 +214,7 @@ function registerIpc() {
     const entry = await store.duplicateEntry(id);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
     localServer.broadcast({ type: "entry-added", entry });
-    mainWindow?.webContents.send("entries:changed");
+    sendToAll("entries:changed");
     return { entry, exportStatus };
   });
 
@@ -143,7 +222,7 @@ function registerIpc() {
     const entry = await store.cancelEntry(id);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
     localServer.broadcast({ type: "entry-cancelled", entry });
-    mainWindow?.webContents.send("entries:changed");
+    sendToAll("entries:changed");
     return { entry, exportStatus };
   });
 
@@ -173,55 +252,37 @@ function registerIpc() {
   ipcMain.handle("server:start", async (_event, port: number, password: string) => {
     localServer.setPermissions((await store.getSettings()).server.permissions);
     const state = await localServer.start(port, password);
-    mainWindow?.webContents.send("server:changed", state);
+    sendToAll("server:changed", state);
     return state;
   });
 
   ipcMain.handle("server:stop", async () => {
     const state = await localServer.stop();
-    mainWindow?.webContents.send("server:changed", state);
+    sendToAll("server:changed", state);
     return state;
   });
 
   ipcMain.handle("server:disconnectDevice", async (_event, id: string) => {
     const state = localServer.disconnectDevice(id);
-    mainWindow?.webContents.send("server:changed", state);
+    sendToAll("server:changed", state);
     return state;
   });
 
   ipcMain.handle("window:setPinned", async (_event, enabled: boolean, options?: { opacity?: number; borderless?: boolean; lockPosition?: boolean }) => {
-    pinned = enabled;
-    if (!mainWindow) {
-      return pinned;
+    if (enabled) {
+      await createFloatingWindow(options);
+      return true;
     }
 
-    mainWindow.setAlwaysOnTop(enabled, enabled ? "screen-saver" : "normal", enabled ? 1 : 0);
-    mainWindow.setOpacity(options?.opacity ?? 1);
-    mainWindow.setMovable(!(enabled && options?.lockPosition));
-    mainWindow.setResizable(true);
-    mainWindow.setSkipTaskbar(enabled);
-    mainWindow.setFullScreenable(!enabled);
-    try {
-      mainWindow.setVisibleOnAllWorkspaces(enabled, { visibleOnFullScreen: true });
-    } catch {
-      mainWindow.setVisibleOnAllWorkspaces(enabled);
+    if (floatingWindow && !floatingWindow.isDestroyed()) {
+      floatingWindow.close();
     }
-    if (enabled) {
-      mainWindow.setMinimumSize(520, 118);
-      mainWindow.setSize(1180, 146, true);
-      mainWindow.showInactive();
-      mainWindow.moveTop();
-    } else {
-      mainWindow.setMinimumSize(420, 360);
-      mainWindow.setSize(1220, 820, true);
-      mainWindow.setOpacity(1);
-      mainWindow.show();
-    }
-    mainWindow.webContents.send("entries:changed");
-    return pinned;
+    floatingWindow = null;
+    sendToMain("window:pinnedChanged", false);
+    return false;
   });
 
-  ipcMain.handle("window:getPinned", async () => pinned);
+  ipcMain.handle("window:getPinned", async () => Boolean(floatingWindow && !floatingWindow.isDestroyed()));
 }
 
 app.whenReady().then(bootstrap);

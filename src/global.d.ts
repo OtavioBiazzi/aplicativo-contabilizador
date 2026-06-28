@@ -17,6 +17,7 @@ export interface CaixaApi {
   getPinned: () => Promise<boolean>;
   onEntriesChanged: (callback: () => void) => () => void;
   onServerChanged: (callback: (state: ServerState) => void) => () => void;
+  onPinnedChanged: (callback: (pinned: boolean) => void) => () => void;
 }
 
 declare global {

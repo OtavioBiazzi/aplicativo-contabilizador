@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld("caixa", {
     const handler = (_event: Electron.IpcRendererEvent, state: ServerState) => callback(state);
     ipcRenderer.on("server:changed", handler);
     return () => ipcRenderer.removeListener("server:changed", handler);
+  },
+  onPinnedChanged: (callback: (pinned: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, pinned: boolean) => callback(pinned);
+    ipcRenderer.on("window:pinnedChanged", handler);
+    return () => ipcRenderer.removeListener("window:pinnedChanged", handler);
   }
 });
-
