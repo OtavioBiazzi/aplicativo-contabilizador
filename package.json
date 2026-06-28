@@ -1,6 +1,6 @@
 {
   "name": "aplicativo-contabilizador",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Aplicativo desktop para registrar vendas, mesas, onibus, pagamentos, divisoes e relatorios locais.",
   "author": "OtavioBiazzi",
   "license": "MIT",
@@ -8,7 +8,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on http://127.0.0.1:5173 dist-electron/electron/main.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
-    "build": "npm run typecheck && vite build && tsc -p tsconfig.electron.json",
+    "clean:electron": "node -e \"require('node:fs').rmSync('dist-electron',{recursive:true,force:true})\"",
+    "build": "npm run clean:electron && npm run typecheck && vite build && node scripts/fix_vite_index.mjs && tsc -p tsconfig.electron.json",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1",
     "start": "npm run build && electron .",

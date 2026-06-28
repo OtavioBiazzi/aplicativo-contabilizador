@@ -28,3 +28,4 @@ contextBridge.exposeInMainWorld("caixa", {
     return () => ipcRenderer.removeListener("server:changed", handler);
   }
 });
+

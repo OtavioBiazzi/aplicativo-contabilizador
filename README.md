@@ -128,7 +128,7 @@ python -m playwright install chromium
 python scripts/smoke_playwright.py
 ```
 
-No desenvolvimento local deste projeto, o teste foi executado contra `npm run preview` e validou:
+No desenvolvimento local deste projeto, o teste abre o Electron real via porta de depuracao e validou:
 
 - carregamento da tela principal;
 - registro de uma venda;
@@ -161,4 +161,3 @@ scripts/
 - O app usa `contextIsolation` no Electron e expõe ao renderer somente uma API controlada pelo preload.
 - Remover lancamentos marca o item como removido; o historico interno preserva o registro.
 - Se a exportacao falhar, o lancamento continua salvo no JSON local e a exportacao fica pendente para nova tentativa.
-

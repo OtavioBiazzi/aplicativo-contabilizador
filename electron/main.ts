@@ -1,6 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { LedgerExporter } from "./exporter.js";
 import { LocalServer } from "./localServer.js";
 import { LedgerStore } from "./storage.js";
@@ -16,6 +16,17 @@ let pinned = false;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "app",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true
+    }
+  }
+]);
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1220,
@@ -26,7 +37,7 @@ async function createWindow() {
     backgroundColor: "#0f1311",
     title: "Contabilizador Caixa",
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false
@@ -40,13 +51,16 @@ async function createWindow() {
   if (isDev) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL as string);
   } else {
-    await mainWindow.loadFile(path.join(__dirname, "../../dist/index.html"));
+    await mainWindow.loadURL("app://local/index.html");
   }
 }
 
 async function bootstrap() {
-  const dataDirectory = path.join(app.getPath("userData"), "data");
-  const defaultOutputDirectory = path.join(app.getPath("documents"), "Contabilizador Caixa");
+  Menu.setApplicationMenu(null);
+  registerAppProtocol();
+  const dataDirectory = process.env.CAIXA_DATA_DIR || path.join(app.getPath("userData"), "data");
+  const defaultOutputDirectory =
+    process.env.CAIXA_OUTPUT_DIR || path.join(app.getPath("documents"), "Contabilizador Caixa");
   store = new LedgerStore({ dataDirectory, defaultOutputDirectory });
   exporter = new LedgerExporter(dataDirectory);
   await store.initialize();
@@ -67,6 +81,22 @@ async function bootstrap() {
 
   registerIpc();
   await createWindow();
+}
+
+function registerAppProtocol() {
+  const distRoot = path.normalize(path.join(__dirname, "../../dist"));
+
+  protocol.handle("app", (request) => {
+    const requestUrl = new URL(request.url);
+    const requestedPath = decodeURIComponent(requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname);
+    const filePath = path.normalize(path.join(distRoot, requestedPath));
+
+    if (filePath !== distRoot && !filePath.startsWith(`${distRoot}${path.sep}`)) {
+      return new Response("Forbidden", { status: 403 });
+    }
+
+    return net.fetch(pathToFileURL(filePath).toString());
+  });
 }
 
 function registerIpc() {
