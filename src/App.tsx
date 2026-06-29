@@ -67,6 +67,7 @@ type SettingsCategory =
   | "floating"
   | "quick"
   | "defaults"
+  | "profiles"
   | "files"
   | "reports"
   | "server"
@@ -127,6 +128,82 @@ function themeDefaultAccent(theme: AppSettings["theme"]) {
 
 function createSettingsFallback(settings: AppSettings): AppSettings {
   return createDefaultSettings(settings.outputDirectory);
+}
+
+function cloneValue<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function createProfileSnapshot(settings: AppSettings): Partial<AppSettings> {
+  return {
+    theme: settings.theme,
+    accentColor: settings.accentColor,
+    fieldSize: settings.fieldSize,
+    density: settings.density,
+    layout: settings.layout,
+    defaultType: settings.defaultType,
+    defaultPeople: settings.defaultPeople,
+    defaultRoundingStep: settings.defaultRoundingStep,
+    defaultRoundingDirection: settings.defaultRoundingDirection,
+    spreadsheetMode: settings.spreadsheetMode,
+    visibleColumns: [...settings.visibleColumns],
+    floating: cloneValue(settings.floating),
+    quickTabs: cloneValue(settings.quickTabs),
+    shortcuts: cloneValue(settings.shortcuts)
+  };
+}
+
+function normalizeSettingsDraft(current: AppSettings, patch: Partial<AppSettings>): AppSettings {
+  const defaults = createSettingsFallback(current);
+  const merged: AppSettings = {
+    ...defaults,
+    ...current,
+    ...patch,
+    floating: {
+      ...defaults.floating,
+      ...current.floating,
+      ...patch.floating
+    },
+    server: {
+      ...defaults.server,
+      ...current.server,
+      ...patch.server,
+      permissions: {
+        ...defaults.server.permissions,
+        ...current.server.permissions,
+        ...patch.server?.permissions
+      }
+    },
+    shortcuts: {
+      ...defaults.shortcuts,
+      ...current.shortcuts,
+      ...patch.shortcuts
+    },
+    profiles: {
+      ...defaults.profiles,
+      ...current.profiles,
+      ...patch.profiles
+    },
+    quickTabs: patch.quickTabs?.length
+      ? cloneValue(patch.quickTabs)
+      : current.quickTabs?.length
+        ? cloneValue(current.quickTabs)
+        : cloneValue(defaults.quickTabs)
+  };
+  return {
+    ...merged,
+    visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns
+  };
+}
+
+function profileSummary(profile: Partial<AppSettings>): string {
+  const details = [
+    profile.theme ? `Tema ${profile.theme}` : "",
+    profile.layout ? `Layout ${profile.layout}` : "",
+    profile.density ? `Densidade ${profile.density}` : "",
+    profile.defaultType ? `Padrao ${profile.defaultType}` : ""
+  ].filter(Boolean);
+  return details.join(" | ") || "Perfil pronto para personalizar";
 }
 
 export function App() {
@@ -1648,6 +1725,81 @@ function SettingsPanel({
     });
   };
 
+  const profileNames = Object.keys(draft.profiles);
+  const activeProfileName = draft.activeProfile && draft.profiles[draft.activeProfile]
+    ? draft.activeProfile
+    : profileNames[0] || "Perfil PC";
+
+  const applyProfile = (name: string) => {
+    setDraft((current) => normalizeSettingsDraft(current, { ...current.profiles[name], activeProfile: name }));
+    onToast("success", `Perfil ${name} aplicado ao rascunho.`);
+  };
+
+  const saveCurrentProfile = (name = activeProfileName) => {
+    setDraft((current) => ({
+      ...current,
+      activeProfile: name,
+      profiles: {
+        ...current.profiles,
+        [name]: createProfileSnapshot({ ...current, activeProfile: name })
+      }
+    }));
+    onToast("success", `Perfil ${name} atualizado. Salve as configuracoes para gravar.`);
+  };
+
+  const createProfile = () => {
+    const name = window.prompt("Nome do novo perfil", "Perfil personalizado")?.trim();
+    if (!name) {
+      return;
+    }
+    setDraft((current) => ({
+      ...current,
+      activeProfile: name,
+      profiles: {
+        ...current.profiles,
+        [name]: createProfileSnapshot({ ...current, activeProfile: name })
+      }
+    }));
+    onToast("success", `Perfil ${name} criado. Salve as configuracoes para gravar.`);
+  };
+
+  const deleteProfile = (name: string) => {
+    if (Object.keys(draft.profiles).length <= 1) {
+      onToast("error", "Mantenha pelo menos um perfil.");
+      return;
+    }
+    if (!window.confirm(`Apagar o perfil ${name}?`)) {
+      return;
+    }
+    setDraft((current) => {
+      const nextProfiles = { ...current.profiles };
+      delete nextProfiles[name];
+      const nextActive = current.activeProfile === name ? Object.keys(nextProfiles)[0] : current.activeProfile;
+      return { ...current, profiles: nextProfiles, activeProfile: nextActive };
+    });
+    onToast("info", `Perfil ${name} removido do rascunho.`);
+  };
+
+  const exportSettings = async () => {
+    const filePath = await window.caixa.exportSettings(draft);
+    onToast(filePath ? "success" : "info", filePath ? "Configuracoes exportadas." : "Exportacao cancelada.");
+  };
+
+  const importSettings = async () => {
+    try {
+      const result = await window.caixa.importSettings();
+      if (!result) {
+        onToast("info", "Importacao cancelada.");
+        return;
+      }
+      setDraft((current) => normalizeSettingsDraft(current, result.settings));
+      setCategory("advanced");
+      onToast("info", "Configuracoes importadas para revisao. Clique em Salvar para aplicar.");
+    } catch (error) {
+      onToast("error", error instanceof Error ? error.message : "Nao foi possivel importar configuracoes.");
+    }
+  };
+
   const resetCategory = (target: SettingsCategory) => {
     setDraft((current) => {
       const defaults = createSettingsFallback(current);
@@ -1674,6 +1826,13 @@ function SettingsPanel({
           defaultPeople: defaults.defaultPeople,
           defaultRoundingStep: defaults.defaultRoundingStep,
           defaultRoundingDirection: defaults.defaultRoundingDirection
+        };
+      }
+      if (target === "profiles") {
+        return {
+          ...current,
+          profiles: defaults.profiles,
+          activeProfile: defaults.activeProfile
         };
       }
       if (target === "files") {
@@ -1715,6 +1874,7 @@ function SettingsPanel({
     { key: "floating", label: "Barra fixada", description: "Comportamento da barra flutuante sempre visivel.", icon: Pin },
     { key: "quick", label: "Barra rapida", description: "Abas e modos que aparecem na barra fixada.", icon: SlidersHorizontal },
     { key: "defaults", label: "Vendas", description: "Tipo, pessoas e arredondamento usados por padrao.", icon: Send },
+    { key: "profiles", label: "Perfis", description: "Perfis para alternar entre PC, notebook, tela pequena e barra fixada.", icon: MonitorUp },
     { key: "files", label: "Planilha e backup", description: "Pasta, formato, colunas, backups e organizacao dos arquivos.", icon: FileSpreadsheet },
     { key: "reports", label: "Relatorios", description: "Visibilidade de totais e comportamento de relatorios.", icon: BarChart3 },
     { key: "server", label: "Servidor", description: "Porta, senha e permissoes para outro dispositivo.", icon: RadioTower },
@@ -1822,6 +1982,61 @@ function SettingsPanel({
               <option value="nearest">Mais proximo</option>
             </select>
           </label>
+        </section>
+
+        <section className={categoryClass("profiles", "settings-group wide")}>
+          <h3>Perfis de configuracao</h3>
+          <p className="settings-note">
+            Perfis guardam tema, densidade, layout, barra fixada, abas rapidas, atalhos e padroes de venda.
+            Eles nao trocam sua pasta de arquivos nem apagam vendas.
+          </p>
+          <div className="profile-manager">
+            <div className="profile-active-card">
+              <div>
+                <span className="settings-overline">Perfil ativo</span>
+                <strong>{activeProfileName}</strong>
+                <p>{profileSummary(draft.profiles[activeProfileName] || {})}</p>
+              </div>
+              <label className="field">
+                <span>Trocar perfil</span>
+                <select value={activeProfileName} onChange={(event) => applyProfile(event.target.value)}>
+                  {profileNames.map((name) => (
+                    <option key={name}>{name}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="profile-actions">
+                <button className="primary-button" type="button" onClick={() => saveCurrentProfile(activeProfileName)}>
+                  <Save size={16} /> Atualizar perfil
+                </button>
+                <button className="ghost-button" type="button" onClick={createProfile}>
+                  <Plus size={16} /> Novo perfil
+                </button>
+              </div>
+            </div>
+            <div className="profile-grid">
+              {profileNames.map((name) => (
+                <article key={name} className={`profile-card ${name === activeProfileName ? "active" : ""}`}>
+                  <MonitorUp size={20} />
+                  <div>
+                    <strong>{name}</strong>
+                    <span>{profileSummary(draft.profiles[name] || {})}</span>
+                  </div>
+                  <div className="profile-card-actions">
+                    <button type="button" onClick={() => applyProfile(name)} title="Aplicar perfil">
+                      <Check size={15} />
+                    </button>
+                    <button type="button" onClick={() => saveCurrentProfile(name)} title="Salvar estado atual neste perfil">
+                      <Save size={15} />
+                    </button>
+                    <button type="button" onClick={() => deleteProfile(name)} title="Apagar perfil">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section className={categoryClass("files", "settings-group wide")}>
@@ -2030,6 +2245,19 @@ function SettingsPanel({
 
         <section className={categoryClass("advanced", "settings-group wide")}>
           <h3>Backup, restauracao e seguranca</h3>
+          <div className="settings-action-card">
+            <DatabaseBackup size={20} />
+            <div>
+              <strong>Exportar e importar configuracoes</strong>
+              <span>Gere um JSON para levar seus ajustes para outro PC ou importar um backup. A importacao entra como rascunho e so aplica depois de salvar.</span>
+            </div>
+            <button className="ghost-button" type="button" onClick={exportSettings}>
+              <Download size={16} /> Exportar
+            </button>
+            <button className="primary-button" type="button" onClick={importSettings}>
+              <FileSpreadsheet size={16} /> Importar
+            </button>
+          </div>
           <div className="danger-zone">
             <DatabaseBackup size={20} />
             <div>

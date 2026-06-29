@@ -1233,8 +1233,88 @@ th {
   cursor: not-allowed;
 }
 
+.profile-manager {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+}
+
+.profile-active-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px) auto;
+  align-items: end;
+  gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 8px;
+  padding: 14px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 58%),
+    color-mix(in srgb, var(--panel) 95%, var(--accent) 5%);
+}
+
+.profile-active-card strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 1.3rem;
+}
+
+.profile-active-card p,
+.profile-card span,
+.settings-action-card span {
+  color: var(--muted);
+  line-height: 1.42;
+}
+
+.profile-actions,
+.profile-card-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+  gap: 10px;
+}
+
+.profile-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--panel) 96%, var(--accent) 4%);
+}
+
+.profile-card.active {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  background: color-mix(in srgb, var(--panel) 89%, var(--accent) 11%);
+}
+
+.profile-card strong,
+.profile-card span {
+  display: block;
+}
+
+.profile-card-actions button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
 .update-card,
-.danger-zone {
+.danger-zone,
+.settings-action-card {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -1815,7 +1895,9 @@ th {
   .report-row-list > div,
   .quick-tab-row,
   .quick-tab-row.has-money-link,
+  .profile-active-card,
   .update-card,
+  .settings-action-card,
   .danger-zone {
     grid-template-columns: 1fr;
   }

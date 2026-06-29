@@ -1,10 +1,11 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
+import { promises as fs } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { LedgerExporter } from "./exporter.js";
 import { LocalServer } from "./localServer.js";
 import { LedgerStore } from "./storage.js";
-import type { EntryDraft, LedgerEntry, UpdateInfo } from "../src/shared/types.js";
+import type { AppSettings, EntryDraft, LedgerEntry, UpdateInfo } from "../src/shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -280,6 +281,50 @@ function registerIpc() {
       properties: ["openDirectory", "createDirectory"]
     });
     return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle("settings:exportConfig", async (_event, settings: AppSettings) => {
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: "Exportar configuracoes",
+      defaultPath: `contabilizador-config-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: "Configuracoes JSON", extensions: ["json"] }]
+    });
+    if (result.canceled || !result.filePath) {
+      return null;
+    }
+    await fs.writeFile(
+      result.filePath,
+      JSON.stringify(
+        {
+          app: "Contabilizador Caixa",
+          version: app.getVersion(),
+          exportedAt: new Date().toISOString(),
+          settings
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    return result.filePath;
+  });
+
+  ipcMain.handle("settings:importConfig", async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: "Importar configuracoes",
+      properties: ["openFile"],
+      filters: [{ name: "Configuracoes JSON", extensions: ["json"] }]
+    });
+    if (result.canceled || !result.filePaths[0]) {
+      return null;
+    }
+    const filePath = result.filePaths[0];
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as { settings?: Partial<AppSettings> } | Partial<AppSettings>;
+    return {
+      filePath,
+      settings: "settings" in parsed && parsed.settings ? parsed.settings : parsed
+    };
   });
 
   ipcMain.handle("export:now", async () => {

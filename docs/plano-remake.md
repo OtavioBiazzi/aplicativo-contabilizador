@@ -93,7 +93,7 @@ Teste de aceite:
 
 Objetivo: deixar configuracao entendivel para usuario leigo e completa para usuario avancado.
 
-Status: iniciada na versao 0.2.0 com navegacao lateral de categorias, restauracao por categoria, atalhos editaveis e area de atualizacoes. Avancada na versao 0.2.2 com cabecalho por categoria, largura controlada para monitores grandes e grids mais previsiveis.
+Status: iniciada na versao 0.2.0 com navegacao lateral de categorias, restauracao por categoria, atalhos editaveis e area de atualizacoes. Avancada na versao 0.2.2 com cabecalho por categoria, largura controlada para monitores grandes e grids mais previsiveis. Avancada na versao 0.2.3 com perfis aplicaveis e exportacao/importacao de configuracoes em JSON.
 
 Categorias:
 - Aparencia

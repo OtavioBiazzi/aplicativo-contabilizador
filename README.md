@@ -28,6 +28,8 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia, mes com abas, arquivo fixo ou arquivos separados por tipo.
 - Configuracoes persistentes: tema, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
+- Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
+- Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
 - Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com e troco direto na barra.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
@@ -41,6 +43,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
+- Categoria Perfis para aplicar, atualizar, criar e remover perfis sem mexer nos dados de venda.
 - Tela de configuracoes com cabecalho por categoria e layout mais controlado para monitores grandes.
 - Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
@@ -155,6 +158,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - aparicao no historico;
 - abertura dos relatorios;
 - marca CDA no topo e cabecalho da categoria de ajustes;
+- categoria Perfis e API de exportar/importar configuracoes;
 - barra fixada com troca de modo e troco;
 - servidor remoto com totais mascarados, registro, edicao, cancelamento e lixeira;
 - ausencia de erros de console.

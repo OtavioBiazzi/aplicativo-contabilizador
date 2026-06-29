@@ -10,6 +10,8 @@ export interface CaixaApi {
   cancelEntry: (id: string) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;
   saveSettings: (settings: AppSettings) => Promise<AppSettings>;
   chooseOutputDirectory: () => Promise<string | null>;
+  exportSettings: (settings: AppSettings) => Promise<string | null>;
+  importSettings: () => Promise<{ filePath: string; settings: Partial<AppSettings> } | null>;
   exportNow: () => Promise<ExportStatus>;
   exportFilteredReport: (ids: string[], label: string) => Promise<ExportStatus>;
   checkForUpdates: () => Promise<UpdateInfo>;

@@ -131,6 +131,14 @@ def main() -> int:
       expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Barra rapida").click()
       expect(page.get_by_text("Abas e modos que aparecem na barra fixada.")).to_be_visible()
+      page.locator(".settings-nav").get_by_role("button", name="Perfis").click()
+      expect(page.get_by_text("Perfil ativo")).to_be_visible()
+      has_config_io = page.evaluate(
+        """() => typeof window.caixa.exportSettings === 'function' && typeof window.caixa.importSettings === 'function'"""
+      )
+      if not has_config_io:
+        print("Settings import/export API is not exposed.", file=sys.stderr)
+        return 1
       page.get_by_role("button", name="Atualizacoes").click()
       expect(page.get_by_text("Nenhuma verificacao feita")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Servidor").click()
