@@ -94,6 +94,7 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
 ];
 
 const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floating") === "1";
+const CDA_ICON_SRC = "/cda-icon.png";
 
 const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: "Mesa", label: "Mesa" },
@@ -308,7 +309,9 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar app-topbar">
         <div className="brand-block">
-          <div className="brand-mark">C</div>
+          <div className="brand-mark">
+            <img src={CDA_ICON_SRC} alt="CDA" draggable={false} />
+          </div>
           <div>
             <strong>Contabilizador</strong>
             <span>PDV local rapido</span>
@@ -1707,18 +1710,19 @@ function SettingsPanel({
     }
   };
 
-  const settingsCategories: Array<{ key: SettingsCategory; label: string; icon: typeof Settings }> = [
-    { key: "appearance", label: "Aparencia", icon: Palette },
-    { key: "floating", label: "Barra fixada", icon: Pin },
-    { key: "quick", label: "Barra rapida", icon: SlidersHorizontal },
-    { key: "defaults", label: "Vendas", icon: Send },
-    { key: "files", label: "Planilha e backup", icon: FileSpreadsheet },
-    { key: "reports", label: "Relatorios", icon: BarChart3 },
-    { key: "server", label: "Servidor", icon: RadioTower },
-    { key: "shortcuts", label: "Atalhos", icon: KeyRound },
-    { key: "updates", label: "Atualizacoes", icon: Download },
-    { key: "advanced", label: "Avancado", icon: DatabaseBackup }
+  const settingsCategories: Array<{ key: SettingsCategory; label: string; description: string; icon: typeof Settings }> = [
+    { key: "appearance", label: "Aparencia", description: "Tema, cor, densidade e formato geral da interface.", icon: Palette },
+    { key: "floating", label: "Barra fixada", description: "Comportamento da barra flutuante sempre visivel.", icon: Pin },
+    { key: "quick", label: "Barra rapida", description: "Abas e modos que aparecem na barra fixada.", icon: SlidersHorizontal },
+    { key: "defaults", label: "Vendas", description: "Tipo, pessoas e arredondamento usados por padrao.", icon: Send },
+    { key: "files", label: "Planilha e backup", description: "Pasta, formato, colunas, backups e organizacao dos arquivos.", icon: FileSpreadsheet },
+    { key: "reports", label: "Relatorios", description: "Visibilidade de totais e comportamento de relatorios.", icon: BarChart3 },
+    { key: "server", label: "Servidor", description: "Porta, senha e permissoes para outro dispositivo.", icon: RadioTower },
+    { key: "shortcuts", label: "Atalhos", description: "Comandos de teclado para operar mais rapido.", icon: KeyRound },
+    { key: "updates", label: "Atualizacoes", description: "Checagem de versoes publicadas no GitHub.", icon: Download },
+    { key: "advanced", label: "Avancado", description: "Restauracao, backup e acoes administrativas.", icon: DatabaseBackup }
   ];
+  const activeCategory = settingsCategories.find((item) => item.key === category) || settingsCategories[0];
 
   const categoryClass = (target: SettingsCategory, extra = "") =>
     `${extra || "settings-group"} ${category === target ? "active-category" : "hidden-category"}`;
@@ -1739,11 +1743,18 @@ function SettingsPanel({
         </aside>
 
         <div className="settings-content">
-          <div className="preset-row">
-            {(["Caixa", "Mesa", "Onibus", "Dinheiro", "Minimalista"] as const).map((preset) => (
-              <button key={preset} onClick={() => applyPreset(preset)}>{preset}</button>
-            ))}
-            <button className="ghost-button" type="button" onClick={() => resetCategory(category)}><RotateCcw size={16} /> Restaurar categoria</button>
+          <div className="settings-hero">
+            <div>
+              <span className="settings-overline">Ajustes</span>
+              <h2>{activeCategory.label}</h2>
+              <p>{activeCategory.description}</p>
+            </div>
+            <div className="preset-row settings-presets" aria-label="Presets de configuracao">
+              {(["Caixa", "Mesa", "Onibus", "Dinheiro", "Minimalista"] as const).map((preset) => (
+                <button key={preset} onClick={() => applyPreset(preset)}>{preset}</button>
+              ))}
+              <button className="ghost-button" type="button" onClick={() => resetCategory(category)}><RotateCcw size={16} /> Restaurar categoria</button>
+            </div>
           </div>
 
       <div className="settings-grid">

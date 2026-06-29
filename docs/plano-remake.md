@@ -93,7 +93,7 @@ Teste de aceite:
 
 Objetivo: deixar configuracao entendivel para usuario leigo e completa para usuario avancado.
 
-Status: iniciada na versao 0.2.0 com navegacao lateral de categorias, restauracao por categoria, atalhos editaveis e area de atualizacoes.
+Status: iniciada na versao 0.2.0 com navegacao lateral de categorias, restauracao por categoria, atalhos editaveis e area de atualizacoes. Avancada na versao 0.2.2 com cabecalho por categoria, largura controlada para monitores grandes e grids mais previsiveis.
 
 Categorias:
 - Aparencia
@@ -182,7 +182,7 @@ Teste de aceite:
 
 Objetivo: deixar o app mais profissional no sistema.
 
-Status: iniciada na versao 0.2.0 com icone em `assets/icon/`, fundo preto removido, `.ico` gerado e metadados do instalador configurados. Assinatura de codigo ainda depende de certificado.
+Status: iniciada na versao 0.2.0 com icone em `assets/icon/`, fundo preto removido, `.ico` gerado e metadados do instalador configurados. Avancada na versao 0.2.2 com marca CDA no topo esquerdo do app. Assinatura de codigo ainda depende de certificado.
 
 Entregas:
 - Copiar o icone de referencia para `assets/icon/`.

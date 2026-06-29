@@ -102,6 +102,7 @@ def main() -> int:
       page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
       page.wait_for_load_state("networkidle")
       expect(page.get_by_text("Registro rapido").first).to_be_visible(timeout=15000)
+      expect(page.locator(".brand-mark img")).to_be_visible(timeout=15000)
       page.evaluate(
         """async () => {
           const snapshot = await window.caixa.getSnapshot();
@@ -128,6 +129,8 @@ def main() -> int:
       expect(page.get_by_text("Relatorio filtrado exportado.")).to_be_visible(timeout=15000)
       page.get_by_role("button", name="Ajustes").click()
       expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
+      page.locator(".settings-nav").get_by_role("button", name="Barra rapida").click()
+      expect(page.get_by_text("Abas e modos que aparecem na barra fixada.")).to_be_visible()
       page.get_by_role("button", name="Atualizacoes").click()
       expect(page.get_by_text("Nenhuma verificacao feita")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Servidor").click()

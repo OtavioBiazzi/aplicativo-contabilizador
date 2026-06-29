@@ -39,7 +39,9 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
 - Servidor local com senha, permissoes, cadastro remoto, edicao, cancelamento, lixeira e atualizacao em tempo real via WebSocket.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
+- Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
+- Tela de configuracoes com cabecalho por categoria e layout mais controlado para monitores grandes.
 - Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
 - Checagem discreta de releases do GitHub pela area de Atualizacoes.
@@ -152,6 +154,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - registro de uma venda;
 - aparicao no historico;
 - abertura dos relatorios;
+- marca CDA no topo e cabecalho da categoria de ajustes;
 - barra fixada com troca de modo e troco;
 - servidor remoto com totais mascarados, registro, edicao, cancelamento e lixeira;
 - ausencia de erros de console.
