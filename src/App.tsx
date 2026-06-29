@@ -126,9 +126,9 @@ function resolveFloatingTheme(settings: AppSettings, prefersDark: boolean): Excl
 
 function themeDefaultAccent(theme: AppSettings["theme"]) {
   const map: Record<AppSettings["theme"], string> = {
-    light: "#00a88e",
-    dark: "#17c964",
-    auto: "#00a88e",
+    light: "#0565b7",
+    dark: "#2f8cff",
+    auto: "#0565b7",
     contrast: "#00ff66",
     datacaixa: "#0565b7",
     italia: "#168a56"

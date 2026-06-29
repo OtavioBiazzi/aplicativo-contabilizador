@@ -74,7 +74,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     defaultRoundingStep: 0.25,
     defaultRoundingDirection: "up",
     theme: "light",
-    accentColor: "#00a88e",
+    accentColor: "#0565b7",
     fieldSize: "medium",
     density: "normal",
     layout: "complete",

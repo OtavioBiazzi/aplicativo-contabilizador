@@ -27,7 +27,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com exportacao do recorte filtrado.
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia, mes com abas, arquivo fixo ou arquivos separados por tipo.
-- Configuracoes persistentes: tema, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
+- Configuracoes persistentes: tema padrao azul de PDV, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
 - Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
@@ -35,7 +35,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Alternancia Conta/Dinheiro pode manter o contexto atual: Conta Onibus vira Dinheiro/Onibus e volta para Onibus.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
 - Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
-- Temas adicionais DataCaixa PDV e Italia como base do remake visual.
+- Temas adicionais DataCaixa PDV e Italia como base do remake visual, com contraste revisado em menus e hovers.
 - Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
 - Historico com lixeira, restauracao e exclusao definitiva.
 - Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL.
@@ -161,6 +161,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - marca CDA no topo e cabecalho da categoria de ajustes;
 - categoria Perfis e API de exportar/importar configuracoes;
 - barra fixada com troca de modo e troco;
+- hover legivel no tema DataCaixa;
 - servidor remoto com totais mascarados, registro, edicao, cancelamento e lixeira;
 - ausencia de erros de console.
 

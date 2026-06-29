@@ -72,6 +72,8 @@ Teste de aceite:
 
 Objetivo: fazer temas reais, nao apenas trocar cor principal.
 
+Status: avancada na versao 0.2.5 com tema claro padrao migrado para base azul de PDV e hover do DataCaixa corrigido para nao perder contraste em menus e configuracoes.
+
 Temas:
 - Claro suave: padrao confortavel, menos branco puro.
 - Escuro: contraste bom sem fundo preto puro.

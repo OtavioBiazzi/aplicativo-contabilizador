@@ -1,12 +1,12 @@
 :root {
-  --accent: #17c964;
-  --accent-strong: #72f29a;
-  --bg: #0f1311;
-  --panel: #171c19;
-  --panel-2: #1f2622;
-  --line: #313b35;
-  --text: #f4f7f1;
-  --muted: #9eaba2;
+  --accent: #2f8cff;
+  --accent-strong: #8ac4ff;
+  --bg: #0b121c;
+  --panel: #111b28;
+  --panel-2: #182638;
+  --line: #2b4058;
+  --text: #f3f8ff;
+  --muted: #9fb0c2;
   --danger: #ff5d4d;
   --warning: #f2c14e;
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
@@ -19,14 +19,14 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #eef5f2;
+  --bg: #edf6fb;
   --panel: #ffffff;
-  --panel-2: #f5faf8;
-  --line: #d6e5df;
-  --text: #11221c;
-  --muted: #657a72;
-  --accent-strong: color-mix(in srgb, var(--accent) 78%, #063f35);
-  --shadow: 0 18px 45px rgba(29, 77, 61, 0.12);
+  --panel-2: #f3f9fd;
+  --line: #c7ddeb;
+  --text: #102a3b;
+  --muted: #60798b;
+  --accent-strong: color-mix(in srgb, var(--accent) 78%, #043d70);
+  --shadow: 0 18px 45px rgba(9, 75, 124, 0.13);
 }
 
 :root[data-theme="contrast"] {
@@ -983,6 +983,14 @@ th {
   background: var(--panel-2);
   color: var(--muted);
   cursor: pointer;
+  transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.subtab-row button:hover,
+.settings-nav button:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--text);
+  transform: translateY(-1px);
 }
 
 .subtab-row button.active,
@@ -1748,6 +1756,27 @@ th {
 :root[data-theme="datacaixa"] .tabs button.active {
   background: #ff8a4d;
   color: #ffffff;
+}
+
+:root[data-theme="datacaixa"] .sidebar .tabs button:hover,
+:root[data-theme="datacaixa"] .sidebar .pin-button:hover {
+  background: #0a6fbd;
+  color: #ffffff;
+}
+
+:root[data-theme="datacaixa"] .sidebar .tabs button.active:hover {
+  background: #ff8a4d;
+  color: #ffffff;
+}
+
+:root[data-theme="datacaixa"] .settings-nav button:hover,
+:root[data-theme="datacaixa"] .subtab-row button:hover,
+:root[data-theme="datacaixa"] .quick-actions button:hover,
+:root[data-theme="datacaixa"] .preset-row button:hover,
+:root[data-theme="datacaixa"] .chip-grid button:hover {
+  background: #cae9fb;
+  border-color: #65b6e7;
+  color: #024b8d;
 }
 
 :root[data-theme="datacaixa"] .floating-bar {

@@ -115,6 +115,24 @@ def main() -> int:
         }"""
       )
       expect(page.locator("html")).to_have_attribute("data-theme", "datacaixa")
+      history_tab = page.get_by_role("button", name="Historico")
+      history_tab.hover()
+      hover_style = history_tab.evaluate(
+        """(element) => {
+          const style = getComputedStyle(element);
+          const channels = style.backgroundColor.match(/[\\d.]+/g)?.map(Number) || [0, 0, 0, 1];
+          return {
+            backgroundColor: style.backgroundColor,
+            red: channels[0] || 0,
+            green: channels[1] || 0,
+            blue: channels[2] || 0,
+            alpha: channels.length > 3 ? channels[3] : 1
+          };
+        }"""
+      )
+      if hover_style["alpha"] >= 0.95 and min(hover_style["red"], hover_style["green"], hover_style["blue"]) > 220:
+        print(f"DataCaixa hover is too pale: {hover_style['backgroundColor']}", file=sys.stderr)
+        return 1
       page.get_by_label("Valor").first.fill("45,00")
       page.get_by_label("Descricao").first.fill("Mesa 4")
       page.get_by_role("button", name="Registrar").first.click()
