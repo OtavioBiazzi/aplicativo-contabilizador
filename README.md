@@ -30,6 +30,10 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Configuracoes persistentes: tema, cor principal, densidade, layout, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
 - Barra fixada com alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com e troco direto na barra.
+- Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
+- Temas adicionais DataCaixa PDV e Italia como base do remake visual.
+- Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
+- Historico com lixeira, restauracao e exclusao definitiva.
 - Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL.
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
 - Servidor local com senha, permissoes e atualizacao em tempo real via WebSocket.

@@ -21,6 +21,8 @@ A direcao visual recomendada e um estilo de PDV moderno para Windows: limpo, com
 
 Objetivo: corrigir os problemas que mais incomodam no uso real.
 
+Status: iniciada na versao 0.1.4 com tema sincronizado da barra fixada, tema separado da barra, drag pela alca, dinheiro com vinculo de modo, lixeira e exclusao definitiva.
+
 Entregas:
 - Sincronizar o tema da barra fixada desde a abertura, incluindo tema automatico.
 - Adicionar tema proprio da barra fixada, com opcao "seguir tema do app" como padrao.
@@ -228,4 +230,3 @@ Para a proxima implementacao, o melhor pacote e a Fase 1 inteira, mais uma peque
 8. Atualizar smoke test e gerar release.
 
 Esse pacote resolve bugs reais, melhora a sensacao do app e cria base para o remake visual sem quebrar tudo de uma vez.
-

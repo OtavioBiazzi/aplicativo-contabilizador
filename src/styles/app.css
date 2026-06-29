@@ -30,13 +30,41 @@
 }
 
 :root[data-theme="contrast"] {
-  --bg: #000;
+  --bg: #050505;
   --panel: #090909;
   --panel-2: #151515;
   --line: #f4f7f1;
   --text: #fff;
   --muted: #d6d6d6;
   --accent: #00ff66;
+}
+
+:root[data-theme="datacaixa"] {
+  --bg: #e8f3fb;
+  --panel: #ffffff;
+  --panel-2: #dff0fb;
+  --line: #9ac9e8;
+  --text: #092844;
+  --muted: #52728a;
+  --accent: #0565b7;
+  --accent-strong: #024b8d;
+  --danger: #d90000;
+  --warning: #ff8a4d;
+  --shadow: 0 18px 46px rgba(2, 50, 91, 0.16);
+}
+
+:root[data-theme="italia"] {
+  --bg: #f3f5ef;
+  --panel: #ffffff;
+  --panel-2: #edf6ef;
+  --line: #cbdcce;
+  --text: #17251b;
+  --muted: #647468;
+  --accent: #168a56;
+  --accent-strong: #0e683f;
+  --danger: #b62f2f;
+  --warning: #d99a34;
+  --shadow: 0 18px 46px rgba(28, 91, 54, 0.13);
 }
 
 :root[data-density="compact"] {
@@ -83,6 +111,12 @@ body.is-floating-window {
   background: transparent;
 }
 
+html.is-floating-root,
+html.is-floating-root body,
+html.is-floating-root #root {
+  background: transparent;
+}
+
 button,
 input,
 select {
@@ -118,6 +152,7 @@ input[type="color"] {
 }
 
 input[type="range"] {
+  width: 100%;
   accent-color: var(--accent);
 }
 
@@ -456,6 +491,11 @@ h3 {
   background: var(--panel-2);
   color: var(--text);
   cursor: pointer;
+}
+
+.row-actions button.danger-icon {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--line));
+  color: var(--danger);
 }
 
 .primary-button,
@@ -965,13 +1005,13 @@ th {
   padding: 8px;
   background: transparent;
   color: #1b2a24;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 
 .floating-bar {
-  --bar-accent: #00a86b;
-  --bar-soft: #d9f5ea;
-  --bar-button: #00a86b;
+  --bar-accent: var(--accent);
+  --bar-soft: color-mix(in srgb, var(--bar-accent) 18%, #ffffff);
+  --bar-button: var(--bar-accent);
   --bar-button-text: #ffffff;
   position: relative;
   display: grid;
@@ -980,18 +1020,22 @@ th {
   gap: 8px;
   width: 100%;
   min-height: 116px;
-  border: 2px solid var(--bar-soft);
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--bar-accent) 28%, rgba(255, 255, 255, 0.7));
+  border-radius: 12px;
   padding: 14px 8px 14px 10px;
-  background: #ffffff;
-  box-shadow: 0 10px 32px rgba(15, 56, 42, 0.18);
-  -webkit-app-region: drag;
+  background: color-mix(in srgb, var(--panel) 94%, #ffffff 6%);
+  box-shadow: 0 16px 38px color-mix(in srgb, var(--accent) 18%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  -webkit-app-region: no-drag;
 }
 
 .floating-bar.money {
   --bar-accent: #f07a00;
   --bar-soft: #ffd79b;
   --bar-button: #ef7900;
+}
+
+.floating-bar.has-detail {
+  grid-template-columns: auto minmax(104px, 130px) minmax(140px, 190px) minmax(104px, 150px) minmax(84px, 108px) minmax(220px, 1fr) minmax(104px, auto) auto;
 }
 
 .floating-bar button,
@@ -1002,10 +1046,21 @@ th {
 
 .floating-grip {
   position: absolute;
-  left: 10px;
-  top: 8px;
+  left: 8px;
+  top: 6px;
   display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 4px;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  cursor: grab;
+  -webkit-app-region: drag;
+}
+
+.floating-grip:active {
+  cursor: grabbing;
 }
 
 .floating-grip i {
@@ -1049,7 +1104,7 @@ th {
 
 .floating-field > span,
 .floating-result span {
-  color: #53635d;
+  color: var(--muted);
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.04em;
@@ -1060,8 +1115,8 @@ th {
   border: 1px solid #dfe9e5;
   border-radius: 7px;
   padding: 0 12px;
-  background: #ffffff;
-  color: #18251f;
+  background: color-mix(in srgb, var(--panel) 98%, #ffffff 2%);
+  color: var(--text);
   box-shadow: inset 0 0 0 1px transparent, 0 2px 10px rgba(24, 37, 31, 0.04);
 }
 
@@ -1070,8 +1125,8 @@ th {
   border: 1px solid color-mix(in srgb, var(--bar-accent) 34%, #dfe9e5);
   border-radius: 7px;
   padding: 0 10px;
-  background: #ffffff;
-  color: #18251f;
+  background: color-mix(in srgb, var(--panel) 98%, #ffffff 2%);
+  color: var(--text);
   font-weight: 850;
   outline: none;
 }
@@ -1089,19 +1144,32 @@ th {
   height: 40px;
   border: 1px solid color-mix(in srgb, var(--bar-accent) 42%, #dfe9e5);
   border-radius: 7px;
-  background: #ffffff;
+  background: color-mix(in srgb, var(--panel) 98%, #ffffff 2%);
   overflow: hidden;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .money-input b {
   padding-left: 12px;
   color: var(--bar-accent);
+  pointer-events: none;
 }
 
 .money-input input {
   border: 0;
   box-shadow: none;
   font-weight: 900;
+  background: transparent;
+}
+
+.money-input:focus-within {
+  border-color: var(--bar-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bar-accent) 18%, transparent);
+}
+
+.money-input input:focus {
+  border: 0;
+  box-shadow: none;
 }
 
 .people-stepper {
@@ -1114,8 +1182,8 @@ th {
   height: 40px;
   border: 1px solid color-mix(in srgb, var(--bar-accent) 38%, #dfe9e5);
   border-radius: 7px;
-  background: #ffffff;
-  color: #14241d;
+  background: color-mix(in srgb, var(--panel) 98%, #ffffff 2%);
+  color: var(--text);
   font-weight: 900;
   cursor: pointer;
 }
@@ -1136,15 +1204,19 @@ th {
 .floating-result {
   display: grid;
   align-self: end;
-  min-width: 132px;
+  min-width: 0;
   gap: 4px;
-  border-left: 1px solid #dfe9e5;
+  border-left: 1px solid var(--line);
   padding-left: 10px;
 }
 
 .floating-result strong {
   color: var(--bar-accent);
-  font-size: 1.08rem;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: clamp(0.88rem, 1.35vw, 1.08rem);
   white-space: nowrap;
 }
 
@@ -1175,13 +1247,13 @@ th {
   place-items: center;
   border: 1px solid #dfe9e5;
   border-radius: 7px;
-  background: #ffffff;
-  color: #53635d;
+  background: color-mix(in srgb, var(--panel) 98%, #ffffff 2%);
+  color: var(--muted);
   cursor: pointer;
 }
 
 :root[data-theme="dark"] .floating-bar {
-  background: #111a16;
+  background: color-mix(in srgb, var(--panel) 94%, #111a16 6%);
   border-color: color-mix(in srgb, var(--bar-accent) 34%, #23352d);
   color: #eff8f3;
   box-shadow: 0 12px 34px rgba(0, 0, 0, 0.38);
@@ -1204,6 +1276,34 @@ th {
 
 :root[data-theme="dark"] .money-input input {
   background: transparent;
+}
+
+:root[data-theme="datacaixa"] .sidebar {
+  background: linear-gradient(180deg, #034f8d, #0565b7);
+}
+
+:root[data-theme="datacaixa"] .sidebar,
+:root[data-theme="datacaixa"] .sidebar .tabs button,
+:root[data-theme="datacaixa"] .sidebar .pin-button,
+:root[data-theme="datacaixa"] .sidebar .brand-block span {
+  color: #eaf7ff;
+}
+
+:root[data-theme="datacaixa"] .tabs button.active {
+  background: #ff8a4d;
+  color: #ffffff;
+}
+
+:root[data-theme="datacaixa"] .floating-bar {
+  background: #f9fdff;
+  border-color: #65b6e7;
+}
+
+:root[data-theme="italia"] .floating-bar {
+  border-color: color-mix(in srgb, #168a56 42%, #ffffff);
+  background:
+    linear-gradient(90deg, rgba(22, 138, 86, 0.08), transparent 28%, transparent 72%, rgba(182, 47, 47, 0.08)),
+    #ffffff;
 }
 
 .spin {
@@ -1315,6 +1415,14 @@ th {
   .floating-detail {
     grid-column: 2;
   }
+
+  .people-stepper {
+    grid-template-columns: minmax(70px, 1fr);
+  }
+
+  .people-stepper button {
+    display: none;
+  }
 }
 
 @media (max-width: 560px) {
@@ -1333,7 +1441,7 @@ th {
 
   .floating-result {
     border-left: 0;
-    border-top: 1px solid #dfe9e5;
+    border-top: 1px solid var(--line);
     padding: 8px 0 0;
   }
 }

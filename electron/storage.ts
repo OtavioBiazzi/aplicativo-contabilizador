@@ -142,6 +142,16 @@ export class LedgerStore {
     await this.updateEntry(id, { status: "deleted" });
   }
 
+  async deleteEntry(id: string): Promise<void> {
+    const entries = await this.getEntries();
+    const index = entries.findIndex((entry) => entry.id === id);
+    if (index < 0) {
+      throw new Error("Lancamento nao encontrado.");
+    }
+    entries.splice(index, 1);
+    await this.persistEntries();
+  }
+
   private async persistEntries() {
     await writeJsonAtomic(this.ledgerPath(), this.entries || []);
   }

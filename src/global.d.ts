@@ -5,6 +5,7 @@ export interface CaixaApi {
   addEntry: (draft: EntryDraft) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;
   removeEntry: (id: string) => Promise<{ exportStatus: ExportStatus }>;
+  deleteEntry: (id: string) => Promise<{ exportStatus: ExportStatus }>;
   duplicateEntry: (id: string) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;
   cancelEntry: (id: string) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;
   saveSettings: (settings: AppSettings) => Promise<AppSettings>;
@@ -18,6 +19,7 @@ export interface CaixaApi {
   onEntriesChanged: (callback: () => void) => () => void;
   onServerChanged: (callback: (state: ServerState) => void) => () => void;
   onPinnedChanged: (callback: (pinned: boolean) => void) => () => void;
+  onSettingsChanged: (callback: (settings: AppSettings) => void) => () => void;
 }
 
 declare global {

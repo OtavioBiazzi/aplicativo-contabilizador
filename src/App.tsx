@@ -69,6 +69,35 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
 
 const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floating") === "1";
 
+const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
+  { value: "Mesa", label: "Mesa" },
+  { value: "Venda", label: "Balcao/Venda" },
+  { value: "Onibus", label: "Onibus" },
+  { value: "Extra", label: "Extra" },
+  { value: "Personalizado", label: "Personalizado" }
+];
+
+function resolveTheme(theme: AppSettings["theme"], prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
+  return theme === "auto" ? (prefersDark ? "dark" : "light") : theme;
+}
+
+function resolveFloatingTheme(settings: AppSettings, prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
+  const floatingTheme = settings.floating.theme || "follow";
+  return floatingTheme === "follow" ? resolveTheme(settings.theme, prefersDark) : resolveTheme(floatingTheme, prefersDark);
+}
+
+function themeDefaultAccent(theme: AppSettings["theme"]) {
+  const map: Record<AppSettings["theme"], string> = {
+    light: "#00a88e",
+    dark: "#17c964",
+    auto: "#00a88e",
+    contrast: "#00ff66",
+    datacaixa: "#0565b7",
+    italia: "#168a56"
+  };
+  return map[theme];
+}
+
 export function App() {
   const [entries, setEntries] = useState<LedgerEntry[]>([]);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -95,10 +124,12 @@ export function App() {
     const offEntries = window.caixa.onEntriesChanged(reload);
     const offServer = window.caixa.onServerChanged((state) => setServer(state));
     const offPinned = window.caixa.onPinnedChanged((nextPinned) => setPinnedState(nextPinned));
+    const offSettings = window.caixa.onSettingsChanged((nextSettings) => setSettings(nextSettings));
     return () => {
       offEntries();
       offServer();
       offPinned();
+      offSettings();
     };
   }, []);
 
@@ -106,12 +137,25 @@ export function App() {
     if (!settings) {
       return;
     }
-    document.documentElement.dataset.theme = settings.theme;
-    document.documentElement.dataset.density = settings.density;
-    document.documentElement.dataset.fieldSize = settings.fieldSize;
-    document.documentElement.style.setProperty("--accent", settings.accentColor);
-    document.body.classList.toggle("is-pinned", pinned || IS_FLOATING_WINDOW);
-    document.body.classList.toggle("is-floating-window", IS_FLOATING_WINDOW);
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      const resolvedAppTheme = resolveTheme(settings.theme, media.matches);
+      const resolvedFloatingTheme = resolveFloatingTheme(settings, media.matches);
+      document.documentElement.dataset.theme = IS_FLOATING_WINDOW ? resolvedFloatingTheme : resolvedAppTheme;
+      document.documentElement.dataset.themePreference = settings.theme;
+      document.documentElement.dataset.floatingTheme = resolvedFloatingTheme;
+      document.documentElement.dataset.density = settings.density;
+      document.documentElement.dataset.fieldSize = settings.fieldSize;
+      document.documentElement.style.setProperty("--accent", settings.accentColor);
+      document.documentElement.classList.toggle("is-floating-root", IS_FLOATING_WINDOW);
+      document.body.classList.toggle("is-pinned", pinned || IS_FLOATING_WINDOW);
+      document.body.classList.toggle("is-floating-window", IS_FLOATING_WINDOW);
+    };
+
+    applyTheme();
+    media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
   }, [settings, pinned]);
 
   useEffect(() => {
@@ -355,6 +399,7 @@ function QuickEntry({
   const [tableNumber, setTableNumber] = useState("");
   const [busNumber, setBusNumber] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Nao informado");
+  const [cashLinkedType, setCashLinkedType] = useState<EntryType>("Mesa");
   const [paidWithText, setPaidWithText] = useState("");
   const [observations, setObservations] = useState("");
   const [roundingStep, setRoundingStep] = useState(settings.defaultRoundingStep);
@@ -365,7 +410,8 @@ function QuickEntry({
   const value = parseMoney(valueText);
   const paidWith = parseMoney(paidWithText);
   const split = calculateSplit(value, people, roundingStep, roundingDirection, registerDifference);
-  const cash = calculateCash(value, paidWith);
+  const effectivePaidWith = paidWith > 0 ? paidWith : value;
+  const cash = calculateCash(value, effectivePaidWith);
   const lastActive = entries.find((entry) => entry.status === "active");
 
   useEffect(() => {
@@ -381,7 +427,13 @@ function QuickEntry({
     if (type === "Onibus" && busNumber && !description) {
       setDescription(`Onibus ${busNumber}`);
     }
-  }, [type, tableNumber, busNumber]);
+    if (type === "Dinheiro/Troco" && cashLinkedType === "Mesa" && tableNumber && !description) {
+      setDescription(`Mesa ${tableNumber}`);
+    }
+    if (type === "Dinheiro/Troco" && cashLinkedType === "Onibus" && busNumber && !description) {
+      setDescription(`Onibus ${busNumber}`);
+    }
+  }, [type, cashLinkedType, tableNumber, busNumber]);
 
   const visible = (field: string) => !pinned || settings.floating.visibleFields.includes(field);
 
@@ -400,20 +452,26 @@ function QuickEntry({
       return;
     }
     setSubmitting(true);
+    const isMoney = type === "Dinheiro/Troco";
     const effectiveType: EntryType =
       pinned && type !== "Dinheiro/Troco" && people > 1 ? "Divisao de conta" : type;
     const effectiveSplit = effectiveType === "Divisao de conta" ? split : undefined;
     const effectiveCash = effectiveType === "Dinheiro/Troco" ? cash : undefined;
+    const effectiveDescription =
+      description ||
+      (isMoney && cashLinkedType === "Mesa" && tableNumber ? `Mesa ${tableNumber}` : "") ||
+      (isMoney && cashLinkedType === "Onibus" && busNumber ? `Onibus ${busNumber}` : "");
     const draft: EntryDraft = {
       type: effectiveType,
       value,
-      description,
+      description: effectiveDescription,
       people: effectiveSplit?.people ?? people,
-      tableNumber,
-      busNumber,
+      tableNumber: isMoney && cashLinkedType !== "Mesa" ? "" : tableNumber,
+      busNumber: isMoney && cashLinkedType !== "Onibus" ? "" : busNumber,
       paymentMethod: effectiveType === "Dinheiro/Troco" ? "Dinheiro" : paymentMethod,
-      paidWith,
+      paidWith: effectiveType === "Dinheiro/Troco" ? effectivePaidWith : paidWith,
       observations,
+      customType: effectiveType === "Dinheiro/Troco" ? `Dinheiro/${cashLinkedType}` : undefined,
       splitDetails: effectiveSplit,
       cashDetails: effectiveCash
     };
@@ -433,10 +491,20 @@ function QuickEntry({
   if (pinned) {
     const isMoney = type === "Dinheiro/Troco";
     const nextModeLabel = isMoney ? "Conta" : "Dinheiro";
-    const moneyDisabled = isMoney && (value <= 0 || paidWith <= 0);
+    const moneyDisabled = false;
     const disabled = submitting || value <= 0 || moneyDisabled;
     const floatingTypes: EntryType[] = ["Venda", "Mesa", "Onibus", "Extra", "Taxa", "Personalizado"];
-    const detailKind = type === "Mesa" ? "mesa" : type === "Onibus" ? "onibus" : "";
+    const detailKind = isMoney
+      ? cashLinkedType === "Mesa"
+        ? "mesa"
+        : cashLinkedType === "Onibus"
+          ? "onibus"
+          : ""
+      : type === "Mesa"
+        ? "mesa"
+        : type === "Onibus"
+          ? "onibus"
+          : "";
 
     return (
       <form className={`floating-bar ${isMoney ? "money" : "account"} ${detailKind ? "has-detail" : ""}`} onSubmit={onSubmitForm}>
@@ -455,7 +523,16 @@ function QuickEntry({
           {nextModeLabel}
         </button>
 
-        {!isMoney && (
+        {isMoney ? (
+          <label className="floating-field floating-kind floating-cash-kind">
+            <span>VINCULAR A</span>
+            <select value={cashLinkedType} onChange={(event) => setCashLinkedType(event.target.value as EntryType)}>
+              {CASH_LINKED_TYPES.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
           <label className="floating-field floating-kind">
             <span>TIPO</span>
             <select value={type} onChange={(event) => setType(event.target.value as EntryType)}>
@@ -513,7 +590,7 @@ function QuickEntry({
           </div>
         )}
 
-        {!isMoney && detailKind && (
+        {detailKind && (
           <label className="floating-field floating-detail">
             <span>{detailKind === "mesa" ? "MESA" : "ONIBUS"}</span>
             <input
@@ -627,14 +704,14 @@ function QuickEntry({
           </label>
         )}
 
-        {type === "Mesa" && !pinned && (
+        {(type === "Mesa" || (type === "Dinheiro/Troco" && cashLinkedType === "Mesa")) && !pinned && (
           <label className="field small-field">
             <span>Mesa</span>
             <input value={tableNumber} onChange={(event) => setTableNumber(event.target.value)} placeholder="8" />
           </label>
         )}
 
-        {type === "Onibus" && !pinned && (
+        {(type === "Onibus" || (type === "Dinheiro/Troco" && cashLinkedType === "Onibus")) && !pinned && (
           <label className="field small-field">
             <span>Onibus</span>
             <input value={busNumber} onChange={(event) => setBusNumber(event.target.value)} placeholder="2" />
@@ -647,6 +724,17 @@ function QuickEntry({
             <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}>
               {PAYMENT_METHODS.map((item) => (
                 <option key={item}>{item}</option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {type === "Dinheiro/Troco" && !pinned && (
+          <label className="field">
+            <span>Vincular a</span>
+            <select value={cashLinkedType} onChange={(event) => setCashLinkedType(event.target.value as EntryType)}>
+              {CASH_LINKED_TYPES.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
               ))}
             </select>
           </label>
@@ -797,7 +885,7 @@ function CashBox({
 }
 
 function TodayPanel({ summary, entries, onMode }: { summary: DaySummary; entries: LedgerEntry[]; onMode: (type: EntryType) => void }) {
-  const latest = entries.slice(0, 5);
+  const latest = entries.filter((entry) => entry.status !== "deleted").slice(0, 5);
   return (
     <aside className="today-panel">
       <div className="total-plate">
@@ -851,6 +939,7 @@ function HistoryPanel({
 }) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState("Todos");
+  const [statusFilter, setStatusFilter] = useState("visiveis");
   const [date, setDate] = useState("");
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
 
@@ -858,10 +947,16 @@ function HistoryPanel({
     return entries.filter((entry) => {
       const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${entry.paymentMethod}`.toLowerCase();
       const sameType = type === "Todos" || entry.type === type;
+      const sameStatus =
+        statusFilter === "todos" ||
+        (statusFilter === "visiveis" && entry.status !== "deleted") ||
+        (statusFilter === "active" && entry.status === "active") ||
+        (statusFilter === "cancelled" && entry.status === "cancelled") ||
+        (statusFilter === "deleted" && entry.status === "deleted");
       const sameDate = !date || entry.createdAt.startsWith(date);
-      return sameType && sameDate && haystack.includes(query.toLowerCase());
+      return sameType && sameStatus && sameDate && haystack.includes(query.toLowerCase());
     });
-  }, [entries, query, type, date]);
+  }, [entries, query, type, statusFilter, date]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     try {
@@ -885,6 +980,16 @@ function HistoryPanel({
           <select value={type} onChange={(event) => setType(event.target.value)}>
             <option>Todos</option>
             {ENTRY_TYPES.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>Status</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="visiveis">Visiveis</option>
+            <option value="active">Ativos</option>
+            <option value="cancelled">Cancelados</option>
+            <option value="deleted">Lixeira</option>
+            <option value="todos">Todos</option>
           </select>
         </label>
         <label className="field">
@@ -920,13 +1025,20 @@ function HistoryPanel({
                   <td>{entry.busNumber || "-"}</td>
                   <td>{entry.paymentMethod}</td>
                   <td>{formatCurrency(entry.finalValue)}</td>
-                  <td><span className={`status-dot ${entry.status}`}>{entry.status}</span></td>
+                  <td><span className={`status-dot ${entry.status}`}>{statusLabel(entry.status)}</span></td>
                   <td>
                     <div className="row-actions">
                       <button title="Editar" onClick={() => setEditing(entry)}><Edit3 size={15} /></button>
                       <button title="Duplicar" onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
-                      <button title="Cancelar" onClick={() => run(() => window.caixa.cancelEntry(entry.id), "Lancamento cancelado.")}><MinusCircle size={15} /></button>
-                      <button title="Remover" onClick={() => window.confirm("Marcar este lancamento como removido?") && run(() => window.caixa.removeEntry(entry.id), "Lancamento removido.")}><Trash2 size={15} /></button>
+                      {entry.status === "deleted" ? (
+                        <button title="Restaurar" onClick={() => run(() => window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
+                      ) : (
+                        <>
+                          <button title="Cancelar" onClick={() => run(() => window.caixa.cancelEntry(entry.id), "Lancamento cancelado.")}><MinusCircle size={15} /></button>
+                          <button title="Enviar para lixeira" onClick={() => window.confirm("Enviar este lancamento para a lixeira? Ele sai da planilha, mas ainda pode ser restaurado.") && run(() => window.caixa.removeEntry(entry.id), "Lancamento enviado para a lixeira.")}><Trash2 size={15} /></button>
+                        </>
+                      )}
+                      <button title="Apagar definitivo" className="danger-icon" onClick={() => window.confirm("Apagar definitivamente? Isso remove do historico local e da proxima exportacao.") && run(() => window.caixa.deleteEntry(entry.id), "Lancamento apagado definitivamente.")}><X size={15} /></button>
                     </div>
                   </td>
                 </tr>
@@ -1243,11 +1355,19 @@ function SettingsPanel({
         <section className="settings-group">
           <h3>Aparencia</h3>
           <label className="field"><span>Tema</span>
-            <select value={draft.theme} onChange={(event) => update("theme", event.target.value as AppSettings["theme"])}>
+            <select
+              value={draft.theme}
+              onChange={(event) => {
+                const theme = event.target.value as AppSettings["theme"];
+                setDraft((current) => ({ ...current, theme, accentColor: themeDefaultAccent(theme) }));
+              }}
+            >
               <option value="light">Claro</option>
               <option value="dark">Escuro</option>
               <option value="auto">Automatico</option>
               <option value="contrast">Alto contraste</option>
+              <option value="datacaixa">DataCaixa PDV</option>
+              <option value="italia">Italia</option>
             </select>
           </label>
           <label className="field"><span>Cor principal</span><input type="color" value={draft.accentColor} onChange={(event) => update("accentColor", event.target.value)} /></label>
@@ -1350,11 +1470,22 @@ function SettingsPanel({
 
         <section className="settings-group wide">
           <h3>Modo fixado</h3>
-          <label className="field"><span>Opacidade</span><input type="range" min={0.5} max={1} step={0.01} value={draft.floating.opacity} onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })} /></label>
+          <label className="field"><span>Tema da barra</span>
+            <select value={draft.floating.theme || "follow"} onChange={(event) => update("floating", { ...draft.floating, theme: event.target.value as AppSettings["floating"]["theme"] })}>
+              <option value="follow">Seguir tema do app</option>
+              <option value="light">Claro</option>
+              <option value="dark">Escuro</option>
+              <option value="auto">Automatico</option>
+              <option value="contrast">Alto contraste</option>
+              <option value="datacaixa">DataCaixa PDV</option>
+              <option value="italia">Italia</option>
+            </select>
+          </label>
+          <label className="field"><span>Opacidade ({Math.round(draft.floating.opacity * 100)}%)</span><input type="range" min={0.35} max={1} step={0.01} value={draft.floating.opacity} onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })} /></label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar posicao</label>
           <p className="settings-note">
             A barra fixada abre em uma janela separada, sem moldura, com Tipo, Valor, Pessoas ou Pago com,
-            Descricao, Troco e Enviar. Mesa e Onibus aparecem automaticamente quando esse tipo e selecionado.
+            Descricao, Troco e Enviar. Ela segue o tema principal por padrao, mas pode ter um tema proprio.
           </p>
         </section>
 
@@ -1448,6 +1579,14 @@ function titleForTab(tab: TabKey): string {
     settings: "Configuracoes"
   };
   return map[tab];
+}
+
+function statusLabel(status: LedgerEntry["status"]): string {
+  return {
+    active: "Ativo",
+    cancelled: "Cancelado",
+    deleted: "Lixeira"
+  }[status];
 }
 
 function permissionLabel(key: "view" | "create" | "edit" | "delete"): string {

@@ -22,7 +22,8 @@ export type RoundDirection = "up" | "down" | "nearest";
 export type FileFormat = "xlsx" | "csv";
 export type FileStrategy = "daily" | "monthlyTabs" | "fixedAll" | "byType";
 export type SpreadsheetMode = "simple" | "advanced";
-export type ThemeMode = "light" | "dark" | "auto" | "contrast";
+export type ThemeMode = "light" | "dark" | "auto" | "contrast" | "datacaixa" | "italia";
+export type FloatingThemeMode = "follow" | ThemeMode;
 export type DensityMode = "compact" | "normal" | "comfortable";
 export type LayoutMode = "complete" | "compact" | "pinnedBar" | "grid" | "sidePanel";
 
@@ -106,6 +107,7 @@ export interface FloatingSettings {
   opacity: number;
   borderless: boolean;
   lockPosition: boolean;
+  theme: FloatingThemeMode;
 }
 
 export interface AppSettings {

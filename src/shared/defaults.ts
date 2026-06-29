@@ -80,7 +80,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
       visibleFields: DEFAULT_FLOATING_FIELDS,
       opacity: 1,
       borderless: false,
-      lockPosition: false
+      lockPosition: false,
+      theme: "follow"
     },
     server: {
       port: 4317,

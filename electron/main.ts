@@ -63,6 +63,7 @@ async function createWindow() {
 
 async function createFloatingWindow(options?: { opacity?: number; lockPosition?: boolean }) {
   if (floatingWindow && !floatingWindow.isDestroyed()) {
+    applyFloatingWindowOptions(options);
     floatingWindow.showInactive();
     floatingWindow.moveTop();
     return floatingWindow;
@@ -119,6 +120,14 @@ async function createFloatingWindow(options?: { opacity?: number; lockPosition?:
 
   sendToMain("window:pinnedChanged", true);
   return floatingWindow;
+}
+
+function applyFloatingWindowOptions(options?: { opacity?: number; lockPosition?: boolean }) {
+  if (!floatingWindow || floatingWindow.isDestroyed()) {
+    return;
+  }
+  floatingWindow.setOpacity(options?.opacity ?? 1);
+  floatingWindow.setMovable(!options?.lockPosition);
 }
 
 async function bootstrap() {
@@ -210,6 +219,14 @@ function registerIpc() {
     return { exportStatus };
   });
 
+  ipcMain.handle("entries:delete", async (_event, id: string) => {
+    await store.deleteEntry(id);
+    const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    localServer.broadcast({ type: "entry-deleted", id });
+    sendToAll("entries:changed");
+    return { exportStatus };
+  });
+
   ipcMain.handle("entries:duplicate", async (_event, id: string) => {
     const entry = await store.duplicateEntry(id);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
@@ -229,7 +246,12 @@ function registerIpc() {
   ipcMain.handle("settings:save", async (_event, settings) => {
     const saved = await store.saveSettings(settings);
     localServer.setPermissions(saved.server.permissions);
+    applyFloatingWindowOptions({
+      opacity: saved.floating.opacity,
+      lockPosition: saved.floating.lockPosition
+    });
     await exporter.export(await store.getEntries(), saved);
+    sendToAll("settings:changed", saved);
     return saved;
   });
 

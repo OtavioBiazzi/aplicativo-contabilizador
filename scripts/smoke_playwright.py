@@ -84,6 +84,18 @@ def main() -> int:
       page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
       page.wait_for_load_state("networkidle")
       expect(page.get_by_text("Registro rapido").first).to_be_visible(timeout=15000)
+      page.evaluate(
+        """async () => {
+          const snapshot = await window.caixa.getSnapshot();
+          await window.caixa.saveSettings({
+            ...snapshot.settings,
+            theme: 'datacaixa',
+            accentColor: '#0565b7',
+            floating: { ...snapshot.settings.floating, theme: 'follow', opacity: 1 }
+          });
+        }"""
+      )
+      expect(page.locator("html")).to_have_attribute("data-theme", "datacaixa")
       page.get_by_label("Valor").first.fill("45,00")
       page.get_by_label("Descricao").first.fill("Mesa 4")
       page.get_by_role("button", name="Registrar").first.click()
@@ -101,16 +113,19 @@ def main() -> int:
       floating_page = find_app_page(browser, floating=True)
       floating_page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
       expect(floating_page.locator(".floating-bar")).to_be_visible(timeout=15000)
+      expect(floating_page.locator("html")).to_have_attribute("data-theme", "datacaixa")
       expect(floating_page.get_by_text("Caixa rapido")).not_to_be_visible()
       expect(floating_page.locator(".floating-kind select")).to_be_visible()
       floating_page.locator(".floating-kind select").select_option("Onibus")
       expect(floating_page.locator(".floating-detail input")).to_be_visible()
       floating_page.locator(".floating-mode").click()
       expect(floating_page.locator(".floating-mode")).to_contain_text("Conta")
+      expect(floating_page.locator(".floating-cash-kind select")).to_have_value("Mesa")
+      expect(floating_page.locator(".floating-detail input")).to_be_visible()
       expect(floating_page.get_by_text("TROCO")).to_be_visible()
       floating_page.locator(".amount-field input").fill("87,50")
-      floating_page.locator(".paid-field input").fill("100,00")
-      expect(floating_page.locator(".floating-result strong")).to_contain_text("12,50")
+      expect(floating_page.locator(".floating-result strong")).to_contain_text("0,00")
+      floating_page.locator(".floating-detail input").fill("12")
       floating_page.locator(".floating-description input").fill("Pagamento fixado")
       floating_page.locator(".floating-send").click()
       expect(floating_page.get_by_text("Lancamento registrado.")).to_be_visible(timeout=15000)
@@ -125,6 +140,23 @@ def main() -> int:
       )
       if not removed:
         print("Could not remove the test entry.", file=sys.stderr)
+        return 1
+      page.wait_for_timeout(500)
+      page.get_by_role("button", name="Historico").click()
+      expect(page.get_by_text("Mesa 4")).not_to_be_visible()
+      page.get_by_label("Status").select_option("deleted")
+      expect(page.get_by_text("Mesa 4").first).to_be_visible()
+      deleted = page.evaluate(
+        """async () => {
+          const snapshot = await window.caixa.getSnapshot();
+          const entry = snapshot.entries.find((item) => item.description === 'Mesa 4');
+          if (!entry) return false;
+          await window.caixa.deleteEntry(entry.id);
+          return true;
+        }"""
+      )
+      if not deleted:
+        print("Could not permanently delete the test entry.", file=sys.stderr)
         return 1
       page.wait_for_timeout(500)
       browser.close()

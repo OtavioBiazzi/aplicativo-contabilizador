@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("caixa", {
   addEntry: (draft: EntryDraft) => ipcRenderer.invoke("entries:add", draft),
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => ipcRenderer.invoke("entries:update", id, patch),
   removeEntry: (id: string) => ipcRenderer.invoke("entries:remove", id),
+  deleteEntry: (id: string) => ipcRenderer.invoke("entries:delete", id),
   duplicateEntry: (id: string) => ipcRenderer.invoke("entries:duplicate", id),
   cancelEntry: (id: string) => ipcRenderer.invoke("entries:cancel", id),
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke("settings:save", settings),
@@ -31,5 +32,10 @@ contextBridge.exposeInMainWorld("caixa", {
     const handler = (_event: Electron.IpcRendererEvent, pinned: boolean) => callback(pinned);
     ipcRenderer.on("window:pinnedChanged", handler);
     return () => ipcRenderer.removeListener("window:pinnedChanged", handler);
+  },
+  onSettingsChanged: (callback: (settings: AppSettings) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, settings: AppSettings) => callback(settings);
+    ipcRenderer.on("settings:changed", handler);
+    return () => ipcRenderer.removeListener("settings:changed", handler);
   }
 });
