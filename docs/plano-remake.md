@@ -53,6 +53,8 @@ Teste de aceite:
 
 Objetivo: transformar a tela principal em um painel operacional bonito e rapido.
 
+Status: iniciada na versao 0.2.0 com navegacao superior em estilo PDV, modulos Caixa/Historico/Relatorios/Rede/Ajustes e estados operacionais no topo.
+
 Entregas:
 - Reorganizar topo do app em uma barra de modulo: Caixa, Mesa, Onibus, Dinheiro, Relatorios, Servidor, Ajustes.
 - Criar uma area de registro rapido mais objetiva, sem textos redundantes.
@@ -91,6 +93,8 @@ Teste de aceite:
 
 Objetivo: deixar configuracao entendivel para usuario leigo e completa para usuario avancado.
 
+Status: iniciada na versao 0.2.0 com navegacao lateral de categorias, restauracao por categoria, atalhos editaveis e area de atualizacoes.
+
 Categorias:
 - Aparencia
 - Barra fixada
@@ -120,6 +124,8 @@ Teste de aceite:
 ## Fase 5 - Relatorios profissionais
 
 Objetivo: transformar relatorios em uma area de analise real.
+
+Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada.
 
 Entregas:
 - Filtros por periodo, tipo, mesa, onibus, forma de pagamento e origem.
@@ -156,6 +162,8 @@ Teste de aceite:
 
 Objetivo: fazer o servidor parecer uma funcao segura e compreensivel.
 
+Status: iniciada na versao 0.2.0 com subabas Criar servidor, Conectar e Permissoes, alem de mascara de valores quando totais sensiveis estao ocultos.
+
 Entregas:
 - Separar "Criar servidor" e "Conectar a servidor".
 - Explicar em linguagem simples: o que e servidor local, IP, porta, senha e permissao.
@@ -172,6 +180,8 @@ Teste de aceite:
 
 Objetivo: deixar o app mais profissional no sistema.
 
+Status: iniciada na versao 0.2.0 com icone em `assets/icon/`, fundo preto removido, `.ico` gerado e metadados do instalador configurados. Assinatura de codigo ainda depende de certificado.
+
 Entregas:
 - Copiar o icone de referencia para `assets/icon/`.
 - Remover fundo preto e gerar `.ico` com tamanhos corretos.
@@ -187,6 +197,8 @@ Teste de aceite:
 ## Fase 9 - Atualizacoes via GitHub
 
 Objetivo: avisar sobre releases novas sem atrapalhar o caixa.
+
+Status: iniciada na versao 0.2.0 com checagem discreta de ultima release do GitHub na area de Atualizacoes.
 
 Entregas:
 - Checar releases do GitHub de forma discreta.

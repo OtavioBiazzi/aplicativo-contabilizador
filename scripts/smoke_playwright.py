@@ -104,7 +104,21 @@ def main() -> int:
       expect(page.get_by_text("Mesa 4").first).to_be_visible()
       page.get_by_role("button", name="Relatorios").click()
       expect(page.get_by_text("Total do periodo")).to_be_visible()
-      page.get_by_role("button", name="Registro").click()
+      expect(page.get_by_text("Relatorios com filtros")).to_be_visible()
+      page.get_by_label("Tipo").select_option("Venda")
+      page.get_by_role("button", name="Exportar filtrado").click()
+      expect(page.get_by_text("Relatorio filtrado exportado.")).to_be_visible(timeout=15000)
+      page.get_by_role("button", name="Ajustes").click()
+      expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
+      page.get_by_role("button", name="Atualizacoes").click()
+      expect(page.get_by_text("Nenhuma verificacao feita")).to_be_visible()
+      page.locator(".settings-nav").get_by_role("button", name="Servidor").click()
+      expect(page.get_by_text("Porta padrao")).to_be_visible()
+      page.get_by_role("button", name="Rede").click()
+      expect(page.get_by_text("Criar servidor")).to_be_visible()
+      page.get_by_role("button", name="Conectar").click()
+      expect(page.get_by_text("Conectar este computador")).to_be_visible()
+      page.get_by_role("button", name="Caixa").click()
       page.get_by_role("button", name="Abrir barra fixada").click()
       expect(page.locator(".app-shell")).to_be_visible()
       browser.close()
@@ -163,14 +177,21 @@ def main() -> int:
       if console_errors:
         print("\n".join(console_errors), file=sys.stderr)
         return 1
-      exported_files = list((SMOKE_DIR / "exports").glob("*.xlsx"))
+      exported_files = [item for item in (SMOKE_DIR / "exports").glob("*.xlsx") if not item.name.startswith("relatorio-")]
       if not exported_files:
         print("No exported xlsx file found.", file=sys.stderr)
         return 1
-      with ZipFile(exported_files[0]) as zip_file:
-        sheet = zip_file.read("xl/worksheets/sheet1.xml").decode("utf-8")
+      sheets = []
+      for exported_file in exported_files:
+        with ZipFile(exported_file) as zip_file:
+          sheets.append(zip_file.read("xl/worksheets/sheet1.xml").decode("utf-8"))
+      sheet = "\n".join(sheets)
       if "Mesa 4" in sheet or "Pagamento fixado" not in sheet or "TOTAL" not in sheet:
         print("Exported xlsx did not reflect removal/total correctly.", file=sys.stderr)
+        return 1
+      report_files = list((SMOKE_DIR / "exports").glob("relatorio-*.xlsx"))
+      if not report_files:
+        print("No filtered report xlsx file found.", file=sys.stderr)
         return 1
     return 0
   finally:

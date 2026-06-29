@@ -60,7 +60,11 @@ export class LocalServer {
 
     app.get("/api/entries", this.authorize("view"), async (_request, response) => {
       const entries = await this.options.getEntries();
-      response.json({ entries, summary: summarizeEntries(entries) });
+      response.json({
+        entries: this.permissions.viewTotals ? entries : entries.map(maskMoneyFields),
+        summary: this.permissions.viewTotals ? summarizeEntries(entries) : null,
+        permissions: this.permissions
+      });
     });
 
     app.post("/api/entries", this.authorize("create"), async (request, response) => {
@@ -202,6 +206,38 @@ function getLocalIps(): string[] {
   return ips;
 }
 
+function maskMoneyFields(entry: LedgerEntry): LedgerEntry {
+  return {
+    ...entry,
+    originalValue: 0,
+    finalValue: 0,
+    perPerson: 0,
+    difference: 0,
+    paidWith: 0,
+    change: 0,
+    splitDetails: entry.splitDetails
+      ? {
+          ...entry.splitDetails,
+          originalValue: 0,
+          perPersonRaw: 0,
+          perPersonRounded: 0,
+          finalTotal: 0,
+          difference: 0
+        }
+      : undefined,
+    cashDetails: entry.cashDetails
+      ? {
+          ...entry.cashDetails,
+          accountValue: 0,
+          paidWith: 0,
+          change: 0,
+          breakdown: [],
+          unrepresentedCents: 0
+        }
+      : undefined
+  };
+}
+
 function remoteClientHtml(port: number): string {
   return `<!doctype html>
 <html lang="pt-BR">
@@ -265,7 +301,9 @@ function remoteClientHtml(port: number): string {
     }
     async function load() {
       const data = await api("/api/entries");
-      document.querySelector("#summary").textContent = "Total: " + money.format(data.summary.total) + " | Lancamentos: " + data.summary.count;
+      document.querySelector("#summary").textContent = data.summary
+        ? "Total: " + money.format(data.summary.total) + " | Lancamentos: " + data.summary.count
+        : "Totais ocultos pelas permissoes do servidor.";
       document.querySelector("#entries").innerHTML = data.entries.slice(0, 20).map((entry) => "<div class='item'><span>" + entry.description + "<br><small class='muted'>" + entry.type + "</small></span><b>" + money.format(entry.finalValue) + "</b></div>").join("");
     }
     document.querySelector("#loginButton").onclick = async () => {

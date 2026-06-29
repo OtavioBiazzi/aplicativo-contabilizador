@@ -23,8 +23,8 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Modos de lancamento: Venda, Mesa, Onibus, Dinheiro/Troco, Divisao de conta, Taxa, Extra, Cancelado/Estorno e Personalizado.
 - Divisao de conta com arredondamento por multiplos de R$ 0,05 a R$ 5,00 e direcao para cima, para baixo ou mais proxima.
 - Modo dinheiro/troco com quebra em notas e moedas do real.
-- Historico editavel com filtros, duplicar, cancelar e remover sem apagar fisicamente do historico interno.
-- Relatorios por periodo com total geral, total por tipo, mesa, onibus, forma de pagamento, media, maior venda e sobras.
+- Historico editavel com filtros, duplicar, cancelar, lixeira, restauracao e exclusao definitiva.
+- Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com exportacao do recorte filtrado.
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia, mes com abas, arquivo fixo ou arquivos separados por tipo.
 - Configuracoes persistentes: tema, cor principal, densidade, layout, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
@@ -37,6 +37,12 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL.
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
 - Servidor local com senha, permissoes e atualizacao em tempo real via WebSocket.
+- Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
+- Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
+- Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
+- Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
+- Checagem discreta de releases do GitHub pela area de Atualizacoes.
+- Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
 - Smoke test da interface com Playwright.
 
 ## Requisitos
@@ -121,11 +127,11 @@ Quando backup automatico estiver ativo, arquivos existentes sao copiados para a 
 
 ## Servidor local
 
-1. Abra a aba **Servidor**.
-2. Defina porta e senha.
-3. Escolha permissoes: visualizar, registrar, editar ou apagar.
+1. Abra a aba **Rede**.
+2. Use **Criar servidor** para definir porta e senha.
+3. Em **Permissoes**, escolha visualizar, registrar, editar, apagar e ver totais vendidos.
 4. Clique em **Abrir servidor**.
-5. Em outro computador da mesma rede, abra o endereco mostrado pelo app.
+5. Em outro computador da mesma rede, abra o endereco mostrado pelo app ou use a subaba **Conectar** para montar o link.
 
 Se o servidor estiver desligado, o aplicativo continua funcionando normalmente no computador principal.
 
@@ -170,5 +176,7 @@ scripts/
 - O servidor local exige senha.
 - A senha e configuravel pelo usuario.
 - O app usa `contextIsolation` no Electron e expõe ao renderer somente uma API controlada pelo preload.
-- Remover lancamentos marca o item como removido; o historico interno preserva o registro.
+- A permissao **Ver totais vendidos** mascara valores monetarios na API remota quando desativada.
+- Remover lancamentos envia o item para a lixeira; apagar definitivo remove do historico local.
 - Se a exportacao falhar, o lancamento continua salvo no JSON local e a exportacao fica pendente para nova tentativa.
+- Avisos do Windows SmartScreen/antivirus so reduzem de forma consistente com assinatura de codigo por certificado confiavel; o app ja define nome, icone e metadados do instalador.

@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld("caixa", {
   saveSettings: (settings: AppSettings) => ipcRenderer.invoke("settings:save", settings),
   chooseOutputDirectory: () => ipcRenderer.invoke("settings:chooseOutputDirectory"),
   exportNow: () => ipcRenderer.invoke("export:now"),
+  exportFilteredReport: (ids: string[], label: string) => ipcRenderer.invoke("reports:exportFiltered", ids, label),
+  checkForUpdates: () => ipcRenderer.invoke("updates:check"),
   startServer: (port: number, password: string) => ipcRenderer.invoke("server:start", port, password),
   stopServer: () => ipcRenderer.invoke("server:stop"),
   disconnectDevice: (id: string) => ipcRenderer.invoke("server:disconnectDevice", id),

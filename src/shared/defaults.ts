@@ -90,7 +90,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
         view: true,
         create: true,
         edit: false,
-        delete: false
+        delete: false,
+        viewTotals: true
       }
     },
     shortcuts: {

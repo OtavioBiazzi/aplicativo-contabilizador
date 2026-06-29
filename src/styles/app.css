@@ -174,19 +174,20 @@ input[type="range"] {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100vh;
   min-width: 0;
 }
 
 .sidebar {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
-  gap: 18px;
-  padding: 18px;
-  border-right: 1px solid var(--line);
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, var(--accent) 6%), var(--panel));
+    linear-gradient(90deg, color-mix(in srgb, var(--panel) 90%, var(--accent) 10%), var(--panel));
 }
 
 .brand-block {
@@ -218,8 +219,10 @@ input[type="range"] {
 }
 
 .tabs {
-  display: grid;
-  gap: 7px;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .tabs button,
@@ -237,6 +240,12 @@ input[type="range"] {
   color: var(--muted);
   cursor: pointer;
   transition: transform 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.tabs button {
+  width: auto;
+  min-width: 116px;
+  justify-content: center;
 }
 
 .tabs button:hover,
@@ -266,6 +275,12 @@ input[type="range"] {
   background: color-mix(in srgb, var(--panel-2) 72%, transparent);
 }
 
+.topbar-card {
+  align-self: center;
+  min-width: 172px;
+  padding: 10px 12px;
+}
+
 .sidebar-card span,
 .sidebar-card small {
   color: var(--muted);
@@ -278,6 +293,7 @@ input[type="range"] {
 
 .pin-button {
   justify-content: center;
+  width: auto;
   background: var(--text);
   color: var(--bg);
   font-weight: 800;
@@ -288,7 +304,7 @@ input[type="range"] {
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  padding: 22px;
+  padding: 18px 22px 22px;
   gap: 16px;
   overflow: hidden;
 }
@@ -301,8 +317,26 @@ input[type="range"] {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px 16px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--panel) 92%, var(--accent) 8%), color-mix(in srgb, var(--panel) 88%, transparent));
   box-shadow: 0 10px 28px rgba(29, 77, 61, 0.06);
+}
+
+.module-status {
+  display: grid;
+  gap: 3px;
+  margin-left: auto;
+  color: var(--muted);
+  text-align: right;
+}
+
+.module-status strong {
+  color: var(--text);
+}
+
+.muted-copy {
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .eyebrow {
@@ -780,10 +814,66 @@ th {
   gap: 16px;
 }
 
+.report-command {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: color-mix(in srgb, var(--panel-2) 60%, transparent);
+}
+
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.report-filter-bar {
+  align-items: end;
+}
+
+.report-search {
+  grid-column: span 4;
+}
+
 .report-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+}
+
+.restricted-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.report-row-list {
+  display: grid;
+  gap: 8px;
+}
+
+.report-row-list > div {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) minmax(160px, auto) minmax(90px, auto);
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 0;
+}
+
+.report-row-list span,
+.report-row-list small {
+  color: var(--muted);
+}
+
+.report-row-list strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .bar-list {
@@ -867,9 +957,109 @@ th {
   padding: 10px;
 }
 
+.subtab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.subtab-row button,
+.settings-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.subtab-row button.active,
+.settings-nav button.active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  color: var(--accent-strong);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.help-grid section,
+.connect-panel,
+.danger-zone,
+.update-card,
+.quick-tab-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: color-mix(in srgb, var(--panel-2) 72%, transparent);
+}
+
+.help-grid p,
+.connection-steps,
+.danger-zone span,
+.update-card span,
+.quick-tab-card span {
+  color: var(--muted);
+}
+
+.connection-steps {
+  display: grid;
+  gap: 8px;
+}
+
+.connection-steps span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.permission-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
 .settings-panel {
   display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 14px;
+}
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 14px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-nav {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--line);
+  padding-right: 12px;
+}
+
+.settings-nav button {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.settings-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .preset-row button,
@@ -881,7 +1071,7 @@ th {
 
 .settings-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -909,6 +1099,35 @@ th {
 
 .settings-group.wide {
   grid-column: 1 / -1;
+}
+
+.hidden-category {
+  display: none;
+}
+
+.quick-tab-grid,
+.shortcut-list {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.quick-tab-card {
+  display: grid;
+  gap: 5px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.update-card,
+.danger-zone {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
 }
 
 .chip-grid {
@@ -962,9 +1181,8 @@ th {
 }
 
 .sticky-save {
-  position: sticky;
-  bottom: -16px;
-  margin: 0 -16px -16px;
+  position: static;
+  margin: 0;
   padding: 14px 16px;
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
@@ -1312,18 +1530,17 @@ th {
 
 @media (max-width: 980px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .sidebar {
     grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-rows: auto auto;
     align-items: center;
   }
 
   .tabs {
     grid-column: 1 / -1;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-row: 2;
   }
 
   .tabs button {
@@ -1338,12 +1555,29 @@ th {
   .register-layout,
   .server-hero,
   .report-columns,
-  .settings-grid {
+  .settings-grid,
+  .settings-layout,
+  .help-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-nav {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 0 0 12px;
   }
 
   .workspace {
     min-height: 0;
+  }
+
+  .report-command {
+    flex-direction: column;
+  }
+
+  .report-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -1363,6 +1597,20 @@ th {
   .quick-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-block,
+  .pin-button {
+    justify-self: stretch;
+  }
+
+  .module-status {
+    margin-left: 0;
+    text-align: left;
   }
 
   .entry-grid,
@@ -1391,8 +1639,16 @@ th {
 
   .quick-actions,
   .metric-grid,
-  .calc-results {
+  .calc-results,
+  .report-row-list > div,
+  .update-card,
+  .danger-zone {
     grid-template-columns: 1fr;
+  }
+
+  .report-search,
+  .settings-group .field {
+    grid-column: 1 / -1;
   }
 }
 

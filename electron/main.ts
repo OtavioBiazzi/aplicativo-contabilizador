@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { LedgerExporter } from "./exporter.js";
 import { LocalServer } from "./localServer.js";
 import { LedgerStore } from "./storage.js";
-import type { EntryDraft, LedgerEntry } from "../src/shared/types.js";
+import type { EntryDraft, LedgerEntry, UpdateInfo } from "../src/shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +15,7 @@ let exporter: LedgerExporter;
 let localServer: LocalServer;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -271,6 +272,49 @@ function registerIpc() {
     return status;
   });
 
+  ipcMain.handle("reports:exportFiltered", async (_event, ids: string[], label: string) => {
+    const idSet = new Set(ids);
+    const entries = (await store.getEntries()).filter((entry) => idSet.has(entry.id));
+    const status = await exporter.exportReport(entries, await store.getSettings(), label);
+    if (status.filePath) {
+      shell.showItemInFolder(status.filePath);
+    }
+    return status;
+  });
+
+  ipcMain.handle("updates:check", async (): Promise<UpdateInfo> => {
+    const currentVersion = app.getVersion();
+    try {
+      const response = await net.fetch(RELEASE_API_URL, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "User-Agent": "Contabilizador-Caixa"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`GitHub respondeu ${response.status}.`);
+      }
+      const release = (await response.json()) as { tag_name?: string; html_url?: string };
+      const latestVersion = normalizeVersion(release.tag_name || currentVersion);
+      return {
+        currentVersion,
+        latestVersion,
+        hasUpdate: compareVersions(latestVersion, currentVersion) > 0,
+        releaseUrl: release.html_url || "https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases",
+        checkedAt: new Date().toISOString()
+      };
+    } catch (error) {
+      return {
+        currentVersion,
+        latestVersion: currentVersion,
+        hasUpdate: false,
+        releaseUrl: "https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases",
+        checkedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : "Nao foi possivel verificar atualizacoes."
+      };
+    }
+  });
+
   ipcMain.handle("server:start", async (_event, port: number, password: string) => {
     localServer.setPermissions((await store.getSettings()).server.permissions);
     const state = await localServer.start(port, password);
@@ -305,6 +349,23 @@ function registerIpc() {
   });
 
   ipcMain.handle("window:getPinned", async () => Boolean(floatingWindow && !floatingWindow.isDestroyed()));
+}
+
+function normalizeVersion(version: string) {
+  return version.replace(/^v/i, "").trim();
+}
+
+function compareVersions(left: string, right: string) {
+  const leftParts = normalizeVersion(left).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = normalizeVersion(right).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return 0;
 }
 
 app.whenReady().then(bootstrap);

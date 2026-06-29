@@ -1,6 +1,6 @@
 {
   "name": "aplicativo-contabilizador",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Aplicativo desktop para registrar vendas, mesas, onibus, pagamentos, divisoes e relatorios locais.",
   "author": "OtavioBiazzi",
   "license": "MIT",
@@ -53,6 +53,10 @@
       "package.json"
     ],
     "win": {
+      "icon": "assets/icon/icon.ico",
+      "signtoolOptions": {
+        "publisherName": "Otavio Biazzi"
+      },
       "target": [
         "nsis",
         "portable"
@@ -60,7 +64,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Contabilizador Caixa"
     }
   }
 }

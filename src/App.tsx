@@ -5,27 +5,39 @@ import {
   BarChart3,
   Check,
   Copy,
+  DatabaseBackup,
   Download,
   Edit3,
+  ExternalLink,
   Eye,
+  FileSpreadsheet,
   History,
+  KeyRound,
   Laptop,
   LayoutPanelTop,
+  ListFilter,
   MinusCircle,
   MonitorUp,
+  Palette,
   Pin,
+  PlugZap,
   Plus,
+  RadioTower,
   RefreshCw,
+  RotateCcw,
   Save,
   Send,
   Server,
   Settings,
+  ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   Undo2,
   Wallet,
+  Wifi,
   X
 } from "lucide-react";
-import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS } from "./shared/defaults";
+import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, createDefaultSettings } from "./shared/defaults";
 import {
   calculateCash,
   calculateSplit,
@@ -44,10 +56,23 @@ import type {
   LedgerEntry,
   PaymentMethod,
   RoundDirection,
-  ServerState
+  ServerState,
+  UpdateInfo
 } from "./shared/types";
 
 type TabKey = "register" | "history" | "reports" | "server" | "settings";
+type SettingsCategory =
+  | "appearance"
+  | "floating"
+  | "quick"
+  | "defaults"
+  | "files"
+  | "reports"
+  | "server"
+  | "shortcuts"
+  | "updates"
+  | "advanced";
+type ServerPanelMode = "create" | "connect" | "permissions";
 
 interface ToastState {
   tone: "success" | "error" | "info";
@@ -60,10 +85,10 @@ interface ModeCommand {
 }
 
 const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
-  { key: "register", label: "Registro", icon: Send },
+  { key: "register", label: "Caixa", icon: Send },
   { key: "history", label: "Historico", icon: History },
   { key: "reports", label: "Relatorios", icon: BarChart3 },
-  { key: "server", label: "Servidor", icon: Server },
+  { key: "server", label: "Rede", icon: Server },
   { key: "settings", label: "Ajustes", icon: Settings }
 ];
 
@@ -96,6 +121,10 @@ function themeDefaultAccent(theme: AppSettings["theme"]) {
     italia: "#168a56"
   };
   return map[theme];
+}
+
+function createSettingsFallback(settings: AppSettings): AppSettings {
+  return createDefaultSettings(settings.outputDirectory);
 }
 
 export function App() {
@@ -276,12 +305,12 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className="sidebar app-topbar">
         <div className="brand-block">
           <div className="brand-mark">C</div>
           <div>
             <strong>Contabilizador</strong>
-            <span>Caixa diario</span>
+            <span>PDV local rapido</span>
           </div>
         </div>
 
@@ -301,8 +330,8 @@ export function App() {
           })}
         </nav>
 
-        <div className="sidebar-card">
-          <span>Total de hoje</span>
+        <div className="sidebar-card topbar-card">
+          <span>Total hoje</span>
           <strong>{formatCurrency(summary.total)}</strong>
           <small>{summary.count} lancamentos</small>
         </div>
@@ -318,6 +347,10 @@ export function App() {
           <div>
             <span className="eyebrow">Operacao diaria</span>
             <h1>{titleForTab(activeTab)}</h1>
+          </div>
+          <div className="module-status">
+            <span>{summary.count ? "Caixa em movimento" : "Pronto para lancar"}</span>
+            <strong>{activeTab === "register" ? "Fluxo rapido" : "Modulo completo"}</strong>
           </div>
           <div className="status-strip">
             <StatusPill label="Excel/CSV" ok={exportStatus?.ok ?? true} text={exportStatus?.pendingCount ? `${exportStatus.pendingCount} pendente` : "sincronizado"} />
@@ -350,8 +383,12 @@ export function App() {
         )}
 
         {activeTab === "reports" && (
-          <ReportsPanel entries={entries} summary={summary} exportStatus={exportStatus} onExport={async () => {
+          <ReportsPanel entries={entries} settings={settings} summary={summary} exportStatus={exportStatus} onExport={async () => {
             const status = await window.caixa.exportNow();
+            setExportStatus(status);
+            showToast(status.ok ? "success" : "error", status.message || "Exportacao executada.");
+          }} onExportFiltered={async (ids, label) => {
+            const status = await window.caixa.exportFilteredReport(ids, label);
             setExportStatus(status);
             showToast(status.ok ? "success" : "error", status.message || "Exportacao executada.");
           }} />
@@ -1149,48 +1186,161 @@ function EditEntryModal({
 
 function ReportsPanel({
   entries,
+  settings,
   summary,
   exportStatus,
-  onExport
+  onExport,
+  onExportFiltered
 }: {
   entries: LedgerEntry[];
+  settings: AppSettings;
   summary: DaySummary;
   exportStatus: ExportStatus | null;
   onExport: () => Promise<void>;
+  onExportFiltered: (ids: string[], label: string) => Promise<void>;
 }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [type, setType] = useState("Todos");
+  const [payment, setPayment] = useState("Todos");
+  const [table, setTable] = useState("");
+  const [bus, setBus] = useState("");
+  const [query, setQuery] = useState("");
+  const [showSensitive, setShowSensitive] = useState(settings.server.permissions.viewTotals);
+
+  useEffect(() => {
+    setShowSensitive(settings.server.permissions.viewTotals);
+  }, [settings.server.permissions.viewTotals]);
+
   const periodEntries = entries.filter((entry) => {
     const date = entry.createdAt.slice(0, 10);
-    return (!from || date >= from) && (!to || date <= to);
+    const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${entry.originDevice}`.toLowerCase();
+    return (
+      (!from || date >= from) &&
+      (!to || date <= to) &&
+      (type === "Todos" || entry.type === type) &&
+      (payment === "Todos" || entry.paymentMethod === payment) &&
+      (!table || entry.tableNumber === table) &&
+      (!bus || entry.busNumber === bus) &&
+      haystack.includes(query.toLowerCase())
+    );
   });
   const periodSummary = summarizeEntries(periodEntries);
+  const activeRows = periodEntries.filter((entry) => entry.status === "active");
+  const cancelledCount = periodEntries.filter((entry) => entry.status === "cancelled").length;
+  const deletedCount = periodEntries.filter((entry) => entry.status === "deleted").length;
+  const tables = uniqueFilled(entries.map((entry) => entry.tableNumber));
+  const buses = uniqueFilled(entries.map((entry) => entry.busNumber));
+  const exportLabel = [from || "inicio", to || "hoje", type, payment]
+    .join("-")
+    .replace(/\s+/g, "-")
+    .toLowerCase();
 
   return (
     <section className="panel report-panel">
-      <div className="filter-bar">
+      <div className="report-command">
+        <div>
+          <span className="eyebrow">Analise do caixa</span>
+          <h2>Relatorios com filtros</h2>
+          <p className="muted-copy">Filtre por periodo, tipo, mesa, onibus, pagamento ou origem e exporte apenas o recorte que esta na tela.</p>
+        </div>
+        <div className="report-actions">
+          <label className="switch-line">
+            <input type="checkbox" checked={showSensitive} onChange={(event) => setShowSensitive(event.target.checked)} />
+            Mostrar totais sensiveis
+          </label>
+          <button className="ghost-button" onClick={onExport}><FileSpreadsheet size={18} /> Planilha geral</button>
+          <button className="primary-button" onClick={() => onExportFiltered(periodEntries.map((entry) => entry.id), exportLabel)}><Download size={18} /> Exportar filtrado</button>
+        </div>
+      </div>
+
+      <div className="filter-bar report-filter-bar">
         <label className="field"><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label className="field"><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        <button className="primary-button" onClick={onExport}><Download size={18} /> Exportar agora</button>
+        <label className="field"><span>Tipo</span>
+          <select value={type} onChange={(event) => setType(event.target.value)}>
+            <option>Todos</option>
+            {ENTRY_TYPES.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="field"><span>Pagamento</span>
+          <select value={payment} onChange={(event) => setPayment(event.target.value)}>
+            <option>Todos</option>
+            {PAYMENT_METHODS.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="field"><span>Mesa</span>
+          <select value={table} onChange={(event) => setTable(event.target.value)}>
+            <option value="">Todas</option>
+            {tables.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="field"><span>Onibus</span>
+          <select value={bus} onChange={(event) => setBus(event.target.value)}>
+            <option value="">Todos</option>
+            {buses.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="field report-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, origem..." /></label>
+        <button className="ghost-button" type="button" onClick={() => {
+          setFrom("");
+          setTo("");
+          setType("Todos");
+          setPayment("Todos");
+          setTable("");
+          setBus("");
+          setQuery("");
+        }}><RotateCcw size={16} /> Limpar filtros</button>
       </div>
 
       <div className="metric-grid">
-        <Metric label="Total do periodo" value={formatCurrency(periodSummary.total)} />
+        <Metric label="Total do periodo" value={showSensitive ? formatCurrency(periodSummary.total) : "Restrito"} />
         <Metric label="Quantidade" value={String(periodSummary.count)} />
-        <Metric label="Media" value={formatCurrency(periodSummary.average)} />
-        <Metric label="Maior venda" value={formatCurrency(periodSummary.biggestSale)} />
-        <Metric label="Onibus" value={formatCurrency(periodSummary.busTotal)} />
-        <Metric label="Dinheiro" value={formatCurrency(periodSummary.cashTotal)} />
-        <Metric label="Sobras" value={formatCurrency(periodSummary.differenceTotal)} />
+        <Metric label="Media" value={showSensitive ? formatCurrency(periodSummary.average) : "Restrito"} />
+        <Metric label="Maior venda" value={showSensitive ? formatCurrency(periodSummary.biggestSale) : "Restrito"} />
+        <Metric label="Onibus" value={showSensitive ? formatCurrency(periodSummary.busTotal) : "Restrito"} />
+        <Metric label="Dinheiro" value={showSensitive ? formatCurrency(periodSummary.cashTotal) : "Restrito"} />
+        <Metric label="Sobras" value={showSensitive ? formatCurrency(periodSummary.differenceTotal) : "Restrito"} />
+        <Metric label="Cancelados" value={String(cancelledCount)} />
+        <Metric label="Lixeira" value={String(deletedCount)} />
         <Metric label="Arquivo" value={exportStatus?.pendingCount ? `${exportStatus.pendingCount} pendente` : "OK"} />
       </div>
 
-      <div className="report-columns">
-        <BarList title="Total por tipo" data={periodSummary.byType} total={periodSummary.total} />
-        <BarList title="Total por mesa" data={periodSummary.byTable} total={periodSummary.total} />
-        <BarList title="Total por onibus" data={periodSummary.byBus} total={periodSummary.total} />
-        <BarList title="Forma de pagamento" data={periodSummary.byPayment} total={periodSummary.total} />
-      </div>
+      {showSensitive ? (
+        <div className="report-columns">
+          <BarList title="Total por tipo" data={periodSummary.byType} total={periodSummary.total} />
+          <BarList title="Total por mesa" data={periodSummary.byTable} total={periodSummary.total} />
+          <BarList title="Total por onibus" data={periodSummary.byBus} total={periodSummary.total} />
+          <BarList title="Forma de pagamento" data={periodSummary.byPayment} total={periodSummary.total} />
+        </div>
+      ) : (
+        <section className="flat-section restricted-panel">
+          <ShieldCheck size={20} />
+          <strong>Totais ocultos</strong>
+          <p className="muted-copy">Este modo permite conferir quantidade e filtros sem expor valores de venda.</p>
+        </section>
+      )}
+
+      <section className="flat-section">
+        <div className="section-title">
+          <strong>Registros do recorte</strong>
+          <span>{activeRows.length} ativos em {periodEntries.length} encontrados</span>
+        </div>
+        <div className="report-row-list">
+          {periodEntries.slice(0, 12).map((entry) => {
+            const { date, time } = formatDateTime(entry.createdAt);
+            return (
+              <div key={entry.id}>
+                <span>{date} {time}</span>
+                <strong>{entry.description}</strong>
+                <small>{entry.customType || entry.type} | {entry.paymentMethod}</small>
+                <b>{showSensitive ? formatCurrency(entry.finalValue) : "Restrito"}</b>
+              </div>
+            );
+          })}
+          {!periodEntries.length && <p className="empty-text">Nenhum registro encontrado com esses filtros.</p>}
+        </div>
+      </section>
     </section>
   );
 }
@@ -1211,6 +1361,9 @@ function ServerPanel({
   const [port, setPort] = useState(settings.server.port);
   const [password, setPassword] = useState(settings.server.password);
   const [permissions, setPermissions] = useState(settings.server.permissions);
+  const [mode, setMode] = useState<ServerPanelMode>("create");
+  const [connectHost, setConnectHost] = useState(server.url || "");
+  const [connectPassword, setConnectPassword] = useState("");
 
   const start = async () => {
     try {
@@ -1236,7 +1389,7 @@ function ServerPanel({
         <div>
           <span className="eyebrow">Rede local</span>
           <h2>{server.running ? "Servidor ativo" : "Servidor desligado"}</h2>
-          <p>Outro computador na mesma rede pode abrir o endereco, informar a senha e registrar vendas conforme as permissoes.</p>
+          <p>Use esta area para abrir o caixa principal na rede ou orientar outro computador a conectar com senha.</p>
         </div>
         <div className="server-url">
           <Laptop size={24} />
@@ -1245,49 +1398,119 @@ function ServerPanel({
         </div>
       </div>
 
-      <div className="entry-grid">
-        <label className="field">
-          <span>Porta</span>
-          <input type="number" value={port} onChange={(event) => setPort(Number(event.target.value || 4317))} />
-        </label>
-        <label className="field">
-          <span>Senha</span>
-          <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Defina uma senha" />
-        </label>
-        <div className="permission-box">
-          {(["view", "create", "edit", "delete"] as const).map((key) => (
-            <label className="switch-line" key={key}>
-              <input
-                type="checkbox"
-                checked={permissions[key]}
-                onChange={(event) => setPermissions({ ...permissions, [key]: event.target.checked })}
-              />
-              {permissionLabel(key)}
+      <div className="subtab-row">
+        <button className={mode === "create" ? "active" : ""} onClick={() => setMode("create")}><RadioTower size={16} /> Criar servidor</button>
+        <button className={mode === "connect" ? "active" : ""} onClick={() => setMode("connect")}><PlugZap size={16} /> Conectar</button>
+        <button className={mode === "permissions" ? "active" : ""} onClick={() => setMode("permissions")}><ShieldCheck size={16} /> Permissoes</button>
+      </div>
+
+      {mode === "create" && (
+        <>
+          <div className="help-grid">
+            <section>
+              <strong>O que acontece ao abrir?</strong>
+              <p>Este computador vira o caixa principal. Outros dispositivos da mesma rede acessam o endereco mostrado, digitam a senha e seguem as permissoes definidas.</p>
+            </section>
+            <section>
+              <strong>Se der erro</strong>
+              <p>Confira se os computadores estao no mesmo Wi-Fi/cabo, se a porta nao esta bloqueada e se a senha foi digitada igual.</p>
+            </section>
+          </div>
+          <div className="entry-grid">
+            <label className="field">
+              <span>Porta</span>
+              <input type="number" value={port} onChange={(event) => setPort(Number(event.target.value || 4317))} />
             </label>
-          ))}
-        </div>
-      </div>
+            <label className="field">
+              <span>Senha</span>
+              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Defina uma senha" />
+            </label>
+          </div>
+          <div className="submit-row">
+            {server.running ? (
+              <button className="danger-button" onClick={stop}>Desligar servidor</button>
+            ) : (
+              <button className="primary-button" onClick={start}><Server size={18} /> Abrir servidor</button>
+            )}
+          </div>
+        </>
+      )}
 
-      <div className="submit-row">
-        {server.running ? (
-          <button className="danger-button" onClick={stop}>Desligar servidor</button>
-        ) : (
-          <button className="primary-button" onClick={start}><Server size={18} /> Abrir servidor</button>
-        )}
-      </div>
+      {mode === "connect" && (
+        <section className="flat-section connect-panel">
+          <div className="section-title">
+            <strong>Conectar este computador a outro caixa</strong>
+            <span>Para quando outro PC esta com o servidor aberto</span>
+          </div>
+          <div className="entry-grid">
+            <label className="field description-field">
+              <span>Endereco do servidor</span>
+              <input value={connectHost} onChange={(event) => setConnectHost(event.target.value)} placeholder="http://192.168.0.10:4317" />
+            </label>
+            <label className="field">
+              <span>Senha</span>
+              <input type="password" value={connectPassword} onChange={(event) => setConnectPassword(event.target.value)} placeholder="Senha do caixa principal" />
+            </label>
+          </div>
+          <div className="connection-steps">
+            <span><Wifi size={16} /> 1. Abra o servidor no PC principal.</span>
+            <span><KeyRound size={16} /> 2. Copie o endereco e use a senha definida.</span>
+            <span><ExternalLink size={16} /> 3. Abra no navegador do segundo PC.</span>
+          </div>
+          <button
+            className="primary-button"
+            disabled={!connectHost}
+            onClick={() => window.open(connectPassword ? `${connectHost.replace(/\/$/, "")}?password=${encodeURIComponent(connectPassword)}` : connectHost)}
+          >
+            <ExternalLink size={18} /> Abrir conexao
+          </button>
+        </section>
+      )}
 
-      <section className="flat-section">
-        <div className="section-title"><strong>Dispositivos conectados</strong></div>
-        <div className="mini-list">
-          {server.devices.map((device) => (
-            <div key={device.id}>
-              <span>{device.name}<small>{device.ip}</small></span>
-              <button onClick={async () => onServerChange(await window.caixa.disconnectDevice(device.id))}>Desconectar</button>
-            </div>
-          ))}
-          {!server.devices.length && <p className="empty-text">Nenhum dispositivo conectado agora.</p>}
-        </div>
-      </section>
+      {mode === "permissions" && (
+        <section className="flat-section">
+          <div className="section-title">
+            <strong>Permissoes dos dispositivos</strong>
+            <span>Controla o que a pagina remota pode fazer</span>
+          </div>
+          <div className="permission-box permission-grid">
+            {(["view", "create", "edit", "delete", "viewTotals"] as const).map((key) => (
+              <label className="switch-line" key={key}>
+                <input
+                  type="checkbox"
+                  checked={permissions[key]}
+                  onChange={(event) => setPermissions({ ...permissions, [key]: event.target.checked })}
+                />
+                {permissionLabel(key)}
+              </label>
+            ))}
+          </div>
+          <button
+            className="primary-button"
+            onClick={async () => {
+              await onSaveSettings({ ...settings, server: { ...settings.server, port, password, permissions } });
+              onToast("success", "Permissoes salvas.");
+            }}
+          >
+            <Save size={18} /> Salvar permissoes
+          </button>
+        </section>
+      )}
+
+      {mode !== "connect" && (
+        <section className="flat-section">
+          <div className="section-title"><strong>Dispositivos conectados</strong></div>
+          <div className="mini-list">
+            {server.devices.map((device) => (
+              <div key={device.id}>
+                <span>{device.name}<small>{device.ip}</small></span>
+                <button onClick={async () => onServerChange(await window.caixa.disconnectDevice(device.id))}>Desconectar</button>
+              </div>
+            ))}
+            {!server.devices.length && <p className="empty-text">Nenhum dispositivo conectado agora.</p>}
+          </div>
+        </section>
+      )}
     </section>
   );
 }
@@ -1302,6 +1525,9 @@ function SettingsPanel({
   onToast: (tone: ToastState["tone"], message: string) => void;
 }) {
   const [draft, setDraft] = useState(settings);
+  const [category, setCategory] = useState<SettingsCategory>("appearance");
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   useEffect(() => setDraft(settings), [settings]);
 
@@ -1343,16 +1569,106 @@ function SettingsPanel({
     update("visibleColumns", exists ? draft.visibleColumns.filter((item) => item !== column) : [...draft.visibleColumns, column]);
   };
 
+  const resetCategory = (target: SettingsCategory) => {
+    setDraft((current) => {
+      const defaults = createSettingsFallback(current);
+      if (target === "appearance") {
+        return {
+          ...current,
+          theme: defaults.theme,
+          accentColor: defaults.accentColor,
+          fieldSize: defaults.fieldSize,
+          density: defaults.density,
+          layout: defaults.layout
+        };
+      }
+      if (target === "floating") {
+        return { ...current, floating: defaults.floating };
+      }
+      if (target === "defaults") {
+        return {
+          ...current,
+          defaultType: defaults.defaultType,
+          defaultPeople: defaults.defaultPeople,
+          defaultRoundingStep: defaults.defaultRoundingStep,
+          defaultRoundingDirection: defaults.defaultRoundingDirection
+        };
+      }
+      if (target === "files") {
+        return {
+          ...current,
+          fileFormat: defaults.fileFormat,
+          fileStrategy: defaults.fileStrategy,
+          spreadsheetMode: defaults.spreadsheetMode,
+          dateFormat: defaults.dateFormat,
+          csvSeparator: defaults.csvSeparator,
+          visibleColumns: defaults.visibleColumns,
+          backupEnabled: defaults.backupEnabled
+        };
+      }
+      if (target === "server") {
+        return { ...current, server: defaults.server };
+      }
+      if (target === "shortcuts") {
+        return { ...current, shortcuts: defaults.shortcuts };
+      }
+      return current;
+    });
+    onToast("info", "Categoria restaurada para o padrao.");
+  };
+
+  const checkUpdates = async () => {
+    setCheckingUpdate(true);
+    try {
+      const info = await window.caixa.checkForUpdates();
+      setUpdateInfo(info);
+      onToast(info.hasUpdate ? "info" : "success", info.hasUpdate ? "Atualizacao encontrada." : "Voce esta na versao mais recente.");
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const settingsCategories: Array<{ key: SettingsCategory; label: string; icon: typeof Settings }> = [
+    { key: "appearance", label: "Aparencia", icon: Palette },
+    { key: "floating", label: "Barra fixada", icon: Pin },
+    { key: "quick", label: "Barra rapida", icon: SlidersHorizontal },
+    { key: "defaults", label: "Vendas", icon: Send },
+    { key: "files", label: "Planilha e backup", icon: FileSpreadsheet },
+    { key: "reports", label: "Relatorios", icon: BarChart3 },
+    { key: "server", label: "Servidor", icon: RadioTower },
+    { key: "shortcuts", label: "Atalhos", icon: KeyRound },
+    { key: "updates", label: "Atualizacoes", icon: Download },
+    { key: "advanced", label: "Avancado", icon: DatabaseBackup }
+  ];
+
+  const categoryClass = (target: SettingsCategory, extra = "") =>
+    `${extra || "settings-group"} ${category === target ? "active-category" : "hidden-category"}`;
+
   return (
     <section className="panel settings-panel">
-      <div className="preset-row">
-        {(["Caixa", "Mesa", "Onibus", "Dinheiro", "Minimalista"] as const).map((preset) => (
-          <button key={preset} onClick={() => applyPreset(preset)}>{preset}</button>
-        ))}
-      </div>
+      <div className="settings-layout">
+        <aside className="settings-nav">
+          {settingsCategories.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button key={item.key} className={category === item.key ? "active" : ""} onClick={() => setCategory(item.key)}>
+                <Icon size={16} />
+                {item.label}
+              </button>
+            );
+          })}
+        </aside>
+
+        <div className="settings-content">
+          <div className="preset-row">
+            {(["Caixa", "Mesa", "Onibus", "Dinheiro", "Minimalista"] as const).map((preset) => (
+              <button key={preset} onClick={() => applyPreset(preset)}>{preset}</button>
+            ))}
+            <button className="ghost-button" type="button" onClick={() => resetCategory(category)}><RotateCcw size={16} /> Restaurar categoria</button>
+          </div>
 
       <div className="settings-grid">
-        <section className="settings-group">
+        <section className={categoryClass("appearance")}>
           <h3>Aparencia</h3>
           <label className="field"><span>Tema</span>
             <select
@@ -1396,7 +1712,7 @@ function SettingsPanel({
           </label>
         </section>
 
-        <section className="settings-group">
+        <section className={categoryClass("defaults")}>
           <h3>Padroes</h3>
           <label className="field"><span>Tipo padrao</span>
             <select value={draft.defaultType} onChange={(event) => update("defaultType", event.target.value as EntryType)}>
@@ -1418,7 +1734,7 @@ function SettingsPanel({
           </label>
         </section>
 
-        <section className="settings-group wide">
+        <section className={categoryClass("files", "settings-group wide")}>
           <h3>Arquivos</h3>
           <label className="field path-field"><span>Pasta padrao</span><input value={draft.outputDirectory} onChange={(event) => update("outputDirectory", event.target.value)} /><button onClick={chooseFolder} type="button">Escolher</button></label>
           <label className="field"><span>Formato</span>
@@ -1468,7 +1784,7 @@ function SettingsPanel({
           <label className="switch-line"><input type="checkbox" checked={draft.backupEnabled} onChange={(event) => update("backupEnabled", event.target.checked)} /> Criar backup automatico</label>
         </section>
 
-        <section className="settings-group wide">
+        <section className={categoryClass("floating", "settings-group wide")}>
           <h3>Modo fixado</h3>
           <label className="field"><span>Tema da barra</span>
             <select value={draft.floating.theme || "follow"} onChange={(event) => update("floating", { ...draft.floating, theme: event.target.value as AppSettings["floating"]["theme"] })}>
@@ -1489,7 +1805,111 @@ function SettingsPanel({
           </p>
         </section>
 
-        <section className="settings-group wide">
+        <section className={categoryClass("quick", "settings-group wide")}>
+          <h3>Barra rapida</h3>
+          <p className="settings-note">Presets editaveis para a barra fixada. Nesta etapa eles definem o fluxo recomendado sem criar um construtor confuso.</p>
+          <div className="quick-tab-grid">
+            {[
+              ["Conta", "Valor, pessoas, descricao e divisao rapida"],
+              ["Dinheiro", "Valor, pago com, troco e vinculo com mesa/onibus"],
+              ["Mesa", "Mesa, valor e descricao automatica"],
+              ["Onibus", "Onibus, valor e identificador"],
+              ["Minimalista", "Apenas tipo, valor, descricao e enviar"]
+            ].map(([title, text]) => (
+              <button key={title} type="button" className="quick-tab-card">
+                <strong>{title}</strong>
+                <span>{text}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className={categoryClass("reports", "settings-group wide")}>
+          <h3>Relatorios</h3>
+          <label className="switch-line">
+            <input
+              type="checkbox"
+              checked={draft.server.permissions.viewTotals}
+              onChange={(event) => update("server", { ...draft.server, permissions: { ...draft.server.permissions, viewTotals: event.target.checked } })}
+            />
+            Permitir visualizacao de totais sensiveis
+          </label>
+          <p className="settings-note">Quando desativado, relatorios e dispositivos remotos podem operar sem mostrar total vendido, media ou maior venda.</p>
+        </section>
+
+        <section className={categoryClass("server", "settings-group wide")}>
+          <h3>Servidor e sincronizacao</h3>
+          <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
+          <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
+          <div className="permission-box permission-grid">
+            {(["view", "create", "edit", "delete", "viewTotals"] as const).map((key) => (
+              <label className="switch-line" key={key}>
+                <input
+                  type="checkbox"
+                  checked={draft.server.permissions[key]}
+                  onChange={(event) => update("server", { ...draft.server, permissions: { ...draft.server.permissions, [key]: event.target.checked } })}
+                />
+                {permissionLabel(key)}
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className={categoryClass("shortcuts", "settings-group wide")}>
+          <h3>Atalhos</h3>
+          <div className="shortcut-list">
+            {Object.entries(draft.shortcuts).map(([key, value]) => (
+              <label className="field" key={key}>
+                <span>{shortcutLabel(key)}</span>
+                <input
+                  value={value}
+                  onChange={(event) => update("shortcuts", { ...draft.shortcuts, [key]: event.target.value })}
+                />
+              </label>
+            ))}
+          </div>
+          <p className="settings-note">Evite atalhos usados pelo Windows ou pelo navegador. O app aplica os principais atalhos globais da janela.</p>
+        </section>
+
+        <section className={categoryClass("updates", "settings-group wide")}>
+          <h3>Atualizacoes</h3>
+          <p className="settings-note">A verificacao consulta a ultima release do GitHub e mostra um aviso discreto. A versao portatil abre a pagina da release; auto-update completo fica para o instalador assinado.</p>
+          <div className="update-card">
+            <Download size={20} />
+            <div>
+              <strong>{updateInfo ? `Atual: ${updateInfo.currentVersion} | GitHub: ${updateInfo.latestVersion}` : "Nenhuma verificacao feita"}</strong>
+              <span>{updateInfo?.message || (updateInfo?.hasUpdate ? "Existe uma versao nova disponivel." : "Use o botao para verificar sem interromper o caixa.")}</span>
+            </div>
+            <button className="ghost-button" type="button" onClick={checkUpdates} disabled={checkingUpdate}>
+              {checkingUpdate ? <RefreshCw size={16} className="spin" /> : <Download size={16} />}
+              Verificar
+            </button>
+            {updateInfo?.hasUpdate && (
+              <button className="primary-button" type="button" onClick={() => window.open(updateInfo.releaseUrl)}>
+                <ExternalLink size={16} /> Abrir release
+              </button>
+            )}
+          </div>
+        </section>
+
+        <section className={categoryClass("advanced", "settings-group wide")}>
+          <h3>Backup, restauracao e seguranca</h3>
+          <div className="danger-zone">
+            <DatabaseBackup size={20} />
+            <div>
+              <strong>Restauracoes seguras</strong>
+              <span>Restaurar categorias nao apaga vendas. Para apagar dados de venda, use o Historico com confirmacao.</span>
+            </div>
+            <button className="ghost-button" type="button" onClick={() => {
+              setDraft(createSettingsFallback(draft));
+              onToast("info", "Configuracoes restauradas. Salve para aplicar.");
+            }}>
+              <RotateCcw size={16} /> Restaurar tudo
+            </button>
+          </div>
+        </section>
+
+        <section className={categoryClass("files", "settings-group wide")}>
           <h3>Colunas do arquivo</h3>
           {draft.spreadsheetMode === "simple" && (
             <p className="settings-note">
@@ -1509,6 +1929,8 @@ function SettingsPanel({
             ))}
           </div>
         </section>
+      </div>
+        </div>
       </div>
 
       <div className="submit-row sticky-save">
@@ -1589,11 +2011,32 @@ function statusLabel(status: LedgerEntry["status"]): string {
   }[status];
 }
 
-function permissionLabel(key: "view" | "create" | "edit" | "delete"): string {
+function uniqueFilled(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim()))].sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true }));
+}
+
+function shortcutLabel(key: string): string {
+  const labels: Record<string, string> = {
+    submit: "Enviar",
+    submitAndClear: "Enviar e limpar",
+    money: "Modo dinheiro",
+    table: "Modo mesa",
+    bus: "Modo onibus",
+    pin: "Fixar/desfixar",
+    history: "Abrir historico",
+    settings: "Abrir ajustes",
+    repeatLast: "Repetir ultimo",
+    escape: "Limpar/fechar"
+  };
+  return labels[key] || key;
+}
+
+function permissionLabel(key: "view" | "create" | "edit" | "delete" | "viewTotals"): string {
   return {
     view: "Somente visualizar",
     create: "Registrar vendas",
     edit: "Editar lancamentos",
-    delete: "Apagar lancamentos"
+    delete: "Apagar lancamentos",
+    viewTotals: "Ver totais vendidos"
   }[key];
 }

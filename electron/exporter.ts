@@ -76,6 +76,51 @@ export class LedgerExporter {
     }
   }
 
+  async exportReport(entries: LedgerEntry[], settings: AppSettings, label: string): Promise<ExportStatus> {
+    try {
+      await fs.mkdir(settings.outputDirectory, { recursive: true });
+      const safeLabel = sanitizeFilePart(label || "relatorio") || "relatorio";
+      const filePath = path.join(settings.outputDirectory, `relatorio-${safeLabel}-${formatDateToken(new Date(), settings)}.${settings.fileFormat}`);
+      const reportColumns = [
+        "Data",
+        "Hora",
+        "Tipo",
+        "Valor pago",
+        "Descricao",
+        "Mesa",
+        "Onibus",
+        "Forma de pagamento",
+        "Pago com",
+        "Troco",
+        "Status"
+      ];
+      const rows = entries.filter((entry) => entry.status !== "deleted").map((entry) => toRow(entry, reportColumns));
+
+      await this.backupIfNeeded(filePath, settings.backupEnabled);
+      if (settings.fileFormat === "xlsx") {
+        await this.writeXlsx(filePath, [{ name: "Relatorio", rows }]);
+      } else {
+        await this.writeCsv(filePath, rows, settings.csvSeparator);
+      }
+
+      const status: ExportStatus = {
+        ok: true,
+        filePath,
+        pendingCount: 0,
+        message: "Relatorio filtrado exportado."
+      };
+      await this.writeState({ pendingCount: 0, lastFilePath: filePath });
+      return status;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Nao foi possivel exportar o relatorio.";
+      return {
+        ok: false,
+        pendingCount: 1,
+        message
+      };
+    }
+  }
+
   private buildTargets(entries: LedgerEntry[], settings: AppSettings) {
     const extension = settings.fileFormat;
     const exportableEntries = entries.filter((entry) => entry.status !== "deleted");

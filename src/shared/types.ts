@@ -100,6 +100,7 @@ export interface ServerPermissions {
   create: boolean;
   edit: boolean;
   delete: boolean;
+  viewTotals: boolean;
 }
 
 export interface FloatingSettings {
@@ -176,6 +177,15 @@ export interface ExportStatus {
   filePath?: string;
   message?: string;
   pendingCount: number;
+}
+
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  releaseUrl: string;
+  checkedAt: string;
+  message?: string;
 }
 
 export interface AppSnapshot {

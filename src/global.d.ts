@@ -1,4 +1,4 @@
-import type { AppSettings, AppSnapshot, EntryDraft, ExportStatus, LedgerEntry, ServerState } from "./shared/types";
+import type { AppSettings, AppSnapshot, EntryDraft, ExportStatus, LedgerEntry, ServerState, UpdateInfo } from "./shared/types";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
@@ -11,6 +11,8 @@ export interface CaixaApi {
   saveSettings: (settings: AppSettings) => Promise<AppSettings>;
   chooseOutputDirectory: () => Promise<string | null>;
   exportNow: () => Promise<ExportStatus>;
+  exportFilteredReport: (ids: string[], label: string) => Promise<ExportStatus>;
+  checkForUpdates: () => Promise<UpdateInfo>;
   startServer: (port: number, password: string) => Promise<ServerState>;
   stopServer: () => Promise<ServerState>;
   disconnectDevice: (id: string) => Promise<ServerState>;
