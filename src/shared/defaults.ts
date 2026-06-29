@@ -91,7 +91,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
       opacity: 1,
       borderless: false,
       lockPosition: false,
-      theme: "follow"
+      theme: "follow",
+      syncMoneyWithEntryType: true
     },
     server: {
       port: 4317,

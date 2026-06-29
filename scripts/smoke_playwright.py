@@ -220,7 +220,7 @@ def main() -> int:
       expect(floating_page.locator(".floating-detail input")).to_be_visible()
       floating_page.locator(".floating-mode").click()
       expect(floating_page.locator(".floating-mode")).to_contain_text("Conta")
-      expect(floating_page.locator(".floating-cash-kind select")).to_have_value("Mesa")
+      expect(floating_page.locator(".floating-cash-kind select")).to_have_value("Onibus")
       expect(floating_page.locator(".floating-detail input")).to_be_visible()
       expect(floating_page.get_by_text("TROCO")).to_be_visible()
       floating_page.locator(".amount-field input").fill("87,50")

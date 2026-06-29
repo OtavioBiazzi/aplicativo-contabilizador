@@ -21,7 +21,7 @@ A direcao visual recomendada e um estilo de PDV moderno para Windows: limpo, com
 
 Objetivo: corrigir os problemas que mais incomodam no uso real.
 
-Status: iniciada na versao 0.1.4 com tema sincronizado da barra fixada, tema separado da barra, drag pela alca, dinheiro com vinculo de modo, lixeira e exclusao definitiva.
+Status: iniciada na versao 0.1.4 com tema sincronizado da barra fixada, tema separado da barra, drag pela alca, dinheiro com vinculo de modo, lixeira e exclusao definitiva. Avancada na versao 0.2.4 com sincronizacao configuravel entre Conta e Dinheiro/Troco para manter Mesa/Onibus ao alternar.
 
 Entregas:
 - Sincronizar o tema da barra fixada desde a abertura, incluindo tema automatico.

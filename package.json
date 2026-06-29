@@ -1,6 +1,6 @@
 {
   "name": "aplicativo-contabilizador",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Aplicativo desktop para registrar vendas, mesas, onibus, pagamentos, divisoes e relatorios locais.",
   "author": "OtavioBiazzi",
   "license": "MIT",

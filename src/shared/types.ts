@@ -118,6 +118,7 @@ export interface FloatingSettings {
   borderless: boolean;
   lockPosition: boolean;
   theme: FloatingThemeMode;
+  syncMoneyWithEntryType: boolean;
 }
 
 export interface AppSettings {

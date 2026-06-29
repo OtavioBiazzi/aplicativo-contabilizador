@@ -105,6 +105,16 @@ const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: "Personalizado", label: "Personalizado" }
 ];
 
+const CASH_LINKABLE_TYPES = CASH_LINKED_TYPES.map((item) => item.value);
+
+function cashLinkFromEntryType(type: EntryType, fallback: EntryType = "Mesa"): EntryType {
+  return CASH_LINKABLE_TYPES.includes(type) ? type : fallback;
+}
+
+function entryTypeFromCashLink(type: EntryType): EntryType {
+  return CASH_LINKABLE_TYPES.includes(type) ? type : "Venda";
+}
+
 function resolveTheme(theme: AppSettings["theme"], prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
   return theme === "auto" ? (prefersDark ? "dark" : "light") : theme;
 }
@@ -535,13 +545,16 @@ function QuickEntry({
 
   useEffect(() => {
     if (modeCommand) {
+      if (settings.floating.syncMoneyWithEntryType && modeCommand.type === "Dinheiro/Troco") {
+        setCashLinkedType(cashLinkFromEntryType(type, cashLinkedType));
+      }
       setType(modeCommand.type);
       const matchingTab = (settings.quickTabs.length ? settings.quickTabs : DEFAULT_QUICK_TABS).find(
         (tab) => tab.enabled && tab.type === modeCommand.type
       );
       setActiveQuickTabId(matchingTab?.id || "manual");
     }
-  }, [modeCommand?.nonce, settings.quickTabs]);
+  }, [modeCommand?.nonce, settings.floating.syncMoneyWithEntryType, settings.quickTabs]);
 
   useEffect(() => {
     if (type === "Mesa" && tableNumber && !description) {
@@ -635,23 +648,33 @@ function QuickEntry({
       setActiveQuickTabId(tab.id);
       setType(tab.type);
       if (tab.type === "Dinheiro/Troco") {
-        setCashLinkedType(tab.cashLinkedType || "Mesa");
+        setCashLinkedType(
+          settings.floating.syncMoneyWithEntryType
+            ? cashLinkFromEntryType(type, tab.cashLinkedType || "Mesa")
+            : tab.cashLinkedType || "Mesa"
+        );
       }
-      if (tab.type === "Mesa") {
-        setCashLinkedType("Mesa");
-      }
-      if (tab.type === "Onibus") {
-        setCashLinkedType("Onibus");
+      if (settings.floating.syncMoneyWithEntryType && tab.type !== "Dinheiro/Troco") {
+        setCashLinkedType(cashLinkFromEntryType(tab.type, cashLinkedType));
       }
       if (tab.compact) {
         setPeople(1);
       }
     };
     const switchMoneyMode = () => {
-      const nextType: EntryType = isMoney ? "Venda" : "Dinheiro/Troco";
-      const matchingTab = quickTabs.find((tab) => tab.type === nextType && (!isMoney || !tab.compact));
+      const syncModes = settings.floating.syncMoneyWithEntryType;
+      const moneyTab = quickTabs.find((tab) => tab.type === "Dinheiro/Troco");
+      if (!isMoney) {
+        setType("Dinheiro/Troco");
+        setCashLinkedType(syncModes ? cashLinkFromEntryType(type, cashLinkedType) : moneyTab?.cashLinkedType || "Mesa");
+        setActiveQuickTabId(moneyTab?.id || "manual");
+        return;
+      }
+      const nextType: EntryType = syncModes ? entryTypeFromCashLink(cashLinkedType) : "Venda";
+      const matchingTab = quickTabs.find((tab) => tab.type === nextType && !tab.compact);
       if (matchingTab) {
-        applyQuickTab(matchingTab);
+        setActiveQuickTabId(matchingTab.id);
+        setType(matchingTab.type);
         return;
       }
       setType(nextType);
@@ -659,6 +682,9 @@ function QuickEntry({
     };
     const chooseType = (nextType: EntryType) => {
       setType(nextType);
+      if (settings.floating.syncMoneyWithEntryType) {
+        setCashLinkedType(cashLinkFromEntryType(nextType, cashLinkedType));
+      }
       const matchingTab = quickTabs.find((tab) => tab.type === nextType && !tab.compact);
       setActiveQuickTabId(matchingTab?.id || "manual");
     };
@@ -2104,9 +2130,10 @@ function SettingsPanel({
           </label>
           <label className="field"><span>Opacidade ({Math.round(draft.floating.opacity * 100)}%)</span><input type="range" min={0.35} max={1} step={0.01} value={draft.floating.opacity} onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })} /></label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar posicao</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.syncMoneyWithEntryType} onChange={(event) => update("floating", { ...draft.floating, syncMoneyWithEntryType: event.target.checked })} /> Manter Mesa/Onibus ao trocar Conta/Dinheiro</label>
           <p className="settings-note">
             A barra fixada abre em uma janela separada, sem moldura, com Tipo, Valor, Pessoas ou Pago com,
-            Descricao, Troco e Enviar. Ela segue o tema principal por padrao, mas pode ter um tema proprio.
+            Descricao, Troco e Enviar. Quando a sincronizacao esta ligada, Conta Onibus vira Dinheiro/Onibus e volta para Onibus.
           </p>
         </section>
 

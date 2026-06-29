@@ -32,6 +32,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
 - Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com e troco direto na barra.
+- Alternancia Conta/Dinheiro pode manter o contexto atual: Conta Onibus vira Dinheiro/Onibus e volta para Onibus.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
 - Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
 - Temas adicionais DataCaixa PDV e Italia como base do remake visual.
