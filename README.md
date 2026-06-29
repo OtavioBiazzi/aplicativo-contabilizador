@@ -12,7 +12,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 
 - **Electron**: melhor encaixe para app desktop real, janela sempre visivel, acesso a arquivos locais, dialogos de pasta e empacotamento Windows.
 - **React + Vite + TypeScript**: interface rapida, componentizada e facil de evoluir.
-- **ExcelJS + CSV nativo**: geracao local de planilhas `.xlsx` e `.csv`.
+- **XLSX local + CSV nativo**: geracao local de planilhas `.xlsx` e `.csv`, sem depender de Excel aberto.
 - **Express + WebSocket**: servidor local com senha para outro computador na mesma rede visualizar ou registrar lancamentos.
 - **JSON local como fonte confiavel**: os arquivos Excel/CSV sao exportacoes; o historico principal fica salvo localmente para reduzir risco de perda.
 
@@ -27,16 +27,17 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com exportacao do recorte filtrado.
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia, mes com abas, arquivo fixo ou arquivos separados por tipo.
-- Configuracoes persistentes: tema, cor principal, densidade, layout, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
+- Configuracoes persistentes: tema, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
-- Barra fixada com alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com e troco direto na barra.
+- Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com e troco direto na barra.
+- Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
 - Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
 - Temas adicionais DataCaixa PDV e Italia como base do remake visual.
 - Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
 - Historico com lixeira, restauracao e exclusao definitiva.
 - Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL.
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
-- Servidor local com senha, permissoes e atualizacao em tempo real via WebSocket.
+- Servidor local com senha, permissoes, cadastro remoto, edicao, cancelamento, lixeira e atualizacao em tempo real via WebSocket.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
 - Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
@@ -151,6 +152,8 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - registro de uma venda;
 - aparicao no historico;
 - abertura dos relatorios;
+- barra fixada com troca de modo e troco;
+- servidor remoto com totais mascarados, registro, edicao, cancelamento e lixeira;
 - ausencia de erros de console.
 
 ## Estrutura

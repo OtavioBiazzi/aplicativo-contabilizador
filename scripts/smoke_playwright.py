@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -50,6 +51,23 @@ def stop_process_tree(process: subprocess.Popen) -> None:
       process.wait(timeout=8)
     except subprocess.TimeoutExpired:
       process.kill()
+
+
+def api_json(base_url: str, path: str, password: str, method: str = "GET", payload: dict | None = None) -> dict:
+  data = json.dumps(payload).encode("utf-8") if payload is not None else None
+  request = urllib.request.Request(
+    base_url + path,
+    data=data,
+    method=method,
+    headers={
+      "content-type": "application/json",
+      "x-caixa-password": password,
+      "x-device-name": "Smoke remoto",
+    },
+  )
+  with urllib.request.urlopen(request, timeout=5) as response:
+    raw = response.read().decode("utf-8")
+  return json.loads(raw) if raw else {}
 
 
 def main() -> int:
@@ -118,6 +136,63 @@ def main() -> int:
       expect(page.get_by_text("Criar servidor")).to_be_visible()
       page.get_by_role("button", name="Conectar").click()
       expect(page.get_by_text("Conectar este computador")).to_be_visible()
+      remote_port = 43179
+      remote_password = "smoke-pass"
+      page.evaluate(
+        """async ({ port, password }) => {
+          const snapshot = await window.caixa.getSnapshot();
+          await window.caixa.saveSettings({
+            ...snapshot.settings,
+            server: {
+              ...snapshot.settings.server,
+              port,
+              password,
+              permissions: { view: true, create: true, edit: true, delete: true, viewTotals: false }
+            }
+          });
+          await window.caixa.startServer(port, password);
+        }""",
+        {"port": remote_port, "password": remote_password},
+      )
+      remote_base = f"http://127.0.0.1:{remote_port}"
+      created = api_json(
+        remote_base,
+        "/api/entries",
+        remote_password,
+        "POST",
+        {"type": "Venda", "value": 29.9, "people": 1, "description": "Remoto smoke"},
+      )["entry"]
+      masked = api_json(remote_base, "/api/entries", remote_password)
+      if masked["summary"] is not None:
+        print("Remote API exposed summary when viewTotals was disabled.", file=sys.stderr)
+        return 1
+      remote_entry = next((item for item in masked["entries"] if item["id"] == created["id"]), None)
+      if not remote_entry or remote_entry["finalValue"] != 0:
+        print("Remote API did not mask money fields.", file=sys.stderr)
+        return 1
+      remote_browser = playwright.chromium.launch(headless=True)
+      try:
+        remote_page = remote_browser.new_page()
+        remote_errors = []
+        remote_page.on("console", lambda message: remote_errors.append(message.text) if message.type == "error" else None)
+        remote_page.goto(remote_base)
+        remote_page.locator("#password").fill(remote_password)
+        remote_page.locator("#loginButton").click()
+        expect(remote_page.locator("#history")).to_be_visible(timeout=10000)
+        expect(remote_page.get_by_text("Totais ocultos")).to_be_visible(timeout=10000)
+        if remote_errors:
+          print("\n".join(remote_errors), file=sys.stderr)
+          return 1
+      finally:
+        remote_browser.close()
+      api_json(remote_base, f"/api/entries/{created['id']}", remote_password, "PATCH", {"description": "Remoto editado", "value": 31.25})
+      api_json(remote_base, f"/api/entries/{created['id']}/cancel", remote_password, "POST")
+      api_json(remote_base, f"/api/entries/{created['id']}", remote_password, "DELETE")
+      after_remote_delete = api_json(remote_base, "/api/entries", remote_password)
+      deleted_remote = next((item for item in after_remote_delete["entries"] if item["id"] == created["id"]), None)
+      if not deleted_remote or deleted_remote["status"] != "deleted":
+        print("Remote delete did not move the entry to trash.", file=sys.stderr)
+        return 1
       page.get_by_role("button", name="Caixa").click()
       page.get_by_role("button", name="Abrir barra fixada").click()
       expect(page.locator(".app-shell")).to_be_visible()

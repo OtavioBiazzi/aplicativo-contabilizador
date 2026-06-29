@@ -1,4 +1,4 @@
-import type { AppSettings, EntryType, PaymentMethod } from "./types.js";
+import type { AppSettings, EntryType, PaymentMethod, QuickTabSettings } from "./types.js";
 
 export const ENTRY_TYPES: EntryType[] = [
   "Venda",
@@ -49,6 +49,15 @@ export const SIMPLE_COLUMNS = ["Data", "Hora", "Valor pago", "Descricao", "Tipo"
 
 export const DEFAULT_FLOATING_FIELDS = ["type", "value", "people", "description", "submit"];
 
+export const DEFAULT_QUICK_TABS: QuickTabSettings[] = [
+  { id: "account", label: "Conta", enabled: true, type: "Venda" },
+  { id: "money", label: "Dinheiro", enabled: true, type: "Dinheiro/Troco", cashLinkedType: "Mesa" },
+  { id: "table", label: "Mesa", enabled: true, type: "Mesa" },
+  { id: "bus", label: "Onibus", enabled: true, type: "Onibus" },
+  { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
+  { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
+];
+
 export function createDefaultSettings(outputDirectory: string): AppSettings {
   return {
     outputDirectory,
@@ -76,6 +85,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
       "Perfil tela pequena": { density: "compact", fieldSize: "small", layout: "sidePanel" },
       "Perfil fixado": { layout: "pinnedBar", density: "compact" }
     },
+    quickTabs: DEFAULT_QUICK_TABS,
     floating: {
       visibleFields: DEFAULT_FLOATING_FIELDS,
       opacity: 1,

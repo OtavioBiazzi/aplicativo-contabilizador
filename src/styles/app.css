@@ -1121,6 +1121,65 @@ th {
   cursor: pointer;
 }
 
+.quick-tab-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+}
+
+.quick-tab-row {
+  display: grid;
+  grid-template-columns: minmax(82px, auto) minmax(140px, 1.1fr) minmax(150px, 1fr) minmax(118px, auto) auto;
+  align-items: end;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--panel) 94%, var(--accent) 6%);
+}
+
+.quick-tab-row.enabled {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+
+.quick-tab-row .field {
+  min-width: 0;
+}
+
+.quick-tab-row.has-money-link {
+  grid-template-columns: minmax(82px, auto) minmax(130px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(118px, auto) auto;
+}
+
+.quick-switch {
+  align-self: center;
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.quick-order {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.quick-order button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.quick-order button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
 .update-card,
 .danger-zone {
   grid-column: 1 / -1;
@@ -1256,6 +1315,16 @@ th {
   grid-template-columns: auto minmax(104px, 130px) minmax(140px, 190px) minmax(104px, 150px) minmax(84px, 108px) minmax(220px, 1fr) minmax(104px, auto) auto;
 }
 
+.floating-bar.with-tabs {
+  row-gap: 7px;
+  padding-top: 34px;
+}
+
+.floating-bar.compact-tab {
+  grid-template-columns: auto minmax(150px, 230px) minmax(260px, 1fr) auto auto;
+  min-height: 98px;
+}
+
 .floating-bar button,
 .floating-bar input,
 .floating-bar select {
@@ -1286,6 +1355,42 @@ th {
   height: 4px;
   border-radius: 50%;
   background: #a7b9b1;
+}
+
+.floating-tab-strip {
+  position: absolute;
+  left: 58px;
+  right: 42px;
+  top: 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.floating-tab-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.floating-tab-strip button {
+  min-height: 25px;
+  border: 1px solid color-mix(in srgb, var(--bar-accent) 24%, var(--line));
+  border-radius: 999px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--bar-accent) 12%);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.floating-tab-strip button.active {
+  border-color: var(--bar-accent);
+  background: var(--bar-accent);
+  color: var(--bar-button-text);
 }
 
 .floating-mode,

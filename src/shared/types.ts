@@ -27,6 +27,15 @@ export type FloatingThemeMode = "follow" | ThemeMode;
 export type DensityMode = "compact" | "normal" | "comfortable";
 export type LayoutMode = "complete" | "compact" | "pinnedBar" | "grid" | "sidePanel";
 
+export interface QuickTabSettings {
+  id: string;
+  label: string;
+  enabled: boolean;
+  type: EntryType;
+  cashLinkedType?: EntryType;
+  compact?: boolean;
+}
+
 export interface SplitDetails {
   originalValue: number;
   people: number;
@@ -132,6 +141,7 @@ export interface AppSettings {
   layout: LayoutMode;
   profiles: Record<string, Partial<AppSettings>>;
   activeProfile: string;
+  quickTabs: QuickTabSettings[];
   floating: FloatingSettings;
   server: {
     port: number;

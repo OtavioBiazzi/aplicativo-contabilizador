@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { SIMPLE_COLUMNS, createDefaultSettings } from "../src/shared/defaults.js";
+import { DEFAULT_QUICK_TABS, ENTRY_TYPES, SIMPLE_COLUMNS, createDefaultSettings } from "../src/shared/defaults.js";
 import { calculateCash, roundMoney } from "../src/shared/calculations.js";
-import type { AppSettings, EntryDraft, LedgerEntry } from "../src/shared/types.js";
+import type { AppSettings, EntryDraft, EntryType, LedgerEntry, QuickTabSettings } from "../src/shared/types.js";
 
 const SETTINGS_FILE = "settings.json";
 const LEDGER_FILE = "ledger.json";
@@ -223,11 +223,38 @@ function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppS
     profiles: {
       ...defaults.profiles,
       ...saved.profiles
-    }
+    },
+    quickTabs: mergeQuickTabs(defaults.quickTabs, saved.quickTabs)
   };
 
   return {
     ...merged,
     visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns
   };
+}
+
+function mergeQuickTabs(defaultTabs: QuickTabSettings[], savedTabs?: QuickTabSettings[]): QuickTabSettings[] {
+  const byId = new Map(defaultTabs.map((tab) => [tab.id, tab]));
+  const normalized = Array.isArray(savedTabs)
+    ? savedTabs
+        .filter((tab) => tab && typeof tab.id === "string")
+        .map((tab) => {
+          const fallback = byId.get(tab.id) || defaultTabs[0];
+          return {
+            ...fallback,
+            ...tab,
+            label: typeof tab.label === "string" && tab.label.trim() ? tab.label.trim() : fallback.label,
+            enabled: tab.enabled ?? fallback.enabled,
+            type: isEntryType(tab.type) ? tab.type : fallback.type,
+            cashLinkedType: isEntryType(tab.cashLinkedType) ? tab.cashLinkedType : fallback.cashLinkedType,
+            compact: tab.compact ?? fallback.compact
+          };
+        })
+    : [];
+  const seen = new Set(normalized.map((tab) => tab.id));
+  return [...normalized, ...defaultTabs.filter((tab) => !seen.has(tab.id))];
+}
+
+function isEntryType(value: unknown): value is EntryType {
+  return typeof value === "string" && ENTRY_TYPES.includes(value as EntryType);
 }

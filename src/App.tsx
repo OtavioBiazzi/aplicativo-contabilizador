@@ -37,7 +37,7 @@ import {
   Wifi,
   X
 } from "lucide-react";
-import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, createDefaultSettings } from "./shared/defaults";
+import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
 import {
   calculateCash,
   calculateSplit,
@@ -55,6 +55,7 @@ import type {
   ExportStatus,
   LedgerEntry,
   PaymentMethod,
+  QuickTabSettings,
   RoundDirection,
   ServerState,
   UpdateInfo
@@ -442,6 +443,7 @@ function QuickEntry({
   const [roundingStep, setRoundingStep] = useState(settings.defaultRoundingStep);
   const [roundingDirection, setRoundingDirection] = useState<RoundDirection>(settings.defaultRoundingDirection);
   const [registerDifference, setRegisterDifference] = useState(true);
+  const [activeQuickTabId, setActiveQuickTabId] = useState(settings.quickTabs.find((tab) => tab.enabled)?.id || "account");
   const [submitting, setSubmitting] = useState(false);
 
   const value = parseMoney(valueText);
@@ -454,8 +456,12 @@ function QuickEntry({
   useEffect(() => {
     if (modeCommand) {
       setType(modeCommand.type);
+      const matchingTab = (settings.quickTabs.length ? settings.quickTabs : DEFAULT_QUICK_TABS).find(
+        (tab) => tab.enabled && tab.type === modeCommand.type
+      );
+      setActiveQuickTabId(matchingTab?.id || "manual");
     }
-  }, [modeCommand?.nonce]);
+  }, [modeCommand?.nonce, settings.quickTabs]);
 
   useEffect(() => {
     if (type === "Mesa" && tableNumber && !description) {
@@ -526,11 +532,14 @@ function QuickEntry({
   };
 
   if (pinned) {
+    const quickTabs = (settings.quickTabs.length ? settings.quickTabs : DEFAULT_QUICK_TABS).filter((tab) => tab.enabled);
     const isMoney = type === "Dinheiro/Troco";
     const nextModeLabel = isMoney ? "Conta" : "Dinheiro";
     const moneyDisabled = false;
     const disabled = submitting || value <= 0 || moneyDisabled;
     const floatingTypes: EntryType[] = ["Venda", "Mesa", "Onibus", "Extra", "Taxa", "Personalizado"];
+    const activeQuickTab = quickTabs.find((tab) => tab.id === activeQuickTabId);
+    const compactFloating = Boolean(activeQuickTab?.compact);
     const detailKind = isMoney
       ? cashLinkedType === "Mesa"
         ? "mesa"
@@ -542,25 +551,72 @@ function QuickEntry({
         : type === "Onibus"
           ? "onibus"
           : "";
+    const applyQuickTab = (tab: QuickTabSettings) => {
+      setActiveQuickTabId(tab.id);
+      setType(tab.type);
+      if (tab.type === "Dinheiro/Troco") {
+        setCashLinkedType(tab.cashLinkedType || "Mesa");
+      }
+      if (tab.type === "Mesa") {
+        setCashLinkedType("Mesa");
+      }
+      if (tab.type === "Onibus") {
+        setCashLinkedType("Onibus");
+      }
+      if (tab.compact) {
+        setPeople(1);
+      }
+    };
+    const switchMoneyMode = () => {
+      const nextType: EntryType = isMoney ? "Venda" : "Dinheiro/Troco";
+      const matchingTab = quickTabs.find((tab) => tab.type === nextType && (!isMoney || !tab.compact));
+      if (matchingTab) {
+        applyQuickTab(matchingTab);
+        return;
+      }
+      setType(nextType);
+      setActiveQuickTabId("manual");
+    };
+    const chooseType = (nextType: EntryType) => {
+      setType(nextType);
+      const matchingTab = quickTabs.find((tab) => tab.type === nextType && !tab.compact);
+      setActiveQuickTabId(matchingTab?.id || "manual");
+    };
 
     return (
-      <form className={`floating-bar ${isMoney ? "money" : "account"} ${detailKind ? "has-detail" : ""}`} onSubmit={onSubmitForm}>
+      <form className={`floating-bar ${isMoney ? "money" : "account"} ${detailKind ? "has-detail" : ""} ${compactFloating ? "compact-tab" : ""} ${quickTabs.length ? "with-tabs" : ""}`} onSubmit={onSubmitForm}>
         <div className="floating-grip" aria-hidden="true">
           <i />
           <i />
           <i />
         </div>
 
+        {quickTabs.length > 0 && (
+          <div className="floating-tab-strip" aria-label="Modos rapidos">
+            {quickTabs.map((tab) => (
+              <button
+                key={tab.id}
+                className={tab.id === activeQuickTabId ? "active" : ""}
+                type="button"
+                onClick={() => applyQuickTab(tab)}
+                title={`Usar modo ${tab.label}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <button
           className="floating-mode"
           type="button"
-          onClick={() => setType(isMoney ? "Venda" : "Dinheiro/Troco")}
+          onClick={switchMoneyMode}
         >
           <span>← →</span>
           {nextModeLabel}
         </button>
 
-        {isMoney ? (
+        {!compactFloating && (isMoney ? (
           <label className="floating-field floating-kind floating-cash-kind">
             <span>VINCULAR A</span>
             <select value={cashLinkedType} onChange={(event) => setCashLinkedType(event.target.value as EntryType)}>
@@ -572,13 +628,13 @@ function QuickEntry({
         ) : (
           <label className="floating-field floating-kind">
             <span>TIPO</span>
-            <select value={type} onChange={(event) => setType(event.target.value as EntryType)}>
+            <select value={type} onChange={(event) => chooseType(event.target.value as EntryType)}>
               {floatingTypes.map((item) => (
                 <option key={item}>{item}</option>
               ))}
             </select>
           </label>
-        )}
+        ))}
 
         <label className="floating-field amount-field">
           <span>VALOR DA CONTA</span>
@@ -607,7 +663,7 @@ function QuickEntry({
               />
             </div>
           </label>
-        ) : (
+        ) : !compactFloating && (
           <div className="floating-field people-field">
             <span>PESSOAS</span>
             <div className="people-stepper">
@@ -1569,6 +1625,26 @@ function SettingsPanel({
     update("visibleColumns", exists ? draft.visibleColumns.filter((item) => item !== column) : [...draft.visibleColumns, column]);
   };
 
+  const updateQuickTab = (id: string, patch: Partial<QuickTabSettings>) => {
+    setDraft((current) => ({
+      ...current,
+      quickTabs: current.quickTabs.map((tab) => (tab.id === id ? { ...tab, ...patch } : tab))
+    }));
+  };
+
+  const moveQuickTab = (id: string, direction: -1 | 1) => {
+    setDraft((current) => {
+      const next = [...current.quickTabs];
+      const index = next.findIndex((tab) => tab.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= next.length) {
+        return current;
+      }
+      [next[index], next[target]] = [next[target], next[index]];
+      return { ...current, quickTabs: next };
+    });
+  };
+
   const resetCategory = (target: SettingsCategory) => {
     setDraft((current) => {
       const defaults = createSettingsFallback(current);
@@ -1584,6 +1660,9 @@ function SettingsPanel({
       }
       if (target === "floating") {
         return { ...current, floating: defaults.floating };
+      }
+      if (target === "quick") {
+        return { ...current, quickTabs: defaults.quickTabs };
       }
       if (target === "defaults") {
         return {
@@ -1807,19 +1886,65 @@ function SettingsPanel({
 
         <section className={categoryClass("quick", "settings-group wide")}>
           <h3>Barra rapida</h3>
-          <p className="settings-note">Presets editaveis para a barra fixada. Nesta etapa eles definem o fluxo recomendado sem criar um construtor confuso.</p>
-          <div className="quick-tab-grid">
-            {[
-              ["Conta", "Valor, pessoas, descricao e divisao rapida"],
-              ["Dinheiro", "Valor, pago com, troco e vinculo com mesa/onibus"],
-              ["Mesa", "Mesa, valor e descricao automatica"],
-              ["Onibus", "Onibus, valor e identificador"],
-              ["Minimalista", "Apenas tipo, valor, descricao e enviar"]
-            ].map(([title, text]) => (
-              <button key={title} type="button" className="quick-tab-card">
-                <strong>{title}</strong>
-                <span>{text}</span>
-              </button>
+          <p className="settings-note">
+            Escolha quais abas aparecem na barra fixada e o que cada uma faz. A ordem daqui e a mesma ordem da barra.
+          </p>
+          <div className="quick-tab-editor">
+            {draft.quickTabs.map((tab, index) => (
+              <article key={tab.id} className={`quick-tab-row ${tab.enabled ? "enabled" : ""} ${tab.type === "Dinheiro/Troco" ? "has-money-link" : ""}`}>
+                <label className="switch-line quick-switch">
+                  <input
+                    type="checkbox"
+                    checked={tab.enabled}
+                    onChange={(event) => updateQuickTab(tab.id, { enabled: event.target.checked })}
+                  />
+                  Ativa
+                </label>
+                <label className="field">
+                  <span>Nome da aba</span>
+                  <input value={tab.label} onChange={(event) => updateQuickTab(tab.id, { label: event.target.value })} />
+                </label>
+                <label className="field">
+                  <span>Modo ao clicar</span>
+                  <select
+                    value={tab.type}
+                    onChange={(event) => updateQuickTab(tab.id, { type: event.target.value as EntryType })}
+                  >
+                    {ENTRY_TYPES.filter((item) => item !== "Cancelado/Estorno").map((item) => (
+                      <option key={item}>{item}</option>
+                    ))}
+                  </select>
+                </label>
+                {tab.type === "Dinheiro/Troco" && (
+                  <label className="field">
+                    <span>Dinheiro vincula com</span>
+                    <select
+                      value={tab.cashLinkedType || "Mesa"}
+                      onChange={(event) => updateQuickTab(tab.id, { cashLinkedType: event.target.value as EntryType })}
+                    >
+                      {CASH_LINKED_TYPES.map((item) => (
+                        <option key={item.value} value={item.value}>{item.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="switch-line quick-switch">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(tab.compact)}
+                    onChange={(event) => updateQuickTab(tab.id, { compact: event.target.checked })}
+                  />
+                  Compacta
+                </label>
+                <div className="quick-order">
+                  <button type="button" disabled={index === 0} onClick={() => moveQuickTab(tab.id, -1)} title="Subir">
+                    <ArrowUp size={15} />
+                  </button>
+                  <button type="button" disabled={index === draft.quickTabs.length - 1} onClick={() => moveQuickTab(tab.id, 1)} title="Descer">
+                    <ArrowDown size={15} />
+                  </button>
+                </div>
+              </article>
             ))}
           </div>
         </section>

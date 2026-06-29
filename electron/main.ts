@@ -149,6 +149,24 @@ async function bootstrap() {
       await exporter.export(await store.getEntries(), await store.getSettings());
       return entry;
     },
+    updateEntry: async (id, patch) => {
+      const entry = await store.updateEntry(id, patch);
+      await exporter.export(await store.getEntries(), await store.getSettings());
+      return entry;
+    },
+    cancelEntry: async (id) => {
+      const entry = await store.cancelEntry(id);
+      await exporter.export(await store.getEntries(), await store.getSettings());
+      return entry;
+    },
+    removeEntry: async (id) => {
+      await store.removeEntry(id);
+      await exporter.export(await store.getEntries(), await store.getSettings());
+    },
+    deleteEntry: async (id) => {
+      await store.deleteEntry(id);
+      await exporter.export(await store.getEntries(), await store.getSettings());
+    },
     onRemoteChange: () => {
       sendToAll("entries:changed");
       sendToAll("server:changed", localServer.getState());

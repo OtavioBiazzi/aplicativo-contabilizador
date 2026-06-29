@@ -143,6 +143,8 @@ Teste de aceite:
 
 Objetivo: permitir personalizacao sem virar bagunca.
 
+Status: iniciada na versao 0.2.1 com abas rapidas persistentes, editor em Ajustes, ativar/desativar, renomear, reordenar, modo compacto e vinculo Dinheiro/Troco.
+
 Entregas:
 - Criar modelo de "abas rapidas": Conta, Dinheiro, Mesa, Onibus e Personalizada.
 - Permitir ativar/desativar abas.
@@ -162,7 +164,7 @@ Teste de aceite:
 
 Objetivo: fazer o servidor parecer uma funcao segura e compreensivel.
 
-Status: iniciada na versao 0.2.0 com subabas Criar servidor, Conectar e Permissoes, alem de mascara de valores quando totais sensiveis estao ocultos.
+Status: iniciada na versao 0.2.0 com subabas Criar servidor, Conectar e Permissoes, alem de mascara de valores quando totais sensiveis estao ocultos. Avancada na versao 0.2.1 com cliente remoto melhorado e API remota para editar, cancelar, enviar para lixeira e apagar definitivamente conforme permissoes.
 
 Entregas:
 - Separar "Criar servidor" e "Conectar a servidor".
@@ -218,6 +220,8 @@ Teste de aceite:
 ## Fase 10 - Testes, release e controle de qualidade
 
 Objetivo: cada versao sair testada e facil de baixar.
+
+Status: smoke test cobre janela principal, tema DataCaixa, relatorios, barra fixada, planilha e servidor remoto com permissoes.
 
 Entregas:
 - Smoke test para janela principal.
