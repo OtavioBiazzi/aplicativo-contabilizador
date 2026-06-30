@@ -185,9 +185,6 @@ interface FloatingPreset {
   defaultType: EntryType;
   fields: string[];
   quickTabs: QuickTabSettings[];
-  density?: AppSettings["density"];
-  layout?: AppSettings["layout"];
-  fieldSize?: AppSettings["fieldSize"];
   borderless?: boolean;
 }
 
@@ -200,9 +197,6 @@ const FLOATING_PRESETS: FloatingPreset[] = [
     defaultType: "Venda",
     fields: DEFAULT_FLOATING_FIELDS,
     quickTabs: DEFAULT_QUICK_TABS,
-    density: "normal",
-    layout: "complete",
-    fieldSize: "medium",
     borderless: true
   },
   {
@@ -220,9 +214,6 @@ const FLOATING_PRESETS: FloatingPreset[] = [
       { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
       { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
     ],
-    density: "compact",
-    layout: "sidePanel",
-    fieldSize: "medium",
     borderless: true
   },
   {
@@ -240,9 +231,6 @@ const FLOATING_PRESETS: FloatingPreset[] = [
       { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
       { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
     ],
-    density: "compact",
-    layout: "compact",
-    fieldSize: "small",
     borderless: true
   },
   {
@@ -260,9 +248,6 @@ const FLOATING_PRESETS: FloatingPreset[] = [
       { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
       { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
     ],
-    density: "compact",
-    layout: "complete",
-    fieldSize: "medium",
     borderless: true
   },
   {
@@ -280,9 +265,6 @@ const FLOATING_PRESETS: FloatingPreset[] = [
       { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
       { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
     ],
-    density: "compact",
-    layout: "pinnedBar",
-    fieldSize: "small",
     borderless: true
   }
 ];
@@ -513,9 +495,6 @@ function normalizeFloatingFields(fields?: string[]): string[] {
 function applyFloatingPresetToSettings(settings: AppSettings, preset: FloatingPreset): AppSettings {
   return normalizeSettingsDraft(settings, {
     defaultType: preset.defaultType,
-    density: preset.density || settings.density,
-    layout: preset.layout || settings.layout,
-    fieldSize: preset.fieldSize || settings.fieldSize,
     quickTabs: cloneValue(preset.quickTabs),
     floating: {
       ...settings.floating,
@@ -977,6 +956,7 @@ function QuickEntry({
   const [roundingStep, setRoundingStep] = useState(settings.defaultRoundingStep);
   const [roundingDirection, setRoundingDirection] = useState<RoundDirection>(settings.defaultRoundingDirection);
   const [registerDifference, setRegisterDifference] = useState(true);
+  const [showSplitAdjustment, setShowSplitAdjustment] = useState(false);
   const [activeQuickTabId, setActiveQuickTabId] = useState(() => quickTabForType(enabledQuickTabs(settings), settings.defaultType)?.id || "account");
   const [submitting, setSubmitting] = useState(false);
 
@@ -1451,9 +1431,11 @@ function QuickEntry({
           roundingStep={roundingStep}
           roundingDirection={roundingDirection}
           registerDifference={registerDifference}
+          showAdjustment={showSplitAdjustment}
           onRoundingStep={setRoundingStep}
           onRoundingDirection={setRoundingDirection}
           onRegisterDifference={setRegisterDifference}
+          onShowAdjustment={setShowSplitAdjustment}
         />
       )}
 
@@ -1499,18 +1481,24 @@ function SplitBox({
   roundingStep,
   roundingDirection,
   registerDifference,
+  showAdjustment,
   onRoundingStep,
   onRoundingDirection,
-  onRegisterDifference
+  onRegisterDifference,
+  onShowAdjustment
 }: {
   split: ReturnType<typeof calculateSplit>;
   roundingStep: number;
   roundingDirection: RoundDirection;
   registerDifference: boolean;
+  showAdjustment: boolean;
   onRoundingStep: (value: number) => void;
   onRoundingDirection: (value: RoundDirection) => void;
   onRegisterDifference: (value: boolean) => void;
+  onShowAdjustment: (value: boolean) => void;
 }) {
+  const adjustmentPerPerson = split.people ? split.difference / split.people : 0;
+  const adjustmentTone = split.difference > 0 ? "up" : split.difference < 0 ? "down" : "neutral";
   return (
     <section className="calculation-panel">
       <div className="calc-controls">
@@ -1534,6 +1522,10 @@ function SplitBox({
           <input type="checkbox" checked={registerDifference} onChange={(event) => onRegisterDifference(event.target.checked)} />
           Registrar sobra como ajuste
         </label>
+        <label className="switch-line">
+          <input type="checkbox" checked={showAdjustment} onChange={(event) => onShowAdjustment(event.target.checked)} />
+          Mostrar cobranca extra
+        </label>
       </div>
       <div className="calc-results">
         <Metric label="Original" value={formatCurrency(split.originalValue)} />
@@ -1542,6 +1534,22 @@ function SplitBox({
         <Metric label="Total final" value={formatCurrency(split.finalTotal)} />
         <Metric label="Sobra/diferenca" value={formatCurrency(split.difference)} />
       </div>
+      {showAdjustment && (
+        <div className={`split-adjustment ${adjustmentTone}`}>
+          <strong>
+            {split.difference > 0
+              ? `Vai cobrar ${formatCurrency(split.difference)} a mais no total`
+              : split.difference < 0
+                ? `Vai cobrar ${formatCurrency(Math.abs(split.difference))} a menos no total`
+                : "Arredondamento sem diferenca"}
+          </strong>
+          <span>
+            {split.difference === 0
+              ? "O total final ficou igual ao valor original."
+              : `${formatCurrency(Math.abs(adjustmentPerPerson))} ${split.difference > 0 ? "a mais" : "a menos"} por pessoa.`}
+          </span>
+        </div>
+      )}
     </section>
   );
 }

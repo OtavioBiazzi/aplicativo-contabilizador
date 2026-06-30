@@ -33,7 +33,8 @@ let logger: DiagnosticLogger;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
-const FLOATING_MIN_WIDTH = 720;
+const FLOATING_MIN_WIDTH = 520;
+const FLOATING_MAX_WIDTH = 1240;
 const FLOATING_MIN_HEIGHT = 112;
 
 interface GitHubReleaseAsset {
@@ -93,19 +94,20 @@ async function createWindow() {
   }
 }
 
-async function createFloatingWindow(options?: { opacity?: number; lockPosition?: boolean }) {
+async function createFloatingWindow(options?: { opacity?: number; lockPosition?: boolean }, settings?: AppSettings) {
+  const size = settings ? floatingWindowSize(settings) : { width: FLOATING_MAX_WIDTH, minWidth: FLOATING_MIN_WIDTH, height: 132, minHeight: FLOATING_MIN_HEIGHT };
   if (floatingWindow && !floatingWindow.isDestroyed()) {
-    applyFloatingWindowOptions(options);
+    applyFloatingWindowOptions(options, settings);
     floatingWindow.showInactive();
     floatingWindow.moveTop();
     return floatingWindow;
   }
 
   floatingWindow = new BrowserWindow({
-    width: 1240,
-    height: 132,
-    minWidth: FLOATING_MIN_WIDTH,
-    minHeight: FLOATING_MIN_HEIGHT,
+    width: size.width,
+    height: size.height,
+    minWidth: size.minWidth,
+    minHeight: size.minHeight,
     show: false,
     frame: false,
     transparent: true,
@@ -154,14 +156,47 @@ async function createFloatingWindow(options?: { opacity?: number; lockPosition?:
   return floatingWindow;
 }
 
-function applyFloatingWindowOptions(options?: { opacity?: number; lockPosition?: boolean }) {
+function floatingWindowSize(settings: AppSettings) {
+  const fields = new Set(settings.floating.visibleFields?.length ? settings.floating.visibleFields : ["mode", "type", "value", "people", "description", "submit"]);
+  const weights: Record<string, number> = {
+    tabs: 80,
+    mode: 126,
+    type: 146,
+    value: 205,
+    people: 160,
+    tableNumber: 112,
+    busNumber: 112,
+    paymentMethod: 160,
+    description: 285,
+    paidWith: 190,
+    result: 130,
+    submit: 150
+  };
+  const width = Math.max(
+    FLOATING_MIN_WIDTH,
+    Math.min(
+      FLOATING_MAX_WIDTH,
+      76 + [...fields].reduce((total, field) => total + (weights[field] || 120), 0) + Math.max(0, fields.size - 1) * 8
+    )
+  );
+  return {
+    width,
+    minWidth: Math.min(width, Math.max(FLOATING_MIN_WIDTH, width - 60)),
+    height: fields.has("tabs") ? 132 : 112,
+    minHeight: FLOATING_MIN_HEIGHT
+  };
+}
+
+function applyFloatingWindowOptions(options?: { opacity?: number; lockPosition?: boolean }, settings?: AppSettings) {
   if (!floatingWindow || floatingWindow.isDestroyed()) {
     return;
   }
-  floatingWindow.setMinimumSize(FLOATING_MIN_WIDTH, FLOATING_MIN_HEIGHT);
+  const size = settings ? floatingWindowSize(settings) : { width: FLOATING_MAX_WIDTH, minWidth: FLOATING_MIN_WIDTH, height: 132, minHeight: FLOATING_MIN_HEIGHT };
+  floatingWindow.setMinimumSize(size.minWidth, size.minHeight);
   const [width, height] = floatingWindow.getSize();
-  if (width < FLOATING_MIN_WIDTH || height < FLOATING_MIN_HEIGHT) {
-    floatingWindow.setSize(Math.max(width, FLOATING_MIN_WIDTH), Math.max(height, FLOATING_MIN_HEIGHT));
+  const shouldResizeWidth = settings && Math.abs(width - size.width) > 80;
+  if (shouldResizeWidth || width < size.minWidth || height < size.minHeight) {
+    floatingWindow.setSize(Math.max(size.width, size.minWidth), Math.max(size.height, size.minHeight));
   }
   floatingWindow.setOpacity(options?.opacity ?? 1);
   floatingWindow.setMovable(!options?.lockPosition);
@@ -429,7 +464,7 @@ function registerIpc() {
     applyFloatingWindowOptions({
       opacity: saved.floating.opacity,
       lockPosition: saved.floating.lockPosition
-    });
+    }, saved);
     const exportStatus = await exporter.export(await store.getEntries(), saved);
     await logExportStatus("salvar configuracoes", exportStatus);
     sendToAll("settings:changed", saved);
@@ -779,7 +814,7 @@ function registerIpc() {
 
   ipcMain.handle("window:setPinned", async (_event, enabled: boolean, options?: { opacity?: number; borderless?: boolean; lockPosition?: boolean }) => {
     if (enabled) {
-      await createFloatingWindow(options);
+      await createFloatingWindow(options, await store.getSettings());
       return true;
     }
 

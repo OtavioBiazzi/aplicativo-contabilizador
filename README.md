@@ -22,6 +22,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Descricao automatica como `Venda` quando o campo fica vazio.
 - Modos de lancamento: Venda, Mesa, Onibus, Dinheiro/Troco, Divisao de conta, Taxa, Extra, Cancelado/Estorno e Personalizado.
 - Divisao de conta com arredondamento por multiplos de R$ 0,05 a R$ 5,00 e direcao para cima, para baixo ou mais proxima.
+- Divisao de conta com aviso opcional de quanto sera cobrado a mais ou a menos quando o arredondamento alterar o total.
 - Modo dinheiro/troco com quebra em notas e moedas do real.
 - Historico editavel com filtros, duplicar, cancelar, lixeira, restauracao e exclusao definitiva.
 - Relatorios por periodo iniciando no mes atual, com filtros por tipo, mesa, onibus, forma de pagamento e busca, fechamento, tendencia diaria com dia da semana, ranking, alertas, origem/caixa e exportacao do recorte filtrado.
@@ -38,6 +39,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, campos Mesa e Onibus separados, divisao por pessoas, campo Pago com, troco direto e elementos que podem ser ocultados.
 - Alternancia Conta/Dinheiro pode manter o contexto atual: Conta Onibus vira Dinheiro/Onibus e volta para Onibus.
 - Presets da barra fixada: Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, todos editaveis depois.
+- Presets da barra fixada ajustam apenas a barra, sem alterar fonte, densidade ou layout global do aplicativo.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
 - Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
 - Temas DataCaixa PDV, DataCaixa PDV escuro e Italia como base do remake visual, com contraste revisado em menus e hovers.
