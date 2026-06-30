@@ -53,7 +53,7 @@ Teste de aceite:
 
 Objetivo: transformar a tela principal em um painel operacional bonito e rapido.
 
-Status: iniciada na versao 0.2.0 com navegacao superior em estilo PDV, modulos Caixa/Historico/Relatorios/Rede/Ajustes e estados operacionais no topo. Pendente: deixar os atalhos de modos Caixa/Mesa/Onibus/Dinheiro contextuais para nao aparecerem onde parecem fora de lugar.
+Status: iniciada na versao 0.2.0 com navegacao superior em estilo PDV, modulos Caixa/Historico/Relatorios/Rede/Ajustes e estados operacionais no topo. Avancada na versao 0.2.7 com cabecalho contextual por aba, reduzindo a sensacao de comandos de caixa em telas de consulta/configuracao.
 
 Entregas:
 - Reorganizar topo do app em uma barra de modulo: Caixa, Mesa, Onibus, Dinheiro, Relatorios, Servidor, Ajustes.
@@ -128,7 +128,7 @@ Teste de aceite:
 
 Objetivo: transformar relatorios em uma area de analise real.
 
-Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada. Avancada na versao 0.2.6 com total do dia isolado dos dias anteriores.
+Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada. Avancada na versao 0.2.6 com total do dia isolado dos dias anteriores. Avancada na versao 0.2.7 com importacao de Excel/CSV/TSV compativel e deduplicacao.
 
 Entregas:
 - Filtros por periodo, tipo, mesa, onibus, forma de pagamento e origem.

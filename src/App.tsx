@@ -33,6 +33,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Undo2,
+  Upload,
   Wallet,
   Wifi,
   X
@@ -408,6 +409,28 @@ export function App() {
     showToast(result.exportStatus.ok ? "success" : "error", result.exportStatus.ok ? "Lancamento registrado." : result.exportStatus.message || "Lancamento salvo localmente.");
   };
 
+  const importLedgerFile = async () => {
+    try {
+      const result = await window.caixa.importLedgerFile();
+      if (!result) {
+        showToast("info", "Importacao cancelada.");
+        return;
+      }
+      await reload();
+      setExportStatus(result.exportStatus);
+      const skippedText = result.skipped ? ` ${result.skipped} linha(s) pulada(s).` : "";
+      const warningText = result.warnings.length ? ` ${result.warnings.length} aviso(s).` : "";
+      showToast(
+        result.imported ? "success" : "info",
+        result.imported
+          ? `${result.imported} lancamento(s) importado(s).${skippedText}${warningText}`
+          : `Nenhum lancamento novo importado.${skippedText}${warningText}`
+      );
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "Nao foi possivel importar a planilha.");
+    }
+  };
+
   const repeatLastEntry = async () => {
     const last = entries.find((entry) => entry.status === "active");
     if (!last) {
@@ -458,6 +481,8 @@ export function App() {
     );
   }
 
+  const header = headerForTab(activeTab, summary.count);
+
   return (
     <div className="app-shell">
       <aside className="sidebar app-topbar">
@@ -502,12 +527,12 @@ export function App() {
       <main className="workspace">
         <header className="workspace-header">
           <div>
-            <span className="eyebrow">Operacao diaria</span>
-            <h1>{titleForTab(activeTab)}</h1>
+            <span className="eyebrow">{header.eyebrow}</span>
+            <h1>{header.title}</h1>
           </div>
           <div className="module-status">
-            <span>{summary.count ? "Caixa em movimento" : "Pronto para lancar"}</span>
-            <strong>{activeTab === "register" ? "Fluxo rapido" : "Modulo completo"}</strong>
+            <span>{header.status}</span>
+            <strong>{header.detail}</strong>
           </div>
           <div className="status-strip">
             <StatusPill label="Excel/CSV" ok={exportStatus?.ok ?? true} text={exportStatus?.pendingCount ? `${exportStatus.pendingCount} pendente` : "sincronizado"} />
@@ -562,7 +587,7 @@ export function App() {
         )}
 
         {activeTab === "settings" && (
-          <SettingsPanel settings={settings} onSave={saveSettings} onToast={showToast} />
+          <SettingsPanel settings={settings} onSave={saveSettings} onToast={showToast} onImportLedger={importLedgerFile} />
         )}
       </main>
 
@@ -1762,11 +1787,13 @@ function ServerPanel({
 function SettingsPanel({
   settings,
   onSave,
-  onToast
+  onToast,
+  onImportLedger
 }: {
   settings: AppSettings;
   onSave: (settings: AppSettings) => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
+  onImportLedger: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState(settings);
   const [category, setCategory] = useState<SettingsCategory>("appearance");
@@ -2181,6 +2208,10 @@ function SettingsPanel({
                       : "Todos os lancamentos ativos ficam em um arquivo geral."}
               </small>
             </div>
+            <button className="primary-button" type="button" onClick={onImportLedger}>
+              <Upload size={18} />
+              Importar Excel/CSV
+            </button>
           </div>
           <label className="field path-field"><span>Pasta padrao</span><input value={draft.outputDirectory} onChange={(event) => update("outputDirectory", event.target.value)} /><button onClick={chooseFolder} type="button">Escolher</button></label>
           <label className="field"><span>Formato</span>
@@ -2524,6 +2555,42 @@ function titleForTab(tab: TabKey): string {
     reports: "Relatorios",
     server: "Servidor local",
     settings: "Configuracoes"
+  };
+  return map[tab];
+}
+
+function headerForTab(tab: TabKey, todayCount: number): { eyebrow: string; title: string; status: string; detail: string } {
+  const map: Record<TabKey, { eyebrow: string; title: string; status: string; detail: string }> = {
+    register: {
+      eyebrow: "Operacao diaria",
+      title: titleForTab(tab),
+      status: todayCount ? "Caixa em movimento" : "Pronto para lancar",
+      detail: "Fluxo rapido"
+    },
+    history: {
+      eyebrow: "Consulta e auditoria",
+      title: titleForTab(tab),
+      status: "Edite, duplique ou restaure registros",
+      detail: "Historico"
+    },
+    reports: {
+      eyebrow: "Analise do caixa",
+      title: titleForTab(tab),
+      status: "Filtros por periodo, tipo e pagamento",
+      detail: "Relatorios"
+    },
+    server: {
+      eyebrow: "Rede local",
+      title: titleForTab(tab),
+      status: "Acesso com senha e permissoes",
+      detail: "Sincronizacao"
+    },
+    settings: {
+      eyebrow: "Preferencias do app",
+      title: titleForTab(tab),
+      status: "Tema, arquivos, barra e perfis",
+      detail: "Ajustes"
+    }
   };
   return map[tab];
 }

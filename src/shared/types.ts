@@ -190,6 +190,16 @@ export interface ExportStatus {
   pendingCount: number;
 }
 
+export interface LedgerImportResult {
+  filePath: string;
+  imported: number;
+  skipped: number;
+  totalRows: number;
+  parsedRows: number;
+  warnings: string[];
+  exportStatus: ExportStatus;
+}
+
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;

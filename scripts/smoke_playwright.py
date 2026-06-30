@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from datetime import datetime
 from zipfile import ZipFile
 from pathlib import Path
 
@@ -78,6 +79,13 @@ def main() -> int:
   shutil.rmtree(SMOKE_DIR, ignore_errors=True)
   (SMOKE_DIR / "data").mkdir(parents=True, exist_ok=True)
   (SMOKE_DIR / "exports").mkdir(parents=True, exist_ok=True)
+  (SMOKE_DIR / "imports").mkdir(parents=True, exist_ok=True)
+  import_file = SMOKE_DIR / "imports" / "importacao-smoke.csv"
+  import_file.write_text(
+    "Data;Hora;Tipo;Valor pago;Descricao;Mesa;Forma de pagamento;Status\n"
+    f"{datetime.now().strftime('%d/%m/%Y')};10:15:00;Mesa;12,50;Mesa Importada;9;Dinheiro;active\n",
+    encoding="utf-8",
+  )
 
   env = os.environ.copy()
   env["CAIXA_DATA_DIR"] = str(SMOKE_DIR / "data")
@@ -156,6 +164,24 @@ def main() -> int:
       expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Barra fixada").click()
       expect(page.get_by_text("Elementos da barra")).to_be_visible()
+      page.locator(".settings-nav").get_by_role("button", name="Planilha e backup").click()
+      expect(page.get_by_role("button", name="Importar Excel/CSV")).to_be_visible()
+      first_import = page.evaluate("""async (filePath) => await window.caixa.importLedgerFile(filePath)""", str(import_file))
+      if first_import["imported"] != 1:
+        print(f"Import did not create the expected row: {first_import}", file=sys.stderr)
+        return 1
+      second_import = page.evaluate("""async (filePath) => await window.caixa.importLedgerFile(filePath)""", str(import_file))
+      if second_import["imported"] != 0 or second_import["skipped"] < 1:
+        print(f"Import dedupe did not skip the existing row: {second_import}", file=sys.stderr)
+        return 1
+      today_xlsx = SMOKE_DIR / "exports" / f"vendas-{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+      if not today_xlsx.exists():
+        print("Expected daily xlsx was not created before xlsx import smoke.", file=sys.stderr)
+        return 1
+      xlsx_import = page.evaluate("""async (filePath) => await window.caixa.importLedgerFile(filePath)""", str(today_xlsx))
+      if xlsx_import["imported"] != 0 or xlsx_import["skipped"] < 1:
+        print(f"XLSX import did not dedupe existing rows: {xlsx_import}", file=sys.stderr)
+        return 1
       page.locator(".settings-nav").get_by_role("button", name="Barra rapida").click()
       expect(page.get_by_text("Abas e modos que aparecem na barra fixada.")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Perfis").click()
@@ -231,6 +257,9 @@ def main() -> int:
       if not deleted_remote or deleted_remote["status"] != "deleted":
         print("Remote delete did not move the entry to trash.", file=sys.stderr)
         return 1
+      page.get_by_role("button", name="Caixa").click()
+      page.get_by_role("button", name="Historico").click()
+      expect(page.get_by_text("Mesa Importada").first).to_be_visible()
       page.get_by_role("button", name="Caixa").click()
       page.get_by_role("button", name="Abrir barra fixada").click()
       expect(page.locator(".app-shell")).to_be_visible()

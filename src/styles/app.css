@@ -1195,13 +1195,17 @@ th {
 
 .file-preview-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
   border-radius: 8px;
   padding: 12px;
   background: color-mix(in srgb, var(--panel) 91%, var(--accent) 9%);
+}
+
+.file-preview-card .primary-button {
+  justify-self: end;
 }
 
 .file-preview-card span,

@@ -152,6 +152,41 @@ export class LedgerStore {
     await this.persistEntries();
   }
 
+  async importEntries(importedEntries: LedgerEntry[]): Promise<{ imported: number; skipped: number; entries: LedgerEntry[] }> {
+    const entries = await this.getEntries();
+    const ids = new Set(entries.map((entry) => entry.id));
+    const signatures = new Set(entries.flatMap((entry) => [entrySignature(entry), entryLooseSignature(entry)]));
+    const accepted: LedgerEntry[] = [];
+    let skipped = 0;
+
+    for (const incoming of importedEntries) {
+      const signature = entrySignature(incoming);
+      const looseSignature = entryLooseSignature(incoming);
+      if ((incoming.id && ids.has(incoming.id)) || signatures.has(signature) || signatures.has(looseSignature)) {
+        skipped += 1;
+        continue;
+      }
+
+      const entry = {
+        ...incoming,
+        id: incoming.id || randomUUID(),
+        updatedAt: incoming.updatedAt || new Date().toISOString()
+      };
+      ids.add(entry.id);
+      signatures.add(signature);
+      signatures.add(looseSignature);
+      accepted.push(entry);
+    }
+
+    if (accepted.length) {
+      entries.unshift(...accepted);
+      entries.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+      await this.persistEntries();
+    }
+
+    return { imported: accepted.length, skipped, entries: accepted };
+  }
+
   private async persistEntries() {
     await writeJsonAtomic(this.ledgerPath(), this.entries || []);
   }
@@ -276,4 +311,33 @@ function mergeQuickTabs(defaultTabs: QuickTabSettings[], savedTabs?: QuickTabSet
 
 function isEntryType(value: unknown): value is EntryType {
   return typeof value === "string" && ENTRY_TYPES.includes(value as EntryType);
+}
+
+function entrySignature(entry: LedgerEntry): string {
+  return [
+    entryTimeKey(entry.createdAt),
+    entry.type,
+    entry.customType || "",
+    Math.round(entry.finalValue * 100),
+    entry.description.trim().toLowerCase(),
+    entry.tableNumber,
+    entry.busNumber,
+    entry.paymentMethod,
+    entry.status
+  ].join("|");
+}
+
+function entryLooseSignature(entry: LedgerEntry): string {
+  return [
+    entryTimeKey(entry.createdAt),
+    entry.type,
+    Math.round(entry.finalValue * 100),
+    entry.description.trim().toLowerCase(),
+    entry.status
+  ].join("|");
+}
+
+function entryTimeKey(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : date.toISOString().slice(0, 19);
 }

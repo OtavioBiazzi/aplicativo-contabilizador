@@ -3,9 +3,10 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { LedgerExporter } from "./exporter.js";
+import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
 import { LedgerStore } from "./storage.js";
-import type { AppSettings, EntryDraft, LedgerEntry, UpdateInfo } from "../src/shared/types.js";
+import type { AppSettings, EntryDraft, LedgerImportResult, LedgerEntry, UpdateInfo } from "../src/shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -343,6 +344,43 @@ function registerIpc() {
       shell.showItemInFolder(status.filePath);
     }
     return status;
+  });
+
+  ipcMain.handle("entries:importFile", async (_event, providedPath?: string): Promise<LedgerImportResult | null> => {
+    let filePath = providedPath;
+    if (!filePath) {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: "Importar Excel ou CSV",
+        properties: ["openFile"],
+        filters: [
+          { name: "Planilhas compativeis", extensions: ["xlsx", "csv", "tsv"] },
+          { name: "Excel", extensions: ["xlsx"] },
+          { name: "CSV", extensions: ["csv", "tsv"] }
+        ]
+      });
+      if (result.canceled || !result.filePaths[0]) {
+        return null;
+      }
+      filePath = result.filePaths[0];
+    }
+
+    const settings = await store.getSettings();
+    const parsed = await readLedgerImport(filePath, settings);
+    const imported = await store.importEntries(parsed.entries);
+    const exportStatus = await exporter.export(await store.getEntries(), settings);
+    if (imported.imported) {
+      localServer.broadcast({ type: "entries-imported", count: imported.imported });
+      sendToAll("entries:changed");
+    }
+    return {
+      filePath,
+      imported: imported.imported,
+      skipped: imported.skipped + parsed.skippedRows,
+      totalRows: parsed.totalRows,
+      parsedRows: parsed.parsedRows,
+      warnings: parsed.warnings,
+      exportStatus
+    };
   });
 
   ipcMain.handle("updates:check", async (): Promise<UpdateInfo> => {

@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("caixa", {
   chooseOutputDirectory: () => ipcRenderer.invoke("settings:chooseOutputDirectory"),
   exportSettings: (settings: AppSettings) => ipcRenderer.invoke("settings:exportConfig", settings),
   importSettings: () => ipcRenderer.invoke("settings:importConfig"),
+  importLedgerFile: (filePath?: string) => ipcRenderer.invoke("entries:importFile", filePath),
   exportNow: () => ipcRenderer.invoke("export:now"),
   exportFilteredReport: (ids: string[], label: string) => ipcRenderer.invoke("reports:exportFiltered", ids, label),
   checkForUpdates: () => ipcRenderer.invoke("updates:check"),

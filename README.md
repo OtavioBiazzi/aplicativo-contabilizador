@@ -27,6 +27,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com exportacao do recorte filtrado.
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia real do lancamento, mes com abas, arquivo fixo ou arquivos separados por tipo.
+- Importacao de planilhas Excel/CSV/TSV compativeis com deduplicacao por ID ou assinatura do lancamento.
 - Configuracoes persistentes: tema padrao azul de PDV, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
 - Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
@@ -47,6 +48,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
 - Categoria Perfis para aplicar, atualizar, criar e remover perfis sem mexer nos dados de venda.
 - Tela de configuracoes com cabecalho por categoria e layout mais controlado para monitores grandes.
+- Cabecalho principal contextual por aba, separando operacao de caixa, historico, relatorios, rede e ajustes.
 - Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
 - Checagem discreta de releases do GitHub pela area de Atualizacoes.
@@ -131,6 +133,8 @@ venda-2026-06-28.xlsx
 onibus-2026-06-28.xlsx
 ```
 
+Em **Ajustes > Planilha e backup**, use **Importar Excel/CSV** para trazer planilhas antigas compativeis para o historico do app. Linhas `TOTAL` sao ignoradas e lancamentos repetidos sao pulados automaticamente.
+
 Quando backup automatico estiver ativo, arquivos existentes sao copiados para a subpasta `backups/` antes da nova exportacao.
 
 ## Servidor local
@@ -163,6 +167,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - categoria Perfis e API de exportar/importar configuracoes;
 - barra fixada com troca de modo e troco;
 - elementos configuraveis da barra fixada;
+- importacao CSV e XLSX com deduplicacao;
 - hover legivel no tema DataCaixa;
 - total de hoje sem somar lancamentos de ontem;
 - exportacao diaria separada pela data real do lancamento;
