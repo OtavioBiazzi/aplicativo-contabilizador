@@ -37,12 +37,14 @@ import {
   Wifi,
   X
 } from "lucide-react";
-import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
+import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
 import {
   calculateCash,
   calculateSplit,
+  filterEntriesByLocalDate,
   formatCurrency,
   formatDateTime,
+  getLocalDateKey,
   parseMoney,
   ROUNDING_STEPS,
   summarizeEntries
@@ -103,6 +105,18 @@ const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: "Onibus", label: "Onibus" },
   { value: "Extra", label: "Extra" },
   { value: "Personalizado", label: "Personalizado" }
+];
+
+const FLOATING_FIELD_OPTIONS = [
+  { id: "tabs", label: "Abas rapidas", helper: "Conta, Dinheiro, Mesa, Onibus..." },
+  { id: "mode", label: "Trocar Conta/Dinheiro", helper: "Botao lateral de alternancia." },
+  { id: "type", label: "Tipo ou vinculo", helper: "Seletor de tipo e vincular dinheiro." },
+  { id: "people", label: "Pessoas", helper: "Divisao rapida da conta." },
+  { id: "detail", label: "Mesa/Onibus", helper: "Campo curto para numero." },
+  { id: "description", label: "Descricao", helper: "Campo opcional para observacao." },
+  { id: "paidWith", label: "Pago com", helper: "Valor recebido no modo dinheiro." },
+  { id: "result", label: "Troco/por pessoa", helper: "Resultado calculado na barra." },
+  { id: "submit", label: "Botao enviar", helper: "Tambem da para enviar com Enter." }
 ];
 
 const CASH_LINKABLE_TYPES = CASH_LINKED_TYPES.map((item) => item.value);
@@ -202,8 +216,53 @@ function normalizeSettingsDraft(current: AppSettings, patch: Partial<AppSettings
   };
   return {
     ...merged,
-    visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns
+    visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns,
+    floating: {
+      ...merged.floating,
+      visibleFields: normalizeFloatingFields(merged.floating.visibleFields)
+    }
   };
+}
+
+function normalizeFloatingFields(fields?: string[]): string[] {
+  if (!Array.isArray(fields) || !fields.length) {
+    return [...DEFAULT_FLOATING_FIELDS];
+  }
+
+  const legacyFields = ["type", "value", "people", "description", "submit"];
+  const isLegacyDefault = fields.length === legacyFields.length && legacyFields.every((field) => fields.includes(field));
+  if (isLegacyDefault) {
+    return [...DEFAULT_FLOATING_FIELDS];
+  }
+
+  return fields.includes("value") ? fields : ["value", ...fields];
+}
+
+function dateTokenForFormat(date: Date, format: AppSettings["dateFormat"]): string {
+  const [year, month, day] = getLocalDateKey(date).split("-");
+  if (format === "dd-MM-yyyy") {
+    return `${day}-${month}-${year}`;
+  }
+  if (format === "yyyyMMdd") {
+    return `${year}${month}${day}`;
+  }
+  return `${year}-${month}-${day}`;
+}
+
+function filePreviewForSettings(settings: AppSettings): string {
+  const now = new Date();
+  const extension = settings.fileFormat;
+  const date = dateTokenForFormat(now, settings.dateFormat);
+  if (settings.fileStrategy === "monthlyTabs" && settings.fileFormat === "xlsx") {
+    return `caixa-${getLocalDateKey(now).slice(0, 7)}.${extension}`;
+  }
+  if (settings.fileStrategy === "fixedAll") {
+    return `caixa-geral.${extension}`;
+  }
+  if (settings.fileStrategy === "byType") {
+    return `venda-${date}.${extension}`;
+  }
+  return `vendas-${date}.${extension}`;
 }
 
 function profileSummary(profile: Partial<AppSettings>): string {
@@ -225,8 +284,10 @@ export function App() {
   const [pinned, setPinnedState] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [modeCommand, setModeCommand] = useState<ModeCommand | null>(null);
+  const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey());
 
-  const summary = useMemo(() => summarizeEntries(entries), [entries]);
+  const todayEntries = useMemo(() => filterEntriesByLocalDate(entries, currentDateKey), [entries, currentDateKey]);
+  const summary = useMemo(() => summarizeEntries(todayEntries), [todayEntries]);
 
   const reload = async () => {
     const snapshot = await window.caixa.getSnapshot();
@@ -249,6 +310,11 @@ export function App() {
       offPinned();
       offSettings();
     };
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentDateKey(getLocalDateKey()), 30000);
+    return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -459,7 +525,7 @@ export function App() {
               onSubmit={addEntry}
               onUnpin={togglePinned}
             />
-            <TodayPanel summary={summary} entries={entries} onMode={commandMode} />
+            <TodayPanel summary={summary} entries={todayEntries} onMode={commandMode} />
           </div>
         )}
 
@@ -474,7 +540,7 @@ export function App() {
         )}
 
         {activeTab === "reports" && (
-          <ReportsPanel entries={entries} settings={settings} summary={summary} exportStatus={exportStatus} onExport={async () => {
+            <ReportsPanel entries={entries} settings={settings} summary={summary} exportStatus={exportStatus} onExport={async () => {
             const status = await window.caixa.exportNow();
             setExportStatus(status);
             showToast(status.ok ? "success" : "error", status.message || "Exportacao executada.");
@@ -644,6 +710,15 @@ function QuickEntry({
         : type === "Onibus"
           ? "onibus"
           : "";
+    const showTabs = visible("tabs") && quickTabs.length > 0;
+    const showMode = visible("mode");
+    const showType = visible("type");
+    const showPeople = visible("people");
+    const showDetail = Boolean(detailKind && visible("detail"));
+    const showDescription = visible("description");
+    const showPaidWith = visible("paidWith");
+    const showResult = visible("result");
+    const showSubmit = visible("submit");
     const applyQuickTab = (tab: QuickTabSettings) => {
       setActiveQuickTabId(tab.id);
       setType(tab.type);
@@ -690,14 +765,14 @@ function QuickEntry({
     };
 
     return (
-      <form className={`floating-bar ${isMoney ? "money" : "account"} ${detailKind ? "has-detail" : ""} ${compactFloating ? "compact-tab" : ""} ${quickTabs.length ? "with-tabs" : ""}`} onSubmit={onSubmitForm}>
+      <form className={`floating-bar ${isMoney ? "money" : "account"} ${showDetail ? "has-detail" : ""} ${compactFloating ? "compact-tab" : ""} ${showTabs ? "with-tabs" : ""}`} onSubmit={onSubmitForm}>
         <div className="floating-grip" aria-hidden="true">
           <i />
           <i />
           <i />
         </div>
 
-        {quickTabs.length > 0 && (
+        {showTabs && (
           <div className="floating-tab-strip" aria-label="Modos rapidos">
             {quickTabs.map((tab) => (
               <button
@@ -713,7 +788,8 @@ function QuickEntry({
           </div>
         )}
 
-        <button
+        {showMode && (
+          <button
           className="floating-mode"
           type="button"
           onClick={switchMoneyMode}
@@ -722,7 +798,9 @@ function QuickEntry({
           {nextModeLabel}
         </button>
 
-        {!compactFloating && (isMoney ? (
+        )}
+
+        {showType && !compactFloating && (isMoney ? (
           <label className="floating-field floating-kind floating-cash-kind">
             <span>VINCULAR A</span>
             <select value={cashLinkedType} onChange={(event) => setCashLinkedType(event.target.value as EntryType)}>
@@ -756,7 +834,7 @@ function QuickEntry({
           </div>
         </label>
 
-        {isMoney ? (
+        {isMoney ? showPaidWith && (
           <label className="floating-field paid-field">
             <span>PAGO COM</span>
             <div className="money-input warm">
@@ -769,7 +847,7 @@ function QuickEntry({
               />
             </div>
           </label>
-        ) : !compactFloating && (
+        ) : showPeople && !compactFloating && (
           <div className="floating-field people-field">
             <span>PESSOAS</span>
             <div className="people-stepper">
@@ -789,7 +867,7 @@ function QuickEntry({
           </div>
         )}
 
-        {detailKind && (
+        {showDetail && (
           <label className="floating-field floating-detail">
             <span>{detailKind === "mesa" ? "MESA" : "ONIBUS"}</span>
             <input
@@ -806,16 +884,18 @@ function QuickEntry({
           </label>
         )}
 
-        <label className="floating-field floating-description">
-          <span>DESCRICAO</span>
-          <input
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Descricao opcional"
-          />
-        </label>
+        {showDescription && (
+          <label className="floating-field floating-description">
+            <span>DESCRICAO</span>
+            <input
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Descricao opcional"
+            />
+          </label>
+        )}
 
-        {isMoney ? (
+        {showResult && (isMoney ? (
           <div className="floating-result">
             <span>TROCO</span>
             <strong>{formatCurrency(cash.change)}</strong>
@@ -827,12 +907,14 @@ function QuickEntry({
               <strong>{formatCurrency(split.perPersonRounded)}</strong>
             </div>
           )
-        )}
+        ))}
 
-        <button className="floating-send" type="submit" disabled={disabled}>
-          {submitting ? <RefreshCw size={17} className="spin" /> : <Send size={18} />}
-          Enviar
-        </button>
+        {showSubmit && (
+          <button className="floating-send" type="submit" disabled={disabled}>
+            {submitting ? <RefreshCw size={17} className="spin" /> : <Send size={18} />}
+            Enviar
+          </button>
+        )}
 
         <button className="floating-close" type="button" onClick={onUnpin} title="Voltar ao app completo">
           <Undo2 size={16} />
@@ -1088,7 +1170,7 @@ function TodayPanel({ summary, entries, onMode }: { summary: DaySummary; entries
   return (
     <aside className="today-panel">
       <div className="total-plate">
-        <span>Total geral</span>
+        <span>Total do dia</span>
         <strong>{formatCurrency(summary.total)}</strong>
         <small>{summary.count} registros, media {formatCurrency(summary.average)}</small>
       </div>
@@ -1152,7 +1234,7 @@ function HistoryPanel({
         (statusFilter === "active" && entry.status === "active") ||
         (statusFilter === "cancelled" && entry.status === "cancelled") ||
         (statusFilter === "deleted" && entry.status === "deleted");
-      const sameDate = !date || entry.createdAt.startsWith(date);
+      const sameDate = !date || getLocalDateKey(entry.createdAt) === date;
       return sameType && sameStatus && sameDate && haystack.includes(query.toLowerCase());
     });
   }, [entries, query, type, statusFilter, date]);
@@ -1289,7 +1371,7 @@ function EditEntryModal({
         </div>
         <div className="entry-grid">
           <label className="field">
-            <span>Tipo</span>
+            <span>Tipo / categoria</span>
             <select value={type} onChange={(event) => setType(event.target.value as EntryType)}>
               {ENTRY_TYPES.map((item) => <option key={item}>{item}</option>)}
             </select>
@@ -1375,7 +1457,7 @@ function ReportsPanel({
   }, [settings.server.permissions.viewTotals]);
 
   const periodEntries = entries.filter((entry) => {
-    const date = entry.createdAt.slice(0, 10);
+    const date = getLocalDateKey(entry.createdAt);
     const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${entry.originDevice}`.toLowerCase();
     return (
       (!from || date >= from) &&
@@ -1751,6 +1833,22 @@ function SettingsPanel({
     });
   };
 
+  const toggleFloatingField = (field: string) => {
+    setDraft((current) => {
+      const currentFields = normalizeFloatingFields(current.floating.visibleFields);
+      const nextFields = currentFields.includes(field)
+        ? currentFields.filter((item) => item !== field)
+        : [...currentFields, field];
+      return {
+        ...current,
+        floating: {
+          ...current.floating,
+          visibleFields: normalizeFloatingFields(nextFields)
+        }
+      };
+    });
+  };
+
   const profileNames = Object.keys(draft.profiles);
   const activeProfileName = draft.activeProfile && draft.profiles[draft.activeProfile]
     ? draft.activeProfile
@@ -1909,6 +2007,7 @@ function SettingsPanel({
     { key: "advanced", label: "Avancado", description: "Restauracao, backup e acoes administrativas.", icon: DatabaseBackup }
   ];
   const activeCategory = settingsCategories.find((item) => item.key === category) || settingsCategories[0];
+  const filePreview = filePreviewForSettings(draft);
 
   const categoryClass = (target: SettingsCategory, extra = "") =>
     `${extra || "settings-group"} ${category === target ? "active-category" : "hidden-category"}`;
@@ -2067,6 +2166,22 @@ function SettingsPanel({
 
         <section className={categoryClass("files", "settings-group wide")}>
           <h3>Arquivos</h3>
+          <div className="file-preview-card">
+            <FileSpreadsheet size={20} />
+            <div>
+              <span>Proximo arquivo</span>
+              <strong>{filePreview}</strong>
+              <small>
+                {draft.fileStrategy === "daily"
+                  ? "Lancamentos de cada dia ficam no arquivo daquele dia."
+                  : draft.fileStrategy === "monthlyTabs" && draft.fileFormat === "xlsx"
+                    ? "Um arquivo por mes, com uma aba para cada dia."
+                    : draft.fileStrategy === "byType"
+                      ? "Um arquivo por tipo e por data do lancamento."
+                      : "Todos os lancamentos ativos ficam em um arquivo geral."}
+              </small>
+            </div>
+          </div>
           <label className="field path-field"><span>Pasta padrao</span><input value={draft.outputDirectory} onChange={(event) => update("outputDirectory", event.target.value)} /><button onClick={chooseFolder} type="button">Escolher</button></label>
           <label className="field"><span>Formato</span>
             <select value={draft.fileFormat} onChange={(event) => update("fileFormat", event.target.value as AppSettings["fileFormat"])}>
@@ -2100,9 +2215,9 @@ function SettingsPanel({
           </label>
           <label className="field"><span>Formato da data</span>
             <select value={draft.dateFormat} onChange={(event) => update("dateFormat", event.target.value as AppSettings["dateFormat"])}>
-              <option value="yyyy-MM-dd">2026-06-28</option>
-              <option value="dd-MM-yyyy">28-06-2026</option>
-              <option value="yyyyMMdd">20260628</option>
+              <option value="yyyy-MM-dd">{dateTokenForFormat(new Date(), "yyyy-MM-dd")}</option>
+              <option value="dd-MM-yyyy">{dateTokenForFormat(new Date(), "dd-MM-yyyy")}</option>
+              <option value="yyyyMMdd">{dateTokenForFormat(new Date(), "yyyyMMdd")}</option>
             </select>
           </label>
           <label className="field"><span>Separador CSV</span>
@@ -2131,6 +2246,25 @@ function SettingsPanel({
           <label className="field"><span>Opacidade ({Math.round(draft.floating.opacity * 100)}%)</span><input type="range" min={0.35} max={1} step={0.01} value={draft.floating.opacity} onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })} /></label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar posicao</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.syncMoneyWithEntryType} onChange={(event) => update("floating", { ...draft.floating, syncMoneyWithEntryType: event.target.checked })} /> Manter Mesa/Onibus ao trocar Conta/Dinheiro</label>
+          <div className="floating-field-picker">
+            <div className="section-title">
+              <strong>Elementos da barra</strong>
+              <span>Desmarque para deixar a barra mais limpa.</span>
+            </div>
+            {FLOATING_FIELD_OPTIONS.filter((field) => field.id !== "value").map((field) => (
+              <label key={field.id} className="toggle-card">
+                <input
+                  type="checkbox"
+                  checked={normalizeFloatingFields(draft.floating.visibleFields).includes(field.id)}
+                  onChange={() => toggleFloatingField(field.id)}
+                />
+                <span>
+                  <strong>{field.label}</strong>
+                  <small>{field.helper}</small>
+                </span>
+              </label>
+            ))}
+          </div>
           <p className="settings-note">
             A barra fixada abre em uma janela separada, sem moldura, com Tipo, Valor, Pessoas ou Pago com,
             Descricao, Troco e Enviar. Quando a sincronizacao esta ligada, Conta Onibus vira Dinheiro/Onibus e volta para Onibus.

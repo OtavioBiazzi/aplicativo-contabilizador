@@ -47,7 +47,18 @@ export const DEFAULT_COLUMNS = [
 
 export const SIMPLE_COLUMNS = ["Data", "Hora", "Valor pago", "Descricao", "Tipo", "Pessoas", "Pago com", "Troco"];
 
-export const DEFAULT_FLOATING_FIELDS = ["type", "value", "people", "description", "submit"];
+export const DEFAULT_FLOATING_FIELDS = [
+  "tabs",
+  "mode",
+  "type",
+  "value",
+  "people",
+  "detail",
+  "description",
+  "paidWith",
+  "result",
+  "submit"
+];
 
 export const DEFAULT_QUICK_TABS: QuickTabSettings[] = [
   { id: "account", label: "Conta", enabled: true, type: "Venda" },

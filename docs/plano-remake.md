@@ -53,7 +53,7 @@ Teste de aceite:
 
 Objetivo: transformar a tela principal em um painel operacional bonito e rapido.
 
-Status: iniciada na versao 0.2.0 com navegacao superior em estilo PDV, modulos Caixa/Historico/Relatorios/Rede/Ajustes e estados operacionais no topo.
+Status: iniciada na versao 0.2.0 com navegacao superior em estilo PDV, modulos Caixa/Historico/Relatorios/Rede/Ajustes e estados operacionais no topo. Pendente: deixar os atalhos de modos Caixa/Mesa/Onibus/Dinheiro contextuais para nao aparecerem onde parecem fora de lugar.
 
 Entregas:
 - Reorganizar topo do app em uma barra de modulo: Caixa, Mesa, Onibus, Dinheiro, Relatorios, Servidor, Ajustes.
@@ -61,6 +61,7 @@ Entregas:
 - Criar estados visuais de operacao: pronto, salvando, salvo, erro de planilha, pendente.
 - Melhorar historico do dia com acoes claras: editar, duplicar, cancelar, lixeira, apagar definitivo.
 - Criar filtros rapidos por tipo, mesa, onibus e forma de pagamento.
+- Revisar topo por tela: modos de caixa devem aparecer so onde ajudam, enquanto ajustes, relatorios e perfis devem ter topo proprio.
 - Separar "cancelado" de "apagado": cancelado ainda entra como auditoria; apagado definitivo some.
 
 Teste de aceite:
@@ -127,13 +128,14 @@ Teste de aceite:
 
 Objetivo: transformar relatorios em uma area de analise real.
 
-Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada.
+Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada. Avancada na versao 0.2.6 com total do dia isolado dos dias anteriores.
 
 Entregas:
 - Filtros por periodo, tipo, mesa, onibus, forma de pagamento e origem.
 - Cards de metricas: total, quantidade, media, maior venda, dinheiro, sobras, cancelados.
 - Tabelas resumidas por mesa, onibus, tipo e pagamento.
 - Exportar relatorio filtrado.
+- Importar planilhas Excel/CSV compativeis para trazer lancamentos antigos para dentro do app.
 - Permissao para ocultar totais sensiveis.
 - Estado "sem dados" com orientacao simples.
 
@@ -145,12 +147,13 @@ Teste de aceite:
 
 Objetivo: permitir personalizacao sem virar bagunca.
 
-Status: iniciada na versao 0.2.1 com abas rapidas persistentes, editor em Ajustes, ativar/desativar, renomear, reordenar, modo compacto e vinculo Dinheiro/Troco.
+Status: iniciada na versao 0.2.1 com abas rapidas persistentes, editor em Ajustes, ativar/desativar, renomear, reordenar, modo compacto e vinculo Dinheiro/Troco. Avancada na versao 0.2.6 com seletor de elementos visiveis da barra fixada.
 
 Entregas:
 - Criar modelo de "abas rapidas": Conta, Dinheiro, Mesa, Onibus e Personalizada.
 - Permitir ativar/desativar abas.
 - Permitir escolher campos por aba.
+- Permitir ocultar elementos globais da barra: abas, alternancia Conta/Dinheiro, tipo, pessoas, mesa/onibus, descricao, pago com, resultado e enviar.
 - Permitir ordem das abas.
 - Atalhos por aba.
 - Presets prontos para evitar que o usuario precise montar tudo do zero.
@@ -223,7 +226,7 @@ Teste de aceite:
 
 Objetivo: cada versao sair testada e facil de baixar.
 
-Status: smoke test cobre janela principal, tema DataCaixa, relatorios, barra fixada, planilha e servidor remoto com permissoes.
+Status: smoke test cobre janela principal, tema DataCaixa, relatorios, barra fixada, planilha, total diario, configuracao de elementos da barra e servidor remoto com permissoes.
 
 Entregas:
 - Smoke test para janela principal.

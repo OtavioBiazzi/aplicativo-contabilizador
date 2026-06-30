@@ -112,9 +112,15 @@ def main() -> int:
             accentColor: '#0565b7',
             floating: { ...snapshot.settings.floating, theme: 'follow', opacity: 1 }
           });
+          const yesterdayResult = await window.caixa.addEntry({ type: 'Venda', value: 800, people: 1, description: 'Ontem smoke' });
+          const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          yesterday.setHours(12, 0, 0, 0);
+          await window.caixa.updateEntry(yesterdayResult.entry.id, { createdAt: yesterday.toISOString(), updatedAt: yesterday.toISOString() });
         }"""
       )
       expect(page.locator("html")).to_have_attribute("data-theme", "datacaixa")
+      page.wait_for_timeout(500)
+      expect(page.locator(".topbar-card strong")).to_contain_text("R$ 0,00")
       history_tab = page.get_by_role("button", name="Historico")
       history_tab.hover()
       hover_style = history_tab.evaluate(
@@ -137,6 +143,7 @@ def main() -> int:
       page.get_by_label("Descricao").first.fill("Mesa 4")
       page.get_by_role("button", name="Registrar").first.click()
       expect(page.get_by_text("Lancamento registrado.")).to_be_visible(timeout=15000)
+      expect(page.locator(".topbar-card strong")).to_contain_text("R$ 45,00")
       page.get_by_role("button", name="Historico").click()
       expect(page.get_by_text("Mesa 4").first).to_be_visible()
       page.get_by_role("button", name="Relatorios").click()
@@ -147,6 +154,8 @@ def main() -> int:
       expect(page.get_by_text("Relatorio filtrado exportado.")).to_be_visible(timeout=15000)
       page.get_by_role("button", name="Ajustes").click()
       expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
+      page.locator(".settings-nav").get_by_role("button", name="Barra fixada").click()
+      expect(page.get_by_text("Elementos da barra")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Barra rapida").click()
       expect(page.get_by_text("Abas e modos que aparecem na barra fixada.")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Perfis").click()

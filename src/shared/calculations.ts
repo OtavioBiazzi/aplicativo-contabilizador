@@ -57,6 +57,23 @@ export function formatDateTime(iso: string): { date: string; time: string } {
   };
 }
 
+export function getLocalDateKey(input: string | Date = new Date()): string {
+  const date = typeof input === "string" ? new Date(input) : input;
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const year = String(safeDate.getFullYear());
+  const month = String(safeDate.getMonth() + 1).padStart(2, "0");
+  const day = String(safeDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function getLocalMonthKey(input: string | Date = new Date()): string {
+  return getLocalDateKey(input).slice(0, 7);
+}
+
+export function filterEntriesByLocalDate(entries: LedgerEntry[], dateKey = getLocalDateKey()): LedgerEntry[] {
+  return entries.filter((entry) => getLocalDateKey(entry.createdAt) === dateKey);
+}
+
 export function applyRounding(value: number, step: number, direction: RoundDirection): number {
   const safeStep = step > 0 ? step : 0.05;
   const factor = value / safeStep;

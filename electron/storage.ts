@@ -206,7 +206,8 @@ function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppS
     ...saved,
     floating: {
       ...defaults.floating,
-      ...saved.floating
+      ...saved.floating,
+      visibleFields: mergeFloatingFields(defaults.floating.visibleFields, saved.floating?.visibleFields)
     },
     server: {
       ...defaults.server,
@@ -231,6 +232,24 @@ function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppS
     ...merged,
     visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns
   };
+}
+
+function mergeFloatingFields(defaultFields: string[], savedFields?: string[]): string[] {
+  if (!Array.isArray(savedFields) || !savedFields.length) {
+    return [...defaultFields];
+  }
+
+  const fields = savedFields.filter((field) => typeof field === "string");
+  const legacyFields = ["type", "value", "people", "description", "submit"];
+  const isLegacyDefault =
+    fields.length === legacyFields.length &&
+    legacyFields.every((field) => fields.includes(field));
+
+  if (isLegacyDefault) {
+    return [...defaultFields];
+  }
+
+  return fields.includes("value") ? fields : ["value", ...fields];
 }
 
 function mergeQuickTabs(defaultTabs: QuickTabSettings[], savedTabs?: QuickTabSettings[]): QuickTabSettings[] {

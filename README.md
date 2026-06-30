@@ -26,12 +26,12 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Historico editavel com filtros, duplicar, cancelar, lixeira, restauracao e exclusao definitiva.
 - Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com exportacao do recorte filtrado.
 - Exportacao automatica para Excel ou CSV.
-- Organizacao dos arquivos por dia, mes com abas, arquivo fixo ou arquivos separados por tipo.
+- Organizacao dos arquivos por dia real do lancamento, mes com abas, arquivo fixo ou arquivos separados por tipo.
 - Configuracoes persistentes: tema padrao azul de PDV, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
 - Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
-- Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com e troco direto na barra.
+- Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com, troco direto e elementos que podem ser ocultados.
 - Alternancia Conta/Dinheiro pode manter o contexto atual: Conta Onibus vira Dinheiro/Onibus e volta para Onibus.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
 - Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
@@ -40,6 +40,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Historico com lixeira, restauracao e exclusao definitiva.
 - Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL.
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
+- Total do dia, painel lateral e servidor local somam somente lancamentos do dia atual.
 - Servidor local com senha, permissoes, cadastro remoto, edicao, cancelamento, lixeira e atualizacao em tempo real via WebSocket.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
@@ -161,7 +162,10 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - marca CDA no topo e cabecalho da categoria de ajustes;
 - categoria Perfis e API de exportar/importar configuracoes;
 - barra fixada com troca de modo e troco;
+- elementos configuraveis da barra fixada;
 - hover legivel no tema DataCaixa;
+- total de hoje sem somar lancamentos de ontem;
+- exportacao diaria separada pela data real do lancamento;
 - servidor remoto com totais mascarados, registro, edicao, cancelamento e lixeira;
 - ausencia de erros de console.
 

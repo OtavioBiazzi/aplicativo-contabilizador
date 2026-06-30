@@ -6,7 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { EntryDraft, EntryType, LedgerEntry, PaymentMethod, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import { calculateCash, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
+import { calculateCash, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
   permissions: ServerPermissions;
@@ -65,9 +65,10 @@ export class LocalServer {
 
     app.get("/api/entries", this.authorize("view"), async (_request, response) => {
       const entries = await this.options.getEntries();
+      const todayEntries = filterEntriesByLocalDate(entries);
       response.json({
         entries: this.permissions.viewTotals ? entries : entries.map(maskMoneyFields),
-        summary: this.permissions.viewTotals ? summarizeEntries(entries) : null,
+        summary: this.permissions.viewTotals ? summarizeEntries(todayEntries) : null,
         permissions: this.permissions
       });
     });
@@ -483,7 +484,7 @@ function remoteClientHtml(port: number): string {
         (permissions.viewTotals ? "" : " | sem totais");
       qs("#app").hidden = !permissions.create;
       qs("#summary").textContent = data.summary
-        ? "Total: " + money.format(data.summary.total) + " | Lancamentos: " + data.summary.count
+        ? "Hoje: " + money.format(data.summary.total) + " | Lancamentos: " + data.summary.count
         : "Totais ocultos pelas permissoes do servidor.";
       qs("#entries").innerHTML = entriesCache.slice(0, 24).map(renderEntry).join("") || "<p class='muted'>Nenhum lancamento ainda.</p>";
     }

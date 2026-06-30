@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
 import { DEFAULT_COLUMNS, SIMPLE_COLUMNS } from "../src/shared/defaults.js";
-import { formatDateTime, getEntryAmount, roundMoney } from "../src/shared/calculations.js";
+import { formatDateTime, getEntryAmount, getLocalDateKey, getLocalMonthKey, roundMoney } from "../src/shared/calculations.js";
 import type { AppSettings, ExportStatus, LedgerEntry } from "../src/shared/types.js";
 
 interface ExportState {
@@ -123,7 +123,6 @@ export class LedgerExporter {
 
   private buildTargets(entries: LedgerEntry[], settings: AppSettings) {
     const extension = settings.fileFormat;
-    const exportableEntries = entries.filter((entry) => entry.status !== "deleted");
     const visibleColumns =
       settings.spreadsheetMode === "simple"
         ? SIMPLE_COLUMNS
@@ -131,37 +130,47 @@ export class LedgerExporter {
           ? settings.visibleColumns
           : DEFAULT_COLUMNS;
 
+    const rowsFor = (rows: LedgerEntry[]) =>
+      rows.filter((entry) => entry.status !== "deleted").map((entry) => toRow(entry, visibleColumns));
+
+    if (settings.fileStrategy === "daily" || (settings.fileStrategy === "monthlyTabs" && settings.fileFormat !== "xlsx")) {
+      const grouped = groupBy(entries, (entry) => formatDateToken(new Date(entry.createdAt), settings));
+      return Object.entries(grouped).map(([date, rows]) => ({
+        filePath: path.join(settings.outputDirectory, `vendas-${date}.${extension}`),
+        sheets: [{ name: "Lancamentos", rows: rowsFor(rows) }]
+      }));
+    }
+
     if (settings.fileStrategy === "byType") {
-      const grouped = groupBy(exportableEntries, (entry) => sanitizeFilePart(entry.type));
-      return Object.entries(grouped).map(([type, rows]) => ({
-        filePath: path.join(settings.outputDirectory, `${type}-${formatDateToken(new Date(), settings)}.${extension}`),
-        sheets: [{ name: "Lancamentos", rows: rows.map((entry) => toRow(entry, visibleColumns)) }]
+      const grouped = groupBy(entries, (entry) => {
+        const type = sanitizeFilePart(entry.type);
+        const date = formatDateToken(new Date(entry.createdAt), settings);
+        return `${type}-${date}`;
+      });
+      return Object.entries(grouped).map(([filePart, rows]) => ({
+        filePath: path.join(settings.outputDirectory, `${filePart}.${extension}`),
+        sheets: [{ name: "Lancamentos", rows: rowsFor(rows) }]
       }));
     }
 
     if (settings.fileStrategy === "monthlyTabs" && settings.fileFormat === "xlsx") {
-      const grouped = groupBy(exportableEntries, (entry) => formatDateToken(new Date(entry.createdAt), settings));
-      const month = new Date().toISOString().slice(0, 7);
-      return [
-        {
+      const groupedByMonth = groupBy(entries, (entry) => getLocalMonthKey(entry.createdAt));
+      return Object.entries(groupedByMonth).map(([month, monthRows]) => {
+        const groupedByDay = groupBy(monthRows, (entry) => formatDateToken(new Date(entry.createdAt), settings));
+        return {
           filePath: path.join(settings.outputDirectory, `caixa-${month}.${extension}`),
-          sheets: Object.entries(grouped).map(([date, rows]) => ({
+          sheets: Object.entries(groupedByDay).map(([date, rows]) => ({
             name: date.slice(0, 31),
-            rows: rows.map((entry) => toRow(entry, visibleColumns))
+            rows: rowsFor(rows)
           }))
-        }
-      ];
+        };
+      });
     }
-
-    const fileName =
-      settings.fileStrategy === "fixedAll"
-        ? `caixa-geral.${extension}`
-        : `vendas-${formatDateToken(new Date(), settings)}.${extension}`;
 
     return [
       {
-        filePath: path.join(settings.outputDirectory, fileName),
-        sheets: [{ name: "Lancamentos", rows: exportableEntries.map((entry) => toRow(entry, visibleColumns)) }]
+        filePath: path.join(settings.outputDirectory, `caixa-geral.${extension}`),
+        sheets: [{ name: "Lancamentos", rows: rowsFor(entries) }]
       }
     ];
   }
@@ -294,9 +303,7 @@ function isSummableColumn(column: string): boolean {
 }
 
 function formatDateToken(date: Date, settings: AppSettings): string {
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const [year, month, day] = getLocalDateKey(date).split("-");
 
   if (settings.dateFormat === "dd-MM-yyyy") {
     return `${day}-${month}-${year}`;
