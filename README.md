@@ -28,6 +28,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Exportacao automatica para Excel ou CSV, com XLSX formatado, cabecalho, filtro, congelamento da primeira linha, larguras ajustadas e linha TOTAL com formulas.
 - Organizacao dos arquivos por dia real do lancamento, mes com abas, arquivo fixo ou arquivos separados por tipo.
 - Importacao de planilhas Excel/CSV/TSV compativeis com previa, confirmacao e deduplicacao por ID ou assinatura do lancamento.
+- Importacao de pasta inteira com varias planilhas `.xlsx`, `.csv` e `.tsv`, incluindo varios dias de movimento.
 - Diagnostico em **Ajustes > Avancado** com pasta de dados, pasta de planilhas, estado da exportacao, ultimos eventos e backups recentes.
 - Backup local do caixa em JSON, com historico e configuracoes, mais restauracao segura criando backup do estado atual antes de substituir dados.
 - Configuracoes persistentes: tema padrao DataCaixa PDV, DataCaixa escuro, cor principal, densidade, layout, abas rapidas, campos do modo fixado, mesa/onibus ativaveis separadamente, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
@@ -54,7 +55,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Cabecalho principal contextual por aba, separando operacao de caixa, historico, relatorios, rede e ajustes.
 - Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
-- Checagem discreta de releases do GitHub pela area de Atualizacoes.
+- Checagem de releases pela area de Atualizacoes, com botao para baixar e iniciar o instalador sem abrir o GitHub.
 - Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
 - Smoke test da interface com Playwright, cobrindo previa de importacao, backup/restauracao, deduplicacao, barra fixada, preset Onibus enxuto, relatorios profissionais, servidor e planilha.
 
@@ -139,6 +140,8 @@ onibus-2026-06-28.xlsx
 ```
 
 Em **Ajustes > Planilha e backup**, use **Importar Excel/CSV** para trazer planilhas antigas compativeis para o historico do app. Antes de gravar, o app mostra uma previa com linhas novas, duplicadas, ignoradas, avisos e uma amostra dos lancamentos. Linhas `TOTAL` sao ignoradas e lancamentos repetidos sao pulados automaticamente.
+
+Use **Importar pasta** para apontar uma pasta com varios arquivos de dias diferentes. O app procura `.xlsx`, `.csv` e `.tsv`, pula duplicados e atualiza o historico local.
 
 Na mesma area, **Gerar/abrir arquivo** forca uma nova exportacao e abre a pasta no arquivo atual do dia, mes ou modo configurado. Se o Excel estiver segurando o arquivo aberto, o lancamento permanece salvo no banco local e a exportacao fica pendente para uma nova tentativa.
 

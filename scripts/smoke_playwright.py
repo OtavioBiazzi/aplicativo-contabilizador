@@ -86,6 +86,12 @@ def main() -> int:
     f"{datetime.now().strftime('%d/%m/%Y')};10:15:00;Mesa;12,50;Mesa Importada;9;Dinheiro;active\n",
     encoding="utf-8",
   )
+  folder_import_file = SMOKE_DIR / "imports" / "lote-pasta-smoke.csv"
+  folder_import_file.write_text(
+    "Data;Hora;Tipo;Valor pago;Descricao;Onibus;Forma de pagamento;Status\n"
+    f"{datetime.now().strftime('%d/%m/%Y')};11:20:00;Onibus;22,00;Pasta Smoke;3;Pix;active\n",
+    encoding="utf-8",
+  )
 
   env = os.environ.copy()
   env["CAIXA_DATA_DIR"] = str(SMOKE_DIR / "data")
@@ -178,6 +184,7 @@ def main() -> int:
       expect(page.get_by_text("Elementos da barra")).to_be_visible()
       expect(page.get_by_text("Campo curto para numero da mesa.")).to_be_visible()
       expect(page.get_by_text("Campo curto para numero do onibus.")).to_be_visible()
+      expect(page.get_by_text("Pix, debito, credito ou voucher.")).to_be_visible()
       page.get_by_role("button", name="Onibus enxuto").click()
       expect(page.get_by_text("Preset Onibus enxuto aplicado ao rascunho.")).to_be_visible(timeout=10000)
       expect(page.get_by_label("Visual sem borda de janela")).to_be_checked()
@@ -211,6 +218,10 @@ def main() -> int:
       xlsx_import = page.evaluate("""async (filePath) => await window.caixa.importLedgerFile(filePath)""", str(today_xlsx))
       if xlsx_import["imported"] != 0 or xlsx_import["skipped"] < 1:
         print(f"XLSX import did not dedupe existing rows: {xlsx_import}", file=sys.stderr)
+        return 1
+      folder_import = page.evaluate("""async (folderPath) => await window.caixa.importLedgerFolder(folderPath)""", str(SMOKE_DIR / "imports"))
+      if folder_import["filesScanned"] < 2 or folder_import["imported"] != 1:
+        print(f"Folder import did not import only the new rows: {folder_import}", file=sys.stderr)
         return 1
       page.locator(".settings-nav").get_by_role("button", name="Barra rapida").click()
       expect(page.get_by_text("Abas e modos que aparecem na barra fixada.")).to_be_visible()
@@ -271,6 +282,10 @@ def main() -> int:
       expect(page.get_by_text("Ultimos eventos")).to_be_visible()
       page.get_by_role("button", name="Atualizacoes").click()
       expect(page.get_by_text("Nenhuma verificacao feita")).to_be_visible()
+      has_update_install = page.evaluate("""() => typeof window.caixa.installUpdate === 'function'""")
+      if not has_update_install:
+        print("Update installer API is not exposed.", file=sys.stderr)
+        return 1
       page.locator(".settings-nav").get_by_role("button", name="Servidor").click()
       expect(page.get_by_text("Porta padrao")).to_be_visible()
       page.get_by_role("button", name="Rede").click()

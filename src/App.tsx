@@ -136,6 +136,7 @@ const FLOATING_FIELD_OPTIONS = [
   { id: "people", label: "Pessoas", helper: "Divisao rapida da conta." },
   { id: "tableNumber", label: "Mesa", helper: "Campo curto para numero da mesa." },
   { id: "busNumber", label: "Onibus", helper: "Campo curto para numero do onibus." },
+  { id: "paymentMethod", label: "Pagamento", helper: "Pix, debito, credito ou voucher." },
   { id: "description", label: "Descricao", helper: "Campo opcional para observacao." },
   { id: "paidWith", label: "Pago com", helper: "Valor recebido no modo dinheiro." },
   { id: "result", label: "Troco/por pessoa", helper: "Resultado calculado na barra." },
@@ -294,6 +295,14 @@ function cashLinkFromEntryType(type: EntryType, fallback: EntryType = "Mesa"): E
 
 function entryTypeFromCashLink(type: EntryType): EntryType {
   return CASH_LINKABLE_TYPES.includes(type) ? type : "Venda";
+}
+
+function enabledQuickTabs(settings: Pick<AppSettings, "quickTabs">): QuickTabSettings[] {
+  return (settings.quickTabs.length ? settings.quickTabs : DEFAULT_QUICK_TABS).filter((tab) => tab.enabled);
+}
+
+function quickTabForType(tabs: QuickTabSettings[], type: EntryType): QuickTabSettings | undefined {
+  return tabs.find((tab) => tab.type === type && !tab.compact) || tabs.find((tab) => tab.type === type) || tabs[0];
 }
 
 function resolveTheme(theme: AppSettings["theme"], prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
@@ -711,6 +720,27 @@ export function App() {
     }
   };
 
+  const importLedgerFolder = async () => {
+    try {
+      const result = await window.caixa.importLedgerFolder();
+      if (!result) {
+        showToast("info", "Importacao de pasta cancelada.");
+        return;
+      }
+      await reload();
+      setExportStatus(result.exportStatus);
+      const warningText = result.warnings.length ? ` ${result.warnings.length} aviso(s).` : "";
+      showToast(
+        result.imported ? "success" : "info",
+        result.imported
+          ? `${result.imported} lancamento(s) importado(s) de ${result.filesImported}/${result.filesScanned} arquivo(s).${warningText}`
+          : `Nenhum lancamento novo na pasta. ${result.filesScanned} arquivo(s) conferido(s).${warningText}`
+      );
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "Nao foi possivel importar a pasta.");
+    }
+  };
+
   const confirmLedgerImport = async () => {
     if (!importPreview) {
       return;
@@ -896,7 +926,13 @@ export function App() {
         )}
 
         {activeTab === "settings" && (
-          <SettingsPanel settings={settings} onSave={saveSettings} onToast={showToast} onImportLedger={importLedgerFile} />
+            <SettingsPanel
+              settings={settings}
+              onSave={saveSettings}
+              onToast={showToast}
+              onImportLedger={importLedgerFile}
+              onImportLedgerFolder={importLedgerFolder}
+            />
         )}
       </main>
 
@@ -935,13 +971,13 @@ function QuickEntry({
   const [tableNumber, setTableNumber] = useState("");
   const [busNumber, setBusNumber] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Nao informado");
-  const [cashLinkedType, setCashLinkedType] = useState<EntryType>("Mesa");
+  const [cashLinkedType, setCashLinkedType] = useState<EntryType>(() => quickTabForType(enabledQuickTabs(settings), settings.defaultType)?.cashLinkedType || "Mesa");
   const [paidWithText, setPaidWithText] = useState("");
   const [observations, setObservations] = useState("");
   const [roundingStep, setRoundingStep] = useState(settings.defaultRoundingStep);
   const [roundingDirection, setRoundingDirection] = useState<RoundDirection>(settings.defaultRoundingDirection);
   const [registerDifference, setRegisterDifference] = useState(true);
-  const [activeQuickTabId, setActiveQuickTabId] = useState(settings.quickTabs.find((tab) => tab.enabled)?.id || "account");
+  const [activeQuickTabId, setActiveQuickTabId] = useState(() => quickTabForType(enabledQuickTabs(settings), settings.defaultType)?.id || "account");
   const [submitting, setSubmitting] = useState(false);
 
   const value = parseMoney(valueText);
@@ -960,12 +996,20 @@ function QuickEntry({
         setCashLinkedType(cashLinkFromEntryType(type, cashLinkedType));
       }
       setType(modeCommand.type);
-      const matchingTab = (settings.quickTabs.length ? settings.quickTabs : DEFAULT_QUICK_TABS).find(
-        (tab) => tab.enabled && tab.type === modeCommand.type
-      );
+      const matchingTab = quickTabForType(enabledQuickTabs(settings), modeCommand.type);
       setActiveQuickTabId(matchingTab?.id || "manual");
     }
   }, [modeCommand?.nonce, settings.floating.syncMoneyWithEntryType, settings.quickTabs]);
+
+  useEffect(() => {
+    const tabs = enabledQuickTabs(settings);
+    const currentTab = tabs.find((tab) => tab.id === activeQuickTabId);
+    if (currentTab?.type === type) {
+      return;
+    }
+    const matchingTab = quickTabForType(tabs, type);
+    setActiveQuickTabId(matchingTab?.id || currentTab?.id || "manual");
+  }, [settings.quickTabs, type, activeQuickTabId]);
 
   useEffect(() => {
     if (tableFieldEnabled && type === "Mesa" && tableNumber && !description) {
@@ -1058,7 +1102,7 @@ function QuickEntry({
   };
 
   if (pinned) {
-    const quickTabs = (settings.quickTabs.length ? settings.quickTabs : DEFAULT_QUICK_TABS).filter((tab) => tab.enabled);
+    const quickTabs = enabledQuickTabs(settings);
     const isMoney = type === "Dinheiro/Troco";
     const nextModeLabel = isMoney ? "Conta" : "Dinheiro";
     const moneyDisabled = false;
@@ -1085,6 +1129,7 @@ function QuickEntry({
     const showDetail = Boolean(detailFieldId && visible(detailFieldId));
     const showDescription = visible("description");
     const showPaidWith = visible("paidWith");
+    const showPaymentMethod = visible("paymentMethod") && !isMoney && !compactFloating;
     const showResult = visible("result");
     const showSubmit = visible("submit");
     const applyQuickTab = (tab: QuickTabSettings) => {
@@ -1158,14 +1203,13 @@ function QuickEntry({
 
         {showMode && (
           <button
-          className="floating-mode"
-          type="button"
-          onClick={switchMoneyMode}
-        >
-          <span>← →</span>
-          {nextModeLabel}
-        </button>
-
+            className="floating-mode"
+            type="button"
+            onClick={switchMoneyMode}
+          >
+            <span>&lt;-&gt;</span>
+            {nextModeLabel}
+          </button>
         )}
 
         {showType && !compactFloating && (isMoney ? (
@@ -1249,6 +1293,17 @@ function QuickEntry({
               }}
               placeholder={detailKind === "mesa" ? "8" : "2"}
             />
+          </label>
+        )}
+
+        {showPaymentMethod && (
+          <label className="floating-field payment-field">
+            <span>PAGAMENTO</span>
+            <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}>
+              {PAYMENT_METHODS.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
+            </select>
           </label>
         )}
 
@@ -2746,17 +2801,20 @@ function SettingsPanel({
   settings,
   onSave,
   onToast,
-  onImportLedger
+  onImportLedger,
+  onImportLedgerFolder
 }: {
   settings: AppSettings;
   onSave: (settings: AppSettings) => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
   onImportLedger: () => Promise<void>;
+  onImportLedgerFolder: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState(settings);
   const [category, setCategory] = useState<SettingsCategory>("appearance");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [capturingShortcut, setCapturingShortcut] = useState<ShortcutAction | null>(null);
@@ -3070,9 +3128,28 @@ function SettingsPanel({
     try {
       const info = await window.caixa.checkForUpdates();
       setUpdateInfo(info);
-      onToast(info.hasUpdate ? "info" : "success", info.hasUpdate ? "Atualizacao encontrada." : "Voce esta na versao mais recente.");
+      onToast(
+        info.hasUpdate ? "info" : "success",
+        info.hasUpdate ? "Atualizacao encontrada. Use Baixar e instalar." : "Voce esta na versao mais recente."
+      );
     } finally {
       setCheckingUpdate(false);
+    }
+  };
+
+  const installUpdate = async () => {
+    setInstallingUpdate(true);
+    try {
+      const info = updateInfo?.hasUpdate ? updateInfo : await window.caixa.checkForUpdates();
+      setUpdateInfo(info);
+      if (!info.hasUpdate) {
+        onToast("success", "Voce esta na versao mais recente.");
+        return;
+      }
+      const result = await window.caixa.installUpdate();
+      onToast(result.ok ? "success" : "error", result.message);
+    } finally {
+      setInstallingUpdate(false);
     }
   };
 
@@ -3271,6 +3348,10 @@ function SettingsPanel({
             <button className="primary-button" type="button" onClick={onImportLedger}>
               <Upload size={18} />
               Importar Excel/CSV
+            </button>
+            <button className="ghost-button" type="button" onClick={onImportLedgerFolder}>
+              <Upload size={18} />
+              Importar pasta
             </button>
             <button className="ghost-button" type="button" onClick={openCurrentExport}>
               <ExternalLink size={18} />
@@ -3527,20 +3608,21 @@ function SettingsPanel({
 
         <section className={categoryClass("updates", "settings-group wide")}>
           <h3>Atualizacoes</h3>
-          <p className="settings-note">A verificacao consulta a ultima release do GitHub e mostra um aviso discreto. A versao portatil abre a pagina da release; auto-update completo fica para o instalador assinado.</p>
+          <p className="settings-note">A verificacao consulta a ultima release e, quando houver versao nova, baixa o instalador para atualizar sem abrir o GitHub.</p>
           <div className="update-card">
             <Download size={20} />
             <div>
               <strong>{updateInfo ? `Atual: ${updateInfo.currentVersion} | GitHub: ${updateInfo.latestVersion}` : "Nenhuma verificacao feita"}</strong>
-              <span>{updateInfo?.message || (updateInfo?.hasUpdate ? "Existe uma versao nova disponivel." : "Use o botao para verificar sem interromper o caixa.")}</span>
+              <span>{updateInfo?.message || (updateInfo?.hasUpdate ? "Versao nova pronta para baixar e instalar." : "Use o botao para verificar sem interromper o caixa.")}</span>
             </div>
-            <button className="ghost-button" type="button" onClick={checkUpdates} disabled={checkingUpdate}>
+            <button className="ghost-button" type="button" onClick={checkUpdates} disabled={checkingUpdate || installingUpdate}>
               {checkingUpdate ? <RefreshCw size={16} className="spin" /> : <Download size={16} />}
               Verificar
             </button>
             {updateInfo?.hasUpdate && (
-              <button className="primary-button" type="button" onClick={() => window.open(updateInfo.releaseUrl)}>
-                <ExternalLink size={16} /> Abrir release
+              <button className="primary-button" type="button" onClick={installUpdate} disabled={installingUpdate || !updateInfo.downloadUrl}>
+                {installingUpdate ? <RefreshCw size={16} className="spin" /> : <Download size={16} />}
+                Baixar e instalar
               </button>
             )}
           </div>

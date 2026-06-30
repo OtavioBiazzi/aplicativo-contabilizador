@@ -6,9 +6,11 @@ import type {
   EntryDraft,
   ExportStatus,
   LedgerImportPreview,
+  LedgerFolderImportResult,
   LedgerImportResult,
   LedgerEntry,
   ServerState,
+  UpdateInstallResult,
   UpdateInfo
 } from "./shared/types";
 
@@ -26,6 +28,7 @@ export interface CaixaApi {
   importSettings: () => Promise<{ filePath: string; settings: Partial<AppSettings> } | null>;
   previewLedgerImport: (filePath?: string) => Promise<LedgerImportPreview | null>;
   importLedgerFile: (filePath?: string) => Promise<LedgerImportResult | null>;
+  importLedgerFolder: (folderPath?: string) => Promise<LedgerFolderImportResult | null>;
   exportNow: () => Promise<ExportStatus>;
   exportFilteredReport: (ids: string[], label: string) => Promise<ExportStatus>;
   getDiagnostics: () => Promise<DiagnosticsSnapshot>;
@@ -38,6 +41,7 @@ export interface CaixaApi {
   openDataDirectory: () => Promise<string>;
   openOutputDirectory: () => Promise<string>;
   checkForUpdates: () => Promise<UpdateInfo>;
+  installUpdate: () => Promise<UpdateInstallResult>;
   startServer: (port: number, password: string) => Promise<ServerState>;
   stopServer: () => Promise<ServerState>;
   disconnectDevice: (id: string) => Promise<ServerState>;

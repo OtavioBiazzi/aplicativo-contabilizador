@@ -443,7 +443,7 @@ p {
 }
 
 h1 {
-  font-size: clamp(1.8rem, 4vw, 3rem);
+  font-size: 2.35rem;
   line-height: 1;
 }
 
@@ -571,7 +571,7 @@ h3 {
 }
 
 .value-field input {
-  font-size: clamp(1.6rem, 4vw, 3rem);
+  font-size: 2.25rem;
   font-weight: 900;
   letter-spacing: 0;
   padding-top: 16px;
@@ -1077,7 +1077,7 @@ th {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: clamp(1.12rem, 2vw, 1.55rem);
+  font-size: 1.34rem;
   white-space: nowrap;
 }
 
@@ -1415,7 +1415,7 @@ th {
 
 .remote-client-hero h3 {
   margin-top: 2px;
-  font-size: clamp(1.18rem, 2vw, 1.5rem);
+  font-size: 1.38rem;
 }
 
 .remote-client-hero p {
@@ -1572,7 +1572,7 @@ th {
 
 .settings-hero h2 {
   margin-top: 2px;
-  font-size: clamp(1.22rem, 1.8vw, 1.7rem);
+  font-size: 1.45rem;
 }
 
 .settings-hero p {
@@ -1731,7 +1731,7 @@ th {
 
 .file-preview-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
@@ -2240,17 +2240,22 @@ th {
   --bar-button: var(--bar-accent);
   --bar-button-text: #ffffff;
   position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(104px, 130px) minmax(150px, 220px) minmax(120px, 160px) minmax(260px, 1fr) auto auto;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: end;
   gap: 8px;
   width: 100%;
+  min-width: 700px;
   min-height: 116px;
   border: 1px solid color-mix(in srgb, var(--bar-accent) 14%, rgba(255, 255, 255, 0.62));
   border-radius: 10px;
   padding: 14px 8px 14px 10px;
   background: color-mix(in srgb, var(--panel) 94%, #ffffff 6%);
   box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 12%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.42);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--bar-accent) 52%, var(--line)) transparent;
   -webkit-app-region: no-drag;
 }
 
@@ -2271,7 +2276,7 @@ body.floating-borderless .floating-bar {
 }
 
 .floating-bar.has-detail {
-  grid-template-columns: auto minmax(104px, 130px) minmax(140px, 190px) minmax(104px, 150px) minmax(84px, 108px) minmax(220px, 1fr) minmax(104px, auto) auto;
+  min-width: 700px;
 }
 
 .floating-bar.with-tabs {
@@ -2280,7 +2285,6 @@ body.floating-borderless .floating-bar {
 }
 
 .floating-bar.compact-tab {
-  grid-template-columns: auto minmax(150px, 230px) minmax(260px, 1fr) auto auto;
   min-height: 98px;
 }
 
@@ -2369,6 +2373,7 @@ body.floating-borderless .floating-bar {
 }
 
 .floating-mode {
+  flex: 0 0 120px;
   align-self: end;
   min-width: 104px;
   margin-bottom: 1px;
@@ -2379,17 +2384,34 @@ body.floating-borderless .floating-bar {
 }
 
 .floating-field {
+  flex: 0 0 auto;
   display: grid;
   gap: 6px;
   min-width: 0;
 }
 
+.floating-kind {
+  flex-basis: 132px;
+}
+
 .amount-field {
-  min-width: 130px;
+  flex: 1 1 190px;
+  min-width: 150px;
+  max-width: 230px;
 }
 
 .paid-field {
-  min-width: 140px;
+  flex: 1 1 180px;
+  min-width: 150px;
+  max-width: 230px;
+}
+
+.payment-field {
+  flex-basis: 150px;
+}
+
+.people-field {
+  flex-basis: 154px;
 }
 
 .floating-field > span,
@@ -2484,14 +2506,17 @@ body.floating-borderless .floating-bar {
 }
 
 .floating-description {
-  min-width: 240px;
+  flex: 1 1 260px;
+  min-width: 220px;
 }
 
 .floating-detail {
+  flex-basis: 108px;
   min-width: 96px;
 }
 
 .floating-result {
+  flex: 0 0 126px;
   display: grid;
   align-self: end;
   min-width: 0;
@@ -2506,12 +2531,14 @@ body.floating-borderless .floating-bar {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: clamp(0.88rem, 1.35vw, 1.08rem);
+  font-size: 1rem;
   white-space: nowrap;
 }
 
 .floating-send {
+  flex: 1 1 140px;
   min-width: 80px;
+  max-width: 360px;
   align-self: end;
   border: 0;
   background: linear-gradient(180deg, color-mix(in srgb, var(--bar-button) 94%, #ffffff), color-mix(in srgb, var(--bar-button) 82%, #043c6e));
@@ -2788,6 +2815,7 @@ body.floating-borderless .floating-bar {
   .quick-tab-row,
   .quick-tab-row.has-money-link,
   .profile-active-card,
+  .file-preview-card,
   .update-card,
   .settings-action-card,
   .shortcut-card,
@@ -2812,22 +2840,8 @@ body.floating-borderless .floating-bar {
 
 @media (max-width: 860px) {
   .floating-bar {
-    grid-template-columns: auto minmax(110px, 140px) minmax(150px, 1fr) minmax(150px, 1fr) auto;
-    min-height: 154px;
-    align-content: center;
-  }
-
-  .floating-description {
-    grid-column: 3 / span 2;
-  }
-
-  .floating-result {
-    grid-column: 5;
-    grid-row: 1;
-  }
-
-  .floating-detail {
-    grid-column: 2;
+    min-height: 124px;
+    padding-top: 34px;
   }
 
   .people-stepper {
@@ -2841,22 +2855,13 @@ body.floating-borderless .floating-bar {
 
 @media (max-width: 560px) {
   .floating-bar {
-    grid-template-columns: 1fr;
-    min-height: auto;
-    padding-top: 30px;
-  }
-
-  .floating-mode,
-  .floating-send,
-  .floating-description,
-  .floating-result {
-    grid-column: 1;
+    min-height: 124px;
   }
 
   .floating-result {
-    border-left: 0;
-    border-top: 1px solid var(--line);
-    padding: 8px 0 0;
+    border-left: 1px solid var(--line);
+    border-top: 0;
+    padding: 0 0 0 10px;
   }
 }
 

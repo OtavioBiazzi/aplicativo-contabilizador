@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DiagnosticLogger } from "./diagnostics.js";
 import { LedgerExporter } from "./exporter.js";
@@ -13,9 +14,11 @@ import type {
   DiagnosticsSnapshot,
   EntryDraft,
   ExportStatus,
+  LedgerFolderImportResult,
   LedgerImportPreview,
   LedgerImportResult,
   LedgerEntry,
+  UpdateInstallResult,
   UpdateInfo
 } from "../src/shared/types.js";
 
@@ -30,6 +33,20 @@ let logger: DiagnosticLogger;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
+const FLOATING_MIN_WIDTH = 720;
+const FLOATING_MIN_HEIGHT = 112;
+
+interface GitHubReleaseAsset {
+  name?: string;
+  browser_download_url?: string;
+  size?: number;
+}
+
+interface GitHubReleaseResponse {
+  tag_name?: string;
+  html_url?: string;
+  assets?: GitHubReleaseAsset[];
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -87,8 +104,8 @@ async function createFloatingWindow(options?: { opacity?: number; lockPosition?:
   floatingWindow = new BrowserWindow({
     width: 1240,
     height: 132,
-    minWidth: 560,
-    minHeight: 110,
+    minWidth: FLOATING_MIN_WIDTH,
+    minHeight: FLOATING_MIN_HEIGHT,
     show: false,
     frame: false,
     transparent: true,
@@ -141,8 +158,124 @@ function applyFloatingWindowOptions(options?: { opacity?: number; lockPosition?:
   if (!floatingWindow || floatingWindow.isDestroyed()) {
     return;
   }
+  floatingWindow.setMinimumSize(FLOATING_MIN_WIDTH, FLOATING_MIN_HEIGHT);
+  const [width, height] = floatingWindow.getSize();
+  if (width < FLOATING_MIN_WIDTH || height < FLOATING_MIN_HEIGHT) {
+    floatingWindow.setSize(Math.max(width, FLOATING_MIN_WIDTH), Math.max(height, FLOATING_MIN_HEIGHT));
+  }
   floatingWindow.setOpacity(options?.opacity ?? 1);
   floatingWindow.setMovable(!options?.lockPosition);
+}
+
+async function fetchLatestRelease(): Promise<GitHubReleaseResponse> {
+  const response = await net.fetch(RELEASE_API_URL, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": "Contabilizador-Caixa"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub respondeu ${response.status}.`);
+  }
+  return (await response.json()) as GitHubReleaseResponse;
+}
+
+function selectInstallerAsset(release: GitHubReleaseResponse): GitHubReleaseAsset | undefined {
+  const assets = release.assets || [];
+  const setup = assets.find((asset) => {
+    const name = asset.name || "";
+    return /setup/i.test(name) && /\.exe$/i.test(name) && !/blockmap/i.test(name);
+  });
+  if (setup) {
+    return setup;
+  }
+  return assets.find((asset) => {
+    const name = asset.name || "";
+    return /\.exe$/i.test(name) && !/blockmap/i.test(name);
+  });
+}
+
+function releaseToUpdateInfo(release: GitHubReleaseResponse, currentVersion: string): UpdateInfo {
+  const latestVersion = normalizeVersion(release.tag_name || currentVersion);
+  const asset = selectInstallerAsset(release);
+  const hasUpdate = compareVersions(latestVersion, currentVersion) > 0;
+  return {
+    currentVersion,
+    latestVersion,
+    hasUpdate,
+    releaseUrl: release.html_url || "https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases",
+    downloadUrl: hasUpdate ? asset?.browser_download_url : undefined,
+    assetName: hasUpdate ? asset?.name : undefined,
+    checkedAt: new Date().toISOString(),
+    message: hasUpdate && !asset ? "Versao nova encontrada, mas sem instalador .exe anexado." : undefined
+  };
+}
+
+async function downloadUpdateAsset(info: UpdateInfo): Promise<string> {
+  if (!info.downloadUrl) {
+    throw new Error("A release nova nao tem instalador disponivel para baixar.");
+  }
+  const fileName = info.assetName || `Contabilizador-Caixa-Setup-${info.latestVersion}.exe`;
+  const directory = await fs.mkdtemp(path.join(app.getPath("temp"), "contabilizador-update-"));
+  const filePath = path.join(directory, fileName.replace(/[<>:"/\\|?*]/g, "-"));
+  const response = await net.fetch(info.downloadUrl, {
+    headers: {
+      "User-Agent": "Contabilizador-Caixa"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Download respondeu ${response.status}.`);
+  }
+  const data = Buffer.from(await response.arrayBuffer());
+  await fs.writeFile(filePath, data);
+  return filePath;
+}
+
+async function launchWindowsUpdater(installerPath: string) {
+  const scriptPath = path.join(path.dirname(installerPath), "instalar-atualizacao.cmd");
+  const script = [
+    "@echo off",
+    "setlocal",
+    `set "APP_PID=${process.pid}"`,
+    `set "INSTALLER=${installerPath}"`,
+    ":wait",
+    'tasklist /FI "PID eq %APP_PID%" | find "%APP_PID%" >nul',
+    "if not errorlevel 1 (",
+    "  timeout /t 1 /nobreak >nul",
+    "  goto wait",
+    ")",
+    'start "" /wait "%INSTALLER%" /S',
+    "exit /b %ERRORLEVEL%"
+  ].join("\r\n");
+  await fs.writeFile(scriptPath, script, "utf8");
+  const child = spawn("cmd.exe", ["/c", scriptPath], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true
+  });
+  child.unref();
+}
+
+async function listImportableLedgerFiles(directory: string): Promise<string[]> {
+  const files: string[] = [];
+  async function walk(currentDirectory: string) {
+    const items = await fs.readdir(currentDirectory, { withFileTypes: true });
+    for (const item of items) {
+      const fullPath = path.join(currentDirectory, item.name);
+      if (item.isDirectory()) {
+        if (!item.name.startsWith(".")) {
+          await walk(fullPath);
+        }
+        continue;
+      }
+      const extension = path.extname(item.name).toLowerCase();
+      if (!item.name.startsWith("~$") && [".xlsx", ".csv", ".tsv"].includes(extension)) {
+        files.push(fullPath);
+      }
+    }
+  }
+  await walk(directory);
+  return files.sort((left, right) => left.localeCompare(right, "pt-BR", { numeric: true }));
 }
 
 async function bootstrap() {
@@ -459,6 +592,66 @@ function registerIpc() {
     };
   });
 
+  ipcMain.handle("entries:importFolder", async (_event, providedPath?: string): Promise<LedgerFolderImportResult | null> => {
+    let folderPath = providedPath;
+    if (!folderPath) {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: "Importar pasta com planilhas",
+        properties: ["openDirectory"]
+      });
+      if (result.canceled || !result.filePaths[0]) {
+        return null;
+      }
+      folderPath = result.filePaths[0];
+    }
+
+    const settings = await store.getSettings();
+    const files = await listImportableLedgerFiles(folderPath);
+    let importedCount = 0;
+    let skippedCount = 0;
+    let totalRows = 0;
+    let parsedRows = 0;
+    let filesImported = 0;
+    const warnings: string[] = [];
+
+    for (const filePath of files) {
+      try {
+        const parsed = await readLedgerImport(filePath, settings);
+        const imported = await store.importEntries(parsed.entries);
+        if (imported.imported) {
+          filesImported += 1;
+        }
+        importedCount += imported.imported;
+        skippedCount += imported.skipped + parsed.skippedRows;
+        totalRows += parsed.totalRows;
+        parsedRows += parsed.parsedRows;
+        warnings.push(...parsed.warnings.map((warning) => `${path.basename(filePath)}: ${warning}`));
+      } catch (error) {
+        skippedCount += 1;
+        warnings.push(`${path.basename(filePath)}: ${error instanceof Error ? error.message : "Nao foi possivel importar."}`);
+      }
+    }
+
+    const exportStatus = await exporter.export(await store.getEntries(), settings);
+    await logExportStatus("importacao de pasta", exportStatus);
+    if (importedCount) {
+      await logger.info("Pasta de planilhas importada", `${importedCount} novo(s), ${skippedCount} pulado(s), ${files.length} arquivo(s): ${folderPath}`);
+      localServer.broadcast({ type: "entries-imported", count: importedCount });
+      sendToAll("entries:changed");
+    }
+    return {
+      folderPath,
+      filesScanned: files.length,
+      filesImported,
+      imported: importedCount,
+      skipped: skippedCount,
+      totalRows,
+      parsedRows,
+      warnings,
+      exportStatus
+    };
+  });
+
   ipcMain.handle("diagnostics:get", async (): Promise<DiagnosticsSnapshot> => {
     const settings = await store.getSettings();
     const backups = await store.listDataBackups();
@@ -515,24 +708,7 @@ function registerIpc() {
   ipcMain.handle("updates:check", async (): Promise<UpdateInfo> => {
     const currentVersion = app.getVersion();
     try {
-      const response = await net.fetch(RELEASE_API_URL, {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "User-Agent": "Contabilizador-Caixa"
-        }
-      });
-      if (!response.ok) {
-        throw new Error(`GitHub respondeu ${response.status}.`);
-      }
-      const release = (await response.json()) as { tag_name?: string; html_url?: string };
-      const latestVersion = normalizeVersion(release.tag_name || currentVersion);
-      return {
-        currentVersion,
-        latestVersion,
-        hasUpdate: compareVersions(latestVersion, currentVersion) > 0,
-        releaseUrl: release.html_url || "https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases",
-        checkedAt: new Date().toISOString()
-      };
+      return releaseToUpdateInfo(await fetchLatestRelease(), currentVersion);
     } catch (error) {
       return {
         currentVersion,
@@ -542,6 +718,43 @@ function registerIpc() {
         checkedAt: new Date().toISOString(),
         message: error instanceof Error ? error.message : "Nao foi possivel verificar atualizacoes."
       };
+    }
+  });
+
+  ipcMain.handle("updates:install", async (): Promise<UpdateInstallResult> => {
+    const currentVersion = app.getVersion();
+    try {
+      const info = releaseToUpdateInfo(await fetchLatestRelease(), currentVersion);
+      if (!info.hasUpdate) {
+        return {
+          ok: false,
+          latestVersion: info.latestVersion,
+          message: "Voce ja esta na versao mais recente."
+        };
+      }
+      const installerPath = await downloadUpdateAsset(info);
+      await logger.info("Atualizacao baixada", `${info.latestVersion}; ${installerPath}`);
+      if (process.platform === "win32") {
+        await launchWindowsUpdater(installerPath);
+        setTimeout(() => app.quit(), 450);
+        return {
+          ok: true,
+          latestVersion: info.latestVersion,
+          filePath: installerPath,
+          message: "Atualizacao baixada. O app vai fechar e instalar sozinho."
+        };
+      }
+      await shell.openPath(installerPath);
+      return {
+        ok: true,
+        latestVersion: info.latestVersion,
+        filePath: installerPath,
+        message: "Atualizacao baixada. Conclua a instalacao pelo arquivo aberto."
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Nao foi possivel instalar a atualizacao.";
+      await logger.error("Falha ao instalar atualizacao", message);
+      return { ok: false, latestVersion: currentVersion, message };
     }
   });
 

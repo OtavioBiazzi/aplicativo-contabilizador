@@ -202,6 +202,18 @@ export interface LedgerImportResult {
   exportStatus: ExportStatus;
 }
 
+export interface LedgerFolderImportResult {
+  folderPath: string;
+  filesScanned: number;
+  filesImported: number;
+  imported: number;
+  skipped: number;
+  totalRows: number;
+  parsedRows: number;
+  warnings: string[];
+  exportStatus: ExportStatus;
+}
+
 export interface LedgerImportPreviewItem {
   id: string;
   createdAt: string;
@@ -260,7 +272,16 @@ export interface UpdateInfo {
   hasUpdate: boolean;
   releaseUrl: string;
   checkedAt: string;
+  downloadUrl?: string;
+  assetName?: string;
   message?: string;
+}
+
+export interface UpdateInstallResult {
+  ok: boolean;
+  message: string;
+  latestVersion?: string;
+  filePath?: string;
 }
 
 export interface AppSnapshot {
