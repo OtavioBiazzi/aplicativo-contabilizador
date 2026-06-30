@@ -34,6 +34,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
 - Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com, troco direto e elementos que podem ser ocultados.
 - Alternancia Conta/Dinheiro pode manter o contexto atual: Conta Onibus vira Dinheiro/Onibus e volta para Onibus.
+- Presets da barra fixada: Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, todos editaveis depois.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
 - Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
 - Temas adicionais DataCaixa PDV e Italia como base do remake visual, com contraste revisado em menus e hovers.
@@ -47,13 +48,13 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
 - Categoria Perfis para aplicar, atualizar, criar e remover perfis sem mexer nos dados de venda.
-- Tela de configuracoes com cabecalho por categoria e layout mais controlado para monitores grandes.
+- Tela de configuracoes com cabecalho por categoria, presets operacionais e layout mais controlado para monitores grandes.
 - Cabecalho principal contextual por aba, separando operacao de caixa, historico, relatorios, rede e ajustes.
 - Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
 - Checagem discreta de releases do GitHub pela area de Atualizacoes.
 - Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
-- Smoke test da interface com Playwright.
+- Smoke test da interface com Playwright, cobrindo importacao, barra fixada, preset Onibus enxuto, servidor, relatorios e planilha.
 
 ## Requisitos
 

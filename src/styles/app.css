@@ -1050,7 +1050,7 @@ th {
 
 .settings-layout {
   display: grid;
-  grid-template-columns: minmax(210px, 250px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
   gap: 0;
   min-height: 0;
   overflow: hidden;
@@ -1076,12 +1076,12 @@ th {
   align-content: start;
   gap: 14px;
   width: 100%;
-  max-width: 1180px;
+  max-width: 1440px;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   justify-self: center;
-  padding: 2px 4px 2px 16px;
+  padding: 2px 12px 2px 18px;
 }
 
 .settings-hero {
@@ -1229,6 +1229,62 @@ th {
 
 .floating-field-picker .section-title {
   grid-column: 1 / -1;
+}
+
+.floating-preset-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(184px, 1fr));
+  gap: 10px;
+}
+
+.floating-preset-card {
+  display: grid;
+  gap: 7px;
+  min-height: 116px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 8px;
+  padding: 12px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 58%),
+    color-mix(in srgb, var(--panel) 94%, var(--accent) 6%);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.floating-preset-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--line));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.floating-preset-card.active {
+  border-color: var(--accent);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent 58%),
+    color-mix(in srgb, var(--panel) 88%, var(--accent) 12%);
+}
+
+.floating-preset-card strong,
+.floating-preset-card span,
+.floating-preset-card small {
+  display: block;
+}
+
+.floating-preset-card span,
+.floating-preset-card small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.floating-preset-card small {
+  align-self: end;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .toggle-card {
@@ -1507,12 +1563,22 @@ th {
   gap: 8px;
   width: 100%;
   min-height: 116px;
-  border: 1px solid color-mix(in srgb, var(--bar-accent) 18%, rgba(255, 255, 255, 0.76));
-  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--bar-accent) 14%, rgba(255, 255, 255, 0.62));
+  border-radius: 10px;
   padding: 14px 8px 14px 10px;
   background: color-mix(in srgb, var(--panel) 94%, #ffffff 6%);
   box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 12%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.42);
   -webkit-app-region: no-drag;
+}
+
+body.floating-borderless .pinned-app {
+  padding: 0;
+}
+
+body.floating-borderless .floating-bar {
+  border-color: transparent;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--bar-accent) 10%, transparent);
 }
 
 .floating-bar.money {
@@ -1765,8 +1831,9 @@ th {
   min-width: 80px;
   align-self: end;
   border: 0;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bar-button) 88%, #ffffff), var(--bar-button));
-  box-shadow: 0 8px 18px color-mix(in srgb, var(--bar-button) 26%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bar-button) 94%, #ffffff), color-mix(in srgb, var(--bar-button) 82%, #043c6e));
+  color: #ffffff;
+  box-shadow: 0 9px 20px color-mix(in srgb, var(--bar-button) 30%, transparent);
 }
 
 .floating-send:not(:disabled):hover,
@@ -1776,7 +1843,10 @@ th {
 }
 
 .floating-send:disabled {
-  opacity: 0.52;
+  background: #91a8bb;
+  box-shadow: none;
+  color: #f8fbff;
+  opacity: 1;
   cursor: not-allowed;
 }
 

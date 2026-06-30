@@ -100,7 +100,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     floating: {
       visibleFields: DEFAULT_FLOATING_FIELDS,
       opacity: 1,
-      borderless: false,
+      borderless: true,
       lockPosition: false,
       theme: "follow",
       syncMoneyWithEntryType: true

@@ -147,7 +147,7 @@ Teste de aceite:
 
 Objetivo: permitir personalizacao sem virar bagunca.
 
-Status: iniciada na versao 0.2.1 com abas rapidas persistentes, editor em Ajustes, ativar/desativar, renomear, reordenar, modo compacto e vinculo Dinheiro/Troco. Avancada na versao 0.2.6 com seletor de elementos visiveis da barra fixada.
+Status: iniciada na versao 0.2.1 com abas rapidas persistentes, editor em Ajustes, ativar/desativar, renomear, reordenar, modo compacto e vinculo Dinheiro/Troco. Avancada na versao 0.2.6 com seletor de elementos visiveis da barra fixada. Avancada na versao 0.2.8 com presets editaveis Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, alem de barra sem borda visual por padrao.
 
 Entregas:
 - Criar modelo de "abas rapidas": Conta, Dinheiro, Mesa, Onibus e Personalizada.
@@ -231,6 +231,7 @@ Status: smoke test cobre janela principal, tema DataCaixa, relatorios, barra fix
 Entregas:
 - Smoke test para janela principal.
 - Smoke test para barra fixada.
+- Smoke test para preset Onibus enxuto e barra sem borda visual.
 - Smoke test para planilha.
 - Smoke test para servidor local.
 - Smoke test para tema DataCaixa e Italia.

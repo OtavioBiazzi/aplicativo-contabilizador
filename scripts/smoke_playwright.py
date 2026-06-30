@@ -164,6 +164,9 @@ def main() -> int:
       expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Barra fixada").click()
       expect(page.get_by_text("Elementos da barra")).to_be_visible()
+      page.get_by_role("button", name="Onibus enxuto").click()
+      expect(page.get_by_text("Preset Onibus enxuto aplicado ao rascunho.")).to_be_visible(timeout=10000)
+      expect(page.get_by_label("Visual sem borda de janela")).to_be_checked()
       page.locator(".settings-nav").get_by_role("button", name="Planilha e backup").click()
       expect(page.get_by_role("button", name="Importar Excel/CSV")).to_be_visible()
       first_import = page.evaluate("""async (filePath) => await window.caixa.importLedgerFile(filePath)""", str(import_file))
@@ -196,6 +199,8 @@ def main() -> int:
       expect(page.get_by_text("Nenhuma verificacao feita")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Servidor").click()
       expect(page.get_by_text("Porta padrao")).to_be_visible()
+      page.get_by_role("button", name="Salvar configuracoes").click()
+      expect(page.get_by_text("Configuracoes salvas.")).to_be_visible(timeout=10000)
       page.get_by_role("button", name="Rede").click()
       expect(page.get_by_text("Criar servidor")).to_be_visible()
       page.get_by_role("button", name="Conectar").click()
@@ -269,20 +274,23 @@ def main() -> int:
       floating_page = find_app_page(browser, floating=True)
       floating_page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
       expect(floating_page.locator(".floating-bar")).to_be_visible(timeout=15000)
+      body_classes = floating_page.locator("body").get_attribute("class") or ""
+      if "floating-borderless" not in body_classes:
+        print(f"Floating bar did not use the borderless class: {body_classes}", file=sys.stderr)
+        return 1
       expect(floating_page.locator("html")).to_have_attribute("data-theme", "datacaixa")
       expect(floating_page.get_by_text("Caixa rapido")).not_to_be_visible()
-      expect(floating_page.locator(".floating-kind select")).to_be_visible()
-      floating_page.locator(".floating-kind select").select_option("Onibus")
+      expect(floating_page.locator(".floating-kind select")).not_to_be_visible()
+      expect(floating_page.locator(".floating-description input")).not_to_be_visible()
       expect(floating_page.locator(".floating-detail input")).to_be_visible()
       floating_page.locator(".floating-mode").click()
       expect(floating_page.locator(".floating-mode")).to_contain_text("Conta")
-      expect(floating_page.locator(".floating-cash-kind select")).to_have_value("Onibus")
+      expect(floating_page.locator(".floating-cash-kind select")).not_to_be_visible()
       expect(floating_page.locator(".floating-detail input")).to_be_visible()
       expect(floating_page.get_by_text("TROCO")).to_be_visible()
       floating_page.locator(".amount-field input").fill("87,50")
       expect(floating_page.locator(".floating-result strong")).to_contain_text("0,00")
       floating_page.locator(".floating-detail input").fill("12")
-      floating_page.locator(".floating-description input").fill("Pagamento fixado")
       floating_page.locator(".floating-send").click()
       expect(floating_page.get_by_text("Lancamento registrado.")).to_be_visible(timeout=15000)
       removed = page.evaluate(
@@ -328,7 +336,7 @@ def main() -> int:
         with ZipFile(exported_file) as zip_file:
           sheets.append(zip_file.read("xl/worksheets/sheet1.xml").decode("utf-8"))
       sheet = "\n".join(sheets)
-      if "Mesa 4" in sheet or "Pagamento fixado" not in sheet or "TOTAL" not in sheet:
+      if "Mesa 4" in sheet or "Onibus 12" not in sheet or "TOTAL" not in sheet:
         print("Exported xlsx did not reflect removal/total correctly.", file=sys.stderr)
         return 1
       report_files = list((SMOKE_DIR / "exports").glob("relatorio-*.xlsx"))

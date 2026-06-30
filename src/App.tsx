@@ -120,6 +120,118 @@ const FLOATING_FIELD_OPTIONS = [
   { id: "submit", label: "Botao enviar", helper: "Tambem da para enviar com Enter." }
 ];
 
+type FloatingPresetId = "cashier" | "table" | "bus" | "money" | "minimal";
+
+interface FloatingPreset {
+  id: FloatingPresetId;
+  label: string;
+  title: string;
+  description: string;
+  defaultType: EntryType;
+  fields: string[];
+  quickTabs: QuickTabSettings[];
+  density?: AppSettings["density"];
+  layout?: AppSettings["layout"];
+  fieldSize?: AppSettings["fieldSize"];
+  borderless?: boolean;
+}
+
+const FLOATING_PRESETS: FloatingPreset[] = [
+  {
+    id: "cashier",
+    label: "Caixa",
+    title: "Caixa completo",
+    description: "Conta, dinheiro, mesa, onibus e divisao sempre ao alcance.",
+    defaultType: "Venda",
+    fields: DEFAULT_FLOATING_FIELDS,
+    quickTabs: DEFAULT_QUICK_TABS,
+    density: "normal",
+    layout: "complete",
+    fieldSize: "medium",
+    borderless: true
+  },
+  {
+    id: "table",
+    label: "Mesa",
+    title: "Mesa rapida",
+    description: "Valor, mesa, pessoas e dinheiro vinculado a mesa.",
+    defaultType: "Mesa",
+    fields: ["tabs", "mode", "value", "people", "detail", "description", "paidWith", "result", "submit"],
+    quickTabs: [
+      { id: "table", label: "Mesa", enabled: true, type: "Mesa" },
+      { id: "money", label: "Dinheiro", enabled: true, type: "Dinheiro/Troco", cashLinkedType: "Mesa" },
+      { id: "account", label: "Venda", enabled: true, type: "Venda" },
+      { id: "bus", label: "Onibus", enabled: false, type: "Onibus" },
+      { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
+      { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
+    ],
+    density: "compact",
+    layout: "sidePanel",
+    fieldSize: "medium",
+    borderless: true
+  },
+  {
+    id: "bus",
+    label: "Onibus",
+    title: "Onibus enxuto",
+    description: "So o necessario: modo, valor, numero do onibus, pago com e enviar.",
+    defaultType: "Onibus",
+    fields: ["tabs", "mode", "value", "detail", "paidWith", "result", "submit"],
+    quickTabs: [
+      { id: "bus", label: "Onibus", enabled: true, type: "Onibus" },
+      { id: "money", label: "Dinheiro", enabled: true, type: "Dinheiro/Troco", cashLinkedType: "Onibus" },
+      { id: "account", label: "Venda", enabled: true, type: "Venda" },
+      { id: "table", label: "Mesa", enabled: false, type: "Mesa" },
+      { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
+      { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
+    ],
+    density: "compact",
+    layout: "compact",
+    fieldSize: "small",
+    borderless: true
+  },
+  {
+    id: "money",
+    label: "Dinheiro",
+    title: "Dinheiro e troco",
+    description: "Conta, pago com, troco grande e vinculo Mesa/Onibus.",
+    defaultType: "Dinheiro/Troco",
+    fields: ["tabs", "mode", "type", "value", "detail", "paidWith", "description", "result", "submit"],
+    quickTabs: [
+      { id: "money", label: "Dinheiro", enabled: true, type: "Dinheiro/Troco", cashLinkedType: "Mesa" },
+      { id: "table", label: "Mesa", enabled: true, type: "Mesa" },
+      { id: "bus", label: "Onibus", enabled: true, type: "Onibus" },
+      { id: "account", label: "Venda", enabled: true, type: "Venda" },
+      { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
+      { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
+    ],
+    density: "compact",
+    layout: "complete",
+    fieldSize: "medium",
+    borderless: true
+  },
+  {
+    id: "minimal",
+    label: "Minimo",
+    title: "Minimalista",
+    description: "Barra bem pequena para registrar venda sem distracao.",
+    defaultType: "Venda",
+    fields: ["mode", "value", "submit"],
+    quickTabs: [
+      { id: "account", label: "Venda", enabled: true, type: "Venda", compact: true },
+      { id: "money", label: "Dinheiro", enabled: true, type: "Dinheiro/Troco", cashLinkedType: "Venda", compact: true },
+      { id: "table", label: "Mesa", enabled: false, type: "Mesa" },
+      { id: "bus", label: "Onibus", enabled: false, type: "Onibus" },
+      { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
+      { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
+    ],
+    density: "compact",
+    layout: "pinnedBar",
+    fieldSize: "small",
+    borderless: true
+  }
+];
+
 const CASH_LINKABLE_TYPES = CASH_LINKED_TYPES.map((item) => item.value);
 
 function cashLinkFromEntryType(type: EntryType, fallback: EntryType = "Mesa"): EntryType {
@@ -239,6 +351,22 @@ function normalizeFloatingFields(fields?: string[]): string[] {
   return fields.includes("value") ? fields : ["value", ...fields];
 }
 
+function applyFloatingPresetToSettings(settings: AppSettings, preset: FloatingPreset): AppSettings {
+  return normalizeSettingsDraft(settings, {
+    defaultType: preset.defaultType,
+    density: preset.density || settings.density,
+    layout: preset.layout || settings.layout,
+    fieldSize: preset.fieldSize || settings.fieldSize,
+    quickTabs: cloneValue(preset.quickTabs),
+    floating: {
+      ...settings.floating,
+      visibleFields: normalizeFloatingFields(preset.fields),
+      borderless: preset.borderless ?? settings.floating.borderless,
+      syncMoneyWithEntryType: true
+    }
+  });
+}
+
 function dateTokenForFormat(date: Date, format: AppSettings["dateFormat"]): string {
   const [year, month, day] = getLocalDateKey(date).split("-");
   if (format === "dd-MM-yyyy") {
@@ -293,7 +421,9 @@ export function App() {
   const reload = async () => {
     const snapshot = await window.caixa.getSnapshot();
     setEntries(snapshot.entries);
-    setSettings(snapshot.settings);
+    setSettings((current) =>
+      current && JSON.stringify(current) === JSON.stringify(snapshot.settings) ? current : snapshot.settings
+    );
     setServer(snapshot.server);
     setExportStatus(snapshot.exportStatus);
     setPinnedState(await window.caixa.getPinned());
@@ -332,10 +462,12 @@ export function App() {
       document.documentElement.dataset.floatingTheme = resolvedFloatingTheme;
       document.documentElement.dataset.density = settings.density;
       document.documentElement.dataset.fieldSize = settings.fieldSize;
+      document.documentElement.dataset.floatingBorderless = settings.floating.borderless ? "true" : "false";
       document.documentElement.style.setProperty("--accent", settings.accentColor);
       document.documentElement.classList.toggle("is-floating-root", IS_FLOATING_WINDOW);
       document.body.classList.toggle("is-pinned", pinned || IS_FLOATING_WINDOW);
       document.body.classList.toggle("is-floating-window", IS_FLOATING_WINDOW);
+      document.body.classList.toggle("floating-borderless", IS_FLOATING_WINDOW && settings.floating.borderless);
     };
 
     applyTheme();
@@ -1813,15 +1945,23 @@ function SettingsPanel({
     }
   };
 
+  const applyFloatingPreset = (preset: FloatingPreset) => {
+    setDraft((current) => applyFloatingPresetToSettings(current, preset));
+    onToast("success", `Preset ${preset.title} aplicado ao rascunho.`);
+  };
+
   const applyPreset = (preset: "Caixa" | "Mesa" | "Onibus" | "Dinheiro" | "Minimalista") => {
-    const map: Record<typeof preset, Partial<AppSettings>> = {
-      Caixa: { defaultType: "Venda", layout: "complete", density: "normal" },
-      Mesa: { defaultType: "Mesa", layout: "sidePanel", density: "compact" },
-      Onibus: { defaultType: "Onibus", layout: "compact", density: "compact" },
-      Dinheiro: { defaultType: "Dinheiro/Troco", layout: "complete", density: "normal" },
-      Minimalista: { defaultType: "Venda", layout: "pinnedBar", density: "compact", fieldSize: "small" }
+    const map: Record<typeof preset, FloatingPresetId> = {
+      Caixa: "cashier",
+      Mesa: "table",
+      Onibus: "bus",
+      Dinheiro: "money",
+      Minimalista: "minimal"
     };
-    setDraft((current) => ({ ...current, ...map[preset] }));
+    const selected = FLOATING_PRESETS.find((item) => item.id === map[preset]);
+    if (selected) {
+      applyFloatingPreset(selected);
+    }
   };
 
   const moveColumn = (column: string, direction: -1 | 1) => {
@@ -2263,6 +2403,27 @@ function SettingsPanel({
 
         <section className={categoryClass("floating", "settings-group wide")}>
           <h3>Modo fixado</h3>
+          <div className="floating-preset-grid">
+            {FLOATING_PRESETS.map((preset) => {
+              const active =
+                draft.defaultType === preset.defaultType &&
+                normalizeFloatingFields(draft.floating.visibleFields).join("|") === normalizeFloatingFields(preset.fields).join("|") &&
+                draft.quickTabs.filter((tab) => tab.enabled).map((tab) => tab.id).join("|") ===
+                  preset.quickTabs.filter((tab) => tab.enabled).map((tab) => tab.id).join("|");
+              return (
+                <button
+                  key={preset.id}
+                  className={`floating-preset-card ${active ? "active" : ""}`}
+                  type="button"
+                  onClick={() => applyFloatingPreset(preset)}
+                >
+                  <strong>{preset.title}</strong>
+                  <span>{preset.description}</span>
+                  <small>{normalizeFloatingFields(preset.fields).length} elementos na barra</small>
+                </button>
+              );
+            })}
+          </div>
           <label className="field"><span>Tema da barra</span>
             <select value={draft.floating.theme || "follow"} onChange={(event) => update("floating", { ...draft.floating, theme: event.target.value as AppSettings["floating"]["theme"] })}>
               <option value="follow">Seguir tema do app</option>
@@ -2276,6 +2437,7 @@ function SettingsPanel({
           </label>
           <label className="field"><span>Opacidade ({Math.round(draft.floating.opacity * 100)}%)</span><input type="range" min={0.35} max={1} step={0.01} value={draft.floating.opacity} onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })} /></label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar posicao</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.borderless} onChange={(event) => update("floating", { ...draft.floating, borderless: event.target.checked })} /> Visual sem borda de janela</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.syncMoneyWithEntryType} onChange={(event) => update("floating", { ...draft.floating, syncMoneyWithEntryType: event.target.checked })} /> Manter Mesa/Onibus ao trocar Conta/Dinheiro</label>
           <div className="floating-field-picker">
             <div className="section-title">
