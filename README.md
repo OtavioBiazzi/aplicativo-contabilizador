@@ -57,7 +57,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Cabecalho principal contextual por aba, separando operacao de caixa, historico, relatorios, rede e ajustes.
 - Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
-- Checagem de releases pela area de Atualizacoes, com botao para baixar e iniciar o instalador sem abrir o GitHub.
+- Checagem de releases pela area de Atualizacoes, com botao para baixar e iniciar o instalador diretamente, sem abrir o GitHub nem janela de terminal.
 - Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
 - Smoke test da interface com Playwright, cobrindo previa de importacao, backup/restauracao, deduplicacao, barra fixada, preset Onibus enxuto, relatorios profissionais, servidor e planilha.
 

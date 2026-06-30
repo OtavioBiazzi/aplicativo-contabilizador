@@ -267,23 +267,7 @@ async function downloadUpdateAsset(info: UpdateInfo): Promise<string> {
 }
 
 async function launchWindowsUpdater(installerPath: string) {
-  const scriptPath = path.join(path.dirname(installerPath), "instalar-atualizacao.cmd");
-  const script = [
-    "@echo off",
-    "setlocal",
-    `set "APP_PID=${process.pid}"`,
-    `set "INSTALLER=${installerPath}"`,
-    ":wait",
-    'tasklist /FI "PID eq %APP_PID%" | find "%APP_PID%" >nul',
-    "if not errorlevel 1 (",
-    "  timeout /t 1 /nobreak >nul",
-    "  goto wait",
-    ")",
-    'start "" /wait "%INSTALLER%" /S',
-    "exit /b %ERRORLEVEL%"
-  ].join("\r\n");
-  await fs.writeFile(scriptPath, script, "utf8");
-  const child = spawn("cmd.exe", ["/c", scriptPath], {
+  const child = spawn(installerPath, ["/S"], {
     detached: true,
     stdio: "ignore",
     windowsHide: true
@@ -771,12 +755,14 @@ function registerIpc() {
       await logger.info("Atualizacao baixada", `${info.latestVersion}; ${installerPath}`);
       if (process.platform === "win32") {
         await launchWindowsUpdater(installerPath);
-        setTimeout(() => app.quit(), 450);
+        floatingWindow?.close();
+        mainWindow?.close();
+        setTimeout(() => app.quit(), 250);
         return {
           ok: true,
           latestVersion: info.latestVersion,
           filePath: installerPath,
-          message: "Atualizacao baixada. O app vai fechar e instalar sozinho."
+          message: "Atualizacao baixada. O app vai fechar e iniciar o instalador."
         };
       }
       await shell.openPath(installerPath);

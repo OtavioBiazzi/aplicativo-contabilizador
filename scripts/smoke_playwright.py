@@ -75,6 +75,10 @@ def main() -> int:
   if not (ROOT / "dist-electron" / "electron" / "main.js").exists():
     print("Run npm run build before the smoke test.", file=sys.stderr)
     return 1
+  main_source = (ROOT / "dist-electron" / "electron" / "main.js").read_text(encoding="utf-8")
+  if "instalar-atualizacao.cmd" in main_source or "cmd.exe" in main_source:
+    print("Updater still launches through a visible command shell.", file=sys.stderr)
+    return 1
 
   shutil.rmtree(SMOKE_DIR, ignore_errors=True)
   (SMOKE_DIR / "data").mkdir(parents=True, exist_ok=True)
