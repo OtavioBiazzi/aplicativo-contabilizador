@@ -203,12 +203,43 @@ def main() -> int:
       if not has_config_io:
         print("Settings import/export API is not exposed.", file=sys.stderr)
         return 1
-      page.get_by_role("button", name="Atualizacoes").click()
-      expect(page.get_by_text("Nenhuma verificacao feita")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Servidor").click()
       expect(page.get_by_text("Porta padrao")).to_be_visible()
       page.get_by_role("button", name="Salvar configuracoes").click()
       expect(page.get_by_text("Configuracoes salvas.")).to_be_visible(timeout=10000)
+      has_diagnostics = page.evaluate(
+        """() => typeof window.caixa.getDiagnostics === 'function'
+          && typeof window.caixa.createDataBackup === 'function'
+          && typeof window.caixa.restoreDataBackup === 'function'"""
+      )
+      if not has_diagnostics:
+        print("Diagnostics API is not exposed.", file=sys.stderr)
+        return 1
+      backup_smoke = page.evaluate(
+        """async () => {
+          const backup = await window.caixa.createDataBackup('smoke');
+          await window.caixa.addEntry({ type: 'Venda', value: 9.99, people: 1, description: 'Entrada apos backup smoke' });
+          const restored = await window.caixa.restoreDataBackup(backup.filePath);
+          const snapshot = await window.caixa.getSnapshot();
+          const diagnostics = await window.caixa.getDiagnostics();
+          return {
+            backupCount: diagnostics.backupCount,
+            restored: Boolean(restored),
+            hasTempEntry: snapshot.entries.some((item) => item.description === 'Entrada apos backup smoke'),
+            logCount: diagnostics.logs.length
+          };
+        }"""
+      )
+      if not backup_smoke["restored"] or backup_smoke["hasTempEntry"] or backup_smoke["backupCount"] < 2 or backup_smoke["logCount"] < 1:
+        print(f"Backup/restore smoke failed: {backup_smoke}", file=sys.stderr)
+        return 1
+      page.locator(".settings-nav").get_by_role("button", name="Avancado").click()
+      expect(page.get_by_text("Backup local do caixa")).to_be_visible(timeout=10000)
+      expect(page.get_by_text("Ultimos eventos")).to_be_visible()
+      page.get_by_role("button", name="Atualizacoes").click()
+      expect(page.get_by_text("Nenhuma verificacao feita")).to_be_visible()
+      page.locator(".settings-nav").get_by_role("button", name="Servidor").click()
+      expect(page.get_by_text("Porta padrao")).to_be_visible()
       page.get_by_role("button", name="Rede").click()
       expect(page.get_by_text("Criar servidor")).to_be_visible()
       page.get_by_role("button", name="Conectar").click()

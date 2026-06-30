@@ -3,10 +3,11 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DEFAULT_QUICK_TABS, ENTRY_TYPES, SIMPLE_COLUMNS, createDefaultSettings } from "../src/shared/defaults.js";
 import { calculateCash, roundMoney } from "../src/shared/calculations.js";
-import type { AppSettings, EntryDraft, EntryType, LedgerEntry, QuickTabSettings } from "../src/shared/types.js";
+import type { AppSettings, DataBackupInfo, EntryDraft, EntryType, LedgerEntry, QuickTabSettings } from "../src/shared/types.js";
 
 const SETTINGS_FILE = "settings.json";
 const LEDGER_FILE = "ledger.json";
+const DATA_BACKUP_DIRECTORY = "data-backups";
 
 interface StorePaths {
   dataDirectory: string;
@@ -175,8 +176,78 @@ export class LedgerStore {
     return { imported: plan.imported, skipped: plan.skipped, entries: plan.entries };
   }
 
+  getDataDirectory(): string {
+    return this.paths.dataDirectory;
+  }
+
+  async listDataBackups(): Promise<DataBackupInfo[]> {
+    const directory = this.backupDirectory();
+    try {
+      const files = await fs.readdir(directory);
+      const infos = await Promise.all(
+        files
+          .filter((file) => file.endsWith(".json"))
+          .map(async (file) => backupInfoFromFile(path.join(directory, file)))
+      );
+      return infos
+        .filter((info): info is DataBackupInfo => Boolean(info))
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    } catch {
+      return [];
+    }
+  }
+
+  async createDataBackup(reason = "manual"): Promise<DataBackupInfo> {
+    const settings = await this.getSettings();
+    const entries = await this.getEntries();
+    const createdAt = new Date().toISOString();
+    const directory = this.backupDirectory();
+    await fs.mkdir(directory, { recursive: true });
+    const filePath = path.join(directory, `contabilizador-backup-${createdAt.replace(/[:.]/g, "-")}.json`);
+    await writeJsonAtomic(filePath, {
+      app: "Contabilizador Caixa",
+      createdAt,
+      reason,
+      entryCount: entries.length,
+      settings,
+      entries
+    });
+    const info = await backupInfoFromFile(filePath);
+    if (!info) {
+      throw new Error("Nao foi possivel criar o backup.");
+    }
+    return info;
+  }
+
+  async restoreDataBackup(filePath: string): Promise<{ backup: DataBackupInfo; safetyBackup: DataBackupInfo }> {
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as { entries?: LedgerEntry[]; settings?: AppSettings; createdAt?: string; reason?: string };
+    if (!Array.isArray(parsed.entries) || !parsed.settings) {
+      throw new Error("Backup invalido. O arquivo precisa conter vendas e configuracoes.");
+    }
+
+    const safetyBackup = await this.createDataBackup("antes-restauracao");
+    this.settings = mergeSettings(createDefaultSettings(this.paths.defaultOutputDirectory), parsed.settings);
+    this.entries = parsed.entries;
+    await writeJsonAtomic(this.settingsPath(), this.settings);
+    await this.persistEntries();
+    const backup = (await backupInfoFromFile(filePath)) || {
+      filePath,
+      fileName: path.basename(filePath),
+      createdAt: parsed.createdAt || new Date().toISOString(),
+      reason: parsed.reason || "backup externo",
+      size: raw.length,
+      entryCount: parsed.entries.length
+    };
+    return { backup, safetyBackup };
+  }
+
   private async persistEntries() {
     await writeJsonAtomic(this.ledgerPath(), this.entries || []);
+  }
+
+  private backupDirectory() {
+    return path.join(this.paths.dataDirectory, DATA_BACKUP_DIRECTORY);
   }
 
   private settingsPath() {
@@ -185,6 +256,23 @@ export class LedgerStore {
 
   private ledgerPath() {
     return path.join(this.paths.dataDirectory, LEDGER_FILE);
+  }
+}
+
+async function backupInfoFromFile(filePath: string): Promise<DataBackupInfo | null> {
+  try {
+    const [raw, stat] = await Promise.all([fs.readFile(filePath, "utf8"), fs.stat(filePath)]);
+    const parsed = JSON.parse(raw) as { createdAt?: string; reason?: string; entryCount?: number; entries?: unknown[] };
+    return {
+      filePath,
+      fileName: path.basename(filePath),
+      createdAt: parsed.createdAt || stat.mtime.toISOString(),
+      reason: parsed.reason || "manual",
+      size: stat.size,
+      entryCount: typeof parsed.entryCount === "number" ? parsed.entryCount : Array.isArray(parsed.entries) ? parsed.entries.length : 0
+    };
+  } catch {
+    return null;
   }
 }
 

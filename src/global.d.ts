@@ -1,4 +1,16 @@
-import type { AppSettings, AppSnapshot, EntryDraft, ExportStatus, LedgerImportPreview, LedgerImportResult, LedgerEntry, ServerState, UpdateInfo } from "./shared/types";
+import type {
+  AppSettings,
+  AppSnapshot,
+  DataBackupInfo,
+  DiagnosticsSnapshot,
+  EntryDraft,
+  ExportStatus,
+  LedgerImportPreview,
+  LedgerImportResult,
+  LedgerEntry,
+  ServerState,
+  UpdateInfo
+} from "./shared/types";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
@@ -16,6 +28,15 @@ export interface CaixaApi {
   importLedgerFile: (filePath?: string) => Promise<LedgerImportResult | null>;
   exportNow: () => Promise<ExportStatus>;
   exportFilteredReport: (ids: string[], label: string) => Promise<ExportStatus>;
+  getDiagnostics: () => Promise<DiagnosticsSnapshot>;
+  createDataBackup: (reason?: string) => Promise<DataBackupInfo>;
+  restoreDataBackup: (filePath?: string) => Promise<{
+    backup: DataBackupInfo;
+    safetyBackup: DataBackupInfo;
+    exportStatus: ExportStatus;
+  } | null>;
+  openDataDirectory: () => Promise<string>;
+  openOutputDirectory: () => Promise<string>;
   checkForUpdates: () => Promise<UpdateInfo>;
   startServer: (port: number, password: string) => Promise<ServerState>;
   stopServer: () => Promise<ServerState>;

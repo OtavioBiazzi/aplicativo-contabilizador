@@ -28,6 +28,8 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia real do lancamento, mes com abas, arquivo fixo ou arquivos separados por tipo.
 - Importacao de planilhas Excel/CSV/TSV compativeis com previa, confirmacao e deduplicacao por ID ou assinatura do lancamento.
+- Diagnostico em **Ajustes > Avancado** com pasta de dados, pasta de planilhas, estado da exportacao, ultimos eventos e backups recentes.
+- Backup local do caixa em JSON, com historico e configuracoes, mais restauracao segura criando backup do estado atual antes de substituir dados.
 - Configuracoes persistentes: tema padrao azul de PDV, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
 - Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
@@ -54,7 +56,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
 - Checagem discreta de releases do GitHub pela area de Atualizacoes.
 - Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
-- Smoke test da interface com Playwright, cobrindo previa de importacao, deduplicacao, barra fixada, preset Onibus enxuto, servidor, relatorios e planilha.
+- Smoke test da interface com Playwright, cobrindo previa de importacao, backup/restauracao, deduplicacao, barra fixada, preset Onibus enxuto, servidor, relatorios e planilha.
 
 ## Requisitos
 
@@ -136,7 +138,7 @@ onibus-2026-06-28.xlsx
 
 Em **Ajustes > Planilha e backup**, use **Importar Excel/CSV** para trazer planilhas antigas compativeis para o historico do app. Antes de gravar, o app mostra uma previa com linhas novas, duplicadas, ignoradas, avisos e uma amostra dos lancamentos. Linhas `TOTAL` sao ignoradas e lancamentos repetidos sao pulados automaticamente.
 
-Quando backup automatico estiver ativo, arquivos existentes sao copiados para a subpasta `backups/` antes da nova exportacao.
+Quando backup automatico estiver ativo, arquivos existentes sao copiados para a subpasta `backups/` antes da nova exportacao. O backup interno do caixa fica em **Ajustes > Avancado** e salva o JSON principal do app para restauracao futura.
 
 ## Servidor local
 

@@ -187,7 +187,7 @@ Teste de aceite:
 
 Objetivo: deixar o app mais profissional no sistema.
 
-Status: iniciada na versao 0.2.0 com icone em `assets/icon/`, fundo preto removido, `.ico` gerado e metadados do instalador configurados. Avancada na versao 0.2.2 com marca CDA no topo esquerdo do app. Assinatura de codigo ainda depende de certificado.
+Status: iniciada na versao 0.2.0 com icone em `assets/icon/`, fundo preto removido, `.ico` gerado e metadados do instalador configurados. Avancada na versao 0.2.2 com marca CDA no topo esquerdo do app. Avancada na versao 0.2.10 com diagnostico em Ajustes > Avancado, logs simples, backup local do caixa e restauracao segura com backup automatico antes de substituir dados. Assinatura de codigo ainda depende de certificado.
 
 Entregas:
 - Copiar o icone de referencia para `assets/icon/`.
@@ -196,6 +196,8 @@ Entregas:
 - Configurar `publisherName`, `productName`, atalhos e metadados do instalador.
 - Documentar que reduzir SmartScreen/aviso de virus de verdade exige certificado de assinatura de codigo.
 - Preparar assinatura no build quando houver certificado.
+- Diagnostico simples com ultimos eventos, diretorio de dados e backups locais.
+- Restauracao de backup do banco local com confirmacao e backup de seguranca.
 
 Teste de aceite:
 - App mostra icone correto na janela, taskbar, atalho e instalador.
@@ -234,6 +236,7 @@ Entregas:
 - Smoke test para preset Onibus enxuto e barra sem borda visual.
 - Smoke test para planilha.
 - Smoke test para previa de importacao e deduplicacao.
+- Smoke test para backup/restauracao e diagnostico.
 - Smoke test para servidor local.
 - Smoke test para tema DataCaixa e Italia.
 - Checklist antes de release.

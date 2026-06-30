@@ -225,6 +225,33 @@ export interface LedgerImportPreview {
   sample: LedgerImportPreviewItem[];
 }
 
+export interface DataBackupInfo {
+  filePath: string;
+  fileName: string;
+  createdAt: string;
+  reason: string;
+  size: number;
+  entryCount: number;
+}
+
+export interface DiagnosticLogItem {
+  id: string;
+  createdAt: string;
+  level: "info" | "warn" | "error";
+  message: string;
+  detail?: string;
+}
+
+export interface DiagnosticsSnapshot {
+  dataDirectory: string;
+  outputDirectory: string;
+  exportStatus: ExportStatus;
+  entryCount: number;
+  backupCount: number;
+  backups: DataBackupInfo[];
+  logs: DiagnosticLogItem[];
+}
+
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;

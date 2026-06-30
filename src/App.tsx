@@ -53,6 +53,7 @@ import {
 import type {
   AppSettings,
   DaySummary,
+  DiagnosticsSnapshot,
   EntryDraft,
   EntryType,
   ExportStatus,
@@ -403,6 +404,16 @@ function profileSummary(profile: Partial<AppSettings>): string {
     profile.defaultType ? `Padrao ${profile.defaultType}` : ""
   ].filter(Boolean);
   return details.join(" | ") || "Perfil pronto para personalizar";
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function App() {
@@ -2063,8 +2074,16 @@ function SettingsPanel({
   const [category, setCategory] = useState<SettingsCategory>("appearance");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
 
   useEffect(() => setDraft(settings), [settings]);
+
+  useEffect(() => {
+    if (category === "advanced") {
+      loadDiagnostics();
+    }
+  }, [category]);
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -2220,6 +2239,51 @@ function SettingsPanel({
       onToast("info", "Configuracoes importadas para revisao. Clique em Salvar para aplicar.");
     } catch (error) {
       onToast("error", error instanceof Error ? error.message : "Nao foi possivel importar configuracoes.");
+    }
+  };
+
+  const loadDiagnostics = async () => {
+    setDiagnosticsLoading(true);
+    try {
+      setDiagnostics(await window.caixa.getDiagnostics());
+    } catch (error) {
+      onToast("error", error instanceof Error ? error.message : "Nao foi possivel carregar diagnostico.");
+    } finally {
+      setDiagnosticsLoading(false);
+    }
+  };
+
+  const createDataBackup = async () => {
+    try {
+      const backup = await window.caixa.createDataBackup("manual");
+      onToast("success", `Backup criado: ${backup.fileName}`);
+      await loadDiagnostics();
+    } catch (error) {
+      onToast("error", error instanceof Error ? error.message : "Nao foi possivel criar backup.");
+    }
+  };
+
+  const restoreDataBackup = async (filePath?: string) => {
+    if (!window.confirm("Restaurar este backup? O estado atual sera salvo antes da restauracao.")) {
+      return;
+    }
+    try {
+      const result = await window.caixa.restoreDataBackup(filePath);
+      if (!result) {
+        onToast("info", "Restauracao cancelada.");
+        return;
+      }
+      onToast("success", `Backup restaurado: ${result.backup.fileName}`);
+      await loadDiagnostics();
+    } catch (error) {
+      onToast("error", error instanceof Error ? error.message : "Nao foi possivel restaurar backup.");
+    }
+  };
+
+  const openDirectory = async (target: "data" | "output") => {
+    const message = target === "data" ? await window.caixa.openDataDirectory() : await window.caixa.openOutputDirectory();
+    if (message) {
+      onToast("error", message);
     }
   };
 
@@ -2731,6 +2795,23 @@ function SettingsPanel({
 
         <section className={categoryClass("advanced", "settings-group wide")}>
           <h3>Backup, restauracao e seguranca</h3>
+          <div className="diagnostics-grid">
+            <article>
+              <span>Banco local</span>
+              <strong>{diagnostics ? `${diagnostics.entryCount} lancamentos` : "Carregando"}</strong>
+              <small>{diagnostics?.dataDirectory || "Diretorio de dados do app"}</small>
+            </article>
+            <article>
+              <span>Planilha</span>
+              <strong>{diagnostics?.exportStatus.pendingCount ? `${diagnostics.exportStatus.pendingCount} pendente` : "Sincronizada"}</strong>
+              <small>{diagnostics?.exportStatus.message || "Exportacao local pronta"}</small>
+            </article>
+            <article>
+              <span>Backups</span>
+              <strong>{diagnostics?.backupCount ?? 0}</strong>
+              <small>Backups do historico interno</small>
+            </article>
+          </div>
           <div className="settings-action-card">
             <DatabaseBackup size={20} />
             <div>
@@ -2743,6 +2824,77 @@ function SettingsPanel({
             <button className="primary-button" type="button" onClick={importSettings}>
               <FileSpreadsheet size={16} /> Importar
             </button>
+          </div>
+          <div className="settings-action-card">
+            <DatabaseBackup size={20} />
+            <div>
+              <strong>Backup local do caixa</strong>
+              <span>Salva historico e configuracoes em um JSON proprio do app. Antes de restaurar, o estado atual tambem recebe um backup de seguranca.</span>
+            </div>
+            <button className="ghost-button" type="button" onClick={createDataBackup}>
+              <Save size={16} /> Criar backup
+            </button>
+            <button className="primary-button" type="button" onClick={() => restoreDataBackup()}>
+              <Upload size={16} /> Restaurar externo
+            </button>
+          </div>
+          <div className="settings-action-card">
+            <DatabaseBackup size={20} />
+            <div>
+              <strong>Pastas e diagnostico</strong>
+              <span>Abra os dados internos ou a pasta das planilhas para conferir arquivos, backups e logs quando algo parecer fora do lugar.</span>
+            </div>
+            <button className="ghost-button" type="button" onClick={() => openDirectory("data")}>
+              <DatabaseBackup size={16} /> Dados
+            </button>
+            <button className="ghost-button" type="button" onClick={() => openDirectory("output")}>
+              <FileSpreadsheet size={16} /> Planilhas
+            </button>
+          </div>
+          <div className="diagnostics-panel">
+            <div className="section-title">
+              <strong>Backups recentes</strong>
+              <button className="ghost-button" type="button" onClick={loadDiagnostics} disabled={diagnosticsLoading}>
+                {diagnosticsLoading ? <RefreshCw size={15} className="spin" /> : <RefreshCw size={15} />}
+                Atualizar
+              </button>
+            </div>
+            <div className="backup-list">
+              {diagnostics?.backups.slice(0, 6).map((backup) => {
+                const { date, time } = formatDateTime(backup.createdAt);
+                return (
+                  <article key={backup.filePath}>
+                    <div>
+                      <strong>{backup.fileName}</strong>
+                      <span>{date} {time} | {backup.entryCount} lancamentos | {formatFileSize(backup.size)} | {backup.reason}</span>
+                    </div>
+                    <button className="ghost-button" type="button" onClick={() => restoreDataBackup(backup.filePath)}>
+                      <RotateCcw size={15} /> Restaurar
+                    </button>
+                  </article>
+                );
+              })}
+              {diagnostics && !diagnostics.backups.length && <p className="settings-note">Nenhum backup local criado ainda.</p>}
+            </div>
+          </div>
+          <div className="diagnostics-panel">
+            <div className="section-title">
+              <strong>Ultimos eventos</strong>
+              <span>Log simples para diagnosticar exportacao, importacao e restauracao.</span>
+            </div>
+            <div className="log-list">
+              {diagnostics?.logs.slice(0, 8).map((log) => {
+                const { date, time } = formatDateTime(log.createdAt);
+                return (
+                  <article key={log.id} className={log.level}>
+                    <span>{log.level}</span>
+                    <strong>{log.message}</strong>
+                    <small>{date} {time}{log.detail ? ` | ${log.detail}` : ""}</small>
+                  </article>
+                );
+              })}
+              {diagnostics && !diagnostics.logs.length && <p className="settings-note">Nenhum evento registrado ainda.</p>}
+            </div>
           </div>
           <div className="danger-zone">
             <DatabaseBackup size={20} />

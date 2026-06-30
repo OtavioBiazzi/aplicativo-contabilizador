@@ -2,11 +2,22 @@ import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from 
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { DiagnosticLogger } from "./diagnostics.js";
 import { LedgerExporter } from "./exporter.js";
 import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
 import { LedgerStore } from "./storage.js";
-import type { AppSettings, EntryDraft, LedgerImportPreview, LedgerImportResult, LedgerEntry, UpdateInfo } from "../src/shared/types.js";
+import type {
+  AppSettings,
+  DataBackupInfo,
+  DiagnosticsSnapshot,
+  EntryDraft,
+  ExportStatus,
+  LedgerImportPreview,
+  LedgerImportResult,
+  LedgerEntry,
+  UpdateInfo
+} from "../src/shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -15,6 +26,7 @@ let floatingWindow: BrowserWindow | null = null;
 let store: LedgerStore;
 let exporter: LedgerExporter;
 let localServer: LocalServer;
+let logger: DiagnosticLogger;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
@@ -141,7 +153,9 @@ async function bootstrap() {
     process.env.CAIXA_OUTPUT_DIR || path.join(app.getPath("documents"), "Contabilizador Caixa");
   store = new LedgerStore({ dataDirectory, defaultOutputDirectory });
   exporter = new LedgerExporter(dataDirectory);
+  logger = new DiagnosticLogger(dataDirectory);
   await store.initialize();
+  await logger.info("Aplicativo iniciado", `Versao ${app.getVersion()}`);
 
   localServer = new LocalServer({
     permissions: (await store.getSettings()).server.permissions,
@@ -208,6 +222,12 @@ function sendToAll(channel: string, ...args: unknown[]) {
   }
 }
 
+async function logExportStatus(action: string, status: ExportStatus) {
+  if (!status.ok) {
+    await logger.warn(`Exportacao pendente em ${action}`, status.message || "Sem detalhe informado.");
+  }
+}
+
 function registerIpc() {
   ipcMain.handle("app:getSnapshot", async () => ({
     entries: await store.getEntries(),
@@ -219,6 +239,7 @@ function registerIpc() {
   ipcMain.handle("entries:add", async (_event, draft: EntryDraft) => {
     const entry = await store.addEntry(draft);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    await logExportStatus("novo lancamento", exportStatus);
     localServer.broadcast({ type: "entry-added", entry });
     sendToAll("entries:changed");
     return { entry, exportStatus };
@@ -227,6 +248,7 @@ function registerIpc() {
   ipcMain.handle("entries:update", async (_event, id: string, patch: Partial<LedgerEntry>) => {
     const entry = await store.updateEntry(id, patch);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    await logExportStatus("edicao de lancamento", exportStatus);
     localServer.broadcast({ type: "entry-updated", entry });
     sendToAll("entries:changed");
     return { entry, exportStatus };
@@ -235,6 +257,7 @@ function registerIpc() {
   ipcMain.handle("entries:remove", async (_event, id: string) => {
     await store.removeEntry(id);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    await logExportStatus("lixeira", exportStatus);
     localServer.broadcast({ type: "entry-removed", id });
     sendToAll("entries:changed");
     return { exportStatus };
@@ -243,6 +266,7 @@ function registerIpc() {
   ipcMain.handle("entries:delete", async (_event, id: string) => {
     await store.deleteEntry(id);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    await logExportStatus("exclusao definitiva", exportStatus);
     localServer.broadcast({ type: "entry-deleted", id });
     sendToAll("entries:changed");
     return { exportStatus };
@@ -251,6 +275,7 @@ function registerIpc() {
   ipcMain.handle("entries:duplicate", async (_event, id: string) => {
     const entry = await store.duplicateEntry(id);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    await logExportStatus("duplicacao", exportStatus);
     localServer.broadcast({ type: "entry-added", entry });
     sendToAll("entries:changed");
     return { entry, exportStatus };
@@ -259,6 +284,7 @@ function registerIpc() {
   ipcMain.handle("entries:cancel", async (_event, id: string) => {
     const entry = await store.cancelEntry(id);
     const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    await logExportStatus("cancelamento", exportStatus);
     localServer.broadcast({ type: "entry-cancelled", entry });
     sendToAll("entries:changed");
     return { entry, exportStatus };
@@ -271,7 +297,8 @@ function registerIpc() {
       opacity: saved.floating.opacity,
       lockPosition: saved.floating.lockPosition
     });
-    await exporter.export(await store.getEntries(), saved);
+    const exportStatus = await exporter.export(await store.getEntries(), saved);
+    await logExportStatus("salvar configuracoes", exportStatus);
     sendToAll("settings:changed", saved);
     return saved;
   });
@@ -330,6 +357,7 @@ function registerIpc() {
 
   ipcMain.handle("export:now", async () => {
     const status = await exporter.export(await store.getEntries(), await store.getSettings());
+    await logExportStatus("exportacao manual", status);
     if (status.filePath) {
       shell.showItemInFolder(status.filePath);
     }
@@ -340,6 +368,7 @@ function registerIpc() {
     const idSet = new Set(ids);
     const entries = (await store.getEntries()).filter((entry) => idSet.has(entry.id));
     const status = await exporter.exportReport(entries, await store.getSettings(), label);
+    await logExportStatus("relatorio filtrado", status);
     if (status.filePath) {
       shell.showItemInFolder(status.filePath);
     }
@@ -413,7 +442,9 @@ function registerIpc() {
     const parsed = await readLedgerImport(filePath, settings);
     const imported = await store.importEntries(parsed.entries);
     const exportStatus = await exporter.export(await store.getEntries(), settings);
+    await logExportStatus("importacao de planilha", exportStatus);
     if (imported.imported) {
+      await logger.info("Planilha importada", `${imported.imported} novo(s), ${imported.skipped + parsed.skippedRows} pulado(s): ${path.basename(filePath)}`);
       localServer.broadcast({ type: "entries-imported", count: imported.imported });
       sendToAll("entries:changed");
     }
@@ -426,6 +457,59 @@ function registerIpc() {
       warnings: parsed.warnings,
       exportStatus
     };
+  });
+
+  ipcMain.handle("diagnostics:get", async (): Promise<DiagnosticsSnapshot> => {
+    const settings = await store.getSettings();
+    const backups = await store.listDataBackups();
+    return {
+      dataDirectory: store.getDataDirectory(),
+      outputDirectory: settings.outputDirectory,
+      exportStatus: await exporter.getStatus(),
+      entryCount: (await store.getEntries()).length,
+      backupCount: backups.length,
+      backups,
+      logs: await logger.list()
+    };
+  });
+
+  ipcMain.handle("diagnostics:createBackup", async (_event, reason?: string): Promise<DataBackupInfo> => {
+    const backup = await store.createDataBackup(reason || "manual");
+    await logger.info("Backup local criado", backup.fileName);
+    return backup;
+  });
+
+  ipcMain.handle("diagnostics:restoreBackup", async (_event, providedPath?: string) => {
+    let filePath = providedPath;
+    if (!filePath) {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: "Restaurar backup do Contabilizador",
+        properties: ["openFile"],
+        filters: [{ name: "Backup JSON", extensions: ["json"] }]
+      });
+      if (result.canceled || !result.filePaths[0]) {
+        return null;
+      }
+      filePath = result.filePaths[0];
+    }
+
+    const restored = await store.restoreDataBackup(filePath);
+    const settings = await store.getSettings();
+    localServer.setPermissions(settings.server.permissions);
+    const exportStatus = await exporter.export(await store.getEntries(), settings);
+    await logExportStatus("restauracao de backup", exportStatus);
+    await logger.warn("Backup restaurado", `${restored.backup.fileName}; backup de seguranca: ${restored.safetyBackup.fileName}`);
+    sendToAll("settings:changed", settings);
+    sendToAll("entries:changed");
+    return { ...restored, exportStatus };
+  });
+
+  ipcMain.handle("diagnostics:openDataDirectory", async () => {
+    return shell.openPath(store.getDataDirectory());
+  });
+
+  ipcMain.handle("diagnostics:openOutputDirectory", async () => {
+    return shell.openPath((await store.getSettings()).outputDirectory);
   });
 
   ipcMain.handle("updates:check", async (): Promise<UpdateInfo> => {
