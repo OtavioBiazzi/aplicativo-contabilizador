@@ -176,9 +176,15 @@ def main() -> int:
       expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Barra fixada").click()
       expect(page.get_by_text("Elementos da barra")).to_be_visible()
+      expect(page.get_by_text("Campo curto para numero da mesa.")).to_be_visible()
+      expect(page.get_by_text("Campo curto para numero do onibus.")).to_be_visible()
       page.get_by_role("button", name="Onibus enxuto").click()
       expect(page.get_by_text("Preset Onibus enxuto aplicado ao rascunho.")).to_be_visible(timeout=10000)
       expect(page.get_by_label("Visual sem borda de janela")).to_be_checked()
+      range_fill = page.get_by_label("Opacidade (100%)").evaluate("""(element) => getComputedStyle(element).getPropertyValue('--range-fill').trim()""")
+      if range_fill != "100%":
+        print(f"Opacity slider fill did not reach 100%: {range_fill}", file=sys.stderr)
+        return 1
       page.locator(".settings-nav").get_by_role("button", name="Planilha e backup").click()
       expect(page.get_by_role("button", name="Importar Excel/CSV")).to_be_visible()
       expect(page.get_by_role("button", name="Gerar/abrir arquivo")).to_be_visible()
@@ -213,6 +219,17 @@ def main() -> int:
       expect(page.get_by_label("Mostrar campo de numero do onibus")).to_be_checked()
       page.locator(".settings-nav").get_by_role("button", name="Perfis").click()
       expect(page.get_by_text("Perfil ativo")).to_be_visible()
+      page.locator(".settings-nav").get_by_role("button", name="Atalhos").click()
+      expect(page.get_by_text("Clique no atalho e pressione")).to_be_visible()
+      money_shortcut = page.locator(".shortcut-card").filter(has_text="Modo dinheiro").locator(".shortcut-capture")
+      money_shortcut.click()
+      page.keyboard.press("Control+Alt+D")
+      expect(money_shortcut).to_have_text("Ctrl+Alt+D")
+      page.locator(".shortcut-card").filter(has_text="Modo dinheiro").get_by_role("button", name="Desativar").click()
+      expect(money_shortcut).to_have_text("Desativado")
+      money_shortcut.click()
+      page.keyboard.press("Control+D")
+      expect(money_shortcut).to_have_text("Ctrl+D")
       has_config_io = page.evaluate(
         """() => typeof window.caixa.exportSettings === 'function' && typeof window.caixa.importSettings === 'function'"""
       )

@@ -34,7 +34,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
-- Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, Mesa/Onibus contextual, divisao por pessoas, campo Pago com, troco direto e elementos que podem ser ocultados.
+- Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, campos Mesa e Onibus separados, divisao por pessoas, campo Pago com, troco direto e elementos que podem ser ocultados.
 - Alternancia Conta/Dinheiro pode manter o contexto atual: Conta Onibus vira Dinheiro/Onibus e volta para Onibus.
 - Presets da barra fixada: Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, todos editaveis depois.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
@@ -115,6 +115,8 @@ Atalhos principais:
 - `Ctrl + H`: historico.
 - `Ctrl + ,`: configuracoes.
 - `Ctrl + R`: repetir ultimo lancamento.
+
+Os atalhos podem ser alterados ou desativados em **Ajustes > Atalhos**: clique no comando, pressione a nova combinacao ou use **Desativar**.
 
 ## Arquivos locais
 

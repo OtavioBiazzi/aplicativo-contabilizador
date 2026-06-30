@@ -381,7 +381,9 @@ function mergeFloatingFields(defaultFields: string[], savedFields?: string[]): s
     return [...defaultFields];
   }
 
-  const fields = savedFields.filter((field) => typeof field === "string");
+  const fields = savedFields
+    .filter((field) => typeof field === "string")
+    .flatMap((field) => (field === "detail" ? ["tableNumber", "busNumber"] : [field]));
   const legacyFields = ["type", "value", "people", "description", "submit"];
   const isLegacyDefault =
     fields.length === legacyFields.length &&
@@ -391,7 +393,8 @@ function mergeFloatingFields(defaultFields: string[], savedFields?: string[]): s
     return [...defaultFields];
   }
 
-  return fields.includes("value") ? fields : ["value", ...fields];
+  const next = [...new Set(fields)];
+  return next.includes("value") ? next : ["value", ...next];
 }
 
 function mergeQuickTabs(defaultTabs: QuickTabSettings[], savedTabs?: QuickTabSettings[]): QuickTabSettings[] {

@@ -134,12 +134,45 @@ const FLOATING_FIELD_OPTIONS = [
   { id: "mode", label: "Trocar Conta/Dinheiro", helper: "Botao lateral de alternancia." },
   { id: "type", label: "Tipo ou vinculo", helper: "Seletor de tipo e vincular dinheiro." },
   { id: "people", label: "Pessoas", helper: "Divisao rapida da conta." },
-  { id: "detail", label: "Mesa/Onibus", helper: "Campo curto para numero." },
+  { id: "tableNumber", label: "Mesa", helper: "Campo curto para numero da mesa." },
+  { id: "busNumber", label: "Onibus", helper: "Campo curto para numero do onibus." },
   { id: "description", label: "Descricao", helper: "Campo opcional para observacao." },
   { id: "paidWith", label: "Pago com", helper: "Valor recebido no modo dinheiro." },
   { id: "result", label: "Troco/por pessoa", helper: "Resultado calculado na barra." },
   { id: "submit", label: "Botao enviar", helper: "Tambem da para enviar com Enter." }
 ];
+
+const FLOATING_FIELD_IDS = new Set(["value", ...FLOATING_FIELD_OPTIONS.map((field) => field.id)]);
+
+const SHORTCUT_ORDER = [
+  "submit",
+  "submitAndClear",
+  "money",
+  "table",
+  "bus",
+  "pin",
+  "history",
+  "settings",
+  "repeatLast",
+  "escape"
+] as const;
+
+type ShortcutAction = (typeof SHORTCUT_ORDER)[number];
+
+const GLOBAL_SHORTCUT_ACTIONS: ShortcutAction[] = ["pin", "money", "table", "bus", "history", "settings", "repeatLast"];
+
+const SHORTCUT_HELPERS: Record<ShortcutAction, string> = {
+  submit: "Envia o formulario atual quando estiver no caixa.",
+  submitAndClear: "Envia e limpa os campos do caixa rapido.",
+  money: "Troca para Dinheiro/Troco sem sair do fluxo.",
+  table: "Troca para modo Mesa.",
+  bus: "Troca para modo Onibus.",
+  pin: "Abre ou fecha a barra fixada.",
+  history: "Abre o historico do dia.",
+  settings: "Abre a tela de ajustes.",
+  repeatLast: "Duplica o ultimo lancamento ativo.",
+  escape: "Limpa o formulario atual."
+};
 
 type FloatingPresetId = "cashier" | "table" | "bus" | "money" | "minimal";
 
@@ -177,7 +210,7 @@ const FLOATING_PRESETS: FloatingPreset[] = [
     title: "Mesa rapida",
     description: "Valor, mesa, pessoas e dinheiro vinculado a mesa.",
     defaultType: "Mesa",
-    fields: ["tabs", "mode", "value", "people", "detail", "description", "paidWith", "result", "submit"],
+    fields: ["tabs", "mode", "value", "people", "tableNumber", "description", "paidWith", "result", "submit"],
     quickTabs: [
       { id: "table", label: "Mesa", enabled: true, type: "Mesa" },
       { id: "money", label: "Dinheiro", enabled: true, type: "Dinheiro/Troco", cashLinkedType: "Mesa" },
@@ -197,7 +230,7 @@ const FLOATING_PRESETS: FloatingPreset[] = [
     title: "Onibus enxuto",
     description: "So o necessario: modo, valor, numero do onibus, pago com e enviar.",
     defaultType: "Onibus",
-    fields: ["tabs", "mode", "value", "detail", "paidWith", "result", "submit"],
+    fields: ["tabs", "mode", "value", "busNumber", "paidWith", "result", "submit"],
     quickTabs: [
       { id: "bus", label: "Onibus", enabled: true, type: "Onibus" },
       { id: "money", label: "Dinheiro", enabled: true, type: "Dinheiro/Troco", cashLinkedType: "Onibus" },
@@ -215,9 +248,9 @@ const FLOATING_PRESETS: FloatingPreset[] = [
     id: "money",
     label: "Dinheiro",
     title: "Dinheiro e troco",
-    description: "Conta, pago com, troco grande e vinculo Mesa/Onibus.",
+    description: "Conta, pago com, troco grande e vinculo Mesa ou Onibus.",
     defaultType: "Dinheiro/Troco",
-    fields: ["tabs", "mode", "type", "value", "detail", "paidWith", "description", "result", "submit"],
+    fields: ["tabs", "mode", "type", "value", "tableNumber", "busNumber", "paidWith", "description", "result", "submit"],
     quickTabs: [
       { id: "money", label: "Dinheiro", enabled: true, type: "Dinheiro/Troco", cashLinkedType: "Mesa" },
       { id: "table", label: "Mesa", enabled: true, type: "Mesa" },
@@ -283,6 +316,94 @@ function themeDefaultAccent(theme: AppSettings["theme"]) {
     italia: "#168a56"
   };
   return map[theme];
+}
+
+function normalizeShortcutKey(key: string): string {
+  const map: Record<string, string> = {
+    " ": "Space",
+    Spacebar: "Space",
+    Escape: "Esc",
+    Esc: "Esc",
+    Del: "Delete",
+    Plus: "+",
+    Add: "+"
+  };
+  if (map[key]) {
+    return map[key];
+  }
+  if (key.length === 1) {
+    return key.toUpperCase();
+  }
+  return key;
+}
+
+function shortcutFromKeyboardEvent(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">): string | null {
+  const key = normalizeShortcutKey(event.key);
+  if (["Control", "Ctrl", "Alt", "Shift", "Meta"].includes(key)) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (event.ctrlKey || event.metaKey) {
+    parts.push("Ctrl");
+  }
+  if (event.altKey) {
+    parts.push("Alt");
+  }
+  if (event.shiftKey) {
+    parts.push("Shift");
+  }
+  parts.push(key);
+  return parts.join("+");
+}
+
+function normalizeShortcutValue(value?: string): string {
+  if (!value?.trim()) {
+    return "";
+  }
+  const parts = value
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const modifiers = new Set<string>();
+  const keys: string[] = [];
+  for (const part of parts) {
+    const normalized = normalizeShortcutKey(part);
+    const lower = normalized.toLowerCase();
+    if (lower === "ctrl" || lower === "control" || lower === "cmd" || lower === "command" || lower === "meta") {
+      modifiers.add("Ctrl");
+    } else if (lower === "alt" || lower === "option") {
+      modifiers.add("Alt");
+    } else if (lower === "shift") {
+      modifiers.add("Shift");
+    } else {
+      keys.push(normalized);
+    }
+  }
+  const key = keys.at(-1);
+  if (!key) {
+    return "";
+  }
+  return ["Ctrl", "Alt", "Shift"].filter((modifier) => modifiers.has(modifier)).concat(key).join("+").toLowerCase();
+}
+
+function shortcutMatchesEvent(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+  shortcut?: string
+): boolean {
+  const normalizedShortcut = normalizeShortcutValue(shortcut);
+  if (!normalizedShortcut) {
+    return false;
+  }
+  const eventShortcut = shortcutFromKeyboardEvent(event);
+  return Boolean(eventShortcut && normalizeShortcutValue(eventShortcut) === normalizedShortcut);
+}
+
+function shortcutActionForEvent(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">,
+  shortcuts: Record<string, string>,
+  actions: ShortcutAction[]
+): ShortcutAction | null {
+  return actions.find((action) => shortcutMatchesEvent(event, shortcuts[action])) || null;
 }
 
 function createSettingsFallback(settings: AppSettings): AppSettings {
@@ -372,7 +493,12 @@ function normalizeFloatingFields(fields?: string[]): string[] {
     return [...DEFAULT_FLOATING_FIELDS];
   }
 
-  return fields.includes("value") ? fields : ["value", ...fields];
+  const normalizedFields = fields
+    .filter((field) => typeof field === "string")
+    .flatMap((field) => (field === "detail" ? ["tableNumber", "busNumber"] : [field]))
+    .filter((field) => FLOATING_FIELD_IDS.has(field));
+  const next = [...new Set(normalizedFields)];
+  return next.includes("value") ? next : ["value", ...next];
 }
 
 function applyFloatingPresetToSettings(settings: AppSettings, preset: FloatingPreset): AppSettings {
@@ -521,33 +647,27 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = async (event: KeyboardEvent) => {
-      const ctrl = event.ctrlKey || event.metaKey;
-      if (ctrl && event.key.toLowerCase() === "f") {
-        event.preventDefault();
+      if (!settings || event.defaultPrevented) {
+        return;
+      }
+      const action = shortcutActionForEvent(event, settings.shortcuts, GLOBAL_SHORTCUT_ACTIONS);
+      if (!action) {
+        return;
+      }
+      event.preventDefault();
+      if (action === "pin") {
         await togglePinned();
-      }
-      if (ctrl && event.key.toLowerCase() === "d") {
-        event.preventDefault();
+      } else if (action === "money") {
         commandMode("Dinheiro/Troco");
-      }
-      if (ctrl && event.key.toLowerCase() === "m") {
-        event.preventDefault();
+      } else if (action === "table") {
         commandMode("Mesa");
-      }
-      if (ctrl && event.key.toLowerCase() === "o") {
-        event.preventDefault();
+      } else if (action === "bus") {
         commandMode("Onibus");
-      }
-      if (ctrl && event.key.toLowerCase() === "h") {
-        event.preventDefault();
+      } else if (action === "history") {
         setActiveTab("history");
-      }
-      if (ctrl && event.key === ",") {
-        event.preventDefault();
+      } else if (action === "settings") {
         setActiveTab("settings");
-      }
-      if (ctrl && event.key.toLowerCase() === "r") {
-        event.preventDefault();
+      } else if (action === "repeatLast") {
         await repeatLastEntry();
       }
     };
@@ -832,6 +952,7 @@ function QuickEntry({
   const lastActive = entries.find((entry) => entry.status === "active");
   const tableFieldEnabled = settings.tableNumberEnabled !== false;
   const busFieldEnabled = settings.busNumberEnabled !== false;
+  const floatingVisibleFields = normalizeFloatingFields(settings.floating.visibleFields);
 
   useEffect(() => {
     if (modeCommand) {
@@ -861,7 +982,7 @@ function QuickEntry({
     }
   }, [type, cashLinkedType, tableNumber, busNumber, tableFieldEnabled, busFieldEnabled]);
 
-  const visible = (field: string) => !pinned || settings.floating.visibleFields.includes(field);
+  const visible = (field: string) => !pinned || floatingVisibleFields.includes(field);
 
   const clearForm = () => {
     setValueText("");
@@ -914,6 +1035,28 @@ function QuickEntry({
     await submit();
   };
 
+  const onEntryKeyDown = async (event: React.KeyboardEvent<HTMLFormElement>) => {
+    if (event.defaultPrevented) {
+      return;
+    }
+    const action = shortcutActionForEvent(event, settings.shortcuts, ["submitAndClear", "submit", "escape"]);
+    if (action === "escape") {
+      event.preventDefault();
+      clearForm();
+      return;
+    }
+    if (action === "submit" || action === "submitAndClear") {
+      event.preventDefault();
+      await submit();
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    const isButton = target?.tagName === "BUTTON";
+    if (event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && !isButton) {
+      event.preventDefault();
+    }
+  };
+
   if (pinned) {
     const quickTabs = (settings.quickTabs.length ? settings.quickTabs : DEFAULT_QUICK_TABS).filter((tab) => tab.enabled);
     const isMoney = type === "Dinheiro/Troco";
@@ -938,7 +1081,8 @@ function QuickEntry({
     const showMode = visible("mode");
     const showType = visible("type");
     const showPeople = visible("people");
-    const showDetail = Boolean(detailKind && visible("detail"));
+    const detailFieldId = detailKind === "mesa" ? "tableNumber" : detailKind === "onibus" ? "busNumber" : "";
+    const showDetail = Boolean(detailFieldId && visible(detailFieldId));
     const showDescription = visible("description");
     const showPaidWith = visible("paidWith");
     const showResult = visible("result");
@@ -989,7 +1133,7 @@ function QuickEntry({
     };
 
     return (
-      <form className={`floating-bar ${isMoney ? "money" : "account"} ${showDetail ? "has-detail" : ""} ${compactFloating ? "compact-tab" : ""} ${showTabs ? "with-tabs" : ""}`} onSubmit={onSubmitForm}>
+      <form className={`floating-bar ${isMoney ? "money" : "account"} ${showDetail ? "has-detail" : ""} ${compactFloating ? "compact-tab" : ""} ${showTabs ? "with-tabs" : ""}`} onSubmit={onSubmitForm} onKeyDown={onEntryKeyDown}>
         <div className="floating-grip" aria-hidden="true">
           <i />
           <i />
@@ -1148,7 +1292,7 @@ function QuickEntry({
   }
 
   return (
-    <form className={`quick-entry ${pinned ? "pinned" : ""}`} onSubmit={onSubmitForm}>
+    <form className={`quick-entry ${pinned ? "pinned" : ""}`} onSubmit={onSubmitForm} onKeyDown={onEntryKeyDown}>
       <div className="quick-head">
         <div>
           <span className="eyebrow">Registro rapido</span>
@@ -2615,6 +2759,7 @@ function SettingsPanel({
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [capturingShortcut, setCapturingShortcut] = useState<ShortcutAction | null>(null);
 
   useEffect(() => setDraft(settings), [settings]);
 
@@ -2704,6 +2849,35 @@ function SettingsPanel({
         }
       };
     });
+  };
+
+  const updateShortcut = (key: ShortcutAction, value: string) => {
+    setDraft((current) => ({
+      ...current,
+      shortcuts: {
+        ...current.shortcuts,
+        [key]: normalizeShortcutValue(value) ? value : ""
+      }
+    }));
+  };
+
+  const captureShortcut = (event: React.KeyboardEvent<HTMLButtonElement>, key: ShortcutAction) => {
+    if (capturingShortcut !== key) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Backspace" || event.key === "Delete") {
+      updateShortcut(key, "");
+      setCapturingShortcut(null);
+      return;
+    }
+    const shortcut = shortcutFromKeyboardEvent(event);
+    if (!shortcut) {
+      return;
+    }
+    updateShortcut(key, shortcut);
+    setCapturingShortcut(null);
   };
 
   const profileNames = Object.keys(draft.profiles);
@@ -3186,10 +3360,22 @@ function SettingsPanel({
               <option value="italia">Italia</option>
             </select>
           </label>
-          <label className="field"><span>Opacidade ({Math.round(draft.floating.opacity * 100)}%)</span><input type="range" min={0.35} max={1} step={0.01} value={draft.floating.opacity} onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })} /></label>
+          <label className="field">
+            <span>Opacidade ({Math.round(draft.floating.opacity * 100)}%)</span>
+            <input
+              className="range-input"
+              type="range"
+              min={0.35}
+              max={1}
+              step={0.01}
+              value={draft.floating.opacity}
+              style={{ "--range-fill": `${Math.round(((draft.floating.opacity - 0.35) / 0.65) * 100)}%` } as React.CSSProperties}
+              onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })}
+            />
+          </label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar posicao</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.borderless} onChange={(event) => update("floating", { ...draft.floating, borderless: event.target.checked })} /> Visual sem borda de janela</label>
-          <label className="switch-line"><input type="checkbox" checked={draft.floating.syncMoneyWithEntryType} onChange={(event) => update("floating", { ...draft.floating, syncMoneyWithEntryType: event.target.checked })} /> Manter Mesa/Onibus ao trocar Conta/Dinheiro</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.syncMoneyWithEntryType} onChange={(event) => update("floating", { ...draft.floating, syncMoneyWithEntryType: event.target.checked })} /> Manter Mesa ou Onibus ao trocar Conta/Dinheiro</label>
           <div className="floating-field-picker">
             <div className="section-title">
               <strong>Elementos da barra</strong>
@@ -3314,17 +3500,29 @@ function SettingsPanel({
         <section className={categoryClass("shortcuts", "settings-group wide")}>
           <h3>Atalhos</h3>
           <div className="shortcut-list">
-            {Object.entries(draft.shortcuts).map(([key, value]) => (
-              <label className="field" key={key}>
-                <span>{shortcutLabel(key)}</span>
-                <input
-                  value={value}
-                  onChange={(event) => update("shortcuts", { ...draft.shortcuts, [key]: event.target.value })}
-                />
-              </label>
+            {SHORTCUT_ORDER.map((key) => (
+              <article className={`shortcut-card ${draft.shortcuts[key] ? "" : "disabled"}`} key={key}>
+                <div>
+                  <strong>{shortcutLabel(key)}</strong>
+                  <span>{SHORTCUT_HELPERS[key]}</span>
+                </div>
+                <button
+                  className={`shortcut-capture ${capturingShortcut === key ? "capturing" : ""}`}
+                  type="button"
+                  data-shortcut-capture="true"
+                  onClick={() => setCapturingShortcut(key)}
+                  onKeyDown={(event) => captureShortcut(event, key)}
+                  onBlur={() => setCapturingShortcut((current) => (current === key ? null : current))}
+                >
+                  {capturingShortcut === key ? "Pressione as teclas..." : draft.shortcuts[key] || "Desativado"}
+                </button>
+                <button className="ghost-button shortcut-disable" type="button" onClick={() => updateShortcut(key, "")}>
+                  <X size={15} /> Desativar
+                </button>
+              </article>
             ))}
           </div>
-          <p className="settings-note">Evite atalhos usados pelo Windows ou pelo navegador. O app aplica os principais atalhos globais da janela.</p>
+          <p className="settings-note">Clique no atalho e pressione a combinacao desejada. Use Backspace, Delete ou Desativar para desligar um comando.</p>
         </section>
 
         <section className={categoryClass("updates", "settings-group wide")}>
