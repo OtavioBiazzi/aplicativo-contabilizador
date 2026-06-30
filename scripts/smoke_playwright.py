@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from zipfile import ZipFile
 from pathlib import Path
 
@@ -161,6 +161,14 @@ def main() -> int:
       expect(page.get_by_text("Movimento por dia")).to_be_visible()
       expect(page.get_by_text("Maiores lancamentos")).to_be_visible()
       expect(page.get_by_text("Alertas do recorte")).to_be_visible()
+      expect(page.get_by_text("Total por origem/caixa")).to_be_visible()
+      now = datetime.now()
+      month_start = now.replace(day=1).strftime("%Y-%m-%d")
+      month_end = ((now.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
+      report_dates = page.locator(".report-filter-bar input[type='date']")
+      if report_dates.nth(0).input_value() != month_start or report_dates.nth(1).input_value() != month_end:
+        print("Report filters did not default to the current month.", file=sys.stderr)
+        return 1
       page.get_by_label("Tipo").select_option("Venda")
       page.get_by_role("button", name="Exportar filtrado").click()
       expect(page.get_by_text("Relatorio filtrado exportado.")).to_be_visible(timeout=15000)
@@ -173,6 +181,7 @@ def main() -> int:
       expect(page.get_by_label("Visual sem borda de janela")).to_be_checked()
       page.locator(".settings-nav").get_by_role("button", name="Planilha e backup").click()
       expect(page.get_by_role("button", name="Importar Excel/CSV")).to_be_visible()
+      expect(page.get_by_role("button", name="Gerar/abrir arquivo")).to_be_visible()
       import_preview = page.evaluate("""async (filePath) => await window.caixa.previewLedgerImport(filePath)""", str(import_file))
       if import_preview["newRows"] != 1 or import_preview["duplicateRows"] != 0 or not import_preview["sample"]:
         print(f"Import preview did not detect the new row: {import_preview}", file=sys.stderr)
@@ -199,6 +208,9 @@ def main() -> int:
         return 1
       page.locator(".settings-nav").get_by_role("button", name="Barra rapida").click()
       expect(page.get_by_text("Abas e modos que aparecem na barra fixada.")).to_be_visible()
+      page.locator(".settings-nav").get_by_role("button", name="Vendas").click()
+      expect(page.get_by_label("Mostrar campo de numero da mesa")).to_be_checked()
+      expect(page.get_by_label("Mostrar campo de numero do onibus")).to_be_checked()
       page.locator(".settings-nav").get_by_role("button", name="Perfis").click()
       expect(page.get_by_text("Perfil ativo")).to_be_visible()
       has_config_io = page.evaluate(
@@ -288,10 +300,12 @@ def main() -> int:
         remote_errors = []
         remote_page.on("console", lambda message: remote_errors.append(message.text) if message.type == "error" else None)
         remote_page.goto(remote_base)
+        expect(remote_page.get_by_text("Caixa remoto")).to_be_visible(timeout=10000)
         remote_page.locator("#password").fill(remote_password)
         remote_page.locator("#loginButton").click()
         expect(remote_page.locator("#history")).to_be_visible(timeout=10000)
-        expect(remote_page.get_by_text("Totais ocultos")).to_be_visible(timeout=10000)
+        expect(remote_page.locator("#summary")).to_contain_text("Totais ocultos", timeout=10000)
+        expect(remote_page.get_by_text("Permissoes deste dispositivo")).to_be_visible(timeout=10000)
         if remote_errors:
           print("\n".join(remote_errors), file=sys.stderr)
           return 1
@@ -375,12 +389,17 @@ def main() -> int:
         print("No exported xlsx file found.", file=sys.stderr)
         return 1
       sheets = []
+      has_styles = False
       for exported_file in exported_files:
         with ZipFile(exported_file) as zip_file:
+          has_styles = has_styles or "xl/styles.xml" in zip_file.namelist()
           sheets.append(zip_file.read("xl/worksheets/sheet1.xml").decode("utf-8"))
       sheet = "\n".join(sheets)
       if "Mesa 4" in sheet or "Onibus 12" not in sheet or "TOTAL" not in sheet:
         print("Exported xlsx did not reflect removal/total correctly.", file=sys.stderr)
+        return 1
+      if not has_styles or "SUBTOTAL(109" not in sheet or "<autoFilter" not in sheet:
+        print("Exported xlsx is missing styles, total formula, or autofilter.", file=sys.stderr)
         return 1
       report_files = list((SMOKE_DIR / "exports").glob("relatorio-*.xlsx"))
       if not report_files:

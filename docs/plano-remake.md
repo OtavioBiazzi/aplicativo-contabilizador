@@ -73,7 +73,7 @@ Teste de aceite:
 
 Objetivo: fazer temas reais, nao apenas trocar cor principal.
 
-Status: avancada na versao 0.2.5 com tema claro padrao migrado para base azul de PDV e hover do DataCaixa corrigido para nao perder contraste em menus e configuracoes.
+Status: avancada na versao 0.2.5 com tema claro padrao migrado para base azul de PDV e hover do DataCaixa corrigido para nao perder contraste em menus e configuracoes. Avancada na versao 0.2.12 com DataCaixa PDV como padrao e variante DataCaixa escura.
 
 Temas:
 - Claro suave: padrao confortavel, menos branco puro.
@@ -96,7 +96,7 @@ Teste de aceite:
 
 Objetivo: deixar configuracao entendivel para usuario leigo e completa para usuario avancado.
 
-Status: iniciada na versao 0.2.0 com navegacao lateral de categorias, restauracao por categoria, atalhos editaveis e area de atualizacoes. Avancada na versao 0.2.2 com cabecalho por categoria, largura controlada para monitores grandes e grids mais previsiveis. Avancada na versao 0.2.3 com perfis aplicaveis e exportacao/importacao de configuracoes em JSON.
+Status: iniciada na versao 0.2.0 com navegacao lateral de categorias, restauracao por categoria, atalhos editaveis e area de atualizacoes. Avancada na versao 0.2.2 com cabecalho por categoria, largura controlada para monitores grandes e grids mais previsiveis. Avancada na versao 0.2.3 com perfis aplicaveis e exportacao/importacao de configuracoes em JSON. Avancada na versao 0.2.12 com campos de numero de mesa e onibus ativaveis separadamente.
 
 Categorias:
 - Aparencia
@@ -128,7 +128,7 @@ Teste de aceite:
 
 Objetivo: transformar relatorios em uma area de analise real.
 
-Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada. Avancada na versao 0.2.6 com total do dia isolado dos dias anteriores. Avancada na versao 0.2.7 com importacao de Excel/CSV/TSV compativel e deduplicacao. Avancada na versao 0.2.9 com previa de importacao antes de gravar no caixa. Avancada na versao 0.2.11 com fechamento operacional, tendencia diaria, ranking de maiores lancamentos e alertas do recorte.
+Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada. Avancada na versao 0.2.6 com total do dia isolado dos dias anteriores. Avancada na versao 0.2.7 com importacao de Excel/CSV/TSV compativel e deduplicacao. Avancada na versao 0.2.9 com previa de importacao antes de gravar no caixa. Avancada na versao 0.2.11 com fechamento operacional, tendencia diaria, ranking de maiores lancamentos e alertas do recorte. Avancada na versao 0.2.12 com periodo mensal padrao, dia da semana e total por origem/caixa.
 
 Entregas:
 - Filtros por periodo, tipo, mesa, onibus, forma de pagamento e origem.
@@ -169,7 +169,7 @@ Teste de aceite:
 
 Objetivo: fazer o servidor parecer uma funcao segura e compreensivel.
 
-Status: iniciada na versao 0.2.0 com subabas Criar servidor, Conectar e Permissoes, alem de mascara de valores quando totais sensiveis estao ocultos. Avancada na versao 0.2.1 com cliente remoto melhorado e API remota para editar, cancelar, enviar para lixeira e apagar definitivamente conforme permissoes.
+Status: iniciada na versao 0.2.0 com subabas Criar servidor, Conectar e Permissoes, alem de mascara de valores quando totais sensiveis estao ocultos. Avancada na versao 0.2.1 com cliente remoto melhorado e API remota para editar, cancelar, enviar para lixeira e apagar definitivamente conforme permissoes. Avancada na versao 0.2.12 com mini-caixa remoto em estilo DataCaixa, nome do caixa, mesa/onibus e login por link com senha.
 
 Entregas:
 - Separar "Criar servidor" e "Conectar a servidor".
@@ -187,7 +187,7 @@ Teste de aceite:
 
 Objetivo: deixar o app mais profissional no sistema.
 
-Status: iniciada na versao 0.2.0 com icone em `assets/icon/`, fundo preto removido, `.ico` gerado e metadados do instalador configurados. Avancada na versao 0.2.2 com marca CDA no topo esquerdo do app. Avancada na versao 0.2.10 com diagnostico em Ajustes > Avancado, logs simples, backup local do caixa e restauracao segura com backup automatico antes de substituir dados. Assinatura de codigo ainda depende de certificado.
+Status: iniciada na versao 0.2.0 com icone em `assets/icon/`, fundo preto removido, `.ico` gerado e metadados do instalador configurados. Avancada na versao 0.2.2 com marca CDA no topo esquerdo do app. Avancada na versao 0.2.10 com diagnostico em Ajustes > Avancado, logs simples, backup local do caixa e restauracao segura com backup automatico antes de substituir dados. Avancada na versao 0.2.12 com identificacao discreta "Feito por Otavio Biazzi". Assinatura de codigo ainda depende de certificado.
 
 Entregas:
 - Copiar o icone de referencia para `assets/icon/`.
@@ -228,7 +228,7 @@ Teste de aceite:
 
 Objetivo: cada versao sair testada e facil de baixar.
 
-Status: smoke test cobre janela principal, tema DataCaixa, relatorios, barra fixada, planilha, total diario, configuracao de elementos da barra e servidor remoto com permissoes.
+Status: smoke test cobre janela principal, tema DataCaixa, relatorios mensais, origem/caixa, barra fixada, planilha formatada, total diario, configuracao de elementos da barra e servidor remoto com permissoes.
 
 Entregas:
 - Smoke test para janela principal.

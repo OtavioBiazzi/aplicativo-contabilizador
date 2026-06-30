@@ -24,13 +24,13 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Divisao de conta com arredondamento por multiplos de R$ 0,05 a R$ 5,00 e direcao para cima, para baixo ou mais proxima.
 - Modo dinheiro/troco com quebra em notas e moedas do real.
 - Historico editavel com filtros, duplicar, cancelar, lixeira, restauracao e exclusao definitiva.
-- Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com fechamento, tendencia diaria, ranking de maiores lancamentos, alertas e exportacao do recorte filtrado.
-- Exportacao automatica para Excel ou CSV.
+- Relatorios por periodo iniciando no mes atual, com filtros por tipo, mesa, onibus, forma de pagamento e busca, fechamento, tendencia diaria com dia da semana, ranking, alertas, origem/caixa e exportacao do recorte filtrado.
+- Exportacao automatica para Excel ou CSV, com XLSX formatado, cabecalho, filtro, congelamento da primeira linha, larguras ajustadas e linha TOTAL com formulas.
 - Organizacao dos arquivos por dia real do lancamento, mes com abas, arquivo fixo ou arquivos separados por tipo.
 - Importacao de planilhas Excel/CSV/TSV compativeis com previa, confirmacao e deduplicacao por ID ou assinatura do lancamento.
 - Diagnostico em **Ajustes > Avancado** com pasta de dados, pasta de planilhas, estado da exportacao, ultimos eventos e backups recentes.
 - Backup local do caixa em JSON, com historico e configuracoes, mais restauracao segura criando backup do estado atual antes de substituir dados.
-- Configuracoes persistentes: tema padrao azul de PDV, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
+- Configuracoes persistentes: tema padrao DataCaixa PDV, DataCaixa escuro, cor principal, densidade, layout, abas rapidas, campos do modo fixado, mesa/onibus ativaveis separadamente, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
 - Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
@@ -39,13 +39,13 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Presets da barra fixada: Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, todos editaveis depois.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
 - Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
-- Temas adicionais DataCaixa PDV e Italia como base do remake visual, com contraste revisado em menus e hovers.
+- Temas DataCaixa PDV, DataCaixa PDV escuro e Italia como base do remake visual, com contraste revisado em menus e hovers.
 - Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
 - Historico com lixeira, restauracao e exclusao definitiva.
-- Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL.
+- Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL por formula.
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
 - Total do dia, painel lateral e servidor local somam somente lancamentos do dia atual.
-- Servidor local com senha, permissoes, cadastro remoto, edicao, cancelamento, lixeira e atualizacao em tempo real via WebSocket.
+- Servidor local com senha, permissoes, mini-caixa remoto em estilo DataCaixa, cadastro remoto, edicao, cancelamento, lixeira, origem do dispositivo e atualizacao em tempo real via WebSocket.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
@@ -138,6 +138,8 @@ onibus-2026-06-28.xlsx
 
 Em **Ajustes > Planilha e backup**, use **Importar Excel/CSV** para trazer planilhas antigas compativeis para o historico do app. Antes de gravar, o app mostra uma previa com linhas novas, duplicadas, ignoradas, avisos e uma amostra dos lancamentos. Linhas `TOTAL` sao ignoradas e lancamentos repetidos sao pulados automaticamente.
 
+Na mesma area, **Gerar/abrir arquivo** forca uma nova exportacao e abre a pasta no arquivo atual do dia, mes ou modo configurado. Se o Excel estiver segurando o arquivo aberto, o lancamento permanece salvo no banco local e a exportacao fica pendente para uma nova tentativa.
+
 Quando backup automatico estiver ativo, arquivos existentes sao copiados para a subpasta `backups/` antes da nova exportacao. O backup interno do caixa fica em **Ajustes > Avancado** e salva o JSON principal do app para restauracao futura.
 
 ## Servidor local
@@ -166,6 +168,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - registro de uma venda;
 - aparicao no historico;
 - abertura dos relatorios;
+- filtros mensais padrao, dia da semana e origem/caixa nos relatorios;
 - marca CDA no topo e cabecalho da categoria de ajustes;
 - categoria Perfis e API de exportar/importar configuracoes;
 - barra fixada com troca de modo e troco;
@@ -174,7 +177,8 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - hover legivel no tema DataCaixa;
 - total de hoje sem somar lancamentos de ontem;
 - exportacao diaria separada pela data real do lancamento;
-- servidor remoto com totais mascarados, registro, edicao, cancelamento e lixeira;
+- servidor remoto com mini-caixa visual, totais mascarados, registro, edicao, cancelamento e lixeira;
+- XLSX com estilo, filtro e formula de total;
 - ausencia de erros de console.
 
 ## Estrutura

@@ -356,41 +356,57 @@ function remoteClientHtml(port: number): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Contabilizador remoto</title>
+  <title>Caixa remoto</title>
   <style>
-    :root { color-scheme: dark; font-family: Bahnschrift, "Segoe UI", sans-serif; background: #0f1311; color: #f4f7f1; }
+    :root { color-scheme: light; font-family: Bahnschrift, "Segoe UI Variable Text", "Segoe UI", sans-serif; background: #e8f3fb; color: #092844; }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 18px; background: radial-gradient(circle at top left, rgba(23, 201, 100, 0.14), transparent 34%), #0f1311; }
-    main { max-width: 880px; margin: 0 auto; display: grid; gap: 14px; }
-    header { display: flex; align-items: end; justify-content: space-between; gap: 12px; }
-    section { border: 1px solid #2b332e; border-radius: 8px; padding: 14px; background: rgba(23, 28, 25, 0.94); box-shadow: 0 20px 50px rgba(0, 0, 0, 0.24); }
-    h1 { margin: 0; font-size: 23px; letter-spacing: -0.02em; }
-    p { margin: 6px 0 0; }
-    label { display: grid; gap: 6px; font-size: 12px; font-weight: 800; color: #b9c4bb; text-transform: uppercase; letter-spacing: 0.04em; }
-    input, select, button { border-radius: 7px; border: 1px solid #38423b; padding: 11px 12px; background: #0f1311; color: #f4f7f1; font: inherit; }
-    input:focus, select:focus { outline: none; border-color: #17c964; box-shadow: 0 0 0 3px rgba(23, 201, 100, 0.16); }
-    button { cursor: pointer; background: #17c964; border-color: #17c964; color: #06110a; font-weight: 900; }
-    button.secondary { background: #222a25; border-color: #38423b; color: #f4f7f1; }
-    button.danger { background: #f05f57; border-color: #f05f57; color: #200907; }
+    body { margin: 0; padding: 16px; background: radial-gradient(circle at top left, rgba(5, 101, 183, 0.18), transparent 32%), linear-gradient(180deg, #f7fcff, #e8f3fb); }
+    main { max-width: 1060px; margin: 0 auto; display: grid; gap: 12px; }
+    header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: stretch; }
+    section, .hero-card { border: 1px solid #9ac9e8; border-radius: 8px; padding: 14px; background: rgba(255, 255, 255, 0.94); box-shadow: 0 18px 45px rgba(2, 50, 91, 0.14); }
+    h1 { margin: 0; font-size: clamp(23px, 4.8vw, 34px); letter-spacing: -0.03em; color: #024b8d; }
+    h2, h3, p { margin: 0; }
+    p { margin-top: 6px; color: #52728a; }
+    label { display: grid; gap: 6px; font-size: 11px; font-weight: 900; color: #52728a; text-transform: uppercase; letter-spacing: 0.06em; }
+    input, select, button { border-radius: 7px; border: 1px solid #9ac9e8; padding: 11px 12px; background: #ffffff; color: #092844; font: inherit; }
+    input:focus, select:focus { outline: none; border-color: #0565b7; box-shadow: 0 0 0 3px rgba(5, 101, 183, 0.16); }
+    button { cursor: pointer; background: #0565b7; border-color: #0565b7; color: #ffffff; font-weight: 950; }
+    button.secondary { background: #dff0fb; border-color: #9ac9e8; color: #024b8d; }
+    button.danger { background: #d90000; border-color: #d90000; color: #ffffff; }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .hero-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: center; background: linear-gradient(135deg, #0565b7, #024b8d); color: #ffffff; }
+    .hero-card p, .hero-card span { color: rgba(255,255,255,0.78); }
+    .mark { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 8px; background: #ffffff; color: #0565b7; font-weight: 950; }
+    .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 10px; align-items: end; }
+    .grid label { grid-column: span 3; }
+    .grid .wide { grid-column: span 6; }
+    .grid .small { grid-column: span 2; }
     .actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
     .actions button { min-height: 34px; padding: 0 10px; font-size: 12px; }
+    .dashboard { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .stat { border: 1px solid #c9e2f2; border-radius: 8px; padding: 11px; background: #f7fcff; }
+    .stat span { display: block; color: #52728a; font-size: 11px; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+    .stat strong { display: block; margin-top: 4px; color: #024b8d; font-size: 20px; }
     .list { display: grid; gap: 8px; }
-    .item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid #28312c; border-radius: 8px; padding: 10px; background: #121713; }
+    .item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; border: 1px solid #c9e2f2; border-radius: 8px; padding: 10px; background: #ffffff; }
     .item-main { min-width: 0; }
     .item-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 900; }
-    .item-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; font-size: 12px; color: #8d9a91; }
-    .item-value { color: #17c964; font-weight: 950; white-space: nowrap; }
+    .item-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; font-size: 12px; color: #52728a; }
+    .item-value { color: #0565b7; font-weight: 950; white-space: nowrap; }
     .item-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 7px; }
     .item-actions button { min-height: 31px; padding: 0 9px; font-size: 12px; }
-    .muted { color: #8d9a91; }
-    .status { min-height: 18px; color: #8d9a91; }
-    .status.error { color: #ff9c95; }
-    .pill { border: 1px solid #38423b; border-radius: 999px; padding: 5px 9px; color: #b9c4bb; font-size: 12px; }
+    .muted { color: #52728a; }
+    .status { min-height: 18px; color: #52728a; }
+    .status.error { color: #d90000; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #9ac9e8; border-radius: 999px; padding: 6px 10px; color: #024b8d; background: #f7fcff; font-size: 12px; font-weight: 900; }
+    .permission-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .permission-list span { border-radius: 999px; padding: 5px 8px; background: #dff0fb; color: #024b8d; font-size: 12px; font-weight: 850; }
+    .permission-title { display: block; margin-top: 10px; color: #024b8d; }
+    .section-title { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
     @media (max-width: 620px) {
       body { padding: 10px; }
-      header { display: grid; align-items: start; }
+      header, .dashboard { grid-template-columns: 1fr; }
+      .grid label, .grid .wide, .grid .small { grid-column: 1 / -1; }
       .item { grid-template-columns: 1fr; }
       .item-value { justify-self: start; }
     }
@@ -399,15 +415,23 @@ function remoteClientHtml(port: number): string {
 <body>
   <main>
     <header>
-      <div>
-        <h1>Contabilizador remoto</h1>
-        <p class="muted">Servidor local na porta ${port}. Use a senha definida no app principal.</p>
+      <div class="hero-card">
+        <div class="mark">C</div>
+        <div>
+          <h1>Caixa remoto</h1>
+          <p>Conectado ao computador principal na porta ${port}. Registros entram no mesmo historico e na mesma planilha.</p>
+        </div>
       </div>
       <span class="pill" id="permissionBadge">Aguardando senha</span>
     </header>
     <section id="login">
-      <label>Senha <input id="password" type="password" autofocus /></label>
-      <button id="loginButton">Entrar</button>
+      <div class="grid">
+        <label class="wide">Senha <input id="password" type="password" autofocus /></label>
+        <label class="wide">Nome deste caixa <input id="deviceName" placeholder="Caixa secundario, Notebook..." /></label>
+      </div>
+      <div class="actions">
+        <button id="loginButton">Entrar</button>
+      </div>
       <p id="loginMessage" class="muted"></p>
     </section>
     <section id="app" hidden>
@@ -419,8 +443,10 @@ function remoteClientHtml(port: number): string {
         </label>
         <label>Valor <input id="value" inputmode="decimal" placeholder="0,00" /></label>
         <label>Pago com <input id="paidWith" inputmode="decimal" placeholder="Opcional" /></label>
-        <label>Pessoas <input id="people" type="number" value="1" min="1" /></label>
-        <label>Descricao <input id="description" placeholder="Mesa 4, Cliente..." /></label>
+        <label class="small">Pessoas <input id="people" type="number" value="1" min="1" /></label>
+        <label class="small">Mesa <input id="tableNumber" placeholder="8" /></label>
+        <label class="small">Onibus <input id="busNumber" placeholder="2" /></label>
+        <label class="wide">Descricao <input id="description" placeholder="Mesa 4, Cliente..." /></label>
       </div>
       <div class="actions">
         <button id="sendButton">Registrar</button>
@@ -429,8 +455,14 @@ function remoteClientHtml(port: number): string {
       <p id="appMessage" class="status"></p>
     </section>
     <section id="history" hidden>
-      <strong>Historico</strong>
+      <div class="section-title">
+        <strong>Historico remoto</strong>
+        <span class="pill" id="connectionState">Online</span>
+      </div>
+      <div class="dashboard" id="summaryCards"></div>
       <div id="summary" class="muted"></div>
+      <strong class="permission-title">Permissoes deste dispositivo</strong>
+      <div class="permission-list" id="permissionList"></div>
       <div id="entries" class="list"></div>
     </section>
   </main>
@@ -438,20 +470,51 @@ function remoteClientHtml(port: number): string {
     let password = "";
     let permissions = {};
     let entriesCache = [];
+    let socket = null;
     const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
     const qs = (selector) => document.querySelector(selector);
     const parseValue = (value) => Number(String(value).replace(/[^\\d,.-]/g, "").replace(",", ".")) || 0;
     const escapeText = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
     const visibleMoney = (value) => permissions.viewTotals ? money.format(Number(value || 0)) : "Restrito";
+    const params = new URLSearchParams(location.search);
+    qs("#password").value = params.get("password") || "";
+    qs("#deviceName").value = params.get("device") || localStorage.getItem("caixaRemoteDevice") || "";
     const setStatus = (message, error) => {
       qs("#appMessage").textContent = message || "";
       qs("#appMessage").className = error ? "status error" : "status";
     };
     async function api(path, options = {}) {
-      const response = await fetch(path, { ...options, headers: { "content-type": "application/json", "x-caixa-password": password, "x-device-name": navigator.userAgent, ...(options.headers || {}) } });
+      const response = await fetch(path, { ...options, headers: { "content-type": "application/json", "x-caixa-password": password, "x-device-name": deviceName(), ...(options.headers || {}) } });
       const text = await response.text();
       if (!response.ok) throw new Error(text || response.statusText);
       return text ? JSON.parse(text) : {};
+    }
+    function deviceName() {
+      return qs("#deviceName").value.trim() || navigator.platform || "Caixa remoto";
+    }
+    function permissionChips() {
+      const rows = [
+        permissions.view ? "Visualizar" : "",
+        permissions.create ? "Registrar" : "",
+        permissions.edit ? "Editar" : "",
+        permissions.delete ? "Apagar" : "",
+        permissions.viewTotals ? "Ver totais" : "Totais ocultos"
+      ].filter(Boolean);
+      qs("#permissionList").innerHTML = rows.map((item) => "<span>" + item + "</span>").join("");
+    }
+    function summaryCards(summary) {
+      const cards = summary
+        ? [
+            ["Total hoje", money.format(summary.total)],
+            ["Lancamentos", String(summary.count)],
+            ["Dinheiro", money.format(summary.cashTotal || 0)]
+          ]
+        : [
+            ["Total hoje", "Restrito"],
+            ["Lancamentos", String(entriesCache.length)],
+            ["Permissao", "Totais ocultos"]
+          ];
+      qs("#summaryCards").innerHTML = cards.map((card) => "<article class='stat'><span>" + card[0] + "</span><strong>" + card[1] + "</strong></article>").join("");
     }
     function renderEntry(entry) {
       const actions = [];
@@ -468,7 +531,7 @@ function remoteClientHtml(port: number): string {
       }
       return "<div class='item'>" +
         "<div class='item-main'><span class='item-title'>" + escapeText(entry.description || "Venda") + "</span>" +
-        "<span class='item-meta'><span>" + escapeText(entry.type) + "</span><span>" + escapeText(entry.status) + "</span><span>" + new Date(entry.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + "</span></span></div>" +
+        "<span class='item-meta'><span>" + escapeText(entry.type) + "</span><span>" + escapeText(entry.status) + "</span><span>" + escapeText(entry.originDevice || "Origem local") + "</span><span>" + new Date(entry.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + "</span></span></div>" +
         "<b class='item-value'>" + visibleMoney(entry.finalValue) + "</b>" +
         (actions.length ? "<div class='item-actions'>" + actions.join("") + "</div>" : "") +
         "</div>";
@@ -486,17 +549,23 @@ function remoteClientHtml(port: number): string {
       qs("#summary").textContent = data.summary
         ? "Hoje: " + money.format(data.summary.total) + " | Lancamentos: " + data.summary.count
         : "Totais ocultos pelas permissoes do servidor.";
+      permissionChips();
+      summaryCards(data.summary);
       qs("#entries").innerHTML = entriesCache.slice(0, 24).map(renderEntry).join("") || "<p class='muted'>Nenhum lancamento ainda.</p>";
     }
     qs("#loginButton").onclick = async () => {
       password = qs("#password").value;
+      localStorage.setItem("caixaRemoteDevice", deviceName());
       try {
         await load();
         qs("#login").hidden = true;
         qs("#history").hidden = false;
         load();
-        const ws = new WebSocket("ws://" + location.host + "/sync?password=" + encodeURIComponent(password) + "&device=" + encodeURIComponent(navigator.platform || "browser"));
-        ws.onmessage = load;
+        if (socket) socket.close();
+        socket = new WebSocket("ws://" + location.host + "/sync?password=" + encodeURIComponent(password) + "&device=" + encodeURIComponent(deviceName()));
+        socket.onopen = () => qs("#connectionState").textContent = "Tempo real ativo";
+        socket.onclose = () => qs("#connectionState").textContent = "Reconecte se precisar";
+        socket.onmessage = load;
       } catch {
         qs("#loginMessage").textContent = "Senha invalida ou permissao negada.";
       }
@@ -511,12 +580,16 @@ function remoteClientHtml(port: number): string {
             value: parseValue(qs("#value").value),
             paidWith: parseValue(qs("#paidWith").value),
             people: Number(qs("#people").value || 1),
-            description: qs("#description").value
+            description: qs("#description").value,
+            tableNumber: qs("#tableNumber").value,
+            busNumber: qs("#busNumber").value
           })
         });
         qs("#value").value = "";
         qs("#paidWith").value = "";
         qs("#description").value = "";
+        qs("#tableNumber").value = "";
+        qs("#busNumber").value = "";
         setStatus("Lancamento registrado.");
         await load();
         qs("#value").focus();
@@ -555,6 +628,9 @@ function remoteClientHtml(port: number): string {
       setStatus("Lancamento apagado definitivamente.");
       await load();
     };
+    if (qs("#password").value) {
+      qs("#loginButton").click();
+    }
   </script>
 </body>
 </html>`;

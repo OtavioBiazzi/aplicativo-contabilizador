@@ -22,7 +22,7 @@ export type RoundDirection = "up" | "down" | "nearest";
 export type FileFormat = "xlsx" | "csv";
 export type FileStrategy = "daily" | "monthlyTabs" | "fixedAll" | "byType";
 export type SpreadsheetMode = "simple" | "advanced";
-export type ThemeMode = "light" | "dark" | "auto" | "contrast" | "datacaixa" | "italia";
+export type ThemeMode = "light" | "dark" | "auto" | "contrast" | "datacaixa" | "datacaixa-dark" | "italia";
 export type FloatingThemeMode = "follow" | ThemeMode;
 export type DensityMode = "compact" | "normal" | "comfortable";
 export type LayoutMode = "complete" | "compact" | "pinnedBar" | "grid" | "sidePanel";
@@ -135,6 +135,8 @@ export interface AppSettings {
   defaultPeople: number;
   defaultRoundingStep: number;
   defaultRoundingDirection: RoundDirection;
+  tableNumberEnabled: boolean;
+  busNumberEnabled: boolean;
   theme: ThemeMode;
   accentColor: string;
   fieldSize: "small" | "medium" | "large";

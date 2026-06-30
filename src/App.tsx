@@ -262,6 +262,7 @@ function themeDefaultAccent(theme: AppSettings["theme"]) {
     auto: "#0565b7",
     contrast: "#00ff66",
     datacaixa: "#0565b7",
+    "datacaixa-dark": "#2f8cff",
     italia: "#168a56"
   };
   return map[theme];
@@ -286,6 +287,8 @@ function createProfileSnapshot(settings: AppSettings): Partial<AppSettings> {
     defaultPeople: settings.defaultPeople,
     defaultRoundingStep: settings.defaultRoundingStep,
     defaultRoundingDirection: settings.defaultRoundingDirection,
+    tableNumberEnabled: settings.tableNumberEnabled,
+    busNumberEnabled: settings.busNumberEnabled,
     spreadsheetMode: settings.spreadsheetMode,
     visibleColumns: [...settings.visibleColumns],
     floating: cloneValue(settings.floating),
@@ -810,6 +813,8 @@ function QuickEntry({
   const effectivePaidWith = paidWith > 0 ? paidWith : value;
   const cash = calculateCash(value, effectivePaidWith);
   const lastActive = entries.find((entry) => entry.status === "active");
+  const tableFieldEnabled = settings.tableNumberEnabled !== false;
+  const busFieldEnabled = settings.busNumberEnabled !== false;
 
   useEffect(() => {
     if (modeCommand) {
@@ -825,19 +830,19 @@ function QuickEntry({
   }, [modeCommand?.nonce, settings.floating.syncMoneyWithEntryType, settings.quickTabs]);
 
   useEffect(() => {
-    if (type === "Mesa" && tableNumber && !description) {
+    if (tableFieldEnabled && type === "Mesa" && tableNumber && !description) {
       setDescription(`Mesa ${tableNumber}`);
     }
-    if (type === "Onibus" && busNumber && !description) {
+    if (busFieldEnabled && type === "Onibus" && busNumber && !description) {
       setDescription(`Onibus ${busNumber}`);
     }
-    if (type === "Dinheiro/Troco" && cashLinkedType === "Mesa" && tableNumber && !description) {
+    if (tableFieldEnabled && type === "Dinheiro/Troco" && cashLinkedType === "Mesa" && tableNumber && !description) {
       setDescription(`Mesa ${tableNumber}`);
     }
-    if (type === "Dinheiro/Troco" && cashLinkedType === "Onibus" && busNumber && !description) {
+    if (busFieldEnabled && type === "Dinheiro/Troco" && cashLinkedType === "Onibus" && busNumber && !description) {
       setDescription(`Onibus ${busNumber}`);
     }
-  }, [type, cashLinkedType, tableNumber, busNumber]);
+  }, [type, cashLinkedType, tableNumber, busNumber, tableFieldEnabled, busFieldEnabled]);
 
   const visible = (field: string) => !pinned || settings.floating.visibleFields.includes(field);
 
@@ -870,8 +875,8 @@ function QuickEntry({
       value,
       description: effectiveDescription,
       people: effectiveSplit?.people ?? people,
-      tableNumber: isMoney && cashLinkedType !== "Mesa" ? "" : tableNumber,
-      busNumber: isMoney && cashLinkedType !== "Onibus" ? "" : busNumber,
+      tableNumber: tableFieldEnabled && !(isMoney && cashLinkedType !== "Mesa") ? tableNumber : "",
+      busNumber: busFieldEnabled && !(isMoney && cashLinkedType !== "Onibus") ? busNumber : "",
       paymentMethod: effectiveType === "Dinheiro/Troco" ? "Dinheiro" : paymentMethod,
       paidWith: effectiveType === "Dinheiro/Troco" ? effectivePaidWith : paidWith,
       observations,
@@ -902,14 +907,14 @@ function QuickEntry({
     const activeQuickTab = quickTabs.find((tab) => tab.id === activeQuickTabId);
     const compactFloating = Boolean(activeQuickTab?.compact);
     const detailKind = isMoney
-      ? cashLinkedType === "Mesa"
+      ? tableFieldEnabled && cashLinkedType === "Mesa"
         ? "mesa"
-        : cashLinkedType === "Onibus"
+        : busFieldEnabled && cashLinkedType === "Onibus"
           ? "onibus"
           : ""
-      : type === "Mesa"
+      : tableFieldEnabled && type === "Mesa"
         ? "mesa"
-        : type === "Onibus"
+        : busFieldEnabled && type === "Onibus"
           ? "onibus"
           : "";
     const showTabs = visible("tabs") && quickTabs.length > 0;
@@ -1187,14 +1192,14 @@ function QuickEntry({
           </label>
         )}
 
-        {(type === "Mesa" || (type === "Dinheiro/Troco" && cashLinkedType === "Mesa")) && !pinned && (
+        {tableFieldEnabled && (type === "Mesa" || (type === "Dinheiro/Troco" && cashLinkedType === "Mesa")) && !pinned && (
           <label className="field small-field">
             <span>Mesa</span>
             <input value={tableNumber} onChange={(event) => setTableNumber(event.target.value)} placeholder="8" />
           </label>
         )}
 
-        {(type === "Onibus" || (type === "Dinheiro/Troco" && cashLinkedType === "Onibus")) && !pinned && (
+        {busFieldEnabled && (type === "Onibus" || (type === "Dinheiro/Troco" && cashLinkedType === "Onibus")) && !pinned && (
           <label className="field small-field">
             <span>Onibus</span>
             <input value={busNumber} onChange={(event) => setBusNumber(event.target.value)} placeholder="2" />
@@ -1745,8 +1750,8 @@ function ReportsPanel({
   onExport: () => Promise<void>;
   onExportFiltered: (ids: string[], label: string) => Promise<void>;
 }) {
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [from, setFrom] = useState(() => currentMonthPeriod().from);
+  const [to, setTo] = useState(() => currentMonthPeriod().to);
   const [type, setType] = useState("Todos");
   const [payment, setPayment] = useState("Todos");
   const [table, setTable] = useState("");
@@ -1776,6 +1781,7 @@ function ReportsPanel({
   const cancelledCount = periodEntries.filter((entry) => entry.status === "cancelled").length;
   const deletedCount = periodEntries.filter((entry) => entry.status === "deleted").length;
   const dailyTotals = summarizeByDay(activeRows);
+  const originTotals = summarizeByOrigin(activeRows);
   const peakDay = [...dailyTotals].sort((left, right) => right.total - left.total)[0];
   const topEntries = [...activeRows].sort((left, right) => getEntryAmount(right) - getEntryAmount(left)).slice(0, 5);
   const dailyAverage = dailyTotals.length ? roundMoney(periodSummary.total / dailyTotals.length) : 0;
@@ -1835,8 +1841,9 @@ function ReportsPanel({
         </label>
         <label className="field report-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, origem..." /></label>
         <button className="ghost-button" type="button" onClick={() => {
-          setFrom("");
-          setTo("");
+          const month = currentMonthPeriod();
+          setFrom(month.from);
+          setTo(month.to);
           setType("Todos");
           setPayment("Todos");
           setTable("");
@@ -1854,7 +1861,7 @@ function ReportsPanel({
         <ReportCloseCard
           label="Dia mais forte"
           value={showSensitive ? (peakDay ? formatCurrency(peakDay.total) : formatCurrency(0)) : "Restrito"}
-          detail={peakDay ? `${formatReportDate(peakDay.dateKey)} com ${peakDay.count} registro(s)` : "Sem lancamentos no recorte"}
+          detail={peakDay ? `${formatReportDate(peakDay.dateKey, true)} com ${peakDay.count} registro(s)` : "Sem lancamentos no recorte"}
         />
         <ReportCloseCard
           label="Media diaria"
@@ -1887,6 +1894,7 @@ function ReportsPanel({
           <BarList title="Total por mesa" data={periodSummary.byTable} total={periodSummary.total} />
           <BarList title="Total por onibus" data={periodSummary.byBus} total={periodSummary.total} />
           <BarList title="Forma de pagamento" data={periodSummary.byPayment} total={periodSummary.total} />
+          <BarList title="Total por origem/caixa" data={originTotals} total={periodSummary.total} />
         </div>
       ) : (
         <section className="flat-section restricted-panel">
@@ -1946,9 +1954,30 @@ function summarizeByDay(entries: LedgerEntry[]): Array<{ dateKey: string; total:
     .sort((left, right) => left.dateKey.localeCompare(right.dateKey));
 }
 
-function formatReportDate(dateKey: string): string {
+function summarizeByOrigin(entries: LedgerEntry[]): Record<string, number> {
+  return entries.reduce<Record<string, number>>((acc, entry) => {
+    const origin = entry.originDevice?.trim() || "Sem origem";
+    acc[origin] = roundMoney((acc[origin] || 0) + getEntryAmount(entry));
+    return acc;
+  }, {});
+}
+
+function currentMonthPeriod(): { from: string; to: string } {
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), 1);
+  const to = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return { from: getLocalDateKey(from), to: getLocalDateKey(to) };
+}
+
+function formatReportDate(dateKey: string, withWeekday = false): string {
   const [year, month, day] = dateKey.split("-");
-  return `${day}/${month}/${year}`;
+  const basic = `${day}/${month}/${year}`;
+  if (!withWeekday) {
+    return basic;
+  }
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  const weekdays = ["Domingo", "Segunda", "Terca", "Quarta", "Quinta", "Sexta", "Sabado"];
+  return `${weekdays[date.getDay()]}, ${basic}`;
 }
 
 function ReportCloseCard({ label, value, detail }: { label: string; value: string; detail: string }) {
@@ -1972,7 +2001,7 @@ function DailyTrendCard({ rows, showSensitive }: { rows: Array<{ dateKey: string
       <div className="daily-trend-list">
         {rows.slice(-7).map((row) => (
           <div key={row.dateKey}>
-            <span>{formatReportDate(row.dateKey)}</span>
+            <span>{formatReportDate(row.dateKey, true)}</span>
             <div className="bar-track">
               <span style={{ width: `${Math.max(3, Math.min(100, max ? (Math.abs(row.total) / max) * 100 : 0))}%` }} />
             </div>
@@ -2465,6 +2494,11 @@ function SettingsPanel({
     }
   };
 
+  const openCurrentExport = async () => {
+    const status = await window.caixa.exportNow();
+    onToast(status.ok ? "success" : "error", status.ok ? "Arquivo atual gerado e aberto na pasta." : status.message || "Nao foi possivel abrir a planilha.");
+  };
+
   const resetCategory = (target: SettingsCategory) => {
     setDraft((current) => {
       const defaults = createSettingsFallback(current);
@@ -2490,7 +2524,9 @@ function SettingsPanel({
           defaultType: defaults.defaultType,
           defaultPeople: defaults.defaultPeople,
           defaultRoundingStep: defaults.defaultRoundingStep,
-          defaultRoundingDirection: defaults.defaultRoundingDirection
+          defaultRoundingDirection: defaults.defaultRoundingDirection,
+          tableNumberEnabled: defaults.tableNumberEnabled,
+          busNumberEnabled: defaults.busNumberEnabled
         };
       }
       if (target === "profiles") {
@@ -2599,6 +2635,7 @@ function SettingsPanel({
               <option value="auto">Automatico</option>
               <option value="contrast">Alto contraste</option>
               <option value="datacaixa">DataCaixa PDV</option>
+              <option value="datacaixa-dark">DataCaixa PDV escuro</option>
               <option value="italia">Italia</option>
             </select>
           </label>
@@ -2648,6 +2685,9 @@ function SettingsPanel({
               <option value="nearest">Mais proximo</option>
             </select>
           </label>
+          <label className="switch-line"><input type="checkbox" checked={draft.tableNumberEnabled} onChange={(event) => update("tableNumberEnabled", event.target.checked)} /> Mostrar campo de numero da mesa</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.busNumberEnabled} onChange={(event) => update("busNumberEnabled", event.target.checked)} /> Mostrar campo de numero do onibus</label>
+          <p className="settings-note">Essas opcoes escondem apenas o campo numerico. Os modos Mesa e Onibus continuam disponiveis quando forem uteis.</p>
         </section>
 
         <section className={categoryClass("profiles", "settings-group wide")}>
@@ -2725,6 +2765,10 @@ function SettingsPanel({
             <button className="primary-button" type="button" onClick={onImportLedger}>
               <Upload size={18} />
               Importar Excel/CSV
+            </button>
+            <button className="ghost-button" type="button" onClick={openCurrentExport}>
+              <ExternalLink size={18} />
+              Gerar/abrir arquivo
             </button>
           </div>
           <label className="field path-field"><span>Pasta padrao</span><input value={draft.outputDirectory} onChange={(event) => update("outputDirectory", event.target.value)} /><button onClick={chooseFolder} type="button">Escolher</button></label>
@@ -2806,6 +2850,7 @@ function SettingsPanel({
               <option value="auto">Automatico</option>
               <option value="contrast">Alto contraste</option>
               <option value="datacaixa">DataCaixa PDV</option>
+              <option value="datacaixa-dark">DataCaixa PDV escuro</option>
               <option value="italia">Italia</option>
             </select>
           </label>
@@ -2989,6 +3034,11 @@ function SettingsPanel({
               <strong>{diagnostics?.backupCount ?? 0}</strong>
               <small>Backups do historico interno</small>
             </article>
+          </div>
+          <div className="made-by-card">
+            <span>Aplicativo</span>
+            <strong>Feito por Otavio Biazzi</strong>
+            <small>Contabilizador Caixa para uso local, rede e planilhas diarias.</small>
           </div>
           <div className="settings-action-card">
             <DatabaseBackup size={20} />

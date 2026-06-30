@@ -57,10 +57,13 @@ export class LedgerExporter {
       return status;
     } catch (error) {
       const previous = await this.readState();
-      const message =
+      const rawMessage =
         error instanceof Error
           ? error.message
           : "Nao foi possivel atualizar o arquivo. O lancamento ficou salvo localmente.";
+      const message = isLikelyLockedFileError(rawMessage)
+        ? "O arquivo parece estar aberto ou bloqueado. O lancamento ficou salvo no app; feche o Excel e use Gerar/abrir arquivo ou registre outro valor para sincronizar."
+        : rawMessage;
       const pendingCount = Math.max(1, previous.pendingCount + 1);
       await this.writeState({
         pendingCount,
@@ -182,11 +185,12 @@ export class LedgerExporter {
     zip.folder("_rels")?.file(".rels", rootRelsXml());
     zip.folder("docProps")?.file("core.xml", coreXml());
     zip.folder("xl")?.file("workbook.xml", workbookXml(safeSheets));
+    zip.folder("xl")?.file("styles.xml", stylesXml());
     zip.folder("xl")?.folder("_rels")?.file("workbook.xml.rels", workbookRelsXml(safeSheets.length));
 
     const worksheets = zip.folder("xl")?.folder("worksheets");
     safeSheets.forEach((sheet, index) => {
-      worksheets?.file(`sheet${index + 1}.xml`, worksheetXml(withTotalRow(sheet.rows)));
+      worksheets?.file(`sheet${index + 1}.xml`, worksheetXml(sheet.rows));
     });
 
     const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
@@ -302,6 +306,10 @@ function isSummableColumn(column: string): boolean {
   );
 }
 
+function isLikelyLockedFileError(message: string): boolean {
+  return /EBUSY|EPERM|EACCES|locked|being used|permiss/i.test(message);
+}
+
 function formatDateToken(date: Date, settings: AppSettings): string {
   const [year, month, day] = getLocalDateKey(date).split("-");
 
@@ -350,6 +358,7 @@ function contentTypesXml(sheetCount: number): string {
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
 <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 ${worksheets}
 </Types>`);
 }
@@ -384,38 +393,141 @@ function workbookXml(sheets: Array<{ name: string }>): string {
 }
 
 function workbookRelsXml(sheetCount: number): string {
-  const relationships = Array.from({ length: sheetCount }, (_item, index) => {
+  const sheetRelationships = Array.from({ length: sheetCount }, (_item, index) => {
     return `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`;
   }).join("");
+  const relationships = `${sheetRelationships}<Relationship Id="rId${sheetCount + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`;
   return xmlDeclaration(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>`);
 }
 
 function worksheetXml(rows: Record<string, unknown>[]): string {
   const columns = rows.length ? Object.keys(rows[0]) : DEFAULT_COLUMNS;
-  const allRows = [columns, ...rows.map((row) => columns.map((column) => row[column] ?? ""))];
-  const sheetData = allRows
+  const lastColumn = columnName(columns.length);
+  const dataRowCount = rows.length;
+  const totalRowNumber = dataRowCount ? dataRowCount + 2 : 0;
+  const lastRowNumber = totalRowNumber || 1;
+  const dimension = `A1:${lastColumn}${lastRowNumber}`;
+  const autoFilter = `A1:${lastColumn}${dataRowCount ? dataRowCount + 1 : 1}`;
+  const cols = columns
+    .map((column, index) => {
+      const position = index + 1;
+      return `<col min="${position}" max="${position}" width="${columnWidthFor(column)}" customWidth="1"/>`;
+    })
+    .join("");
+  const headerRow = `<row r="1" ht="23" customHeight="1">${columns
+    .map((column, columnIndex) => cellXml(column, `${columnName(columnIndex + 1)}1`, 1))
+    .join("")}</row>`;
+  const dataRows = rows
     .map((row, rowIndex) => {
-      const rowNumber = rowIndex + 1;
-      const cells = row
-        .map((value, columnIndex) => cellXml(value, `${columnName(columnIndex + 1)}${rowNumber}`))
+      const rowNumber = rowIndex + 2;
+      const cells = columns
+        .map((column, columnIndex) => cellXml(row[column] ?? "", `${columnName(columnIndex + 1)}${rowNumber}`, styleForColumn(column)))
         .join("");
       return `<row r="${rowNumber}">${cells}</row>`;
     })
     .join("");
+  const totalRow = dataRowCount
+    ? `<row r="${totalRowNumber}" ht="22" customHeight="1">${columns
+        .map((column, columnIndex) => totalCellXml(column, columnIndex, totalRowNumber, dataRowCount))
+        .join("")}</row>`
+    : "";
+  const sheetData = `${headerRow}${dataRows}${totalRow}`;
 
   return xmlDeclaration(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<dimension ref="${dimension}"/>
+<sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="18"/>
+<cols>${cols}</cols>
 <sheetData>${sheetData}</sheetData>
+<autoFilter ref="${autoFilter}"/>
 </worksheet>`);
 }
 
-function cellXml(value: unknown, reference: string): string {
+function totalCellXml(column: string, columnIndex: number, rowNumber: number, dataRowCount: number): string {
+  const reference = `${columnName(columnIndex + 1)}${rowNumber}`;
+  if (columnIndex === 0) {
+    return cellXml("TOTAL", reference, 3);
+  }
+  if (isSummableColumn(column)) {
+    const columnLetter = columnName(columnIndex + 1);
+    return `<c r="${reference}" s="4"><f>SUBTOTAL(109,${columnLetter}2:${columnLetter}${dataRowCount + 1})</f></c>`;
+  }
+  return cellXml("", reference, 5);
+}
+
+function styleForColumn(column: string): number {
+  return isSummableColumn(column) ? 2 : 0;
+}
+
+function columnWidthFor(column: string): number {
+  const widths: Record<string, number> = {
+    Data: 13,
+    Hora: 11,
+    Tipo: 18,
+    "Valor pago": 14,
+    "Valor original": 15,
+    "Valor final": 14,
+    Pessoas: 10,
+    "Valor por pessoa": 17,
+    Arredondamento: 18,
+    "Sobra/diferenca": 17,
+    Descricao: 28,
+    Mesa: 10,
+    Onibus: 11,
+    "Forma de pagamento": 19,
+    "Pago com": 14,
+    Troco: 13,
+    Observacoes: 28,
+    "Dispositivo/origem": 24,
+    "ID do lancamento": 38,
+    Status: 12
+  };
+  return widths[column] || Math.max(12, Math.min(28, column.length + 3));
+}
+
+function cellXml(value: unknown, reference: string, styleId = 0): string {
+  const style = styleId ? ` s="${styleId}"` : "";
   if (typeof value === "number" && Number.isFinite(value)) {
-    return `<c r="${reference}"><v>${value}</v></c>`;
+    return `<c r="${reference}"${style}><v>${value}</v></c>`;
   }
   if (typeof value === "boolean") {
-    return `<c r="${reference}" t="b"><v>${value ? 1 : 0}</v></c>`;
+    return `<c r="${reference}" t="b"${style}><v>${value ? 1 : 0}</v></c>`;
   }
-  return `<c r="${reference}" t="inlineStr"><is><t>${escapeXml(String(value ?? ""))}</t></is></c>`;
+  if (value === "" || value === null || value === undefined) {
+    return `<c r="${reference}"${style}/>`;
+  }
+  return `<c r="${reference}" t="inlineStr"${style}><is><t>${escapeXml(String(value ?? ""))}</t></is></c>`;
+}
+
+function stylesXml(): string {
+  return xmlDeclaration(`<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;R$&quot; #,##0.00"/></numFmts>
+<fonts count="3">
+<font><sz val="11"/><color rgb="FF102A3B"/><name val="Segoe UI"/></font>
+<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Segoe UI"/></font>
+<font><b/><sz val="11"/><color rgb="FF092844"/><name val="Segoe UI"/></font>
+</fonts>
+<fills count="4">
+<fill><patternFill patternType="none"/></fill>
+<fill><patternFill patternType="gray125"/></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FF0565B7"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFDFF0FB"/><bgColor indexed="64"/></patternFill></fill>
+</fills>
+<borders count="2">
+<border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left style="thin"><color rgb="FF9AC9E8"/></left><right style="thin"><color rgb="FF9AC9E8"/></right><top style="thin"><color rgb="FF9AC9E8"/></top><bottom style="thin"><color rgb="FF9AC9E8"/></bottom><diagonal/></border>
+</borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="6">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"><alignment horizontal="right"/></xf>
+<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="left"/></xf>
+<xf numFmtId="164" fontId="2" fillId="3" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="right"/></xf>
+<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+</styleSheet>`);
 }
 
 function columnName(index: number): string {
