@@ -27,7 +27,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com exportacao do recorte filtrado.
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia real do lancamento, mes com abas, arquivo fixo ou arquivos separados por tipo.
-- Importacao de planilhas Excel/CSV/TSV compativeis com deduplicacao por ID ou assinatura do lancamento.
+- Importacao de planilhas Excel/CSV/TSV compativeis com previa, confirmacao e deduplicacao por ID ou assinatura do lancamento.
 - Configuracoes persistentes: tema padrao azul de PDV, cor principal, densidade, layout, abas rapidas, campos do modo fixado, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
 - Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
@@ -54,7 +54,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
 - Checagem discreta de releases do GitHub pela area de Atualizacoes.
 - Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
-- Smoke test da interface com Playwright, cobrindo importacao, barra fixada, preset Onibus enxuto, servidor, relatorios e planilha.
+- Smoke test da interface com Playwright, cobrindo previa de importacao, deduplicacao, barra fixada, preset Onibus enxuto, servidor, relatorios e planilha.
 
 ## Requisitos
 
@@ -134,7 +134,7 @@ venda-2026-06-28.xlsx
 onibus-2026-06-28.xlsx
 ```
 
-Em **Ajustes > Planilha e backup**, use **Importar Excel/CSV** para trazer planilhas antigas compativeis para o historico do app. Linhas `TOTAL` sao ignoradas e lancamentos repetidos sao pulados automaticamente.
+Em **Ajustes > Planilha e backup**, use **Importar Excel/CSV** para trazer planilhas antigas compativeis para o historico do app. Antes de gravar, o app mostra uma previa com linhas novas, duplicadas, ignoradas, avisos e uma amostra dos lancamentos. Linhas `TOTAL` sao ignoradas e lancamentos repetidos sao pulados automaticamente.
 
 Quando backup automatico estiver ativo, arquivos existentes sao copiados para a subpasta `backups/` antes da nova exportacao.
 

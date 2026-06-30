@@ -6,7 +6,7 @@ import { LedgerExporter } from "./exporter.js";
 import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
 import { LedgerStore } from "./storage.js";
-import type { AppSettings, EntryDraft, LedgerImportResult, LedgerEntry, UpdateInfo } from "../src/shared/types.js";
+import type { AppSettings, EntryDraft, LedgerImportPreview, LedgerImportResult, LedgerEntry, UpdateInfo } from "../src/shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -344,6 +344,51 @@ function registerIpc() {
       shell.showItemInFolder(status.filePath);
     }
     return status;
+  });
+
+  ipcMain.handle("entries:previewImportFile", async (_event, providedPath?: string): Promise<LedgerImportPreview | null> => {
+    let filePath = providedPath;
+    if (!filePath) {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: "Importar Excel ou CSV",
+        properties: ["openFile"],
+        filters: [
+          { name: "Planilhas compativeis", extensions: ["xlsx", "csv", "tsv"] },
+          { name: "Excel", extensions: ["xlsx"] },
+          { name: "CSV", extensions: ["csv", "tsv"] }
+        ]
+      });
+      if (result.canceled || !result.filePaths[0]) {
+        return null;
+      }
+      filePath = result.filePaths[0];
+    }
+
+    const settings = await store.getSettings();
+    const parsed = await readLedgerImport(filePath, settings);
+    const preview = await store.previewImportEntries(parsed.entries);
+    return {
+      filePath,
+      fileName: path.basename(filePath),
+      totalRows: parsed.totalRows,
+      parsedRows: parsed.parsedRows,
+      ignoredRows: parsed.skippedRows,
+      newRows: preview.imported,
+      duplicateRows: preview.skipped,
+      warnings: parsed.warnings,
+      sample: preview.items.slice(0, 30).map(({ entry, duplicate }) => ({
+        id: entry.id,
+        createdAt: entry.createdAt,
+        type: entry.type,
+        description: entry.description,
+        finalValue: entry.finalValue,
+        paymentMethod: entry.paymentMethod,
+        status: entry.status,
+        tableNumber: entry.tableNumber,
+        busNumber: entry.busNumber,
+        duplicate
+      }))
+    };
   });
 
   ipcMain.handle("entries:importFile", async (_event, providedPath?: string): Promise<LedgerImportResult | null> => {

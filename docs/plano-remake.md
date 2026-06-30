@@ -128,7 +128,7 @@ Teste de aceite:
 
 Objetivo: transformar relatorios em uma area de analise real.
 
-Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada. Avancada na versao 0.2.6 com total do dia isolado dos dias anteriores. Avancada na versao 0.2.7 com importacao de Excel/CSV/TSV compativel e deduplicacao.
+Status: iniciada na versao 0.2.0 com filtros por periodo, tipo, mesa, onibus, pagamento, busca, totais sensiveis e exportacao filtrada. Avancada na versao 0.2.6 com total do dia isolado dos dias anteriores. Avancada na versao 0.2.7 com importacao de Excel/CSV/TSV compativel e deduplicacao. Avancada na versao 0.2.9 com previa de importacao antes de gravar no caixa.
 
 Entregas:
 - Filtros por periodo, tipo, mesa, onibus, forma de pagamento e origem.
@@ -233,6 +233,7 @@ Entregas:
 - Smoke test para barra fixada.
 - Smoke test para preset Onibus enxuto e barra sem borda visual.
 - Smoke test para planilha.
+- Smoke test para previa de importacao e deduplicacao.
 - Smoke test para servidor local.
 - Smoke test para tema DataCaixa e Italia.
 - Checklist antes de release.

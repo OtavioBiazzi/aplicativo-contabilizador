@@ -57,6 +57,7 @@ import type {
   EntryType,
   ExportStatus,
   LedgerEntry,
+  LedgerImportPreview,
   PaymentMethod,
   QuickTabSettings,
   RoundDirection,
@@ -413,6 +414,8 @@ export function App() {
   const [pinned, setPinnedState] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [modeCommand, setModeCommand] = useState<ModeCommand | null>(null);
+  const [importPreview, setImportPreview] = useState<LedgerImportPreview | null>(null);
+  const [importingPreview, setImportingPreview] = useState(false);
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey());
 
   const todayEntries = useMemo(() => filterEntriesByLocalDate(entries, currentDateKey), [entries, currentDateKey]);
@@ -543,13 +546,32 @@ export function App() {
 
   const importLedgerFile = async () => {
     try {
-      const result = await window.caixa.importLedgerFile();
+      const preview = await window.caixa.previewLedgerImport();
+      if (!preview) {
+        showToast("info", "Importacao cancelada.");
+        return;
+      }
+      setImportPreview(preview);
+      showToast(preview.newRows ? "info" : "error", preview.newRows ? "Previa da importacao pronta." : "Nenhum lancamento novo encontrado.");
+    } catch (error) {
+      showToast("error", error instanceof Error ? error.message : "Nao foi possivel ler a planilha.");
+    }
+  };
+
+  const confirmLedgerImport = async () => {
+    if (!importPreview) {
+      return;
+    }
+    setImportingPreview(true);
+    try {
+      const result = await window.caixa.importLedgerFile(importPreview.filePath);
       if (!result) {
         showToast("info", "Importacao cancelada.");
         return;
       }
       await reload();
       setExportStatus(result.exportStatus);
+      setImportPreview(null);
       const skippedText = result.skipped ? ` ${result.skipped} linha(s) pulada(s).` : "";
       const warningText = result.warnings.length ? ` ${result.warnings.length} aviso(s).` : "";
       showToast(
@@ -560,6 +582,8 @@ export function App() {
       );
     } catch (error) {
       showToast("error", error instanceof Error ? error.message : "Nao foi possivel importar a planilha.");
+    } finally {
+      setImportingPreview(false);
     }
   };
 
@@ -723,6 +747,14 @@ export function App() {
         )}
       </main>
 
+      {importPreview && (
+        <ImportPreviewModal
+          preview={importPreview}
+          busy={importingPreview}
+          onClose={() => setImportPreview(null)}
+          onConfirm={confirmLedgerImport}
+        />
+      )}
       {toast && <Toast toast={toast} />}
     </div>
   );
@@ -1499,6 +1531,106 @@ function HistoryPanel({
         />
       )}
     </section>
+  );
+}
+
+function ImportPreviewModal({
+  preview,
+  busy,
+  onClose,
+  onConfirm
+}: {
+  preview: LedgerImportPreview;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const canImport = preview.newRows > 0 && !busy;
+  return (
+    <div className="modal-backdrop">
+      <div className="modal import-modal">
+        <div className="modal-head">
+          <div>
+            <span className="settings-overline">Importacao de planilha</span>
+            <strong>Conferir antes de importar</strong>
+            <p>{preview.fileName}</p>
+          </div>
+          <button className="icon-button" onClick={onClose} disabled={busy}><X size={18} /></button>
+        </div>
+
+        <div className="import-summary-grid">
+          <div>
+            <span>Novos</span>
+            <strong>{preview.newRows}</strong>
+          </div>
+          <div>
+            <span>Duplicados</span>
+            <strong>{preview.duplicateRows}</strong>
+          </div>
+          <div>
+            <span>Ignorados</span>
+            <strong>{preview.ignoredRows}</strong>
+          </div>
+          <div>
+            <span>Lidos</span>
+            <strong>{preview.parsedRows}/{preview.totalRows}</strong>
+          </div>
+        </div>
+
+        {preview.warnings.length > 0 && (
+          <div className="import-warning-box">
+            <strong>Avisos encontrados</strong>
+            {preview.warnings.slice(0, 4).map((warning) => (
+              <span key={warning}>{warning}</span>
+            ))}
+            {preview.warnings.length > 4 && <span>Mais {preview.warnings.length - 4} aviso(s).</span>}
+          </div>
+        )}
+
+        <div className="import-table-wrap">
+          <table className="import-preview-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Data</th>
+                <th>Tipo</th>
+                <th>Descricao</th>
+                <th>Valor</th>
+                <th>Pagamento</th>
+              </tr>
+            </thead>
+            <tbody>
+              {preview.sample.map((item) => {
+                const { date, time } = formatDateTime(item.createdAt);
+                return (
+                  <tr key={`${item.id}-${item.duplicate ? "dup" : "new"}`} className={item.duplicate ? "duplicate" : "new"}>
+                    <td><span>{item.duplicate ? "Duplicado" : "Novo"}</span></td>
+                    <td>{date} {time}</td>
+                    <td>{item.type}</td>
+                    <td>{item.description || "Venda"}</td>
+                    <td>{formatCurrency(item.finalValue)}</td>
+                    <td>{item.paymentMethod}</td>
+                  </tr>
+                );
+              })}
+              {!preview.sample.length && (
+                <tr>
+                  <td colSpan={6}>Nenhuma linha compativel encontrada nesta planilha.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="submit-row">
+          <button className="primary-button" onClick={onConfirm} disabled={!canImport}>
+            {busy ? <RefreshCw size={18} className="spin" /> : <Upload size={18} />}
+            Confirmar importacao
+          </button>
+          <button className="ghost-button" onClick={onClose} disabled={busy}>Cancelar</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

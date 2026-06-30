@@ -200,6 +200,31 @@ export interface LedgerImportResult {
   exportStatus: ExportStatus;
 }
 
+export interface LedgerImportPreviewItem {
+  id: string;
+  createdAt: string;
+  type: EntryType;
+  description: string;
+  finalValue: number;
+  paymentMethod: PaymentMethod;
+  status: LedgerEntry["status"];
+  tableNumber: string;
+  busNumber: string;
+  duplicate: boolean;
+}
+
+export interface LedgerImportPreview {
+  filePath: string;
+  fileName: string;
+  totalRows: number;
+  parsedRows: number;
+  ignoredRows: number;
+  newRows: number;
+  duplicateRows: number;
+  warnings: string[];
+  sample: LedgerImportPreviewItem[];
+}
+
 export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;

@@ -169,9 +169,17 @@ def main() -> int:
       expect(page.get_by_label("Visual sem borda de janela")).to_be_checked()
       page.locator(".settings-nav").get_by_role("button", name="Planilha e backup").click()
       expect(page.get_by_role("button", name="Importar Excel/CSV")).to_be_visible()
+      import_preview = page.evaluate("""async (filePath) => await window.caixa.previewLedgerImport(filePath)""", str(import_file))
+      if import_preview["newRows"] != 1 or import_preview["duplicateRows"] != 0 or not import_preview["sample"]:
+        print(f"Import preview did not detect the new row: {import_preview}", file=sys.stderr)
+        return 1
       first_import = page.evaluate("""async (filePath) => await window.caixa.importLedgerFile(filePath)""", str(import_file))
       if first_import["imported"] != 1:
         print(f"Import did not create the expected row: {first_import}", file=sys.stderr)
+        return 1
+      duplicate_preview = page.evaluate("""async (filePath) => await window.caixa.previewLedgerImport(filePath)""", str(import_file))
+      if duplicate_preview["newRows"] != 0 or duplicate_preview["duplicateRows"] < 1:
+        print(f"Import preview did not mark the row as duplicate: {duplicate_preview}", file=sys.stderr)
         return 1
       second_import = page.evaluate("""async (filePath) => await window.caixa.importLedgerFile(filePath)""", str(import_file))
       if second_import["imported"] != 0 or second_import["skipped"] < 1:

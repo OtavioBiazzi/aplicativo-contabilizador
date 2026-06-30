@@ -152,39 +152,27 @@ export class LedgerStore {
     await this.persistEntries();
   }
 
+  async previewImportEntries(importedEntries: LedgerEntry[]): Promise<{
+    imported: number;
+    skipped: number;
+    entries: LedgerEntry[];
+    items: Array<{ entry: LedgerEntry; duplicate: boolean }>;
+  }> {
+    const entries = await this.getEntries();
+    return planImportEntries(entries, importedEntries);
+  }
+
   async importEntries(importedEntries: LedgerEntry[]): Promise<{ imported: number; skipped: number; entries: LedgerEntry[] }> {
     const entries = await this.getEntries();
-    const ids = new Set(entries.map((entry) => entry.id));
-    const signatures = new Set(entries.flatMap((entry) => [entrySignature(entry), entryLooseSignature(entry)]));
-    const accepted: LedgerEntry[] = [];
-    let skipped = 0;
+    const plan = planImportEntries(entries, importedEntries);
 
-    for (const incoming of importedEntries) {
-      const signature = entrySignature(incoming);
-      const looseSignature = entryLooseSignature(incoming);
-      if ((incoming.id && ids.has(incoming.id)) || signatures.has(signature) || signatures.has(looseSignature)) {
-        skipped += 1;
-        continue;
-      }
-
-      const entry = {
-        ...incoming,
-        id: incoming.id || randomUUID(),
-        updatedAt: incoming.updatedAt || new Date().toISOString()
-      };
-      ids.add(entry.id);
-      signatures.add(signature);
-      signatures.add(looseSignature);
-      accepted.push(entry);
-    }
-
-    if (accepted.length) {
-      entries.unshift(...accepted);
+    if (plan.entries.length) {
+      entries.unshift(...plan.entries);
       entries.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
       await this.persistEntries();
     }
 
-    return { imported: accepted.length, skipped, entries: accepted };
+    return { imported: plan.imported, skipped: plan.skipped, entries: plan.entries };
   }
 
   private async persistEntries() {
@@ -198,6 +186,37 @@ export class LedgerStore {
   private ledgerPath() {
     return path.join(this.paths.dataDirectory, LEDGER_FILE);
   }
+}
+
+function planImportEntries(existingEntries: LedgerEntry[], importedEntries: LedgerEntry[]) {
+  const ids = new Set(existingEntries.map((entry) => entry.id));
+  const signatures = new Set(existingEntries.flatMap((entry) => [entrySignature(entry), entryLooseSignature(entry)]));
+  const accepted: LedgerEntry[] = [];
+  const items: Array<{ entry: LedgerEntry; duplicate: boolean }> = [];
+  let skipped = 0;
+
+  for (const incoming of importedEntries) {
+    const signature = entrySignature(incoming);
+    const looseSignature = entryLooseSignature(incoming);
+    if ((incoming.id && ids.has(incoming.id)) || signatures.has(signature) || signatures.has(looseSignature)) {
+      skipped += 1;
+      items.push({ entry: incoming, duplicate: true });
+      continue;
+    }
+
+    const entry = {
+      ...incoming,
+      id: incoming.id || randomUUID(),
+      updatedAt: incoming.updatedAt || new Date().toISOString()
+    };
+    ids.add(entry.id);
+    signatures.add(signature);
+    signatures.add(looseSignature);
+    accepted.push(entry);
+    items.push({ entry, duplicate: false });
+  }
+
+  return { imported: accepted.length, skipped, entries: accepted, items };
 }
 
 function normalizeDescription(description: string | undefined, type: string, tableNumber?: string, busNumber?: string): string {
