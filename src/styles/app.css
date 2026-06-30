@@ -1341,6 +1341,120 @@ th {
   gap: 8px;
 }
 
+.remote-client-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.remote-client-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 8px;
+  padding: 14px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, transparent), transparent 48%),
+    color-mix(in srgb, var(--panel) 94%, var(--accent) 6%);
+}
+
+.remote-client-hero h3 {
+  margin-top: 2px;
+  font-size: clamp(1.18rem, 2vw, 1.5rem);
+}
+
+.remote-client-hero p {
+  margin-top: 5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.remote-client-actions,
+.remote-entry-actions,
+.remote-permission-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.remote-permission-row span {
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.remote-permission-row small {
+  color: var(--muted);
+}
+
+.remote-metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.remote-history-card {
+  display: grid;
+  gap: 10px;
+}
+
+.remote-entry-list {
+  display: grid;
+  gap: 8px;
+}
+
+.remote-entry-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--panel) 96%, var(--accent) 4%);
+}
+
+.remote-entry-list article.deleted {
+  opacity: 0.68;
+}
+
+.remote-entry-list article.cancelled {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--line));
+}
+
+.remote-entry-list strong,
+.remote-entry-list span,
+.remote-entry-list small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-entry-list span,
+.remote-entry-list small {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.remote-entry-list b {
+  white-space: nowrap;
+}
+
+.remote-entry-actions button {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 9px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
 .permission-grid {
   grid-column: 1 / -1;
   display: grid;
@@ -2453,7 +2567,8 @@ body.floating-borderless .floating-bar {
   }
 
   .report-close-grid,
-  .report-deep-grid {
+  .report-deep-grid,
+  .remote-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2483,7 +2598,8 @@ body.floating-borderless .floating-bar {
   }
 
   .workspace-header,
-  .quick-head {
+  .quick-head,
+  .remote-client-hero {
     align-items: stretch;
     flex-direction: column;
   }
@@ -2528,11 +2644,13 @@ body.floating-borderless .floating-bar {
 
   .quick-actions,
   .metric-grid,
+  .remote-metrics,
   .calc-results,
   .diagnostics-grid,
   .report-close-grid,
   .report-deep-grid,
   .report-row-list > div,
+  .remote-entry-list article,
   .quick-tab-row,
   .quick-tab-row.has-money-link,
   .profile-active-card,

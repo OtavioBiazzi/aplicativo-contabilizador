@@ -279,6 +279,22 @@ def main() -> int:
         {"port": remote_port, "password": remote_password},
       )
       remote_base = f"http://127.0.0.1:{remote_port}"
+      page.locator(".connect-panel").get_by_label("Endereco do servidor").fill(remote_base)
+      page.locator(".connect-panel").get_by_label("Senha").fill(remote_password)
+      page.locator(".connect-panel").get_by_label("Nome deste caixa").fill("App cliente smoke")
+      page.get_by_role("button", name="Conectar no app").click()
+      expect(page.get_by_text("Cliente conectado no app")).to_be_visible(timeout=15000)
+      expect(page.get_by_text("Historico vindo do caixa principal")).to_be_visible(timeout=15000)
+      page.locator(".connect-panel").get_by_label("Valor").first.fill("18,75")
+      page.locator(".connect-panel").get_by_label("Descricao").first.fill("Cliente app smoke")
+      page.locator(".connect-panel").get_by_role("button", name="Registrar").first.click()
+      expect(page.get_by_text("Lancamento enviado ao caixa principal.")).to_be_visible(timeout=15000)
+      api_after_app_client = api_json(remote_base, "/api/entries", remote_password)
+      if not any(item["description"] == "Cliente app smoke" for item in api_after_app_client["entries"]):
+        print("Native app remote client did not create the remote entry.", file=sys.stderr)
+        return 1
+      page.get_by_role("button", name="Desconectar").click()
+      expect(page.get_by_role("button", name="Conectar no app")).to_be_visible(timeout=10000)
       created = api_json(
         remote_base,
         "/api/entries",

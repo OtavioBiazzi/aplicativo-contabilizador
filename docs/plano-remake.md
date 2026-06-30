@@ -169,7 +169,7 @@ Teste de aceite:
 
 Objetivo: fazer o servidor parecer uma funcao segura e compreensivel.
 
-Status: iniciada na versao 0.2.0 com subabas Criar servidor, Conectar e Permissoes, alem de mascara de valores quando totais sensiveis estao ocultos. Avancada na versao 0.2.1 com cliente remoto melhorado e API remota para editar, cancelar, enviar para lixeira e apagar definitivamente conforme permissoes. Avancada na versao 0.2.12 com mini-caixa remoto em estilo DataCaixa, nome do caixa, mesa/onibus e login por link com senha.
+Status: iniciada na versao 0.2.0 com subabas Criar servidor, Conectar e Permissoes, alem de mascara de valores quando totais sensiveis estao ocultos. Avancada na versao 0.2.1 com cliente remoto melhorado e API remota para editar, cancelar, enviar para lixeira e apagar definitivamente conforme permissoes. Avancada na versao 0.2.12 com mini-caixa remoto em estilo DataCaixa, nome do caixa, mesa/onibus e login por link com senha. Avancada na versao 0.2.13 com cliente remoto dentro do proprio app para conectar por IP/porta/senha, registrar, listar historico e operar conforme permissoes.
 
 Entregas:
 - Separar "Criar servidor" e "Conectar a servidor".
@@ -178,6 +178,7 @@ Entregas:
 - Permissoes por dispositivo: visualizar, registrar, editar, apagar, ver totais.
 - Tela de dispositivos conectados com desconectar.
 - Cliente remoto mais bonito e coerente com o app.
+- Cliente remoto nativo na aba Rede para usar outro PC com o proprio aplicativo.
 
 Teste de aceite:
 - Um segundo PC/celular na rede conecta com senha.
@@ -228,7 +229,7 @@ Teste de aceite:
 
 Objetivo: cada versao sair testada e facil de baixar.
 
-Status: smoke test cobre janela principal, tema DataCaixa, relatorios mensais, origem/caixa, barra fixada, planilha formatada, total diario, configuracao de elementos da barra e servidor remoto com permissoes.
+Status: smoke test cobre janela principal, tema DataCaixa, relatorios mensais, origem/caixa, barra fixada, planilha formatada, total diario, configuracao de elementos da barra, cliente remoto dentro do app e servidor remoto com permissoes.
 
 Entregas:
 - Smoke test para janela principal.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -64,6 +64,7 @@ import type {
   PaymentMethod,
   QuickTabSettings,
   RoundDirection,
+  ServerPermissions,
   ServerState,
   UpdateInfo
 } from "./shared/types";
@@ -82,6 +83,22 @@ type SettingsCategory =
   | "updates"
   | "advanced";
 type ServerPanelMode = "create" | "connect" | "permissions";
+
+interface RemoteEntriesResponse {
+  entries: LedgerEntry[];
+  summary: DaySummary | null;
+  permissions: ServerPermissions;
+}
+
+interface RemoteClientSession {
+  baseUrl: string;
+  password: string;
+  deviceName: string;
+  entries: LedgerEntry[];
+  summary: DaySummary | null;
+  permissions: ServerPermissions;
+  connectedAt: string;
+}
 
 interface ToastState {
   tone: "success" | "error" | "info";
@@ -2115,6 +2132,18 @@ function ServerPanel({
   const [mode, setMode] = useState<ServerPanelMode>("create");
   const [connectHost, setConnectHost] = useState(server.url || "");
   const [connectPassword, setConnectPassword] = useState("");
+  const [connectDeviceName, setConnectDeviceName] = useState("App cliente");
+  const [remoteSession, setRemoteSession] = useState<RemoteClientSession | null>(null);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteMessage, setRemoteMessage] = useState("");
+  const remoteSocket = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    return () => {
+      remoteSocket.current?.close();
+      remoteSocket.current = null;
+    };
+  }, []);
 
   const start = async () => {
     try {
@@ -2132,6 +2161,144 @@ function ServerPanel({
     const next = await window.caixa.stopServer();
     onServerChange(next);
     onToast("info", "Servidor desligado.");
+  };
+
+  const remoteRequest = async <T,>(session: RemoteClientSession, path: string, options: RequestInit = {}): Promise<T> => {
+    const response = await fetch(`${session.baseUrl}${path}`, {
+      ...options,
+      headers: {
+        "content-type": "application/json",
+        "x-caixa-password": session.password,
+        "x-device-name": session.deviceName,
+        ...(options.headers || {})
+      }
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      let errorMessage = text || response.statusText;
+      try {
+        const parsed = JSON.parse(text) as { error?: string };
+        errorMessage = parsed.error || errorMessage;
+      } catch {
+        // A resposta remota pode ser texto puro.
+      }
+      throw new Error(errorMessage);
+    }
+    return (text ? JSON.parse(text) : {}) as T;
+  };
+
+  const refreshRemote = async (session = remoteSession) => {
+    if (!session) {
+      return;
+    }
+    const data = await remoteRequest<RemoteEntriesResponse>(session, "/api/entries");
+    setRemoteSession({
+      ...session,
+      entries: data.entries,
+      summary: data.summary,
+      permissions: data.permissions
+    });
+  };
+
+  const connectRemote = async () => {
+    setRemoteLoading(true);
+    setRemoteMessage("");
+    try {
+      const baseUrl = normalizeRemoteBaseUrl(connectHost);
+      const session: RemoteClientSession = {
+        baseUrl,
+        password: connectPassword,
+        deviceName: connectDeviceName.trim() || "App cliente",
+        entries: [],
+        summary: null,
+        permissions: { view: false, create: false, edit: false, delete: false, viewTotals: false },
+        connectedAt: new Date().toISOString()
+      };
+      const data = await remoteRequest<RemoteEntriesResponse>(session, "/api/entries");
+      const connectedSession = { ...session, entries: data.entries, summary: data.summary, permissions: data.permissions };
+      setRemoteSession(connectedSession);
+      remoteSocket.current?.close();
+      const wsUrl = `${baseUrl.replace(/^http/i, "ws")}/sync?password=${encodeURIComponent(connectPassword)}&device=${encodeURIComponent(session.deviceName)}`;
+      remoteSocket.current = new WebSocket(wsUrl);
+      remoteSocket.current.onopen = () => setRemoteMessage("Tempo real ativo.");
+      remoteSocket.current.onmessage = () => {
+        void refreshRemote(connectedSession);
+      };
+      remoteSocket.current.onclose = () => setRemoteMessage("Conexao em tempo real fechada. Use Atualizar ou conecte novamente.");
+      onToast("success", "Cliente conectado ao caixa principal.");
+    } catch (error) {
+      setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel conectar.");
+      onToast("error", error instanceof Error ? error.message : "Nao foi possivel conectar.");
+    } finally {
+      setRemoteLoading(false);
+    }
+  };
+
+  const disconnectRemote = () => {
+    remoteSocket.current?.close();
+    remoteSocket.current = null;
+    setRemoteSession(null);
+    setRemoteMessage("");
+    onToast("info", "Cliente remoto desconectado.");
+  };
+
+  const submitRemoteEntry = async (draft: EntryDraft) => {
+    if (!remoteSession?.permissions.create) {
+      onToast("error", "Este cliente nao tem permissao para registrar.");
+      return;
+    }
+    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, "/api/entries", {
+      method: "POST",
+      body: JSON.stringify(draft)
+    });
+    await refreshRemote();
+    onToast("success", "Lancamento enviado ao caixa principal.");
+  };
+
+  const editRemoteEntry = async (entry: LedgerEntry) => {
+    if (!remoteSession?.permissions.edit) {
+      return;
+    }
+    const description = window.prompt("Nova descricao", entry.description || "");
+    if (description === null) {
+      return;
+    }
+    const payload: Record<string, unknown> = { description };
+    if (remoteSession.permissions.viewTotals) {
+      const value = window.prompt("Novo valor", String(entry.finalValue || 0).replace(".", ","));
+      if (value !== null) {
+        payload.value = parseMoney(value);
+      }
+    }
+    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, `/api/entries/${entry.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+    await refreshRemote();
+    onToast("success", "Lancamento remoto editado.");
+  };
+
+  const cancelRemoteEntry = async (entry: LedgerEntry) => {
+    if (!remoteSession?.permissions.edit) {
+      return;
+    }
+    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, `/api/entries/${entry.id}/cancel`, { method: "POST" });
+    await refreshRemote();
+    onToast("info", "Lancamento remoto cancelado.");
+  };
+
+  const deleteRemoteEntry = async (entry: LedgerEntry, permanent = false) => {
+    if (!remoteSession?.permissions.delete) {
+      return;
+    }
+    if (!window.confirm(permanent ? "Apagar definitivamente no caixa principal?" : "Enviar para a lixeira no caixa principal?")) {
+      return;
+    }
+    await remoteRequest<{ ok: boolean }>(remoteSession, `/api/entries/${entry.id}${permanent ? "?permanent=1" : ""}`, {
+      method: "DELETE"
+    });
+    await refreshRemote();
+    onToast(permanent ? "info" : "success", permanent ? "Lancamento remoto apagado." : "Lancamento remoto enviado para a lixeira.");
   };
 
   return (
@@ -2191,30 +2358,62 @@ function ServerPanel({
         <section className="flat-section connect-panel">
           <div className="section-title">
             <strong>Conectar este computador a outro caixa</strong>
-            <span>Para quando outro PC esta com o servidor aberto</span>
+            <span>{remoteSession ? "Operando como cliente remoto" : "Para quando outro PC esta com o servidor aberto"}</span>
           </div>
-          <div className="entry-grid">
-            <label className="field description-field">
-              <span>Endereco do servidor</span>
-              <input value={connectHost} onChange={(event) => setConnectHost(event.target.value)} placeholder="http://192.168.0.10:4317" />
-            </label>
-            <label className="field">
-              <span>Senha</span>
-              <input type="password" value={connectPassword} onChange={(event) => setConnectPassword(event.target.value)} placeholder="Senha do caixa principal" />
-            </label>
-          </div>
-          <div className="connection-steps">
-            <span><Wifi size={16} /> 1. Abra o servidor no PC principal.</span>
-            <span><KeyRound size={16} /> 2. Copie o endereco e use a senha definida.</span>
-            <span><ExternalLink size={16} /> 3. Abra no navegador do segundo PC.</span>
-          </div>
-          <button
-            className="primary-button"
-            disabled={!connectHost}
-            onClick={() => window.open(connectPassword ? `${connectHost.replace(/\/$/, "")}?password=${encodeURIComponent(connectPassword)}` : connectHost)}
-          >
-            <ExternalLink size={18} /> Abrir conexao
-          </button>
+          {!remoteSession ? (
+            <>
+              <div className="entry-grid">
+                <label className="field description-field">
+                  <span>Endereco do servidor</span>
+                  <input value={connectHost} onChange={(event) => setConnectHost(event.target.value)} placeholder="http://192.168.0.10:4317" />
+                </label>
+                <label className="field">
+                  <span>Senha</span>
+                  <input type="password" value={connectPassword} onChange={(event) => setConnectPassword(event.target.value)} placeholder="Senha do caixa principal" />
+                </label>
+                <label className="field">
+                  <span>Nome deste caixa</span>
+                  <input value={connectDeviceName} onChange={(event) => setConnectDeviceName(event.target.value)} placeholder="Notebook, caixa 2..." />
+                </label>
+              </div>
+              <div className="connection-steps">
+                <span><Wifi size={16} /> 1. Abra o servidor no PC principal.</span>
+                <span><KeyRound size={16} /> 2. Digite endereco, senha e o nome deste caixa.</span>
+                <span><PlugZap size={16} /> 3. Clique em Conectar no app para operar como extensao do caixa principal.</span>
+              </div>
+              {remoteMessage && <p className="settings-note">{remoteMessage}</p>}
+              <div className="submit-row">
+                <button
+                  className="primary-button"
+                  disabled={!connectHost || !connectPassword || remoteLoading}
+                  onClick={connectRemote}
+                >
+                  {remoteLoading ? <RefreshCw size={18} className="spin" /> : <PlugZap size={18} />}
+                  Conectar no app
+                </button>
+                <button
+                  className="ghost-button"
+                  disabled={!connectHost}
+                  onClick={() => window.open(connectPassword ? `${normalizeRemoteBaseUrl(connectHost)}?password=${encodeURIComponent(connectPassword)}&device=${encodeURIComponent(connectDeviceName || "App cliente")}` : normalizeRemoteBaseUrl(connectHost))}
+                >
+                  <ExternalLink size={18} /> Abrir no navegador
+                </button>
+              </div>
+            </>
+          ) : (
+            <RemoteClientWorkspace
+              session={remoteSession}
+              settings={settings}
+              message={remoteMessage}
+              loading={remoteLoading}
+              onRefresh={() => refreshRemote()}
+              onDisconnect={disconnectRemote}
+              onSubmit={submitRemoteEntry}
+              onEdit={editRemoteEntry}
+              onCancel={cancelRemoteEntry}
+              onDelete={deleteRemoteEntry}
+            />
+          )}
         </section>
       )}
 
@@ -2264,6 +2463,139 @@ function ServerPanel({
       )}
     </section>
   );
+}
+
+function RemoteClientWorkspace({
+  session,
+  settings,
+  message,
+  loading,
+  onRefresh,
+  onDisconnect,
+  onSubmit,
+  onEdit,
+  onCancel,
+  onDelete
+}: {
+  session: RemoteClientSession;
+  settings: AppSettings;
+  message: string;
+  loading: boolean;
+  onRefresh: () => Promise<void> | void;
+  onDisconnect: () => void;
+  onSubmit: (draft: EntryDraft) => Promise<void>;
+  onEdit: (entry: LedgerEntry) => Promise<void>;
+  onCancel: (entry: LedgerEntry) => Promise<void>;
+  onDelete: (entry: LedgerEntry, permanent?: boolean) => Promise<void>;
+}) {
+  const visibleEntries = session.entries.filter((entry) => entry.status !== "deleted");
+  const deletedEntries = session.entries.filter((entry) => entry.status === "deleted");
+  const permissionBadges = [
+    session.permissions.view ? "Visualizar" : "",
+    session.permissions.create ? "Registrar" : "",
+    session.permissions.edit ? "Editar" : "",
+    session.permissions.delete ? "Apagar" : "",
+    session.permissions.viewTotals ? "Ver totais" : "Totais ocultos"
+  ].filter(Boolean);
+
+  return (
+    <div className="remote-client-workspace">
+      <div className="remote-client-hero">
+        <div>
+          <span className="eyebrow">Cliente conectado no app</span>
+          <h3>{session.deviceName}</h3>
+          <p>{session.baseUrl} | conectado em {formatDateTime(session.connectedAt).time}</p>
+        </div>
+        <div className="remote-client-actions">
+          <button className="ghost-button" type="button" onClick={onRefresh} disabled={loading}>
+            {loading ? <RefreshCw size={16} className="spin" /> : <RefreshCw size={16} />}
+            Atualizar
+          </button>
+          <button className="danger-button" type="button" onClick={onDisconnect}>
+            <X size={16} /> Desconectar
+          </button>
+        </div>
+      </div>
+
+      <div className="remote-permission-row">
+        {permissionBadges.map((badge) => (
+          <span key={badge}>{badge}</span>
+        ))}
+        {message && <small>{message}</small>}
+      </div>
+
+      <div className="metric-grid remote-metrics">
+        <Metric label="Total hoje remoto" value={session.summary && session.permissions.viewTotals ? formatCurrency(session.summary.total) : "Restrito"} />
+        <Metric label="Lancamentos" value={String(session.summary?.count ?? visibleEntries.length)} />
+        <Metric label="Dinheiro" value={session.summary && session.permissions.viewTotals ? formatCurrency(session.summary.cashTotal) : "Restrito"} />
+        <Metric label="Onibus" value={session.summary && session.permissions.viewTotals ? formatCurrency(session.summary.busTotal) : "Restrito"} />
+        <Metric label="Lixeira remota" value={String(deletedEntries.length)} />
+      </div>
+
+      {session.permissions.create ? (
+        <QuickEntry
+          entries={session.entries}
+          settings={settings}
+          pinned={false}
+          modeCommand={null}
+          onSubmit={onSubmit}
+        />
+      ) : (
+        <section className="flat-section restricted-panel">
+          <ShieldCheck size={20} />
+          <strong>Somente visualizacao</strong>
+          <p className="muted-copy">Este cliente consegue acompanhar o caixa principal, mas nao tem permissao para registrar.</p>
+        </section>
+      )}
+
+      <section className="flat-section remote-history-card">
+        <div className="section-title">
+          <strong>Historico vindo do caixa principal</strong>
+          <span>{visibleEntries.length} visiveis | {deletedEntries.length} na lixeira</span>
+        </div>
+        <div className="remote-entry-list">
+          {session.entries.slice(0, 16).map((entry) => {
+            const { date, time } = formatDateTime(entry.createdAt);
+            return (
+              <article key={entry.id} className={entry.status}>
+                <div>
+                  <strong>{entry.description || "Venda"}</strong>
+                  <span>{date} {time} | {entry.customType || entry.type} | {statusLabel(entry.status)}</span>
+                  <small>{entry.originDevice || "Origem nao informada"}</small>
+                </div>
+                <b>{session.permissions.viewTotals ? formatCurrency(getEntryAmount(entry)) : "Restrito"}</b>
+                <div className="remote-entry-actions">
+                  {session.permissions.edit && entry.status !== "deleted" && (
+                    <>
+                      <button type="button" onClick={() => onEdit(entry)}>Editar</button>
+                      <button type="button" onClick={() => onCancel(entry)}>Cancelar</button>
+                    </>
+                  )}
+                  {session.permissions.delete && (
+                    entry.status === "deleted" ? (
+                      <button type="button" onClick={() => onDelete(entry, true)}>Apagar definitivo</button>
+                    ) : (
+                      <button type="button" onClick={() => onDelete(entry)}>Lixeira</button>
+                    )
+                  )}
+                </div>
+              </article>
+            );
+          })}
+          {!session.entries.length && <p className="empty-text">Nenhum lancamento remoto encontrado.</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function normalizeRemoteBaseUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("Informe o endereco do servidor.");
+  }
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  return withProtocol.replace(/\/+$/, "");
 }
 
 function SettingsPanel({

@@ -45,7 +45,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL por formula.
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
 - Total do dia, painel lateral e servidor local somam somente lancamentos do dia atual.
-- Servidor local com senha, permissoes, mini-caixa remoto em estilo DataCaixa, cadastro remoto, edicao, cancelamento, lixeira, origem do dispositivo e atualizacao em tempo real via WebSocket.
+- Servidor local com senha, permissoes, cliente remoto dentro do proprio app, mini-caixa web em estilo DataCaixa, cadastro remoto, edicao, cancelamento, lixeira, origem do dispositivo e atualizacao em tempo real via WebSocket.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
@@ -149,6 +149,7 @@ Quando backup automatico estiver ativo, arquivos existentes sao copiados para a 
 3. Em **Permissoes**, escolha visualizar, registrar, editar, apagar e ver totais vendidos.
 4. Clique em **Abrir servidor**.
 5. Em outro computador da mesma rede, abra o endereco mostrado pelo app ou use a subaba **Conectar** para montar o link.
+6. Para usar outro PC com o proprio aplicativo, abra **Rede > Conectar**, informe endereco, senha e nome do caixa, e clique em **Conectar no app**.
 
 Se o servidor estiver desligado, o aplicativo continua funcionando normalmente no computador principal.
 
@@ -177,7 +178,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - hover legivel no tema DataCaixa;
 - total de hoje sem somar lancamentos de ontem;
 - exportacao diaria separada pela data real do lancamento;
-- servidor remoto com mini-caixa visual, totais mascarados, registro, edicao, cancelamento e lixeira;
+- cliente remoto dentro do app, mini-caixa web, totais mascarados, registro, edicao, cancelamento e lixeira;
 - XLSX com estilo, filtro e formula de total;
 - ausencia de erros de console.
 
