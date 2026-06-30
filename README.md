@@ -24,7 +24,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Divisao de conta com arredondamento por multiplos de R$ 0,05 a R$ 5,00 e direcao para cima, para baixo ou mais proxima.
 - Modo dinheiro/troco com quebra em notas e moedas do real.
 - Historico editavel com filtros, duplicar, cancelar, lixeira, restauracao e exclusao definitiva.
-- Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com exportacao do recorte filtrado.
+- Relatorios por periodo com filtros por tipo, mesa, onibus, forma de pagamento e busca, com fechamento, tendencia diaria, ranking de maiores lancamentos, alertas e exportacao do recorte filtrado.
 - Exportacao automatica para Excel ou CSV.
 - Organizacao dos arquivos por dia real do lancamento, mes com abas, arquivo fixo ou arquivos separados por tipo.
 - Importacao de planilhas Excel/CSV/TSV compativeis com previa, confirmacao e deduplicacao por ID ou assinatura do lancamento.
@@ -56,7 +56,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
 - Checagem discreta de releases do GitHub pela area de Atualizacoes.
 - Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
-- Smoke test da interface com Playwright, cobrindo previa de importacao, backup/restauracao, deduplicacao, barra fixada, preset Onibus enxuto, servidor, relatorios e planilha.
+- Smoke test da interface com Playwright, cobrindo previa de importacao, backup/restauracao, deduplicacao, barra fixada, preset Onibus enxuto, relatorios profissionais, servidor e planilha.
 
 ## Requisitos
 

@@ -45,9 +45,11 @@ import {
   filterEntriesByLocalDate,
   formatCurrency,
   formatDateTime,
+  getEntryAmount,
   getLocalDateKey,
   parseMoney,
   ROUNDING_STEPS,
+  roundMoney,
   summarizeEntries
 } from "./shared/calculations";
 import type {
@@ -1773,6 +1775,12 @@ function ReportsPanel({
   const activeRows = periodEntries.filter((entry) => entry.status === "active");
   const cancelledCount = periodEntries.filter((entry) => entry.status === "cancelled").length;
   const deletedCount = periodEntries.filter((entry) => entry.status === "deleted").length;
+  const dailyTotals = summarizeByDay(activeRows);
+  const peakDay = [...dailyTotals].sort((left, right) => right.total - left.total)[0];
+  const topEntries = [...activeRows].sort((left, right) => getEntryAmount(right) - getEntryAmount(left)).slice(0, 5);
+  const dailyAverage = dailyTotals.length ? roundMoney(periodSummary.total / dailyTotals.length) : 0;
+  const cashShare = periodSummary.total ? Math.round((periodSummary.cashTotal / periodSummary.total) * 100) : 0;
+  const busShare = periodSummary.total ? Math.round((periodSummary.busTotal / periodSummary.total) * 100) : 0;
   const tables = uniqueFilled(entries.map((entry) => entry.tableNumber));
   const buses = uniqueFilled(entries.map((entry) => entry.busNumber));
   const exportLabel = [from || "inicio", to || "hoje", type, payment]
@@ -1837,6 +1845,29 @@ function ReportsPanel({
         }}><RotateCcw size={16} /> Limpar filtros</button>
       </div>
 
+      <div className="report-close-grid">
+        <ReportCloseCard
+          label="Fechamento"
+          value={showSensitive ? formatCurrency(periodSummary.total) : "Restrito"}
+          detail={`${activeRows.length} ativos em ${periodEntries.length} encontrados`}
+        />
+        <ReportCloseCard
+          label="Dia mais forte"
+          value={showSensitive ? (peakDay ? formatCurrency(peakDay.total) : formatCurrency(0)) : "Restrito"}
+          detail={peakDay ? `${formatReportDate(peakDay.dateKey)} com ${peakDay.count} registro(s)` : "Sem lancamentos no recorte"}
+        />
+        <ReportCloseCard
+          label="Media diaria"
+          value={showSensitive ? formatCurrency(dailyAverage) : "Restrito"}
+          detail={`${dailyTotals.length || 0} dia(s) com movimento`}
+        />
+        <ReportCloseCard
+          label="Mix rapido"
+          value={showSensitive ? `${cashShare}% dinheiro` : "Restrito"}
+          detail={showSensitive ? `${busShare}% onibus | ${cancelledCount} cancelado(s)` : `${cancelledCount} cancelado(s)`}
+        />
+      </div>
+
       <div className="metric-grid">
         <Metric label="Total do periodo" value={showSensitive ? formatCurrency(periodSummary.total) : "Restrito"} />
         <Metric label="Quantidade" value={String(periodSummary.count)} />
@@ -1865,6 +1896,18 @@ function ReportsPanel({
         </section>
       )}
 
+      <div className="report-deep-grid">
+        <DailyTrendCard rows={dailyTotals} showSensitive={showSensitive} />
+        <TopEntriesCard entries={topEntries} showSensitive={showSensitive} />
+        <ReportAlertsCard
+          cancelledCount={cancelledCount}
+          deletedCount={deletedCount}
+          pendingCount={exportStatus?.pendingCount || 0}
+          differenceTotal={periodSummary.differenceTotal}
+          showSensitive={showSensitive}
+        />
+      </div>
+
       <section className="flat-section">
         <div className="section-title">
           <strong>Registros do recorte</strong>
@@ -1885,6 +1928,141 @@ function ReportsPanel({
           {!periodEntries.length && <p className="empty-text">Nenhum registro encontrado com esses filtros.</p>}
         </div>
       </section>
+    </section>
+  );
+}
+
+function summarizeByDay(entries: LedgerEntry[]): Array<{ dateKey: string; total: number; count: number }> {
+  const grouped = entries.reduce<Record<string, { total: number; count: number }>>((acc, entry) => {
+    const dateKey = getLocalDateKey(entry.createdAt);
+    acc[dateKey] = acc[dateKey] || { total: 0, count: 0 };
+    acc[dateKey].total += getEntryAmount(entry);
+    acc[dateKey].count += 1;
+    return acc;
+  }, {});
+
+  return Object.entries(grouped)
+    .map(([dateKey, value]) => ({ dateKey, total: roundMoney(value.total), count: value.count }))
+    .sort((left, right) => left.dateKey.localeCompare(right.dateKey));
+}
+
+function formatReportDate(dateKey: string): string {
+  const [year, month, day] = dateKey.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function ReportCloseCard({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <article className="report-close-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </article>
+  );
+}
+
+function DailyTrendCard({ rows, showSensitive }: { rows: Array<{ dateKey: string; total: number; count: number }>; showSensitive: boolean }) {
+  const max = Math.max(...rows.map((row) => Math.abs(row.total)), 0);
+  return (
+    <section className="report-insight-card">
+      <div className="section-title">
+        <strong>Movimento por dia</strong>
+        <span>{rows.length} dia(s)</span>
+      </div>
+      <div className="daily-trend-list">
+        {rows.slice(-7).map((row) => (
+          <div key={row.dateKey}>
+            <span>{formatReportDate(row.dateKey)}</span>
+            <div className="bar-track">
+              <span style={{ width: `${Math.max(3, Math.min(100, max ? (Math.abs(row.total) / max) * 100 : 0))}%` }} />
+            </div>
+            <strong>{showSensitive ? formatCurrency(row.total) : `${row.count} reg.`}</strong>
+          </div>
+        ))}
+        {!rows.length && <p className="empty-text">Sem movimento no recorte.</p>}
+      </div>
+    </section>
+  );
+}
+
+function TopEntriesCard({ entries, showSensitive }: { entries: LedgerEntry[]; showSensitive: boolean }) {
+  return (
+    <section className="report-insight-card">
+      <div className="section-title">
+        <strong>Maiores lancamentos</strong>
+        <span>Top {entries.length}</span>
+      </div>
+      <div className="top-entry-list">
+        {entries.map((entry, index) => {
+          const { date, time } = formatDateTime(entry.createdAt);
+          return (
+            <article key={entry.id}>
+              <span>{index + 1}</span>
+              <div>
+                <strong>{entry.description || "Venda"}</strong>
+                <small>{date} {time} | {entry.customType || entry.type} | {entry.paymentMethod}</small>
+              </div>
+              <b>{showSensitive ? formatCurrency(getEntryAmount(entry)) : "Restrito"}</b>
+            </article>
+          );
+        })}
+        {!entries.length && <p className="empty-text">Sem lancamentos ativos no recorte.</p>}
+      </div>
+    </section>
+  );
+}
+
+function ReportAlertsCard({
+  cancelledCount,
+  deletedCount,
+  pendingCount,
+  differenceTotal,
+  showSensitive
+}: {
+  cancelledCount: number;
+  deletedCount: number;
+  pendingCount: number;
+  differenceTotal: number;
+  showSensitive: boolean;
+}) {
+  const alerts = [
+    {
+      label: pendingCount ? "Exportacao pendente" : "Exportacao sincronizada",
+      detail: pendingCount ? `${pendingCount} tentativa(s) pendente(s)` : "Planilha pronta para conferir",
+      tone: pendingCount ? "warn" : "ok"
+    },
+    {
+      label: cancelledCount ? "Cancelamentos no recorte" : "Sem cancelamentos",
+      detail: `${cancelledCount} lancamento(s) cancelado(s)`,
+      tone: cancelledCount ? "warn" : "ok"
+    },
+    {
+      label: deletedCount ? "Itens na lixeira" : "Lixeira limpa no recorte",
+      detail: `${deletedCount} lancamento(s) removido(s)`,
+      tone: deletedCount ? "warn" : "ok"
+    },
+    {
+      label: "Sobras e ajustes",
+      detail: showSensitive ? formatCurrency(differenceTotal) : "Restrito",
+      tone: differenceTotal ? "warn" : "ok"
+    }
+  ];
+
+  return (
+    <section className="report-insight-card report-alert-card">
+      <div className="section-title">
+        <strong>Alertas do recorte</strong>
+        <span>Fechamento</span>
+      </div>
+      {alerts.map((alert) => (
+        <article key={alert.label} className={alert.tone}>
+          <i />
+          <div>
+            <strong>{alert.label}</strong>
+            <span>{alert.detail}</span>
+          </div>
+        </article>
+      ))}
     </section>
   );
 }
