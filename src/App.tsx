@@ -739,7 +739,35 @@ function normalizeRemotePolicy(policy: RemoteClientPolicy | undefined, settings:
   };
 }
 
-function settingsForRemoteClient(settings: AppSettings, policy: RemoteClientPolicy): AppSettings {
+function clientPolicyForEntry(settings: AppSettings, policy: RemoteClientPolicy, allowClientCustomization = false): RemoteClientPolicy {
+  if (!allowClientCustomization) {
+    return policy;
+  }
+  const serverFields = new Set(normalizeFloatingFields(policy.visibleFields));
+  const customFields = normalizeFloatingFields(settings.floating.visibleFields).filter((field) => serverFields.has(field));
+  const visibleFields = customFields.length ? normalizeFloatingFields(customFields) : normalizeFloatingFields(policy.visibleFields);
+  const customTabs = enabledQuickTabs(settings)
+    .filter((tab) => policy.allowedTypes.includes(tab.type))
+    .map((tab) => ({
+      ...tab,
+      enabled: true,
+      cashLinkedType:
+        tab.cashLinkedType && policy.allowedTypes.includes(tab.cashLinkedType)
+          ? tab.cashLinkedType
+          : tab.cashLinkedType
+            ? defaultCashLinkForAllowedTypes(policy.allowedTypes, tab.cashLinkedType)
+            : undefined
+    }));
+
+  return {
+    ...policy,
+    visibleFields,
+    quickTabs: customTabs.length ? customTabs : policy.quickTabs
+  };
+}
+
+function settingsForRemoteClient(settings: AppSettings, policy: RemoteClientPolicy, allowClientCustomization = false): AppSettings {
+  const entryPolicy = clientPolicyForEntry(settings, policy, allowClientCustomization);
   return normalizeSettingsDraft(settings, {
     defaultType: policy.defaultType,
     defaultPeople: policy.defaultPeople,
@@ -747,12 +775,12 @@ function settingsForRemoteClient(settings: AppSettings, policy: RemoteClientPoli
     defaultRoundingDirection: policy.defaultRoundingDirection,
     tableNumberEnabled: policy.tableNumberEnabled,
     busNumberEnabled: policy.busNumberEnabled,
-    quickTabs: policy.quickTabs.length
-      ? policy.quickTabs.map((tab) => ({ ...tab, enabled: true }))
+    quickTabs: entryPolicy.quickTabs.length
+      ? entryPolicy.quickTabs.map((tab) => ({ ...tab, enabled: true }))
       : [{ id: "remote-default", label: policy.defaultType, enabled: true, type: policy.defaultType }],
     floating: {
       ...settings.floating,
-      visibleFields: normalizeFloatingFields(policy.visibleFields)
+      visibleFields: normalizeFloatingFields(entryPolicy.visibleFields)
     }
   });
 }
@@ -828,8 +856,8 @@ function settingsChangeWarnings(previous: AppSettings, next: AppSettings): strin
   return warnings;
 }
 
-function remoteLockedSettingsSnapshot(settings: AppSettings) {
-  return {
+function remoteLockedSettingsSnapshot(settings: AppSettings, allowClientCustomization = false) {
+  const snapshot: Record<string, unknown> = {
     outputDirectory: settings.outputDirectory,
     fileFormat: settings.fileFormat,
     fileStrategy: settings.fileStrategy,
@@ -846,10 +874,13 @@ function remoteLockedSettingsSnapshot(settings: AppSettings) {
     busNumberEnabled: settings.busNumberEnabled,
     profiles: settings.profiles,
     activeProfile: settings.activeProfile,
-    quickTabs: settings.quickTabs,
-    floating: settings.floating,
     server: settings.server
   };
+  if (!allowClientCustomization) {
+    snapshot.quickTabs = settings.quickTabs;
+    snapshot.floating = settings.floating;
+  }
+  return snapshot;
 }
 
 function formatFileSize(bytes: number): string {
@@ -879,6 +910,7 @@ export function App() {
   const [remoteLoading, setRemoteLoading] = useState(false);
   const remoteSocket = useRef<WebSocket | null>(null);
   const remoteSessionRef = useRef<RemoteClientSession | null>(null);
+  const remoteManualDisconnect = useRef(false);
   const remoteRestoreAttempted = useRef(false);
 
   const todayEntries = useMemo(() => filterEntriesByLocalDate(entries, currentDateKey), [entries, currentDateKey]);
@@ -1049,7 +1081,10 @@ export function App() {
   };
 
   const openRemoteSocket = (session: RemoteClientSession) => {
-    remoteSocket.current?.close();
+    if (remoteSocket.current) {
+      remoteSocket.current.onclose = null;
+      remoteSocket.current.close();
+    }
     const wsUrl = `${session.baseUrl.replace(/^http/i, "ws")}/sync?password=${encodeURIComponent(session.password)}&device=${encodeURIComponent(session.deviceName)}`;
     remoteSocket.current = new WebSocket(wsUrl);
     remoteSocket.current.onopen = () => setRemoteMessage("Tempo real ativo.");
@@ -1061,7 +1096,18 @@ export function App() {
         });
       }
     };
-    remoteSocket.current.onclose = () => setRemoteMessage("Conexao em tempo real fechada. Use Atualizar ou conecte novamente.");
+    remoteSocket.current.onclose = () => {
+      if (remoteManualDisconnect.current) {
+        remoteManualDisconnect.current = false;
+        return;
+      }
+      remoteSocket.current = null;
+      remoteSessionRef.current = null;
+      setRemoteSession(null);
+      setRemoteMessage("Servidor desconectado. Este app voltou para o modo local.");
+      window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+      showToast("info", "O servidor foi desligado ou ficou indisponivel. Cliente voltou ao modo local.");
+    };
   };
 
   const refreshRemote = async (session = remoteSessionRef.current) => {
@@ -1100,7 +1146,15 @@ export function App() {
         todayCount: 0,
         totalCount: 0,
         limited: false,
-        permissions: { view: false, create: false, edit: false, delete: false, viewEntryValues: false, viewTotals: false },
+        permissions: {
+          view: false,
+          create: false,
+          edit: false,
+          delete: false,
+          viewEntryValues: false,
+          viewTotals: false,
+          allowClientCustomization: false
+        },
         clientPolicy: clientPolicyFromSettings(settings),
         connectedAt: new Date().toISOString()
       };
@@ -1137,7 +1191,9 @@ export function App() {
   };
 
   const disconnectRemoteClient = () => {
-    remoteSocket.current?.close();
+    const socket = remoteSocket.current;
+    remoteManualDisconnect.current = Boolean(socket);
+    socket?.close();
     remoteSocket.current = null;
     remoteSessionRef.current = null;
     setRemoteSession(null);
@@ -1325,7 +1381,12 @@ export function App() {
     );
   }
 
-  const entrySettings = remoteSession ? settingsForRemoteClient(settings, remoteSession.clientPolicy) : settings;
+  const effectiveRemotePolicy = remoteSession
+    ? clientPolicyForEntry(settings, remoteSession.clientPolicy, remoteSession.permissions.allowClientCustomization)
+    : undefined;
+  const entrySettings = remoteSession && effectiveRemotePolicy
+    ? settingsForRemoteClient(settings, remoteSession.clientPolicy, remoteSession.permissions.allowClientCustomization)
+    : settings;
   const displayEntries = remoteSession ? remoteSession.entries : entries;
   const displayTodayEntries = remoteSession ? filterEntriesByLocalDate(remoteSession.entries, currentDateKey) : todayEntries;
   const canViewRemoteTotals = !remoteSession || remoteSession.permissions.viewTotals;
@@ -1341,7 +1402,7 @@ export function App() {
         <QuickEntry
           entries={displayEntries}
           settings={entrySettings}
-          clientPolicy={remoteSession?.clientPolicy}
+          clientPolicy={effectiveRemotePolicy}
           pinned
           modeCommand={modeCommand}
           storageScope={quickEntryStorageScope}
@@ -1420,7 +1481,7 @@ export function App() {
             <QuickEntry
               entries={displayEntries}
               settings={entrySettings}
-              clientPolicy={remoteSession?.clientPolicy}
+              clientPolicy={effectiveRemotePolicy}
               pinned={false}
               modeCommand={modeCommand}
               storageScope={quickEntryStorageScope}
@@ -1492,6 +1553,7 @@ export function App() {
             <SettingsPanel
               settings={settings}
               remoteClientActive={Boolean(remoteSession)}
+              remoteClientPermissions={remoteSession?.permissions}
               onSave={saveSettings}
               onToast={showToast}
               onImportLedger={importLedgerFile}
@@ -3259,7 +3321,7 @@ function ServerPanel({
             <span>Controla o que a pagina remota pode fazer</span>
           </div>
           <div className="permission-box permission-grid">
-            {(["view", "create", "edit", "delete", "viewEntryValues", "viewTotals"] as const).map((key) => (
+            {(["view", "create", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -3325,7 +3387,8 @@ function RemoteClientWorkspace({
 }) {
   const visibleEntries = session.entries.filter((entry) => entry.status !== "deleted");
   const deletedEntries = session.entries.filter((entry) => entry.status === "deleted");
-  const entrySettings = settingsForRemoteClient(settings, session.clientPolicy);
+  const entryPolicy = clientPolicyForEntry(settings, session.clientPolicy, session.permissions.allowClientCustomization);
+  const entrySettings = settingsForRemoteClient(settings, session.clientPolicy, session.permissions.allowClientCustomization);
   const permissionBadges = [
     session.permissions.view ? "Visualizar" : "",
     session.permissions.create ? "Registrar" : "",
@@ -3333,6 +3396,7 @@ function RemoteClientWorkspace({
     session.permissions.delete ? "Apagar" : "",
     session.permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
     session.permissions.viewTotals ? "Ver totais" : "Totais ocultos",
+    session.permissions.allowClientCustomization ? "Personalizacao local" : "",
     `${session.clientPolicy.allowedTypes.length} modo(s) do servidor`
   ].filter(Boolean);
 
@@ -3381,7 +3445,7 @@ function RemoteClientWorkspace({
         <QuickEntry
           entries={session.entries}
           settings={entrySettings}
-          clientPolicy={session.clientPolicy}
+          clientPolicy={entryPolicy}
           pinned={false}
           modeCommand={null}
           storageScope={quickEntryStorageScopeForSession(session)}
@@ -3448,6 +3512,7 @@ function normalizeRemoteBaseUrl(value: string): string {
 function SettingsPanel({
   settings,
   remoteClientActive,
+  remoteClientPermissions,
   onSave,
   onToast,
   onImportLedger,
@@ -3455,6 +3520,7 @@ function SettingsPanel({
 }: {
   settings: AppSettings;
   remoteClientActive: boolean;
+  remoteClientPermissions?: ServerPermissions | null;
   onSave: (settings: AppSettings) => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
   onImportLedger: () => Promise<void>;
@@ -3469,7 +3535,12 @@ function SettingsPanel({
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [capturingShortcut, setCapturingShortcut] = useState<ShortcutAction | null>(null);
   const [newProfileName, setNewProfileName] = useState("");
-  const remoteLockedCategories = new Set<SettingsCategory>(["floating", "quick", "defaults", "profiles", "files", "server", "advanced"]);
+  const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
+  const remoteLockedCategoryList: SettingsCategory[] = ["defaults", "profiles", "files", "server", "advanced"];
+  if (!remoteCustomizationAllowed) {
+    remoteLockedCategoryList.unshift("floating", "quick");
+  }
+  const remoteLockedCategories = new Set<SettingsCategory>(remoteLockedCategoryList);
   const remoteLockMessage = "So o computador servidor pode editar essa parte enquanto este app esta conectado como cliente. Desconecte do servidor para editar as configuracoes locais deste PC.";
 
   useEffect(() => setDraft(settings), [settings]);
@@ -3830,7 +3901,8 @@ function SettingsPanel({
   const saveDraft = async () => {
     if (
       remoteClientActive &&
-      JSON.stringify(remoteLockedSettingsSnapshot(settings)) !== JSON.stringify(remoteLockedSettingsSnapshot(draft))
+      JSON.stringify(remoteLockedSettingsSnapshot(settings, remoteCustomizationAllowed)) !==
+        JSON.stringify(remoteLockedSettingsSnapshot(draft, remoteCustomizationAllowed))
     ) {
       onToast("error", "Nao salvei: esse rascunho altera configuracoes controladas pelo servidor. Desconecte do caixa principal para editar essas partes.");
       return;
@@ -3910,7 +3982,9 @@ function SettingsPanel({
                 <p className="remote-lock-banner">
                   {isRemoteLockedCategory(category)
                     ? "Esta area esta travada no cliente. O servidor controla campos, modos, planilha e permissoes em tempo real."
-                    : "Modo cliente remoto ativo: voce pode ajustar apenas aparencia, privacidade local, atalhos e atualizacoes deste PC."}
+                    : remoteCustomizationAllowed
+                      ? "Modo cliente remoto ativo: o servidor liberou personalizacao local de aparencia, barra fixada e barra rapida deste PC."
+                      : "Modo cliente remoto ativo: voce pode ajustar apenas aparencia, privacidade local, atalhos e atualizacoes deste PC."}
                 </p>
               )}
             </div>
@@ -4296,7 +4370,7 @@ function SettingsPanel({
           <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
           <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
           <div className="permission-box permission-grid">
-            {(["view", "create", "edit", "delete", "viewEntryValues", "viewTotals"] as const).map((key) => (
+            {(["view", "create", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -4640,13 +4714,14 @@ function shortcutLabel(key: string): string {
   return labels[key] || key;
 }
 
-function permissionLabel(key: "view" | "create" | "edit" | "delete" | "viewEntryValues" | "viewTotals"): string {
+function permissionLabel(key: keyof ServerPermissions): string {
   return {
     view: "Somente visualizar",
     create: "Registrar vendas",
     edit: "Editar lancamentos",
     delete: "Apagar lancamentos",
     viewEntryValues: "Ver valores das vendas",
-    viewTotals: "Ver totais vendidos"
+    viewTotals: "Ver totais vendidos",
+    allowClientCustomization: "Personalizar barra e visual do cliente"
   }[key];
 }

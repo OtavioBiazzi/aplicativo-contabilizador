@@ -38,6 +38,13 @@ export class LocalServer {
 
   setPermissions(permissions: ServerPermissions) {
     this.permissions = permissions;
+    if (!permissions.view) {
+      for (const client of this.clients.values()) {
+        client.socket.close(1008, "Visualizacao desativada pelo servidor");
+      }
+      this.clients.clear();
+      return;
+    }
     for (const client of this.clients.values()) {
       client.permissions = permissions;
       client.lastSeen = new Date().toISOString();
@@ -642,7 +649,8 @@ function remoteClientHtml(port: number): string {
         permissions.edit ? "Editar" : "",
         permissions.delete ? "Apagar" : "",
         permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
-        permissions.viewTotals ? "Ver totais" : "Totais ocultos"
+        permissions.viewTotals ? "Ver totais" : "Totais ocultos",
+        permissions.allowClientCustomization ? "Personalizar cliente" : ""
       ].filter(Boolean);
       qs("#permissionList").innerHTML = rows.map((item) => "<span>" + item + "</span>").join("");
     }
@@ -724,7 +732,8 @@ function remoteClientHtml(port: number): string {
         (permissions.edit ? " + edita" : "") +
         (permissions.delete ? " + apaga" : "") +
         (permissions.viewEntryValues ? "" : " | sem valores") +
-        (permissions.viewTotals ? "" : " | sem totais");
+        (permissions.viewTotals ? "" : " | sem totais") +
+        (permissions.allowClientCustomization ? " | personaliza" : "");
       qs("#app").hidden = !permissions.create;
       qs("#summary").textContent = data.summary
         ? "Hoje: " + money.format(data.summary.total) + " | Lancamentos: " + data.summary.count

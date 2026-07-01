@@ -415,6 +415,24 @@ def main() -> int:
       if people_default_input.input_value() != original_people_default:
         print("Remote client edited a server-owned setting while connected.", file=sys.stderr)
         return 1
+      page.evaluate(
+        """async () => {
+          const snapshot = await window.caixa.getSnapshot();
+          await window.caixa.saveSettings({
+            ...snapshot.settings,
+            server: {
+              ...snapshot.settings.server,
+              permissions: { ...snapshot.settings.server.permissions, allowClientCustomization: true }
+            }
+          });
+        }"""
+      )
+      page.locator(".settings-nav").get_by_role("button", name="Barra rapida").click()
+      expect(page.get_by_text("servidor liberou personalizacao local")).to_be_visible(timeout=15000)
+      active_settings_class = page.locator("section.active-category").first.get_attribute("class") or ""
+      if "remote-locked-section" in active_settings_class:
+        print("Remote quick bar settings stayed locked after the server allowed client customization.", file=sys.stderr)
+        return 1
       page.get_by_role("button", name="Rede").click()
       page.get_by_role("button", name="Conectar", exact=True).click()
       page.locator(".connect-panel").get_by_label("Valor").first.fill("18,75")
@@ -528,6 +546,9 @@ def main() -> int:
         }"""
       )
       expect(floating_page.locator(".floating-detail input")).not_to_be_visible(timeout=15000)
+      page.evaluate("""async () => { await window.caixa.stopServer(); }""")
+      page.wait_for_function("""() => !window.localStorage.getItem('caixaRemoteSession')""", timeout=15000)
+      expect(page.get_by_text("PDV local rapido")).to_be_visible(timeout=15000)
       removed = page.evaluate(
         """async () => {
           const snapshot = await window.caixa.getSnapshot();

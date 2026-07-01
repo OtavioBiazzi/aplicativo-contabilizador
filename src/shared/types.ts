@@ -111,6 +111,7 @@ export interface ServerPermissions {
   delete: boolean;
   viewEntryValues: boolean;
   viewTotals: boolean;
+  allowClientCustomization: boolean;
 }
 
 export interface RemoteClientPolicy {

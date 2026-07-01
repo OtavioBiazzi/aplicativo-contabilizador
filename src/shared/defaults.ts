@@ -133,7 +133,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
         edit: false,
         delete: false,
         viewEntryValues: true,
-        viewTotals: true
+        viewTotals: true,
+        allowClientCustomization: false
       }
     },
     shortcuts: {
