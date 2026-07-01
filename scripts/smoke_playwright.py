@@ -79,6 +79,9 @@ def main() -> int:
   if "instalar-atualizacao.cmd" in main_source or "cmd.exe" in main_source:
     print("Updater still launches through a visible command shell.", file=sys.stderr)
     return 1
+  if "wscript.exe" not in main_source or "abrir de novo" not in main_source:
+    print("Updater relaunch helper is missing from the packaged main process.", file=sys.stderr)
+    return 1
 
   shutil.rmtree(SMOKE_DIR, ignore_errors=True)
   (SMOKE_DIR / "data").mkdir(parents=True, exist_ok=True)

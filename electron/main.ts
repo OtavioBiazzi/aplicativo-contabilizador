@@ -266,8 +266,45 @@ async function downloadUpdateAsset(info: UpdateInfo): Promise<string> {
   return filePath;
 }
 
+function defaultInstalledExePath() {
+  const localAppData = process.env.LOCALAPPDATA || path.join(app.getPath("home"), "AppData", "Local");
+  return path.join(localAppData, "Programs", "aplicativo-contabilizador", "Contabilizador Caixa.exe");
+}
+
 async function launchWindowsUpdater(installerPath: string) {
-  const child = spawn(installerPath, ["/S"], {
+  const scriptPath = path.join(path.dirname(installerPath), "instalar-atualizacao.vbs");
+  const script = [
+    "Option Explicit",
+    "Dim shell, fso, appPid, installerPath, currentExe, fallbackExe, targetExe",
+    "Set shell = CreateObject(\"WScript.Shell\")",
+    "Set fso = CreateObject(\"Scripting.FileSystemObject\")",
+    "appPid = WScript.Arguments.Item(0)",
+    "installerPath = WScript.Arguments.Item(1)",
+    "currentExe = WScript.Arguments.Item(2)",
+    "fallbackExe = WScript.Arguments.Item(3)",
+    "Do While IsProcessRunning(appPid)",
+    "  WScript.Sleep 400",
+    "Loop",
+    "shell.Run Quote(installerPath) & \" /S\", 0, True",
+    "targetExe = currentExe",
+    "If Not fso.FileExists(targetExe) And fso.FileExists(fallbackExe) Then",
+    "  targetExe = fallbackExe",
+    "End If",
+    "If fso.FileExists(targetExe) Then",
+    "  shell.Run Quote(targetExe), 1, False",
+    "End If",
+    "Function IsProcessRunning(pid)",
+    "  Dim service, processes",
+    "  Set service = GetObject(\"winmgmts:\")",
+    "  Set processes = service.ExecQuery(\"SELECT ProcessId FROM Win32_Process WHERE ProcessId=\" & CLng(pid))",
+    "  IsProcessRunning = (processes.Count > 0)",
+    "End Function",
+    "Function Quote(value)",
+    "  Quote = Chr(34) & Replace(value, Chr(34), Chr(34) & Chr(34)) & Chr(34)",
+    "End Function"
+  ].join("\r\n");
+  await fs.writeFile(scriptPath, script, "utf8");
+  const child = spawn("wscript.exe", ["//B", "//Nologo", scriptPath, String(process.pid), installerPath, app.getPath("exe"), defaultInstalledExePath()], {
     detached: true,
     stdio: "ignore",
     windowsHide: true
@@ -762,7 +799,7 @@ function registerIpc() {
           ok: true,
           latestVersion: info.latestVersion,
           filePath: installerPath,
-          message: "Atualizacao baixada. O app vai fechar e iniciar o instalador."
+          message: "Atualizacao baixada. O app vai fechar, instalar e abrir de novo."
         };
       }
       await shell.openPath(installerPath);

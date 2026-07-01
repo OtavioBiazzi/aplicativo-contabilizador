@@ -59,7 +59,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Privacidade local para ocultar total do topo/painel e abrir relatorios com totais escondidos sem apagar valores.
 - Permissoes remotas separadas para ver valores de vendas e ver totais sensiveis no servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
-- Checagem de releases pela area de Atualizacoes, com botao para baixar e iniciar o instalador diretamente, sem abrir o GitHub nem janela de terminal.
+- Checagem de releases pela area de Atualizacoes, com botao para baixar, fechar, instalar e abrir o app de novo sem abrir o GitHub nem janela de terminal.
 - Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
 - Smoke test da interface com Playwright, cobrindo previa de importacao, backup/restauracao, deduplicacao, barra fixada, preset Onibus enxuto, relatorios profissionais, servidor e planilha.
 
