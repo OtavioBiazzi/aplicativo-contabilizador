@@ -358,6 +358,33 @@ def main() -> int:
       expect(page.get_by_text("Cliente conectado no app")).to_be_visible(timeout=15000)
       expect(page.get_by_text("Historico vindo do caixa principal")).to_be_visible(timeout=15000)
       expect(page.locator(".connect-panel .description-field input")).to_have_count(0)
+      expect(page.locator(".topbar-card")).to_contain_text("Privado", timeout=10000)
+      page.evaluate(
+        """async () => {
+          const snapshot = await window.caixa.getSnapshot();
+          await window.caixa.saveSettings({
+            ...snapshot.settings,
+            server: {
+              ...snapshot.settings.server,
+              permissions: { ...snapshot.settings.server.permissions, viewTotals: true }
+            }
+          });
+        }"""
+      )
+      expect(page.locator(".topbar-card")).to_contain_text("R$", timeout=15000)
+      page.evaluate(
+        """async () => {
+          const snapshot = await window.caixa.getSnapshot();
+          await window.caixa.saveSettings({
+            ...snapshot.settings,
+            server: {
+              ...snapshot.settings.server,
+              permissions: { ...snapshot.settings.server.permissions, viewTotals: false }
+            }
+          });
+        }"""
+      )
+      expect(page.locator(".topbar-card")).to_contain_text("Privado", timeout=15000)
       connect_panel = page.locator(".connect-panel")
       connect_panel.get_by_role("button", name="Onibus").click()
       connect_panel.get_by_label("Valor").first.fill("44,40")
@@ -379,10 +406,11 @@ def main() -> int:
         return 1
       page.get_by_role("button", name="Ajustes").click()
       page.locator(".settings-nav").get_by_role("button", name="Vendas").click()
-      expect(page.get_by_text("Modo cliente remoto ativo")).to_be_visible(timeout=10000)
+      expect(page.get_by_text("Esta area esta travada no cliente")).to_be_visible(timeout=10000)
+      expect(page.locator("section.remote-locked-section.active-category")).to_be_visible(timeout=10000)
       people_default_input = page.get_by_label("Pessoas padrao")
       original_people_default = people_default_input.input_value()
-      people_default_input.click()
+      people_default_input.click(force=True)
       expect(page.get_by_text("So o computador servidor pode editar essa parte")).to_be_visible(timeout=10000)
       if people_default_input.input_value() != original_people_default:
         print("Remote client edited a server-owned setting while connected.", file=sys.stderr)
@@ -482,6 +510,20 @@ def main() -> int:
       ):
         print("Floating remote bar did not send the entry to the principal caixa.", file=sys.stderr)
         return 1
+      page.evaluate(
+        """async () => {
+          const snapshot = await window.caixa.getSnapshot();
+          await window.caixa.saveSettings({
+            ...snapshot.settings,
+            busNumberEnabled: false,
+            floating: {
+              ...snapshot.settings.floating,
+              visibleFields: snapshot.settings.floating.visibleFields.filter((field) => field !== 'busNumber')
+            }
+          });
+        }"""
+      )
+      expect(floating_page.locator(".floating-detail input")).not_to_be_visible(timeout=15000)
       removed = page.evaluate(
         """async () => {
           const snapshot = await window.caixa.getSnapshot();

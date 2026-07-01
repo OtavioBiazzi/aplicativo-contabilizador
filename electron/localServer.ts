@@ -38,6 +38,11 @@ export class LocalServer {
 
   setPermissions(permissions: ServerPermissions) {
     this.permissions = permissions;
+    for (const client of this.clients.values()) {
+      client.permissions = permissions;
+      client.lastSeen = new Date().toISOString();
+    }
+    this.broadcast({ type: "policy-changed", permissions });
   }
 
   async start(port: number, password: string): Promise<ServerState> {

@@ -490,6 +490,7 @@ function registerIpc() {
     const exportStatus = await exporter.export(await store.getEntries(), saved);
     await logExportStatus("salvar configuracoes", exportStatus);
     sendToAll("settings:changed", saved);
+    sendToAll("server:changed", localServer.getState());
     return saved;
   });
 
@@ -750,6 +751,7 @@ function registerIpc() {
     await logExportStatus("restauracao de backup", exportStatus);
     await logger.warn("Backup restaurado", `${restored.backup.fileName}; backup de seguranca: ${restored.safetyBackup.fileName}`);
     sendToAll("settings:changed", settings);
+    sendToAll("server:changed", localServer.getState());
     sendToAll("entries:changed");
     return { ...restored, exportStatus };
   });

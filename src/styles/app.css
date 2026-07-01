@@ -1085,6 +1085,33 @@ th {
   gap: 10px;
 }
 
+.remote-report-lock {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid color-mix(in srgb, var(--muted) 30%, var(--line));
+  border-radius: 8px;
+  padding: 11px 12px;
+  background:
+    linear-gradient(135deg, rgba(103, 121, 138, 0.12), transparent 54%),
+    color-mix(in srgb, var(--panel) 88%, #dfe7ee 12%);
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
+}
+
+.remote-report-lock svg {
+  color: var(--muted);
+}
+
+.remote-report-lock div {
+  display: grid;
+  gap: 2px;
+}
+
+.remote-report-lock span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .report-filter-bar {
   align-items: end;
 }
@@ -1620,6 +1647,13 @@ th {
     color-mix(in srgb, var(--panel) 96%, var(--accent) 4%);
 }
 
+.settings-hero.remote-locked-hero {
+  border-color: color-mix(in srgb, var(--muted) 34%, var(--line));
+  background:
+    linear-gradient(135deg, rgba(111, 132, 150, 0.12), transparent 44%),
+    color-mix(in srgb, var(--panel) 94%, #8ea1b1 6%);
+}
+
 .settings-hero h2 {
   margin-top: 2px;
   font-size: 1.45rem;
@@ -1643,6 +1677,12 @@ th {
   color: var(--text) !important;
   font-size: 0.78rem;
   font-weight: 750;
+}
+
+.remote-locked-hero .remote-lock-banner {
+  border-color: color-mix(in srgb, var(--muted) 42%, var(--line));
+  background: color-mix(in srgb, var(--panel) 82%, #d7e1e8 18%);
+  color: color-mix(in srgb, var(--text) 72%, var(--muted)) !important;
 }
 
 .settings-overline {
@@ -1672,6 +1712,26 @@ th {
   min-width: 0;
 }
 
+.settings-nav button.server-locked-nav {
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, #9aa8b5 10%, transparent), transparent),
+    color-mix(in srgb, var(--panel-2) 78%, #d9e2ea 22%);
+}
+
+.settings-nav button.server-locked-nav::after {
+  content: "servidor";
+  margin-left: auto;
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--muted) 16%, var(--panel));
+  color: color-mix(in srgb, var(--muted) 78%, var(--text));
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .settings-group {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
@@ -1681,17 +1741,60 @@ th {
 }
 
 .settings-group.remote-locked-section {
-  border: 1px dashed color-mix(in srgb, var(--accent) 32%, var(--line));
+  position: relative;
+  border: 1px dashed color-mix(in srgb, var(--muted) 42%, var(--line));
   border-radius: var(--radius);
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 42%),
-    color-mix(in srgb, var(--panel) 97%, var(--accent) 3%);
+    repeating-linear-gradient(
+      135deg,
+      rgba(103, 121, 138, 0.055) 0,
+      rgba(103, 121, 138, 0.055) 6px,
+      transparent 6px,
+      transparent 14px
+    ),
+    color-mix(in srgb, var(--panel) 86%, #dfe7ee 14%);
+  box-shadow: inset 0 0 0 1px rgba(103, 121, 138, 0.08);
+}
+
+.settings-group.remote-locked-section::before {
+  content: "Controlado pelo servidor. Estes controles ficam apenas para consulta enquanto este PC esta conectado como cliente.";
+  grid-column: 1 / -1;
+  border: 1px solid color-mix(in srgb, var(--muted) 24%, var(--line));
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--panel) 78%, #e3ebf1 22%);
+  color: color-mix(in srgb, var(--text) 62%, var(--muted));
+  font-size: 0.75rem;
+  font-weight: 850;
 }
 
 .settings-group.remote-locked-section input,
 .settings-group.remote-locked-section select,
 .settings-group.remote-locked-section button {
   cursor: not-allowed;
+}
+
+.settings-group.remote-locked-section .field,
+.settings-group.remote-locked-section .preset-card,
+.settings-group.remote-locked-section .floating-field-card,
+.settings-group.remote-locked-section .quick-tab-row,
+.settings-group.remote-locked-section .switch-line,
+.settings-group.remote-locked-section .advanced-action {
+  opacity: 0.56;
+  filter: grayscale(0.55) saturate(0.72);
+}
+
+.settings-group.remote-locked-section input,
+.settings-group.remote-locked-section select {
+  background: color-mix(in srgb, var(--panel) 68%, #e7edf2 32%);
+  border-color: color-mix(in srgb, var(--muted) 30%, var(--line));
+  color: color-mix(in srgb, var(--text) 64%, var(--muted));
+}
+
+.settings-group.remote-locked-section button {
+  background: color-mix(in srgb, var(--panel-2) 68%, #dfe7ee 32%);
+  border-color: color-mix(in srgb, var(--muted) 26%, var(--line));
+  color: color-mix(in srgb, var(--text) 58%, var(--muted));
 }
 
 .settings-group h3 {

@@ -365,6 +365,13 @@ function quickEntryStorageScopeForSession(session: RemoteClientSession | null): 
   return session ? `remote:${session.baseUrl}:${session.deviceName}` : "local";
 }
 
+function privateSummaryForEntries(entries: LedgerEntry[]): DaySummary {
+  return {
+    ...summarizeEntries([]),
+    count: entries.filter((entry) => entry.status === "active").length
+  };
+}
+
 function resolveTheme(theme: AppSettings["theme"], prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
   return theme === "auto" ? (prefersDark ? "dark" : "light") : theme;
 }
@@ -1041,7 +1048,9 @@ export function App() {
     remoteSocket.current.onmessage = () => {
       const current = remoteSessionRef.current;
       if (current) {
-        void refreshRemote(current);
+        void refreshRemote(current).catch((error) => {
+          setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar o cliente remoto.");
+        });
       }
     };
     remoteSocket.current.onclose = () => setRemoteMessage("Conexao em tempo real fechada. Use Atualizar ou conecte novamente.");
@@ -1302,7 +1311,11 @@ export function App() {
   const entrySettings = remoteSession ? settingsForRemoteClient(settings, remoteSession.clientPolicy) : settings;
   const displayEntries = remoteSession ? remoteSession.entries : entries;
   const displayTodayEntries = remoteSession ? filterEntriesByLocalDate(remoteSession.entries, currentDateKey) : todayEntries;
-  const displaySummary = remoteSession?.summary || (remoteSession ? summarizeEntries(displayTodayEntries) : summary);
+  const canViewRemoteTotals = !remoteSession || remoteSession.permissions.viewTotals;
+  const canViewRemoteEntryValues = !remoteSession || remoteSession.permissions.viewEntryValues;
+  const displaySummary = remoteSession
+    ? remoteSession.summary || privateSummaryForEntries(displayTodayEntries)
+    : summary;
   const quickEntryStorageScope = quickEntryStorageScopeForSession(remoteSession);
 
   if (IS_FLOATING_WINDOW) {
@@ -1355,9 +1368,9 @@ export function App() {
         </nav>
 
         <div className="sidebar-card topbar-card">
-          <span>{settings.privacy.hideHeaderTotal ? "Total oculto" : "Total hoje"}</span>
-          <strong className={settings.privacy.hideHeaderTotal ? "private-value" : ""}>
-            {settings.privacy.hideHeaderTotal || (remoteSession && !remoteSession.permissions.viewTotals) ? "Privado" : formatCurrency(displaySummary.total)}
+          <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total hoje"}</span>
+          <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "private-value" : ""}>
+            {settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Privado" : formatCurrency(displaySummary.total)}
           </strong>
           <small>{displaySummary.count} lancamentos{remoteSession ? " no servidor" : ""}</small>
         </div>
@@ -1397,7 +1410,14 @@ export function App() {
               onSubmit={submitEntry}
               onUnpin={togglePinned}
             />
-            <TodayPanel summary={displaySummary} entries={displayTodayEntries} settings={settings} onMode={commandMode} />
+            <TodayPanel
+              summary={displaySummary}
+              entries={displayTodayEntries}
+              settings={settings}
+              canViewTotals={canViewRemoteTotals}
+              canViewEntryValues={canViewRemoteEntryValues}
+              onMode={commandMode}
+            />
           </div>
         )}
 
@@ -1412,11 +1432,19 @@ export function App() {
         )}
 
         {activeTab === "reports" && (
-            <ReportsPanel entries={entries} settings={settings} summary={summary} exportStatus={exportStatus} onExport={async () => {
+            <ReportsPanel entries={displayEntries} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} onExport={async () => {
+            if (remoteSession) {
+              showToast("info", "Exportacao de relatorio remoto fica no computador servidor.");
+              return;
+            }
             const status = await window.caixa.exportNow();
             setExportStatus(status);
             showToast(status.ok ? "success" : "error", status.message || "Exportacao executada.");
           }} onExportFiltered={async (ids, label) => {
+            if (remoteSession) {
+              showToast("info", "Exportacao de relatorio remoto fica no computador servidor.");
+              return;
+            }
             const status = await window.caixa.exportFilteredReport(ids, label);
             setExportStatus(status);
             showToast(status.ok ? "success" : "error", status.message || "Exportacao executada.");
@@ -2208,15 +2236,19 @@ function TodayPanel({
   summary,
   entries,
   settings,
+  canViewTotals = true,
+  canViewEntryValues = true,
   onMode
 }: {
   summary: DaySummary;
   entries: LedgerEntry[];
   settings: AppSettings;
+  canViewTotals?: boolean;
+  canViewEntryValues?: boolean;
   onMode: (type: EntryType) => void;
 }) {
   const latest = entries.filter((entry) => entry.status !== "deleted").slice(0, 5);
-  const showTotals = !settings.privacy.hideHeaderTotal;
+  const showTotals = canViewTotals && !settings.privacy.hideHeaderTotal;
   return (
     <aside className="today-panel">
       <div className={`total-plate ${showTotals ? "" : "privacy-hidden"}`}>
@@ -2240,7 +2272,7 @@ function TodayPanel({
           {latest.map((entry) => (
             <div key={entry.id}>
               <span>{entry.description}</span>
-              <strong>{formatCurrency(entry.finalValue)}</strong>
+              <strong>{canViewEntryValues ? formatCurrency(entry.finalValue) : "Restrito"}</strong>
             </div>
           ))}
           {!latest.length && <p className="empty-text">Nenhum registro ainda.</p>}
@@ -2583,6 +2615,9 @@ function ReportsPanel({
   settings,
   summary,
   exportStatus,
+  remoteClientActive = false,
+  canViewTotals = true,
+  canViewEntryValues = true,
   onExport,
   onExportFiltered
 }: {
@@ -2590,6 +2625,9 @@ function ReportsPanel({
   settings: AppSettings;
   summary: DaySummary;
   exportStatus: ExportStatus | null;
+  remoteClientActive?: boolean;
+  canViewTotals?: boolean;
+  canViewEntryValues?: boolean;
   onExport: () => Promise<void>;
   onExportFiltered: (ids: string[], label: string) => Promise<void>;
 }) {
@@ -2600,11 +2638,12 @@ function ReportsPanel({
   const [table, setTable] = useState("");
   const [bus, setBus] = useState("");
   const [query, setQuery] = useState("");
-  const [showSensitive, setShowSensitive] = useState(!settings.privacy.hideReportTotals);
+  const [showSensitive, setShowSensitive] = useState(canViewTotals && !settings.privacy.hideReportTotals);
+  const showReportTotals = canViewTotals && showSensitive;
 
   useEffect(() => {
-    setShowSensitive(!settings.privacy.hideReportTotals);
-  }, [settings.privacy.hideReportTotals]);
+    setShowSensitive(canViewTotals && !settings.privacy.hideReportTotals);
+  }, [settings.privacy.hideReportTotals, canViewTotals]);
 
   const periodEntries = entries.filter((entry) => {
     const date = getLocalDateKey(entry.createdAt);
@@ -2625,8 +2664,12 @@ function ReportsPanel({
   const deletedCount = periodEntries.filter((entry) => entry.status === "deleted").length;
   const dailyTotals = summarizeByDay(activeRows);
   const originTotals = summarizeByOrigin(activeRows);
-  const peakDay = [...dailyTotals].sort((left, right) => right.total - left.total)[0];
-  const topEntries = [...activeRows].sort((left, right) => getEntryAmount(right) - getEntryAmount(left)).slice(0, 5);
+  const peakDay = [...dailyTotals].sort((left, right) =>
+    showReportTotals ? right.total - left.total : right.count - left.count
+  )[0];
+  const topEntries = showReportTotals
+    ? [...activeRows].sort((left, right) => getEntryAmount(right) - getEntryAmount(left)).slice(0, 5)
+    : activeRows.slice(0, 5);
   const dailyAverage = dailyTotals.length ? roundMoney(periodSummary.total / dailyTotals.length) : 0;
   const cashShare = periodSummary.total ? Math.round((periodSummary.cashTotal / periodSummary.total) * 100) : 0;
   const busShare = periodSummary.total ? Math.round((periodSummary.busTotal / periodSummary.total) * 100) : 0;
@@ -2643,17 +2686,31 @@ function ReportsPanel({
         <div>
           <span className="eyebrow">Analise do caixa</span>
           <h2>Relatorios com filtros</h2>
-          <p className="muted-copy">Filtre por periodo, tipo, mesa, onibus, pagamento ou origem e exporte apenas o recorte que esta na tela.</p>
+          <p className="muted-copy">
+            {remoteClientActive
+              ? "Relatorio remoto em modo cliente. Valores e totais seguem as permissoes do computador servidor."
+              : "Filtre por periodo, tipo, mesa, onibus, pagamento ou origem e exporte apenas o recorte que esta na tela."}
+          </p>
         </div>
         <div className="report-actions">
           <label className="switch-line">
-            <input type="checkbox" checked={showSensitive} onChange={(event) => setShowSensitive(event.target.checked)} />
-            Mostrar totais sensiveis
+            <input type="checkbox" checked={showReportTotals} disabled={!canViewTotals} onChange={(event) => setShowSensitive(event.target.checked)} />
+            {canViewTotals ? "Mostrar totais sensiveis" : "Totais bloqueados pelo servidor"}
           </label>
-          <button className="ghost-button" onClick={onExport}><FileSpreadsheet size={18} /> Planilha geral</button>
-          <button className="primary-button" onClick={() => onExportFiltered(periodEntries.map((entry) => entry.id), exportLabel)}><Download size={18} /> Exportar filtrado</button>
+          <button className="ghost-button" onClick={onExport} disabled={remoteClientActive}><FileSpreadsheet size={18} /> Planilha geral</button>
+          <button className="primary-button" onClick={() => onExportFiltered(periodEntries.map((entry) => entry.id), exportLabel)} disabled={remoteClientActive}><Download size={18} /> Exportar filtrado</button>
         </div>
       </div>
+
+      {!canViewTotals && (
+        <section className="remote-report-lock">
+          <ShieldCheck size={18} />
+          <div>
+            <strong>Totais ocultos pelo servidor</strong>
+            <span>Filtros, datas e lista continuam disponiveis, mas nenhum total e recalculado neste cliente.</span>
+          </div>
+        </section>
+      )}
 
       <div className="filter-bar report-filter-bar">
         <label className="field"><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
@@ -2698,40 +2755,40 @@ function ReportsPanel({
       <div className="report-close-grid">
         <ReportCloseCard
           label="Fechamento"
-          value={showSensitive ? formatCurrency(periodSummary.total) : "Restrito"}
+          value={showReportTotals ? formatCurrency(periodSummary.total) : "Restrito"}
           detail={`${activeRows.length} ativos em ${periodEntries.length} encontrados`}
         />
         <ReportCloseCard
-          label="Dia mais forte"
-          value={showSensitive ? (peakDay ? formatCurrency(peakDay.total) : formatCurrency(0)) : "Restrito"}
+          label={showReportTotals ? "Dia mais forte" : "Dia com mais registros"}
+          value={showReportTotals ? (peakDay ? formatCurrency(peakDay.total) : formatCurrency(0)) : peakDay ? `${peakDay.count} reg.` : "0 reg."}
           detail={peakDay ? `${formatReportDate(peakDay.dateKey, true)} com ${peakDay.count} registro(s)` : "Sem lancamentos no recorte"}
         />
         <ReportCloseCard
           label="Media diaria"
-          value={showSensitive ? formatCurrency(dailyAverage) : "Restrito"}
+          value={showReportTotals ? formatCurrency(dailyAverage) : "Restrito"}
           detail={`${dailyTotals.length || 0} dia(s) com movimento`}
         />
         <ReportCloseCard
           label="Mix rapido"
-          value={showSensitive ? `${cashShare}% dinheiro` : "Restrito"}
-          detail={showSensitive ? `${busShare}% onibus | ${cancelledCount} cancelado(s)` : `${cancelledCount} cancelado(s)`}
+          value={showReportTotals ? `${cashShare}% dinheiro` : "Restrito"}
+          detail={showReportTotals ? `${busShare}% onibus | ${cancelledCount} cancelado(s)` : `${cancelledCount} cancelado(s)`}
         />
       </div>
 
       <div className="metric-grid">
-        <Metric label="Total do periodo" value={showSensitive ? formatCurrency(periodSummary.total) : "Restrito"} />
+        <Metric label="Total do periodo" value={showReportTotals ? formatCurrency(periodSummary.total) : "Restrito"} />
         <Metric label="Quantidade" value={String(periodSummary.count)} />
-        <Metric label="Media" value={showSensitive ? formatCurrency(periodSummary.average) : "Restrito"} />
-        <Metric label="Maior venda" value={showSensitive ? formatCurrency(periodSummary.biggestSale) : "Restrito"} />
-        <Metric label="Onibus" value={showSensitive ? formatCurrency(periodSummary.busTotal) : "Restrito"} />
-        <Metric label="Dinheiro" value={showSensitive ? formatCurrency(periodSummary.cashTotal) : "Restrito"} />
-        <Metric label="Sobras" value={showSensitive ? formatCurrency(periodSummary.differenceTotal) : "Restrito"} />
+        <Metric label="Media" value={showReportTotals ? formatCurrency(periodSummary.average) : "Restrito"} />
+        <Metric label="Maior venda" value={showReportTotals ? formatCurrency(periodSummary.biggestSale) : "Restrito"} />
+        <Metric label="Onibus" value={showReportTotals ? formatCurrency(periodSummary.busTotal) : "Restrito"} />
+        <Metric label="Dinheiro" value={showReportTotals ? formatCurrency(periodSummary.cashTotal) : "Restrito"} />
+        <Metric label="Sobras" value={showReportTotals ? formatCurrency(periodSummary.differenceTotal) : "Restrito"} />
         <Metric label="Cancelados" value={String(cancelledCount)} />
         <Metric label="Lixeira" value={String(deletedCount)} />
         <Metric label="Arquivo" value={exportStatus?.pendingCount ? `${exportStatus.pendingCount} pendente` : "OK"} />
       </div>
 
-      {showSensitive ? (
+      {showReportTotals ? (
         <div className="report-columns">
           <BarList title="Total por tipo" data={periodSummary.byType} total={periodSummary.total} />
           <BarList title="Total por mesa" data={periodSummary.byTable} total={periodSummary.total} />
@@ -2748,14 +2805,14 @@ function ReportsPanel({
       )}
 
       <div className="report-deep-grid">
-        <DailyTrendCard rows={dailyTotals} showSensitive={showSensitive} />
-        <TopEntriesCard entries={topEntries} showSensitive={showSensitive} />
+        <DailyTrendCard rows={dailyTotals} showSensitive={showReportTotals} />
+        <TopEntriesCard entries={topEntries} showSensitive={showReportTotals && canViewEntryValues} />
         <ReportAlertsCard
           cancelledCount={cancelledCount}
           deletedCount={deletedCount}
           pendingCount={exportStatus?.pendingCount || 0}
           differenceTotal={periodSummary.differenceTotal}
-          showSensitive={showSensitive}
+          showSensitive={showReportTotals}
         />
       </div>
 
@@ -2772,7 +2829,7 @@ function ReportsPanel({
                 <span>{date} {time}</span>
                 <strong>{entry.description}</strong>
                 <small>{entry.customType || entry.type} | {entry.paymentMethod}</small>
-                <b>{showSensitive ? formatCurrency(entry.finalValue) : "Restrito"}</b>
+                <b>{canViewEntryValues ? formatCurrency(entry.finalValue) : "Restrito"}</b>
               </div>
             );
           })}
@@ -2834,7 +2891,7 @@ function ReportCloseCard({ label, value, detail }: { label: string; value: strin
 }
 
 function DailyTrendCard({ rows, showSensitive }: { rows: Array<{ dateKey: string; total: number; count: number }>; showSensitive: boolean }) {
-  const max = Math.max(...rows.map((row) => Math.abs(row.total)), 0);
+  const max = Math.max(...rows.map((row) => (showSensitive ? Math.abs(row.total) : row.count)), 0);
   return (
     <section className="report-insight-card">
       <div className="section-title">
@@ -2846,7 +2903,7 @@ function DailyTrendCard({ rows, showSensitive }: { rows: Array<{ dateKey: string
           <div key={row.dateKey}>
             <span>{formatReportDate(row.dateKey, true)}</span>
             <div className="bar-track">
-              <span style={{ width: `${Math.max(3, Math.min(100, max ? (Math.abs(row.total) / max) * 100 : 0))}%` }} />
+              <span style={{ width: `${Math.max(3, Math.min(100, max ? ((showSensitive ? Math.abs(row.total) : row.count) / max) * 100 : 0))}%` }} />
             </div>
             <strong>{showSensitive ? formatCurrency(row.total) : `${row.count} reg.`}</strong>
           </div>
@@ -2979,6 +3036,12 @@ function ServerPanel({
   const [connectHost, setConnectHost] = useState(server.url || "");
   const [connectPassword, setConnectPassword] = useState("");
   const [connectDeviceName, setConnectDeviceName] = useState("App cliente");
+
+  useEffect(() => {
+    setPort(settings.server.port);
+    setPassword(settings.server.password);
+    setPermissions(settings.server.permissions);
+  }, [settings.server.port, settings.server.password, settings.server.permissions]);
 
   const start = async () => {
     try {
@@ -3726,6 +3789,7 @@ function SettingsPanel({
 
   const remoteSectionProps = (target: SettingsCategory) => ({
     "data-remote-locked": isRemoteLockedCategory(target) ? "true" : undefined,
+    "aria-disabled": isRemoteLockedCategory(target) ? true : undefined,
     onMouseDownCapture: (event: React.MouseEvent<HTMLElement>) => guardRemoteSection(event, target),
     onClickCapture: (event: React.MouseEvent<HTMLElement>) => guardRemoteSection(event, target),
     onInputCapture: (event: React.FormEvent<HTMLElement>) => guardRemoteSection(event, target),
@@ -3743,8 +3807,14 @@ function SettingsPanel({
         <aside className="settings-nav">
           {settingsCategories.map((item) => {
             const Icon = item.icon;
+            const locked = isRemoteLockedCategory(item.key);
             return (
-              <button key={item.key} className={category === item.key ? "active" : ""} onClick={() => setCategory(item.key)}>
+              <button
+                key={item.key}
+                className={`${category === item.key ? "active" : ""} ${locked ? "server-locked-nav" : ""}`}
+                onClick={() => setCategory(item.key)}
+                title={locked ? "Controlado pelo computador servidor enquanto conectado como cliente" : item.description}
+              >
                 <Icon size={16} />
                 {item.label}
               </button>
@@ -3753,14 +3823,16 @@ function SettingsPanel({
         </aside>
 
         <div className="settings-content">
-          <div className="settings-hero">
+          <div className={`settings-hero ${isRemoteLockedCategory(category) ? "remote-locked-hero" : ""}`}>
             <div>
               <span className="settings-overline">Ajustes</span>
               <h2>{activeCategory.label}</h2>
               <p>{activeCategory.description}</p>
               {remoteClientActive && (
                 <p className="remote-lock-banner">
-                  Modo cliente remoto ativo: ajustes que mudam planilha, campos, modos, perfis ou servidor sao controlados pelo computador principal.
+                  {isRemoteLockedCategory(category)
+                    ? "Esta area esta travada no cliente. O servidor controla campos, modos, planilha e permissoes em tempo real."
+                    : "Modo cliente remoto ativo: voce pode ajustar apenas aparencia, privacidade local, atalhos e atualizacoes deste PC."}
                 </p>
               )}
             </div>
