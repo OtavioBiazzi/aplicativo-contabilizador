@@ -33,7 +33,8 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Diagnostico em **Ajustes > Avancado** com pasta de dados, pasta de planilhas, estado da exportacao, ultimos eventos e backups recentes.
 - Backup local do caixa em JSON, com historico e configuracoes, mais restauracao segura criando backup do estado atual antes de substituir dados.
 - Configuracoes persistentes: tema padrao DataCaixa PDV, DataCaixa escuro, cor principal, densidade, layout, abas rapidas, campos do modo fixado, mesa/onibus ativaveis separadamente, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
-- Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados.
+- Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados, sem trocar pasta de arquivos, planilha ou servidor.
+- Criacao de perfil por campo proprio dentro dos ajustes, com aplicacao real de tema, densidade, padroes e barra fixada.
 - Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
 - Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
 - Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, campos Mesa e Onibus separados, divisao por pessoas, campo Pago com, troco direto e elementos que podem ser ocultados.
@@ -41,7 +42,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Presets da barra fixada: Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, todos editaveis depois.
 - Presets da barra fixada ajustam apenas a barra, sem alterar fonte, densidade ou layout global do aplicativo.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
-- Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida e arraste apenas pela alca de tres pontos.
+- Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida, limite minimo de tamanho e arraste apenas pela alca de tres pontos.
 - Temas DataCaixa PDV, DataCaixa PDV escuro e Italia como base do remake visual, com contraste revisado em menus e hovers.
 - Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
 - Historico com lixeira, restauracao e exclusao definitiva.
@@ -55,7 +56,8 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Categoria Perfis para aplicar, atualizar, criar e remover perfis sem mexer nos dados de venda.
 - Tela de configuracoes com cabecalho por categoria, presets operacionais e layout mais controlado para monitores grandes.
 - Cabecalho principal contextual por aba, separando operacao de caixa, historico, relatorios, rede e ajustes.
-- Permissao para ocultar totais sensiveis em relatorios e na API remota do servidor.
+- Privacidade local para ocultar total do topo/painel e abrir relatorios com totais escondidos sem apagar valores.
+- Permissoes remotas separadas para ver valores de vendas e ver totais sensiveis no servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
 - Checagem de releases pela area de Atualizacoes, com botao para baixar e iniciar o instalador diretamente, sem abrir o GitHub nem janela de terminal.
 - Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.

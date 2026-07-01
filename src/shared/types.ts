@@ -109,6 +109,7 @@ export interface ServerPermissions {
   create: boolean;
   edit: boolean;
   delete: boolean;
+  viewEntryValues: boolean;
   viewTotals: boolean;
 }
 
@@ -144,6 +145,10 @@ export interface AppSettings {
   layout: LayoutMode;
   profiles: Record<string, Partial<AppSettings>>;
   activeProfile: string;
+  privacy: {
+    hideHeaderTotal: boolean;
+    hideReportTotals: boolean;
+  };
   quickTabs: QuickTabSettings[];
   floating: FloatingSettings;
   server: {

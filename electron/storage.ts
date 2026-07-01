@@ -359,13 +359,16 @@ function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppS
         ...saved.server?.permissions
       }
     },
+    privacy: {
+      ...defaults.privacy,
+      ...saved.privacy
+    },
     shortcuts: {
       ...defaults.shortcuts,
       ...saved.shortcuts
     },
     profiles: {
-      ...defaults.profiles,
-      ...saved.profiles
+      ...mergeProfiles(defaults.profiles, saved.profiles)
     },
     quickTabs: mergeQuickTabs(defaults.quickTabs, saved.quickTabs)
   };
@@ -374,6 +377,45 @@ function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppS
     ...merged,
     visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns
   };
+}
+
+function mergeProfiles(defaultProfiles: AppSettings["profiles"], savedProfiles?: AppSettings["profiles"]): AppSettings["profiles"] {
+  const names = new Set([...Object.keys(defaultProfiles), ...Object.keys(savedProfiles || {})]);
+  const merged: AppSettings["profiles"] = {};
+  const fallbackSettings = createDefaultSettings("");
+  for (const name of names) {
+    const base = defaultProfiles[name] || {};
+    const saved = savedProfiles?.[name] || {};
+    const profile: Partial<AppSettings> = {
+      ...base,
+      ...saved,
+      privacy: {
+        ...fallbackSettings.privacy,
+        ...base.privacy,
+        ...saved.privacy
+      },
+      shortcuts: {
+        ...fallbackSettings.shortcuts,
+        ...base.shortcuts,
+        ...saved.shortcuts
+      },
+      quickTabs: saved.quickTabs?.length
+        ? mergeQuickTabs(base.quickTabs || DEFAULT_QUICK_TABS, saved.quickTabs)
+        : base.quickTabs?.length
+          ? mergeQuickTabs(DEFAULT_QUICK_TABS, base.quickTabs)
+          : undefined
+    };
+    if (base.floating || saved.floating) {
+      profile.floating = {
+        ...fallbackSettings.floating,
+        ...base.floating,
+        ...saved.floating,
+        visibleFields: mergeFloatingFields(base.floating?.visibleFields || fallbackSettings.floating.visibleFields, saved.floating?.visibleFields)
+      };
+    }
+    merged[name] = profile;
+  }
+  return merged;
 }
 
 function mergeFloatingFields(defaultFields: string[], savedFields?: string[]): string[] {

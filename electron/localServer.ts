@@ -67,7 +67,7 @@ export class LocalServer {
       const entries = await this.options.getEntries();
       const todayEntries = filterEntriesByLocalDate(entries);
       response.json({
-        entries: this.permissions.viewTotals ? entries : entries.map(maskMoneyFields),
+        entries: this.permissions.viewEntryValues ? entries : entries.map(maskMoneyFields),
         summary: this.permissions.viewTotals ? summarizeEntries(todayEntries) : null,
         permissions: this.permissions
       });
@@ -87,9 +87,10 @@ export class LocalServer {
         observations: request.body.observations || "",
         originDevice: device
       });
-      this.broadcast({ type: "entry-added", entry });
+      const visibleEntry = this.permissions.viewEntryValues ? entry : maskMoneyFields(entry);
+      this.broadcast({ type: "entry-added", entry: visibleEntry });
       this.options.onRemoteChange();
-      response.status(201).json({ entry });
+      response.status(201).json({ entry: visibleEntry });
     });
 
     app.patch("/api/entries/:id", this.authorize("edit"), async (request, response) => {
@@ -101,9 +102,10 @@ export class LocalServer {
           return;
         }
         const entry = await this.options.updateEntry(request.params.id, buildRemotePatch(request.body || {}, current));
-        this.broadcast({ type: "entry-updated", entry });
+        const visibleEntry = this.permissions.viewEntryValues ? entry : maskMoneyFields(entry);
+        this.broadcast({ type: "entry-updated", entry: visibleEntry });
         this.options.onRemoteChange();
-        response.json({ entry: this.permissions.viewTotals ? entry : maskMoneyFields(entry) });
+        response.json({ entry: visibleEntry });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel editar." });
       }
@@ -112,9 +114,10 @@ export class LocalServer {
     app.post("/api/entries/:id/cancel", this.authorize("edit"), async (request, response) => {
       try {
         const entry = await this.options.cancelEntry(request.params.id);
-        this.broadcast({ type: "entry-cancelled", entry });
+        const visibleEntry = this.permissions.viewEntryValues ? entry : maskMoneyFields(entry);
+        this.broadcast({ type: "entry-cancelled", entry: visibleEntry });
         this.options.onRemoteChange();
-        response.json({ entry: this.permissions.viewTotals ? entry : maskMoneyFields(entry) });
+        response.json({ entry: visibleEntry });
       } catch (error) {
         response.status(404).json({ error: error instanceof Error ? error.message : "Lancamento nao encontrado." });
       }
@@ -475,7 +478,7 @@ function remoteClientHtml(port: number): string {
     const qs = (selector) => document.querySelector(selector);
     const parseValue = (value) => Number(String(value).replace(/[^\\d,.-]/g, "").replace(",", ".")) || 0;
     const escapeText = (value) => String(value || "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
-    const visibleMoney = (value) => permissions.viewTotals ? money.format(Number(value || 0)) : "Restrito";
+    const visibleMoney = (value) => permissions.viewEntryValues ? money.format(Number(value || 0)) : "Restrito";
     const params = new URLSearchParams(location.search);
     qs("#password").value = params.get("password") || "";
     qs("#deviceName").value = params.get("device") || localStorage.getItem("caixaRemoteDevice") || "";
@@ -498,6 +501,7 @@ function remoteClientHtml(port: number): string {
         permissions.create ? "Registrar" : "",
         permissions.edit ? "Editar" : "",
         permissions.delete ? "Apagar" : "",
+        permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
         permissions.viewTotals ? "Ver totais" : "Totais ocultos"
       ].filter(Boolean);
       qs("#permissionList").innerHTML = rows.map((item) => "<span>" + item + "</span>").join("");
@@ -544,6 +548,7 @@ function remoteClientHtml(port: number): string {
         (permissions.create ? "Registra" : "So visualiza") +
         (permissions.edit ? " + edita" : "") +
         (permissions.delete ? " + apaga" : "") +
+        (permissions.viewEntryValues ? "" : " | sem valores") +
         (permissions.viewTotals ? "" : " | sem totais");
       qs("#app").hidden = !permissions.create;
       qs("#summary").textContent = data.summary
@@ -603,7 +608,7 @@ function remoteClientHtml(port: number): string {
       const description = prompt("Nova descricao", entry.description || "");
       if (description === null) return;
       const payload = { description };
-      if (permissions.viewTotals) {
+      if (permissions.viewEntryValues) {
         const value = prompt("Novo valor", String(entry.finalValue || 0).replace(".", ","));
         if (value !== null) payload.value = parseValue(value);
       }

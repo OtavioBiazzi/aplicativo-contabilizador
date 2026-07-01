@@ -251,6 +251,11 @@ def main() -> int:
       expect(page.get_by_label("Mostrar campo de numero do onibus")).to_be_checked()
       page.locator(".settings-nav").get_by_role("button", name="Perfis").click()
       expect(page.get_by_text("Perfil ativo")).to_be_visible()
+      page.get_by_label("Nome do novo perfil").fill("Perfil smoke")
+      page.get_by_role("button", name="Criar com ajustes atuais").click()
+      expect(page.get_by_text("Perfil Perfil smoke criado.")).to_be_visible(timeout=10000)
+      page.locator(".profile-card").filter(has_text="Perfil fixado").get_by_title("Aplicar perfil").click()
+      expect(page.get_by_text("Perfil Perfil fixado aplicado ao rascunho.")).to_be_visible(timeout=10000)
       page.locator(".settings-nav").get_by_role("button", name="Atalhos").click()
       expect(page.get_by_text("Clique no atalho e pressione")).to_be_visible()
       money_shortcut = page.locator(".shortcut-card").filter(has_text="Modo dinheiro").locator(".shortcut-capture")
@@ -270,6 +275,7 @@ def main() -> int:
         return 1
       page.locator(".settings-nav").get_by_role("button", name="Servidor").click()
       expect(page.get_by_text("Porta padrao")).to_be_visible()
+      page.once("dialog", lambda dialog: dialog.accept())
       page.get_by_role("button", name="Salvar configuracoes").click()
       expect(page.get_by_text("Configuracoes salvas.")).to_be_visible(timeout=10000)
       has_diagnostics = page.evaluate(
@@ -324,7 +330,7 @@ def main() -> int:
               ...snapshot.settings.server,
               port,
               password,
-              permissions: { view: true, create: true, edit: true, delete: true, viewTotals: false }
+              permissions: { view: true, create: true, edit: true, delete: true, viewEntryValues: true, viewTotals: false }
             }
           });
           await window.caixa.startServer(port, password);
@@ -360,8 +366,8 @@ def main() -> int:
         print("Remote API exposed summary when viewTotals was disabled.", file=sys.stderr)
         return 1
       remote_entry = next((item for item in masked["entries"] if item["id"] == created["id"]), None)
-      if not remote_entry or remote_entry["finalValue"] != 0:
-        print("Remote API did not mask money fields.", file=sys.stderr)
+      if not remote_entry or remote_entry["finalValue"] != 29.9:
+        print("Remote API did not keep entry values visible when only totals were hidden.", file=sys.stderr)
         return 1
       remote_browser = playwright.chromium.launch(headless=True)
       try:

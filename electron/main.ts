@@ -181,7 +181,7 @@ function floatingWindowSize(settings: AppSettings) {
   );
   return {
     width,
-    minWidth: Math.min(width, Math.max(FLOATING_MIN_WIDTH, width - 60)),
+    minWidth: FLOATING_MIN_WIDTH,
     height: fields.has("tabs") ? 132 : 112,
     minHeight: FLOATING_MIN_HEIGHT
   };

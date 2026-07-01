@@ -418,12 +418,91 @@ function createProfileSnapshot(settings: AppSettings): Partial<AppSettings> {
     defaultRoundingDirection: settings.defaultRoundingDirection,
     tableNumberEnabled: settings.tableNumberEnabled,
     busNumberEnabled: settings.busNumberEnabled,
-    spreadsheetMode: settings.spreadsheetMode,
-    visibleColumns: [...settings.visibleColumns],
+    privacy: cloneValue(settings.privacy),
     floating: cloneValue(settings.floating),
     quickTabs: cloneValue(settings.quickTabs),
     shortcuts: cloneValue(settings.shortcuts)
   };
+}
+
+function profilePatch(profile?: Partial<AppSettings>): Partial<AppSettings> {
+  if (!profile) {
+    return {};
+  }
+  const patch: Partial<AppSettings> = {};
+  const keys: Array<keyof AppSettings> = [
+    "theme",
+    "accentColor",
+    "fieldSize",
+    "density",
+    "layout",
+    "defaultType",
+    "defaultPeople",
+    "defaultRoundingStep",
+    "defaultRoundingDirection",
+    "tableNumberEnabled",
+    "busNumberEnabled",
+    "privacy",
+    "floating",
+    "quickTabs",
+    "shortcuts"
+  ];
+  keys.forEach((key) => {
+    if (profile[key] !== undefined) {
+      (patch as Record<string, unknown>)[key] = cloneValue(profile[key]);
+    }
+  });
+  return patch;
+}
+
+function mergeProfileSettings(
+  defaults: Record<string, Partial<AppSettings>>,
+  current?: Record<string, Partial<AppSettings>>,
+  patch?: Record<string, Partial<AppSettings>>
+): Record<string, Partial<AppSettings>> {
+  const names = new Set([...Object.keys(defaults), ...Object.keys(current || {}), ...Object.keys(patch || {})]);
+  const merged: Record<string, Partial<AppSettings>> = {};
+  const fallbackSettings = createDefaultSettings("");
+  names.forEach((name) => {
+    const base = defaults[name] || {};
+    const saved = current?.[name] || {};
+    const next = patch?.[name] || {};
+    const profile: Partial<AppSettings> = {
+      ...base,
+      ...saved,
+      ...next,
+      privacy: {
+        ...fallbackSettings.privacy,
+        ...base.privacy,
+        ...saved.privacy,
+        ...next.privacy
+      },
+      shortcuts: {
+        ...fallbackSettings.shortcuts,
+        ...base.shortcuts,
+        ...saved.shortcuts,
+        ...next.shortcuts
+      },
+      quickTabs: next.quickTabs?.length
+        ? cloneValue(next.quickTabs)
+        : saved.quickTabs?.length
+          ? cloneValue(saved.quickTabs)
+          : base.quickTabs?.length
+            ? cloneValue(base.quickTabs)
+            : undefined
+    };
+    if (base.floating || saved.floating || next.floating) {
+      profile.floating = {
+        ...fallbackSettings.floating,
+        ...base.floating,
+        ...saved.floating,
+        ...next.floating,
+        visibleFields: normalizeFloatingFields(next.floating?.visibleFields || saved.floating?.visibleFields || base.floating?.visibleFields)
+      };
+    }
+    merged[name] = profile;
+  });
+  return merged;
 }
 
 function normalizeSettingsDraft(current: AppSettings, patch: Partial<AppSettings>): AppSettings {
@@ -447,15 +526,18 @@ function normalizeSettingsDraft(current: AppSettings, patch: Partial<AppSettings
         ...patch.server?.permissions
       }
     },
+    privacy: {
+      ...defaults.privacy,
+      ...current.privacy,
+      ...patch.privacy
+    },
     shortcuts: {
       ...defaults.shortcuts,
       ...current.shortcuts,
       ...patch.shortcuts
     },
     profiles: {
-      ...defaults.profiles,
-      ...current.profiles,
-      ...patch.profiles
+      ...mergeProfileSettings(defaults.profiles, current.profiles, patch.profiles)
     },
     quickTabs: patch.quickTabs?.length
       ? cloneValue(patch.quickTabs)
@@ -537,9 +619,30 @@ function profileSummary(profile: Partial<AppSettings>): string {
     profile.theme ? `Tema ${profile.theme}` : "",
     profile.layout ? `Layout ${profile.layout}` : "",
     profile.density ? `Densidade ${profile.density}` : "",
-    profile.defaultType ? `Padrao ${profile.defaultType}` : ""
+    profile.defaultType ? `Padrao ${profile.defaultType}` : "",
+    profile.floating?.visibleFields?.length ? `${profile.floating.visibleFields.length} itens na barra` : ""
   ].filter(Boolean);
   return details.join(" | ") || "Perfil pronto para personalizar";
+}
+
+function settingsChangeWarnings(previous: AppSettings, next: AppSettings): string[] {
+  const warnings = [];
+  if (previous.outputDirectory !== next.outputDirectory) {
+    warnings.push("pasta padrao das planilhas");
+  }
+  if (previous.fileFormat !== next.fileFormat || previous.fileStrategy !== next.fileStrategy || previous.spreadsheetMode !== next.spreadsheetMode) {
+    warnings.push("formato ou organizacao da planilha");
+  }
+  if (previous.server.port !== next.server.port || previous.server.password !== next.server.password) {
+    warnings.push("porta ou senha do servidor");
+  }
+  if (JSON.stringify(previous.server.permissions) !== JSON.stringify(next.server.permissions)) {
+    warnings.push("permissoes dos dispositivos remotos");
+  }
+  if (JSON.stringify(previous.shortcuts) !== JSON.stringify(next.shortcuts)) {
+    warnings.push("atalhos de teclado");
+  }
+  return warnings;
 }
 
 function formatFileSize(bytes: number): string {
@@ -831,8 +934,10 @@ export function App() {
         </nav>
 
         <div className="sidebar-card topbar-card">
-          <span>Total hoje</span>
-          <strong>{formatCurrency(summary.total)}</strong>
+          <span>{settings.privacy.hideHeaderTotal ? "Total oculto" : "Total hoje"}</span>
+          <strong className={settings.privacy.hideHeaderTotal ? "private-value" : ""}>
+            {settings.privacy.hideHeaderTotal ? "Privado" : formatCurrency(summary.total)}
+          </strong>
           <small>{summary.count} lancamentos</small>
         </div>
 
@@ -868,7 +973,7 @@ export function App() {
               onSubmit={addEntry}
               onUnpin={togglePinned}
             />
-            <TodayPanel summary={summary} entries={todayEntries} onMode={commandMode} />
+            <TodayPanel summary={summary} entries={todayEntries} settings={settings} onMode={commandMode} />
           </div>
         )}
 
@@ -1596,14 +1701,25 @@ function CashBox({
   );
 }
 
-function TodayPanel({ summary, entries, onMode }: { summary: DaySummary; entries: LedgerEntry[]; onMode: (type: EntryType) => void }) {
+function TodayPanel({
+  summary,
+  entries,
+  settings,
+  onMode
+}: {
+  summary: DaySummary;
+  entries: LedgerEntry[];
+  settings: AppSettings;
+  onMode: (type: EntryType) => void;
+}) {
   const latest = entries.filter((entry) => entry.status !== "deleted").slice(0, 5);
+  const showTotals = !settings.privacy.hideHeaderTotal;
   return (
     <aside className="today-panel">
-      <div className="total-plate">
-        <span>Total do dia</span>
-        <strong>{formatCurrency(summary.total)}</strong>
-        <small>{summary.count} registros, media {formatCurrency(summary.average)}</small>
+      <div className={`total-plate ${showTotals ? "" : "privacy-hidden"}`}>
+        <span>{showTotals ? "Total do dia" : "Total privado"}</span>
+        <strong>{showTotals ? formatCurrency(summary.total) : "Privado"}</strong>
+        <small>{showTotals ? `${summary.count} registros, media ${formatCurrency(summary.average)}` : `${summary.count} registros hoje`}</small>
       </div>
 
       <div className="quick-actions">
@@ -1632,9 +1748,9 @@ function TodayPanel({ summary, entries, onMode }: { summary: DaySummary; entries
         <div className="section-title">
           <strong>Totais rapidos</strong>
         </div>
-        <Metric label="Onibus" value={formatCurrency(summary.busTotal)} />
-        <Metric label="Dinheiro" value={formatCurrency(summary.cashTotal)} />
-        <Metric label="Sobras" value={formatCurrency(summary.differenceTotal)} />
+        <Metric label="Onibus" value={showTotals ? formatCurrency(summary.busTotal) : "Privado"} />
+        <Metric label="Dinheiro" value={showTotals ? formatCurrency(summary.cashTotal) : "Privado"} />
+        <Metric label="Sobras" value={showTotals ? formatCurrency(summary.differenceTotal) : "Privado"} />
       </section>
     </aside>
   );
@@ -1981,11 +2097,11 @@ function ReportsPanel({
   const [table, setTable] = useState("");
   const [bus, setBus] = useState("");
   const [query, setQuery] = useState("");
-  const [showSensitive, setShowSensitive] = useState(settings.server.permissions.viewTotals);
+  const [showSensitive, setShowSensitive] = useState(!settings.privacy.hideReportTotals);
 
   useEffect(() => {
-    setShowSensitive(settings.server.permissions.viewTotals);
-  }, [settings.server.permissions.viewTotals]);
+    setShowSensitive(!settings.privacy.hideReportTotals);
+  }, [settings.privacy.hideReportTotals]);
 
   const periodEntries = entries.filter((entry) => {
     const date = getLocalDateKey(entry.createdAt);
@@ -2418,7 +2534,7 @@ function ServerPanel({
         deviceName: connectDeviceName.trim() || "App cliente",
         entries: [],
         summary: null,
-        permissions: { view: false, create: false, edit: false, delete: false, viewTotals: false },
+        permissions: { view: false, create: false, edit: false, delete: false, viewEntryValues: false, viewTotals: false },
         connectedAt: new Date().toISOString()
       };
       const data = await remoteRequest<RemoteEntriesResponse>(session, "/api/entries");
@@ -2471,7 +2587,7 @@ function ServerPanel({
       return;
     }
     const payload: Record<string, unknown> = { description };
-    if (remoteSession.permissions.viewTotals) {
+    if (remoteSession.permissions.viewEntryValues) {
       const value = window.prompt("Novo valor", String(entry.finalValue || 0).replace(".", ","));
       if (value !== null) {
         payload.value = parseMoney(value);
@@ -2631,7 +2747,7 @@ function ServerPanel({
             <span>Controla o que a pagina remota pode fazer</span>
           </div>
           <div className="permission-box permission-grid">
-            {(["view", "create", "edit", "delete", "viewTotals"] as const).map((key) => (
+            {(["view", "create", "edit", "delete", "viewEntryValues", "viewTotals"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -2702,6 +2818,7 @@ function RemoteClientWorkspace({
     session.permissions.create ? "Registrar" : "",
     session.permissions.edit ? "Editar" : "",
     session.permissions.delete ? "Apagar" : "",
+    session.permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
     session.permissions.viewTotals ? "Ver totais" : "Totais ocultos"
   ].filter(Boolean);
 
@@ -2770,7 +2887,7 @@ function RemoteClientWorkspace({
                   <span>{date} {time} | {entry.customType || entry.type} | {statusLabel(entry.status)}</span>
                   <small>{entry.originDevice || "Origem nao informada"}</small>
                 </div>
-                <b>{session.permissions.viewTotals ? formatCurrency(getEntryAmount(entry)) : "Restrito"}</b>
+                <b>{session.permissions.viewEntryValues ? formatCurrency(getEntryAmount(entry)) : "Restrito"}</b>
                 <div className="remote-entry-actions">
                   {session.permissions.edit && entry.status !== "deleted" && (
                     <>
@@ -2826,6 +2943,7 @@ function SettingsPanel({
   const [diagnostics, setDiagnostics] = useState<DiagnosticsSnapshot | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [capturingShortcut, setCapturingShortcut] = useState<ShortcutAction | null>(null);
+  const [newProfileName, setNewProfileName] = useState("");
 
   useEffect(() => setDraft(settings), [settings]);
 
@@ -2849,20 +2967,6 @@ function SettingsPanel({
   const applyFloatingPreset = (preset: FloatingPreset) => {
     setDraft((current) => applyFloatingPresetToSettings(current, preset));
     onToast("success", `Preset ${preset.title} aplicado ao rascunho.`);
-  };
-
-  const applyPreset = (preset: "Caixa" | "Mesa" | "Onibus" | "Dinheiro" | "Minimalista") => {
-    const map: Record<typeof preset, FloatingPresetId> = {
-      Caixa: "cashier",
-      Mesa: "table",
-      Onibus: "bus",
-      Dinheiro: "money",
-      Minimalista: "minimal"
-    };
-    const selected = FLOATING_PRESETS.find((item) => item.id === map[preset]);
-    if (selected) {
-      applyFloatingPreset(selected);
-    }
   };
 
   const moveColumn = (column: string, direction: -1 | 1) => {
@@ -2952,7 +3056,7 @@ function SettingsPanel({
     : profileNames[0] || "Perfil PC";
 
   const applyProfile = (name: string) => {
-    setDraft((current) => normalizeSettingsDraft(current, { ...current.profiles[name], activeProfile: name }));
+    setDraft((current) => normalizeSettingsDraft(current, { ...profilePatch(current.profiles[name]), activeProfile: name }));
     onToast("success", `Perfil ${name} aplicado ao rascunho.`);
   };
 
@@ -2969,8 +3073,12 @@ function SettingsPanel({
   };
 
   const createProfile = () => {
-    const name = window.prompt("Nome do novo perfil", "Perfil personalizado")?.trim();
+    const name = newProfileName.trim();
     if (!name) {
+      onToast("error", "Digite um nome para o novo perfil.");
+      return;
+    }
+    if (draft.profiles[name] && !window.confirm(`O perfil ${name} ja existe. Atualizar com o estado atual?`)) {
       return;
     }
     setDraft((current) => ({
@@ -2981,6 +3089,7 @@ function SettingsPanel({
         [name]: createProfileSnapshot({ ...current, activeProfile: name })
       }
     }));
+    setNewProfileName("");
     onToast("success", `Perfil ${name} criado. Salve as configuracoes para gravar.`);
   };
 
@@ -3123,6 +3232,9 @@ function SettingsPanel({
       if (target === "server") {
         return { ...current, server: defaults.server };
       }
+      if (target === "reports") {
+        return { ...current, privacy: defaults.privacy };
+      }
       if (target === "shortcuts") {
         return { ...current, shortcuts: defaults.shortcuts };
       }
@@ -3159,6 +3271,18 @@ function SettingsPanel({
     } finally {
       setInstallingUpdate(false);
     }
+  };
+
+  const saveDraft = async () => {
+    const warnings = settingsChangeWarnings(settings, draft);
+    if (
+      warnings.length &&
+      !window.confirm(`Essas configuracoes alteram ${warnings.join(", ")}. Deseja continuar e salvar?`)
+    ) {
+      onToast("info", "Salvamento cancelado. Revise o rascunho antes de aplicar.");
+      return;
+    }
+    await onSave(draft);
   };
 
   const settingsCategories: Array<{ key: SettingsCategory; label: string; description: string; icon: typeof Settings }> = [
@@ -3202,10 +3326,7 @@ function SettingsPanel({
               <h2>{activeCategory.label}</h2>
               <p>{activeCategory.description}</p>
             </div>
-            <div className="preset-row settings-presets" aria-label="Presets de configuracao">
-              {(["Caixa", "Mesa", "Onibus", "Dinheiro", "Minimalista"] as const).map((preset) => (
-                <button key={preset} onClick={() => applyPreset(preset)}>{preset}</button>
-              ))}
+            <div className="preset-row settings-presets" aria-label="Acoes da categoria">
               <button className="ghost-button" type="button" onClick={() => resetCategory(category)}><RotateCcw size={16} /> Restaurar categoria</button>
             </div>
           </div>
@@ -3306,10 +3427,16 @@ function SettingsPanel({
                 <button className="primary-button" type="button" onClick={() => saveCurrentProfile(activeProfileName)}>
                   <Save size={16} /> Atualizar perfil
                 </button>
-                <button className="ghost-button" type="button" onClick={createProfile}>
-                  <Plus size={16} /> Novo perfil
-                </button>
               </div>
+            </div>
+            <div className="profile-create-card">
+              <label className="field">
+                <span>Nome do novo perfil</span>
+                <input value={newProfileName} onChange={(event) => setNewProfileName(event.target.value)} placeholder="Perfil tela caixa, notebook..." />
+              </label>
+              <button className="ghost-button" type="button" onClick={createProfile}>
+                <Plus size={16} /> Criar com ajustes atuais
+              </button>
             </div>
             <div className="profile-grid">
               {profileNames.map((name) => (
@@ -3556,16 +3683,24 @@ function SettingsPanel({
         </section>
 
         <section className={categoryClass("reports", "settings-group wide")}>
-          <h3>Relatorios</h3>
+          <h3>Privacidade e relatorios</h3>
           <label className="switch-line">
             <input
               type="checkbox"
-              checked={draft.server.permissions.viewTotals}
-              onChange={(event) => update("server", { ...draft.server, permissions: { ...draft.server.permissions, viewTotals: event.target.checked } })}
+              checked={draft.privacy.hideHeaderTotal}
+              onChange={(event) => update("privacy", { ...draft.privacy, hideHeaderTotal: event.target.checked })}
             />
-            Permitir visualizacao de totais sensiveis
+            Ocultar total no topo e no painel do caixa
           </label>
-          <p className="settings-note">Quando desativado, relatorios e dispositivos remotos podem operar sem mostrar total vendido, media ou maior venda.</p>
+          <label className="switch-line">
+            <input
+              type="checkbox"
+              checked={draft.privacy.hideReportTotals}
+              onChange={(event) => update("privacy", { ...draft.privacy, hideReportTotals: event.target.checked })}
+            />
+            Abrir relatorios locais com totais ocultos
+          </label>
+          <p className="settings-note">Isso esconde totais gerais na interface local, mas nao apaga valores dos lancamentos nem muda a planilha.</p>
         </section>
 
         <section className={categoryClass("server", "settings-group wide")}>
@@ -3573,7 +3708,7 @@ function SettingsPanel({
           <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
           <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
           <div className="permission-box permission-grid">
-            {(["view", "create", "edit", "delete", "viewTotals"] as const).map((key) => (
+            {(["view", "create", "edit", "delete", "viewEntryValues", "viewTotals"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -3784,7 +3919,7 @@ function SettingsPanel({
       </div>
 
       <div className="submit-row sticky-save">
-        <button className="primary-button" onClick={() => onSave(draft)}><Save size={18} /> Salvar configuracoes</button>
+        <button className="primary-button" onClick={saveDraft}><Save size={18} /> Salvar configuracoes</button>
         <button className="ghost-button" onClick={() => {
           setDraft(settings);
           onToast("info", "Alteracoes descartadas.");
@@ -3917,12 +4052,13 @@ function shortcutLabel(key: string): string {
   return labels[key] || key;
 }
 
-function permissionLabel(key: "view" | "create" | "edit" | "delete" | "viewTotals"): string {
+function permissionLabel(key: "view" | "create" | "edit" | "delete" | "viewEntryValues" | "viewTotals"): string {
   return {
     view: "Somente visualizar",
     create: "Registrar vendas",
     edit: "Editar lancamentos",
     delete: "Apagar lancamentos",
+    viewEntryValues: "Ver valores das vendas",
     viewTotals: "Ver totais vendidos"
   }[key];
 }

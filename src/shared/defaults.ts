@@ -94,10 +94,26 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     layout: "complete",
     activeProfile: "Perfil PC",
     profiles: {
-      "Perfil PC": {},
-      "Perfil Notebook": { density: "compact", layout: "compact" },
-      "Perfil tela pequena": { density: "compact", fieldSize: "small", layout: "sidePanel" },
-      "Perfil fixado": { layout: "pinnedBar", density: "compact" }
+      "Perfil PC": { theme: "datacaixa", fieldSize: "medium", density: "normal", layout: "complete" },
+      "Perfil Notebook": { theme: "datacaixa", density: "compact", fieldSize: "small", layout: "compact" },
+      "Perfil tela pequena": { theme: "datacaixa-dark", density: "compact", fieldSize: "small", layout: "sidePanel" },
+      "Perfil fixado": {
+        layout: "pinnedBar",
+        density: "compact",
+        fieldSize: "small",
+        floating: {
+          visibleFields: ["mode", "value", "people", "tableNumber", "busNumber", "paidWith", "result", "submit"],
+          opacity: 1,
+          borderless: true,
+          lockPosition: false,
+          theme: "follow",
+          syncMoneyWithEntryType: true
+        }
+      }
+    },
+    privacy: {
+      hideHeaderTotal: false,
+      hideReportTotals: false
     },
     quickTabs: DEFAULT_QUICK_TABS,
     floating: {
@@ -116,6 +132,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
         create: true,
         edit: false,
         delete: false,
+        viewEntryValues: true,
         viewTotals: true
       }
     },
