@@ -350,6 +350,9 @@ def main() -> int:
         }""",
         {"port": remote_port, "password": remote_password},
       )
+      if not page.locator(".subtab-row").get_by_role("button", name="Conectar").is_disabled():
+        print("Connect tab should be disabled while this app is running the local server.", file=sys.stderr)
+        return 1
       remote_base = f"http://127.0.0.1:{remote_port}"
       page.locator(".connect-panel").get_by_label("Endereco do servidor").fill(remote_base)
       page.locator(".connect-panel").get_by_label("Senha").fill(remote_password)
@@ -428,11 +431,24 @@ def main() -> int:
         }"""
       )
       page.locator(".settings-nav").get_by_role("button", name="Barra rapida").click()
-      expect(page.get_by_text("servidor liberou personalizacao local")).to_be_visible(timeout=15000)
+      expect(page.get_by_text("servidor liberou acesso local")).to_be_visible(timeout=15000)
       active_settings_class = page.locator("section.active-category").first.get_attribute("class") or ""
       if "remote-locked-section" in active_settings_class:
         print("Remote quick bar settings stayed locked after the server allowed client customization.", file=sys.stderr)
         return 1
+      page.locator(".settings-nav").get_by_role("button", name="Vendas").click()
+      active_settings_class = page.locator("section.active-category").first.get_attribute("class") or ""
+      if "remote-locked-section" in active_settings_class:
+        print("Remote sales settings stayed locked after the server allowed full local access.", file=sys.stderr)
+        return 1
+      page.locator(".settings-nav").get_by_role("button", name="Perfis").click()
+      active_settings_class = page.locator("section.active-category").first.get_attribute("class") or ""
+      if "remote-locked-section" in active_settings_class:
+        print("Remote profiles stayed locked after the server allowed full local access.", file=sys.stderr)
+        return 1
+      page.locator(".settings-nav").get_by_role("button", name="Planilha e backup").click()
+      expect(page.get_by_text("Esta area esta travada no cliente")).to_be_visible(timeout=10000)
+      expect(page.locator("section.remote-locked-section.active-category").first).to_be_visible(timeout=10000)
       page.get_by_role("button", name="Rede").click()
       page.get_by_role("button", name="Conectar", exact=True).click()
       page.locator(".connect-panel").get_by_label("Valor").first.fill("18,75")

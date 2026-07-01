@@ -54,7 +54,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - O modo operacional do cliente e independente por maquina: um PC pode registrar Onibus enquanto outro fica em Mesa ou Dinheiro, desde que esses modos estejam permitidos pelo servidor.
 - Permissoes, campos da barra e modos permitidos mudam em tempo real nos clientes conectados, incluindo a barra fixada aberta.
 - Cliente remoto volta automaticamente para modo local quando o servidor e desligado ou a conexao cai.
-- Permissao opcional para o servidor liberar personalizacao local da barra fixada e barra rapida do cliente, sem liberar mudancas de planilha, backup, servidor ou contrato do Excel.
+- Permissao opcional para o servidor liberar acesso local completo do cliente a aparencia, vendas, perfis, barra fixada e barra rapida, sem liberar planilha, backup, servidor, avancado ou contrato do Excel.
 - Relatorios no cliente remoto respeitam as permissoes do servidor: sem permissao de totais, o cliente nao recalcula valores mesmo mudando periodo.
 - Modo leve para clientes remotos: o app cliente carrega os lancamentos recentes e metadados de contagem, reduzindo trafego e memoria em PCs mais fracos.
 - Historico local renderiza em blocos com **Mostrar mais**, evitando tabelas gigantes na tela de uma vez.
@@ -164,7 +164,7 @@ Quando backup automatico estiver ativo, arquivos existentes sao copiados para a 
 
 1. Abra a aba **Rede**.
 2. Use **Criar servidor** para definir porta e senha.
-3. Em **Permissoes**, escolha visualizar, registrar, editar, apagar, ver totais vendidos e, se quiser, liberar a personalizacao local da barra do cliente.
+3. Em **Permissoes**, escolha visualizar, registrar, editar, apagar, ver totais vendidos e, se quiser, liberar o acesso local completo do cliente.
 4. Clique em **Abrir servidor**.
 5. Em outro computador da mesma rede, abra o endereco mostrado pelo app ou use a subaba **Conectar** para montar o link.
 6. Para usar outro PC com o proprio aplicativo, abra **Rede > Conectar**, informe endereco, senha e nome do caixa, e clique em **Conectar no app**.
@@ -175,11 +175,13 @@ Cada computador escolhe seu modo de trabalho localmente. Por exemplo, o servidor
 
 Mudancas de permissoes, campos da barra e modos permitidos sao enviadas em tempo real para os clientes conectados. Se o servidor ocultar Mesa, Onibus, pagamento, descricao ou totais vendidos, a tela principal, a barra fixada e os relatorios do cliente atualizam sem reiniciar.
 
-Se a permissao **Personalizar barra e visual do cliente** estiver ativada, o cliente pode ajustar a propria barra fixada e barra rapida para caber melhor naquele PC. Mesmo assim, o servidor continua mandando nas regras que afetam a planilha: modos permitidos, campos aceitos, mesa/onibus, pagamento, descricao, arquivos, backup e permissoes sensiveis.
+Se a permissao **Acesso local completo do cliente** estiver ativada, o cliente pode ajustar aparencia, vendas, perfis, barra fixada e barra rapida para caber melhor naquele PC. Mesmo assim, o servidor continua mandando nas regras que afetam a planilha: modos permitidos, campos aceitos, mesa/onibus, pagamento, descricao, arquivos, backup, servidor, avancado e permissoes sensiveis.
 
 Para PCs mais fracos, o cliente remoto trabalha em modo leve por padrao: baixa os lancamentos mais recentes para historico/operacao e recebe do servidor a contagem do dia e os totais permitidos. O computador servidor continua mantendo o historico completo e a planilha principal.
 
-Enquanto conectado como cliente, os ajustes que mudam planilha, campos, modos, perfis, backup e servidor ficam somente leitura. O usuario ainda consegue ver essas telas; ao clicar nelas, o app avisa que so o computador servidor pode editar. Ao desconectar, ou se o servidor for desligado, as configuracoes locais daquele PC voltam a ser editaveis normalmente.
+Enquanto conectado como cliente, os ajustes que mudam planilha, backup, servidor e avancado ficam somente leitura. Sem a permissao de acesso local completo, Vendas, Perfis, Barra fixada e Barra rapida tambem ficam travados. O usuario ainda consegue ver essas telas; ao clicar nelas, o app avisa que so o computador servidor pode editar. Ao desconectar, ou se o servidor for desligado, as configuracoes locais daquele PC voltam a ser editaveis normalmente.
+
+Quando este computador esta com o servidor aberto, a opcao **Conectar** fica desativada ate o servidor ser desligado. Assim o mesmo app nao tenta ser caixa principal e cliente de outro caixa ao mesmo tempo.
 
 Se o servidor estiver desligado, o aplicativo continua funcionando normalmente no computador principal.
 
@@ -209,7 +211,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - total de hoje sem somar lancamentos de ontem;
 - exportacao diaria separada pela data real do lancamento;
 - cliente remoto dentro do app, mini-caixa web, totais mascarados, permissao em tempo real, payload remoto limitado, modo operacional independente, registro, edicao, cancelamento e lixeira;
-- desconexao automatica do cliente quando o servidor para e permissao de personalizacao local liberada pelo servidor;
+- desconexao automatica do cliente quando o servidor para e permissao de acesso local completo liberada pelo servidor;
 - XLSX com estilo, filtro e formula de total;
 - ausencia de erros de console.
 

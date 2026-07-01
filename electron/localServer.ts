@@ -650,7 +650,7 @@ function remoteClientHtml(port: number): string {
         permissions.delete ? "Apagar" : "",
         permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
         permissions.viewTotals ? "Ver totais" : "Totais ocultos",
-        permissions.allowClientCustomization ? "Personalizar cliente" : ""
+        permissions.allowClientCustomization ? "Acesso local liberado" : ""
       ].filter(Boolean);
       qs("#permissionList").innerHTML = rows.map((item) => "<span>" + item + "</span>").join("");
     }
@@ -733,7 +733,7 @@ function remoteClientHtml(port: number): string {
         (permissions.delete ? " + apaga" : "") +
         (permissions.viewEntryValues ? "" : " | sem valores") +
         (permissions.viewTotals ? "" : " | sem totais") +
-        (permissions.allowClientCustomization ? " | personaliza" : "");
+        (permissions.allowClientCustomization ? " | acesso local" : "");
       qs("#app").hidden = !permissions.create;
       qs("#summary").textContent = data.summary
         ? "Hoje: " + money.format(data.summary.total) + " | Lancamentos: " + data.summary.count

@@ -1427,6 +1427,17 @@ th {
   transform: translateY(-1px);
 }
 
+.subtab-row button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.subtab-row button:disabled:hover {
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
 .subtab-row button.active,
 .settings-nav button.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--panel));

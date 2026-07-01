@@ -743,6 +743,7 @@ function clientPolicyForEntry(settings: AppSettings, policy: RemoteClientPolicy,
   if (!allowClientCustomization) {
     return policy;
   }
+  const defaultType = policy.allowedTypes.includes(settings.defaultType) ? settings.defaultType : policy.defaultType;
   const serverFields = new Set(normalizeFloatingFields(policy.visibleFields));
   const customFields = normalizeFloatingFields(settings.floating.visibleFields).filter((field) => serverFields.has(field));
   const visibleFields = customFields.length ? normalizeFloatingFields(customFields) : normalizeFloatingFields(policy.visibleFields);
@@ -761,6 +762,12 @@ function clientPolicyForEntry(settings: AppSettings, policy: RemoteClientPolicy,
 
   return {
     ...policy,
+    defaultType,
+    defaultPeople: Math.max(1, Math.floor(settings.defaultPeople || policy.defaultPeople || 1)),
+    defaultRoundingStep: settings.defaultRoundingStep,
+    defaultRoundingDirection: settings.defaultRoundingDirection,
+    tableNumberEnabled: policy.tableNumberEnabled && settings.tableNumberEnabled !== false,
+    busNumberEnabled: policy.busNumberEnabled && settings.busNumberEnabled !== false,
     visibleFields,
     quickTabs: customTabs.length ? customTabs : policy.quickTabs
   };
@@ -769,15 +776,15 @@ function clientPolicyForEntry(settings: AppSettings, policy: RemoteClientPolicy,
 function settingsForRemoteClient(settings: AppSettings, policy: RemoteClientPolicy, allowClientCustomization = false): AppSettings {
   const entryPolicy = clientPolicyForEntry(settings, policy, allowClientCustomization);
   return normalizeSettingsDraft(settings, {
-    defaultType: policy.defaultType,
-    defaultPeople: policy.defaultPeople,
-    defaultRoundingStep: policy.defaultRoundingStep,
-    defaultRoundingDirection: policy.defaultRoundingDirection,
-    tableNumberEnabled: policy.tableNumberEnabled,
-    busNumberEnabled: policy.busNumberEnabled,
+    defaultType: entryPolicy.defaultType,
+    defaultPeople: entryPolicy.defaultPeople,
+    defaultRoundingStep: entryPolicy.defaultRoundingStep,
+    defaultRoundingDirection: entryPolicy.defaultRoundingDirection,
+    tableNumberEnabled: entryPolicy.tableNumberEnabled,
+    busNumberEnabled: entryPolicy.busNumberEnabled,
     quickTabs: entryPolicy.quickTabs.length
       ? entryPolicy.quickTabs.map((tab) => ({ ...tab, enabled: true }))
-      : [{ id: "remote-default", label: policy.defaultType, enabled: true, type: policy.defaultType }],
+      : [{ id: "remote-default", label: entryPolicy.defaultType, enabled: true, type: entryPolicy.defaultType }],
     floating: {
       ...settings.floating,
       visibleFields: normalizeFloatingFields(entryPolicy.visibleFields)
@@ -866,17 +873,17 @@ function remoteLockedSettingsSnapshot(settings: AppSettings, allowClientCustomiz
     csvSeparator: settings.csvSeparator,
     visibleColumns: settings.visibleColumns,
     backupEnabled: settings.backupEnabled,
-    defaultType: settings.defaultType,
-    defaultPeople: settings.defaultPeople,
-    defaultRoundingStep: settings.defaultRoundingStep,
-    defaultRoundingDirection: settings.defaultRoundingDirection,
-    tableNumberEnabled: settings.tableNumberEnabled,
-    busNumberEnabled: settings.busNumberEnabled,
-    profiles: settings.profiles,
-    activeProfile: settings.activeProfile,
     server: settings.server
   };
   if (!allowClientCustomization) {
+    snapshot.defaultType = settings.defaultType;
+    snapshot.defaultPeople = settings.defaultPeople;
+    snapshot.defaultRoundingStep = settings.defaultRoundingStep;
+    snapshot.defaultRoundingDirection = settings.defaultRoundingDirection;
+    snapshot.tableNumberEnabled = settings.tableNumberEnabled;
+    snapshot.busNumberEnabled = settings.busNumberEnabled;
+    snapshot.profiles = settings.profiles;
+    snapshot.activeProfile = settings.activeProfile;
     snapshot.quickTabs = settings.quickTabs;
     snapshot.floating = settings.floating;
   }
@@ -3197,6 +3204,7 @@ function ServerPanel({
   const connectRemote = async () => {
     await onConnectRemote(connectHost, connectPassword, connectDeviceName);
   };
+  const connectDisabledByServer = server.running && !remoteSession;
 
   return (
     <section className="panel server-panel">
@@ -3215,7 +3223,14 @@ function ServerPanel({
 
       <div className="subtab-row">
         <button className={mode === "create" ? "active" : ""} onClick={() => setMode("create")}><RadioTower size={16} /> Criar servidor</button>
-        <button className={mode === "connect" ? "active" : ""} onClick={() => setMode("connect")}><PlugZap size={16} /> Conectar</button>
+        <button
+          className={mode === "connect" ? "active" : ""}
+          disabled={connectDisabledByServer}
+          title={connectDisabledByServer ? "Desligue o servidor deste app antes de conectar a outro caixa." : "Conectar este app a outro caixa"}
+          onClick={() => setMode("connect")}
+        >
+          <PlugZap size={16} /> Conectar
+        </button>
         <button className={mode === "permissions" ? "active" : ""} onClick={() => setMode("permissions")}><ShieldCheck size={16} /> Permissoes</button>
       </div>
 
@@ -3396,7 +3411,7 @@ function RemoteClientWorkspace({
     session.permissions.delete ? "Apagar" : "",
     session.permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
     session.permissions.viewTotals ? "Ver totais" : "Totais ocultos",
-    session.permissions.allowClientCustomization ? "Personalizacao local" : "",
+    session.permissions.allowClientCustomization ? "Acesso local liberado" : "",
     `${session.clientPolicy.allowedTypes.length} modo(s) do servidor`
   ].filter(Boolean);
 
@@ -3536,10 +3551,9 @@ function SettingsPanel({
   const [capturingShortcut, setCapturingShortcut] = useState<ShortcutAction | null>(null);
   const [newProfileName, setNewProfileName] = useState("");
   const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
-  const remoteLockedCategoryList: SettingsCategory[] = ["defaults", "profiles", "files", "server", "advanced"];
-  if (!remoteCustomizationAllowed) {
-    remoteLockedCategoryList.unshift("floating", "quick");
-  }
+  const remoteLockedCategoryList: SettingsCategory[] = remoteCustomizationAllowed
+    ? ["files", "server", "advanced"]
+    : ["floating", "quick", "defaults", "profiles", "files", "server", "advanced"];
   const remoteLockedCategories = new Set<SettingsCategory>(remoteLockedCategoryList);
   const remoteLockMessage = "So o computador servidor pode editar essa parte enquanto este app esta conectado como cliente. Desconecte do servidor para editar as configuracoes locais deste PC.";
 
@@ -3983,7 +3997,7 @@ function SettingsPanel({
                   {isRemoteLockedCategory(category)
                     ? "Esta area esta travada no cliente. O servidor controla campos, modos, planilha e permissoes em tempo real."
                     : remoteCustomizationAllowed
-                      ? "Modo cliente remoto ativo: o servidor liberou personalizacao local de aparencia, barra fixada e barra rapida deste PC."
+                      ? "Modo cliente remoto ativo: o servidor liberou acesso local a aparencia, vendas, perfis, barra fixada e barra rapida deste PC."
                       : "Modo cliente remoto ativo: voce pode ajustar apenas aparencia, privacidade local, atalhos e atualizacoes deste PC."}
                 </p>
               )}
@@ -4722,6 +4736,6 @@ function permissionLabel(key: keyof ServerPermissions): string {
     delete: "Apagar lancamentos",
     viewEntryValues: "Ver valores das vendas",
     viewTotals: "Ver totais vendidos",
-    allowClientCustomization: "Personalizar barra e visual do cliente"
+    allowClientCustomization: "Acesso local completo do cliente"
   }[key];
 }
