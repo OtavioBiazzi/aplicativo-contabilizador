@@ -35,7 +35,7 @@ const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
 const FLOATING_MIN_WIDTH = 520;
 const FLOATING_MAX_WIDTH = 1240;
-const FLOATING_MIN_HEIGHT = 112;
+const FLOATING_MIN_HEIGHT = 76;
 
 interface GitHubReleaseAsset {
   name?: string;
@@ -95,7 +95,7 @@ async function createWindow() {
 }
 
 async function createFloatingWindow(options?: { opacity?: number; lockPosition?: boolean }, settings?: AppSettings) {
-  const size = settings ? floatingWindowSize(settings) : { width: FLOATING_MAX_WIDTH, minWidth: FLOATING_MIN_WIDTH, height: 132, minHeight: FLOATING_MIN_HEIGHT };
+  const size = settings ? floatingWindowSize(settings) : { width: FLOATING_MAX_WIDTH, minWidth: FLOATING_MIN_WIDTH, height: 118, minHeight: FLOATING_MIN_HEIGHT };
   if (floatingWindow && !floatingWindow.isDestroyed()) {
     applyFloatingWindowOptions(options, settings);
     floatingWindow.showInactive();
@@ -182,7 +182,7 @@ function floatingWindowSize(settings: AppSettings) {
   return {
     width,
     minWidth: FLOATING_MIN_WIDTH,
-    height: fields.has("tabs") ? 132 : 112,
+    height: fields.has("tabs") ? 118 : 92,
     minHeight: FLOATING_MIN_HEIGHT
   };
 }
@@ -191,12 +191,15 @@ function applyFloatingWindowOptions(options?: { opacity?: number; lockPosition?:
   if (!floatingWindow || floatingWindow.isDestroyed()) {
     return;
   }
-  const size = settings ? floatingWindowSize(settings) : { width: FLOATING_MAX_WIDTH, minWidth: FLOATING_MIN_WIDTH, height: 132, minHeight: FLOATING_MIN_HEIGHT };
+  const size = settings ? floatingWindowSize(settings) : { width: FLOATING_MAX_WIDTH, minWidth: FLOATING_MIN_WIDTH, height: 118, minHeight: FLOATING_MIN_HEIGHT };
   floatingWindow.setMinimumSize(size.minWidth, size.minHeight);
   const [width, height] = floatingWindow.getSize();
   const shouldResizeWidth = settings && Math.abs(width - size.width) > 80;
   if (shouldResizeWidth || width < size.minWidth || height < size.minHeight) {
-    floatingWindow.setSize(Math.max(size.width, size.minWidth), Math.max(size.height, size.minHeight));
+    floatingWindow.setSize(
+      Math.max(shouldResizeWidth ? size.width : width, size.minWidth),
+      Math.max(height < size.minHeight ? size.height : height, size.minHeight)
+    );
   }
   floatingWindow.setOpacity(options?.opacity ?? 1);
   floatingWindow.setMovable(!options?.lockPosition);

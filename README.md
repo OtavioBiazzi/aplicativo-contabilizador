@@ -42,7 +42,8 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Presets da barra fixada: Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, todos editaveis depois.
 - Presets da barra fixada ajustam apenas a barra, sem alterar fonte, densidade ou layout global do aplicativo.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
-- Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida, limite minimo de tamanho e arraste apenas pela alca de tres pontos.
+- Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida, limite minimo menor para notebooks e arraste apenas pela alca de tres pontos.
+- Barra fixada entra em modo baixo automaticamente quando a janela e reduzida, escondendo rotulos e compactando botoes/campos para ocupar menos altura.
 - Temas DataCaixa PDV, DataCaixa PDV escuro e Italia como base do remake visual, com contraste revisado em menus e hovers.
 - Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
 - Historico com lixeira, restauracao e exclusao definitiva.
@@ -206,6 +207,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - categoria Perfis e API de exportar/importar configuracoes;
 - barra fixada com troca de modo e troco;
 - elementos configuraveis da barra fixada;
+- barra fixada compacta em 76px de altura com controles principais visiveis;
 - importacao CSV e XLSX com deduplicacao;
 - hover legivel no tema DataCaixa;
 - total de hoje sem somar lancamentos de ontem;
