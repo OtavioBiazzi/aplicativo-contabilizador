@@ -163,6 +163,8 @@ Quando backup automatico estiver ativo, arquivos existentes sao copiados para a 
 
 No modo cliente, a aparencia local continua podendo ser ajustada, mas o resultado enviado para o Excel segue o computador principal. Se o servidor esconder descricao, tipo, mesa, onibus, pagamento ou outro campo da barra, o cliente tambem nao envia esse campo. A barra fixada do cliente usa a mesma sessao remota e manda os lancamentos para o caixa principal.
 
+Enquanto conectado como cliente, os ajustes que mudam planilha, campos, modos, perfis, backup e servidor ficam somente leitura. O usuario ainda consegue ver essas telas; ao clicar nelas, o app avisa que so o computador servidor pode editar. Ao desconectar, as configuracoes locais daquele PC voltam a ser editaveis normalmente.
+
 Se o servidor estiver desligado, o aplicativo continua funcionando normalmente no computador principal.
 
 ## Smoke test

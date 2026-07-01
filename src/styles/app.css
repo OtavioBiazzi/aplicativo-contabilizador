@@ -1632,6 +1632,19 @@ th {
   line-height: 1.45;
 }
 
+.remote-lock-banner {
+  display: inline-flex;
+  align-items: center;
+  max-width: 78ch;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+  color: var(--text) !important;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
 .settings-overline {
   color: var(--accent-strong);
   font-size: 0.72rem;
@@ -1665,6 +1678,20 @@ th {
   gap: 12px;
   padding: 14px;
   box-shadow: none;
+}
+
+.settings-group.remote-locked-section {
+  border: 1px dashed color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 42%),
+    color-mix(in srgb, var(--panel) 97%, var(--accent) 3%);
+}
+
+.settings-group.remote-locked-section input,
+.settings-group.remote-locked-section select,
+.settings-group.remote-locked-section button {
+  cursor: not-allowed;
 }
 
 .settings-group h3 {

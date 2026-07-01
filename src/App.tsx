@@ -720,7 +720,7 @@ function profileSummary(profile: Partial<AppSettings>): string {
 }
 
 function settingsChangeWarnings(previous: AppSettings, next: AppSettings): string[] {
-  const warnings = [];
+  const warnings: string[] = [];
   if (previous.outputDirectory !== next.outputDirectory) {
     warnings.push("pasta padrao das planilhas");
   }
@@ -737,6 +737,30 @@ function settingsChangeWarnings(previous: AppSettings, next: AppSettings): strin
     warnings.push("atalhos de teclado");
   }
   return warnings;
+}
+
+function remoteLockedSettingsSnapshot(settings: AppSettings) {
+  return {
+    outputDirectory: settings.outputDirectory,
+    fileFormat: settings.fileFormat,
+    fileStrategy: settings.fileStrategy,
+    spreadsheetMode: settings.spreadsheetMode,
+    dateFormat: settings.dateFormat,
+    csvSeparator: settings.csvSeparator,
+    visibleColumns: settings.visibleColumns,
+    backupEnabled: settings.backupEnabled,
+    defaultType: settings.defaultType,
+    defaultPeople: settings.defaultPeople,
+    defaultRoundingStep: settings.defaultRoundingStep,
+    defaultRoundingDirection: settings.defaultRoundingDirection,
+    tableNumberEnabled: settings.tableNumberEnabled,
+    busNumberEnabled: settings.busNumberEnabled,
+    profiles: settings.profiles,
+    activeProfile: settings.activeProfile,
+    quickTabs: settings.quickTabs,
+    floating: settings.floating,
+    server: settings.server
+  };
 }
 
 function formatFileSize(bytes: number): string {
@@ -1345,6 +1369,7 @@ export function App() {
         {activeTab === "settings" && (
             <SettingsPanel
               settings={settings}
+              remoteClientActive={Boolean(remoteSession)}
               onSave={saveSettings}
               onToast={showToast}
               onImportLedger={importLedgerFile}
@@ -3158,12 +3183,14 @@ function normalizeRemoteBaseUrl(value: string): string {
 
 function SettingsPanel({
   settings,
+  remoteClientActive,
   onSave,
   onToast,
   onImportLedger,
   onImportLedgerFolder
 }: {
   settings: AppSettings;
+  remoteClientActive: boolean;
   onSave: (settings: AppSettings) => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
   onImportLedger: () => Promise<void>;
@@ -3178,6 +3205,8 @@ function SettingsPanel({
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [capturingShortcut, setCapturingShortcut] = useState<ShortcutAction | null>(null);
   const [newProfileName, setNewProfileName] = useState("");
+  const remoteLockedCategories = new Set<SettingsCategory>(["floating", "quick", "defaults", "profiles", "files", "server", "advanced"]);
+  const remoteLockMessage = "So o computador servidor pode editar essa parte enquanto este app esta conectado como cliente. Desconecte do servidor para editar as configuracoes locais deste PC.";
 
   useEffect(() => setDraft(settings), [settings]);
 
@@ -3189,6 +3218,33 @@ function SettingsPanel({
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  const isRemoteLockedCategory = (target: SettingsCategory) => remoteClientActive && remoteLockedCategories.has(target);
+
+  const notifyRemoteLock = () => {
+    onToast("info", remoteLockMessage);
+  };
+
+  const guardRemoteSection = (event: React.SyntheticEvent<HTMLElement>, target: SettingsCategory) => {
+    if (!isRemoteLockedCategory(target)) {
+      return;
+    }
+    const element = event.target instanceof HTMLElement ? event.target : null;
+    if (!element?.closest("button,input,select,textarea,label,[role='button']")) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    notifyRemoteLock();
+  };
+
+  const lockedClick = (target: SettingsCategory, action: () => void) => {
+    if (isRemoteLockedCategory(target)) {
+      notifyRemoteLock();
+      return;
+    }
+    action();
   };
 
   const chooseFolder = async () => {
@@ -3508,6 +3564,13 @@ function SettingsPanel({
   };
 
   const saveDraft = async () => {
+    if (
+      remoteClientActive &&
+      JSON.stringify(remoteLockedSettingsSnapshot(settings)) !== JSON.stringify(remoteLockedSettingsSnapshot(draft))
+    ) {
+      onToast("error", "Nao salvei: esse rascunho altera configuracoes controladas pelo servidor. Desconecte do caixa principal para editar essas partes.");
+      return;
+    }
     const warnings = settingsChangeWarnings(settings, draft);
     if (
       warnings.length &&
@@ -3536,7 +3599,20 @@ function SettingsPanel({
   const filePreview = filePreviewForSettings(draft);
 
   const categoryClass = (target: SettingsCategory, extra = "") =>
-    `${extra || "settings-group"} ${category === target ? "active-category" : "hidden-category"}`;
+    `${extra || "settings-group"} ${category === target ? "active-category" : "hidden-category"} ${isRemoteLockedCategory(target) ? "remote-locked-section" : ""}`;
+
+  const remoteSectionProps = (target: SettingsCategory) => ({
+    "data-remote-locked": isRemoteLockedCategory(target) ? "true" : undefined,
+    onMouseDownCapture: (event: React.MouseEvent<HTMLElement>) => guardRemoteSection(event, target),
+    onClickCapture: (event: React.MouseEvent<HTMLElement>) => guardRemoteSection(event, target),
+    onInputCapture: (event: React.FormEvent<HTMLElement>) => guardRemoteSection(event, target),
+    onChangeCapture: (event: React.FormEvent<HTMLElement>) => guardRemoteSection(event, target),
+    onKeyDownCapture: (event: React.KeyboardEvent<HTMLElement>) => {
+      if ((event.key === "Enter" || event.key === " ") && isRemoteLockedCategory(target)) {
+        guardRemoteSection(event, target);
+      }
+    }
+  });
 
   return (
     <section className="panel settings-panel">
@@ -3559,9 +3635,14 @@ function SettingsPanel({
               <span className="settings-overline">Ajustes</span>
               <h2>{activeCategory.label}</h2>
               <p>{activeCategory.description}</p>
+              {remoteClientActive && (
+                <p className="remote-lock-banner">
+                  Modo cliente remoto ativo: ajustes que mudam planilha, campos, modos, perfis ou servidor sao controlados pelo computador principal.
+                </p>
+              )}
             </div>
             <div className="preset-row settings-presets" aria-label="Acoes da categoria">
-              <button className="ghost-button" type="button" onClick={() => resetCategory(category)}><RotateCcw size={16} /> Restaurar categoria</button>
+              <button className="ghost-button" type="button" onClick={() => lockedClick(category, () => resetCategory(category))}><RotateCcw size={16} /> Restaurar categoria</button>
             </div>
           </div>
 
@@ -3611,7 +3692,7 @@ function SettingsPanel({
           </label>
         </section>
 
-        <section className={categoryClass("defaults")}>
+        <section className={categoryClass("defaults")} {...remoteSectionProps("defaults")}>
           <h3>Padroes</h3>
           <label className="field"><span>Tipo padrao</span>
             <select value={draft.defaultType} onChange={(event) => update("defaultType", event.target.value as EntryType)}>
@@ -3636,7 +3717,7 @@ function SettingsPanel({
           <p className="settings-note">Essas opcoes escondem apenas o campo numerico. Os modos Mesa e Onibus continuam disponiveis quando forem uteis.</p>
         </section>
 
-        <section className={categoryClass("profiles", "settings-group wide")}>
+        <section className={categoryClass("profiles", "settings-group wide")} {...remoteSectionProps("profiles")}>
           <h3>Perfis de configuracao</h3>
           <p className="settings-note">
             Perfis guardam tema, densidade, layout, barra fixada, abas rapidas, atalhos e padroes de venda.
@@ -3697,7 +3778,7 @@ function SettingsPanel({
           </div>
         </section>
 
-        <section className={categoryClass("files", "settings-group wide")}>
+        <section className={categoryClass("files", "settings-group wide")} {...remoteSectionProps("files")}>
           <h3>Arquivos</h3>
           <div className="file-preview-card">
             <FileSpreadsheet size={20} />
@@ -3775,7 +3856,7 @@ function SettingsPanel({
           <label className="switch-line"><input type="checkbox" checked={draft.backupEnabled} onChange={(event) => update("backupEnabled", event.target.checked)} /> Criar backup automatico</label>
         </section>
 
-        <section className={categoryClass("floating", "settings-group wide")}>
+        <section className={categoryClass("floating", "settings-group wide")} {...remoteSectionProps("floating")}>
           <h3>Modo fixado</h3>
           <div className="floating-preset-grid">
             {FLOATING_PRESETS.map((preset) => {
@@ -3851,7 +3932,7 @@ function SettingsPanel({
           </p>
         </section>
 
-        <section className={categoryClass("quick", "settings-group wide")}>
+        <section className={categoryClass("quick", "settings-group wide")} {...remoteSectionProps("quick")}>
           <h3>Barra rapida</h3>
           <p className="settings-note">
             Escolha quais abas aparecem na barra fixada e o que cada uma faz. A ordem daqui e a mesma ordem da barra.
@@ -3937,7 +4018,7 @@ function SettingsPanel({
           <p className="settings-note">Isso esconde totais gerais na interface local, mas nao apaga valores dos lancamentos nem muda a planilha.</p>
         </section>
 
-        <section className={categoryClass("server", "settings-group wide")}>
+        <section className={categoryClass("server", "settings-group wide")} {...remoteSectionProps("server")}>
           <h3>Servidor e sincronizacao</h3>
           <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
           <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
@@ -4005,7 +4086,7 @@ function SettingsPanel({
           </div>
         </section>
 
-        <section className={categoryClass("advanced", "settings-group wide")}>
+        <section className={categoryClass("advanced", "settings-group wide")} {...remoteSectionProps("advanced")}>
           <h3>Backup, restauracao e seguranca</h3>
           <div className="diagnostics-grid">
             <article>
@@ -4128,7 +4209,7 @@ function SettingsPanel({
           </div>
         </section>
 
-        <section className={categoryClass("files", "settings-group wide")}>
+        <section className={categoryClass("files", "settings-group wide")} {...remoteSectionProps("files")}>
           <h3>Colunas do arquivo</h3>
           {draft.spreadsheetMode === "simple" && (
             <p className="settings-note">

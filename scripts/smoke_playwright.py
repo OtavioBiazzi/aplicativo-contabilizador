@@ -71,6 +71,12 @@ def api_json(base_url: str, path: str, password: str, method: str = "GET", paylo
   return json.loads(raw) if raw else {}
 
 
+def collect_console_error(errors: list[str], message) -> None:
+  text = message.text
+  if message.type == "error" and "ERR_CONNECTION_REFUSED" not in text:
+    errors.append(text)
+
+
 def main() -> int:
   if not (ROOT / "dist-electron" / "electron" / "main.js").exists():
     print("Run npm run build before the smoke test.", file=sys.stderr)
@@ -120,7 +126,7 @@ def main() -> int:
       browser = playwright.chromium.connect_over_cdp(DEBUG_URL)
       page = find_app_page(browser, floating=False)
       console_errors = []
-      page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+      page.on("console", lambda message: collect_console_error(console_errors, message))
       page.wait_for_load_state("networkidle")
       expect(page.get_by_text("Registro rapido").first).to_be_visible(timeout=15000)
       expect(page.locator(".brand-mark img")).to_be_visible(timeout=15000)
@@ -352,6 +358,18 @@ def main() -> int:
       expect(page.get_by_text("Cliente conectado no app")).to_be_visible(timeout=15000)
       expect(page.get_by_text("Historico vindo do caixa principal")).to_be_visible(timeout=15000)
       expect(page.locator(".connect-panel .description-field input")).to_have_count(0)
+      page.get_by_role("button", name="Ajustes").click()
+      page.locator(".settings-nav").get_by_role("button", name="Vendas").click()
+      expect(page.get_by_text("Modo cliente remoto ativo")).to_be_visible(timeout=10000)
+      people_default_input = page.get_by_label("Pessoas padrao")
+      original_people_default = people_default_input.input_value()
+      people_default_input.click()
+      expect(page.get_by_text("So o computador servidor pode editar essa parte")).to_be_visible(timeout=10000)
+      if people_default_input.input_value() != original_people_default:
+        print("Remote client edited a server-owned setting while connected.", file=sys.stderr)
+        return 1
+      page.get_by_role("button", name="Rede").click()
+      page.get_by_role("button", name="Conectar").click()
       page.locator(".connect-panel").get_by_label("Valor").first.fill("18,75")
       page.locator(".connect-panel").get_by_role("button", name="Registrar").first.click()
       expect(page.get_by_text("Lancamento enviado ao caixa principal.")).to_be_visible(timeout=15000)
@@ -381,7 +399,7 @@ def main() -> int:
       try:
         remote_page = remote_browser.new_page()
         remote_errors = []
-        remote_page.on("console", lambda message: remote_errors.append(message.text) if message.type == "error" else None)
+        remote_page.on("console", lambda message: collect_console_error(remote_errors, message))
         remote_page.goto(remote_base)
         expect(remote_page.get_by_text("Caixa remoto")).to_be_visible(timeout=10000)
         remote_page.locator("#password").fill(remote_password)
@@ -413,7 +431,7 @@ def main() -> int:
       browser = playwright.chromium.connect_over_cdp(DEBUG_URL)
       page = find_app_page(browser, floating=False)
       floating_page = find_app_page(browser, floating=True)
-      floating_page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
+      floating_page.on("console", lambda message: collect_console_error(console_errors, message))
       expect(floating_page.locator(".floating-bar")).to_be_visible(timeout=15000)
       expect(floating_page.get_by_text("Cliente conectado:")).not_to_be_visible()
       body_classes = floating_page.locator("body").get_attribute("class") or ""
