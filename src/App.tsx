@@ -113,6 +113,12 @@ interface ModeCommand {
   nonce: number;
 }
 
+interface QuickEntryModeState {
+  type: EntryType;
+  cashLinkedType: EntryType;
+  activeQuickTabId: string;
+}
+
 const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
   { key: "register", label: "Caixa", icon: Send },
   { key: "history", label: "Historico", icon: History },
@@ -124,6 +130,7 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
 const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floating") === "1";
 const CDA_ICON_SRC = "/cda-icon.png";
 const REMOTE_SESSION_STORAGE_KEY = "caixaRemoteSession";
+const QUICK_ENTRY_MODE_STORAGE_PREFIX = "caixaQuickEntryMode";
 
 const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: "Mesa", label: "Mesa" },
@@ -289,6 +296,73 @@ function enabledQuickTabs(settings: Pick<AppSettings, "quickTabs">): QuickTabSet
 
 function quickTabForType(tabs: QuickTabSettings[], type: EntryType): QuickTabSettings | undefined {
   return tabs.find((tab) => tab.type === type && !tab.compact) || tabs.find((tab) => tab.type === type) || tabs[0];
+}
+
+function defaultCashLinkForAllowedTypes(allowedTypes: EntryType[], fallback: EntryType = "Mesa"): EntryType {
+  if (CASH_LINKABLE_TYPES.includes(fallback) && allowedTypes.includes(fallback)) {
+    return fallback;
+  }
+  return CASH_LINKABLE_TYPES.find((item) => allowedTypes.includes(item)) || "Venda";
+}
+
+function quickEntryModeStorageKey(scope: string): string {
+  return `${QUICK_ENTRY_MODE_STORAGE_PREFIX}:${scope}`;
+}
+
+function readQuickEntryModeState(scope?: string): Partial<QuickEntryModeState> | null {
+  if (!scope) {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(quickEntryModeStorageKey(scope));
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<QuickEntryModeState>;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeQuickEntryModeState(scope: string | undefined, state: QuickEntryModeState): void {
+  if (!scope) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(quickEntryModeStorageKey(scope), JSON.stringify(state));
+  } catch {
+    // LocalStorage pode falhar em modo restrito; o app continua usando o estado em memoria.
+  }
+}
+
+function sanitizeQuickEntryModeState(
+  state: Partial<QuickEntryModeState> | null | undefined,
+  settings: AppSettings,
+  clientPolicy: RemoteClientPolicy | undefined,
+  allowedTypes: EntryType[],
+  quickTabs: QuickTabSettings[]
+): QuickEntryModeState {
+  const fallbackType = allowedTypes.includes(clientPolicy?.defaultType || settings.defaultType)
+    ? clientPolicy?.defaultType || settings.defaultType
+    : allowedTypes[0] || "Venda";
+  const type = state?.type && allowedTypes.includes(state.type) ? state.type : fallbackType;
+  const matchingTab = quickTabForType(quickTabs, type);
+  const activeQuickTabId =
+    state?.activeQuickTabId && quickTabs.some((tab) => tab.id === state.activeQuickTabId)
+      ? state.activeQuickTabId
+      : matchingTab?.id || "manual";
+  const cashFallback = matchingTab?.cashLinkedType || quickTabForType(enabledQuickTabs(settings), settings.defaultType)?.cashLinkedType || "Mesa";
+  const cashLinkedType =
+    state?.cashLinkedType && CASH_LINKABLE_TYPES.includes(state.cashLinkedType) && allowedTypes.includes(state.cashLinkedType)
+      ? state.cashLinkedType
+      : defaultCashLinkForAllowedTypes(allowedTypes, cashFallback);
+
+  return { type, cashLinkedType, activeQuickTabId };
+}
+
+function quickEntryStorageScopeForSession(session: RemoteClientSession | null): string {
+  return session ? `remote:${session.baseUrl}:${session.deviceName}` : "local";
 }
 
 function resolveTheme(theme: AppSettings["theme"], prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
@@ -1229,6 +1303,7 @@ export function App() {
   const displayEntries = remoteSession ? remoteSession.entries : entries;
   const displayTodayEntries = remoteSession ? filterEntriesByLocalDate(remoteSession.entries, currentDateKey) : todayEntries;
   const displaySummary = remoteSession?.summary || (remoteSession ? summarizeEntries(displayTodayEntries) : summary);
+  const quickEntryStorageScope = quickEntryStorageScopeForSession(remoteSession);
 
   if (IS_FLOATING_WINDOW) {
     return (
@@ -1239,6 +1314,7 @@ export function App() {
           clientPolicy={remoteSession?.clientPolicy}
           pinned
           modeCommand={modeCommand}
+          storageScope={quickEntryStorageScope}
           onSubmit={submitEntry}
           onUnpin={togglePinned}
         />
@@ -1317,6 +1393,7 @@ export function App() {
               clientPolicy={remoteSession?.clientPolicy}
               pinned={false}
               modeCommand={modeCommand}
+              storageScope={quickEntryStorageScope}
               onSubmit={submitEntry}
               onUnpin={togglePinned}
             />
@@ -1397,6 +1474,7 @@ function QuickEntry({
   clientPolicy,
   pinned,
   modeCommand,
+  storageScope,
   onSubmit,
   onUnpin
 }: {
@@ -1405,31 +1483,44 @@ function QuickEntry({
   clientPolicy?: RemoteClientPolicy;
   pinned: boolean;
   modeCommand: ModeCommand | null;
+  storageScope?: string;
   onSubmit: (draft: EntryDraft) => Promise<void>;
   onUnpin?: () => Promise<void> | void;
 }) {
-  const [type, setType] = useState<EntryType>(() => clientPolicy?.defaultType || settings.defaultType);
+  const remoteFieldLimited = Boolean(clientPolicy);
+  const allowedTypes = clientPolicy?.allowedTypes?.length ? clientPolicy.allowedTypes : ENTRY_TYPES;
+  const policyVisibleFields = normalizeFloatingFields(clientPolicy?.visibleFields || settings.floating.visibleFields);
+  const quickTabsForEntry = clientPolicy?.quickTabs?.length ? clientPolicy.quickTabs.filter((tab) => allowedTypes.includes(tab.type)) : enabledQuickTabs(settings);
+  const paymentMethodsForEntry = clientPolicy?.paymentMethods?.length ? clientPolicy.paymentMethods : PAYMENT_METHODS;
+  const initialModeRef = useRef<QuickEntryModeState | null>(null);
+  if (!initialModeRef.current) {
+    initialModeRef.current = sanitizeQuickEntryModeState(
+      readQuickEntryModeState(storageScope),
+      settings,
+      clientPolicy,
+      allowedTypes,
+      quickTabsForEntry
+    );
+  }
+  const initialMode = initialModeRef.current;
+  const [type, setType] = useState<EntryType>(() => initialMode.type);
   const [valueText, setValueText] = useState("");
   const [description, setDescription] = useState("");
   const [people, setPeople] = useState(settings.defaultPeople);
   const [tableNumber, setTableNumber] = useState("");
   const [busNumber, setBusNumber] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("Nao informado");
-  const [cashLinkedType, setCashLinkedType] = useState<EntryType>(() => quickTabForType(enabledQuickTabs(settings), settings.defaultType)?.cashLinkedType || "Mesa");
+  const [cashLinkedType, setCashLinkedType] = useState<EntryType>(() => initialMode.cashLinkedType);
   const [paidWithText, setPaidWithText] = useState("");
   const [observations, setObservations] = useState("");
   const [roundingStep, setRoundingStep] = useState(settings.defaultRoundingStep);
   const [roundingDirection, setRoundingDirection] = useState<RoundDirection>(settings.defaultRoundingDirection);
   const [registerDifference, setRegisterDifference] = useState(true);
   const [showSplitAdjustment, setShowSplitAdjustment] = useState(false);
-  const [activeQuickTabId, setActiveQuickTabId] = useState(() => quickTabForType(enabledQuickTabs(settings), settings.defaultType)?.id || "account");
+  const [activeQuickTabId, setActiveQuickTabId] = useState(() => initialMode.activeQuickTabId);
   const [submitting, setSubmitting] = useState(false);
+  const storageScopeRef = useRef(storageScope);
 
-  const remoteFieldLimited = Boolean(clientPolicy);
-  const allowedTypes = clientPolicy?.allowedTypes?.length ? clientPolicy.allowedTypes : ENTRY_TYPES;
-  const policyVisibleFields = normalizeFloatingFields(clientPolicy?.visibleFields || settings.floating.visibleFields);
-  const quickTabsForEntry = clientPolicy?.quickTabs?.length ? clientPolicy.quickTabs.filter((tab) => allowedTypes.includes(tab.type)) : enabledQuickTabs(settings);
-  const paymentMethodsForEntry = clientPolicy?.paymentMethods?.length ? clientPolicy.paymentMethods : PAYMENT_METHODS;
   const value = parseMoney(valueText);
   const paidWith = parseMoney(paidWithText);
   const split = calculateSplit(value, people, roundingStep, roundingDirection, registerDifference);
@@ -1452,9 +1543,29 @@ function QuickEntry({
   }, [modeCommand?.nonce, settings.floating.syncMoneyWithEntryType, settings.quickTabs, clientPolicy?.allowedTypes, clientPolicy?.quickTabs]);
 
   useEffect(() => {
+    if (storageScopeRef.current === storageScope) {
+      return;
+    }
+    storageScopeRef.current = storageScope;
+    const nextState = sanitizeQuickEntryModeState(
+      readQuickEntryModeState(storageScope),
+      settings,
+      clientPolicy,
+      allowedTypes,
+      quickTabsForEntry
+    );
+    setType(nextState.type);
+    setCashLinkedType(nextState.cashLinkedType);
+    setActiveQuickTabId(nextState.activeQuickTabId);
+  }, [storageScope, settings.quickTabs, settings.defaultType, clientPolicy?.quickTabs, clientPolicy?.allowedTypes]);
+
+  useEffect(() => {
     if (!allowedTypes.includes(type)) {
       setType(clientPolicy?.defaultType || allowedTypes[0] || "Venda");
       return;
+    }
+    if (!allowedTypes.includes(cashLinkedType)) {
+      setCashLinkedType(defaultCashLinkForAllowedTypes(allowedTypes, cashLinkedType));
     }
     const currentTab = quickTabsForEntry.find((tab) => tab.id === activeQuickTabId);
     if (currentTab?.type === type) {
@@ -1462,7 +1573,18 @@ function QuickEntry({
     }
     const matchingTab = quickTabForType(quickTabsForEntry, type);
     setActiveQuickTabId(matchingTab?.id || currentTab?.id || "manual");
-  }, [settings.quickTabs, clientPolicy?.quickTabs, clientPolicy?.allowedTypes, type, activeQuickTabId]);
+  }, [settings.quickTabs, clientPolicy?.quickTabs, clientPolicy?.allowedTypes, type, cashLinkedType, activeQuickTabId]);
+
+  useEffect(() => {
+    const state = sanitizeQuickEntryModeState(
+      { type, cashLinkedType, activeQuickTabId },
+      settings,
+      clientPolicy,
+      allowedTypes,
+      quickTabsForEntry
+    );
+    writeQuickEntryModeState(storageScope, state);
+  }, [storageScope, settings.quickTabs, settings.defaultType, clientPolicy?.quickTabs, clientPolicy?.allowedTypes, type, cashLinkedType, activeQuickTabId]);
 
   useEffect(() => {
     if (tableFieldEnabled && type === "Mesa" && tableNumber && !description) {
@@ -3121,6 +3243,7 @@ function RemoteClientWorkspace({
           clientPolicy={session.clientPolicy}
           pinned={false}
           modeCommand={null}
+          storageScope={quickEntryStorageScopeForSession(session)}
           onSubmit={onSubmit}
         />
       ) : (

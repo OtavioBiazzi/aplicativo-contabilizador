@@ -601,6 +601,7 @@ function remoteClientHtml(port: number): string {
     const params = new URLSearchParams(location.search);
     qs("#password").value = params.get("password") || "";
     qs("#deviceName").value = params.get("device") || localStorage.getItem("caixaRemoteDevice") || "";
+    const modeStorageKey = () => "caixaRemoteMode:" + location.host + ":" + deviceName();
     const setStatus = (message, error) => {
       qs("#appMessage").textContent = message || "";
       qs("#appMessage").className = error ? "status error" : "status";
@@ -632,11 +633,25 @@ function remoteClientHtml(port: number): string {
     function applyClientPolicy() {
       if (!clientPolicy) return;
       const allowedTypes = clientPolicy.allowedTypes && clientPolicy.allowedTypes.length ? clientPolicy.allowedTypes : ["Venda"];
+      const currentType = qs("#type").value;
+      const savedType = localStorage.getItem(modeStorageKey()) || "";
       qs("#type").innerHTML = allowedTypes.map((type) => "<option>" + escapeText(type) + "</option>").join("");
-      qs("#type").value = allowedTypes.includes(clientPolicy.defaultType) ? clientPolicy.defaultType : allowedTypes[0];
+      qs("#type").value = allowedTypes.includes(currentType)
+        ? currentType
+        : allowedTypes.includes(savedType)
+          ? savedType
+          : allowedTypes.includes(clientPolicy.defaultType)
+            ? clientPolicy.defaultType
+            : allowedTypes[0];
       const payments = clientPolicy.paymentMethods && clientPolicy.paymentMethods.length ? clientPolicy.paymentMethods : ["Nao informado", "Dinheiro"];
+      const currentPayment = qs("#paymentMethod").value;
       qs("#paymentMethod").innerHTML = payments.map((item) => "<option>" + escapeText(item) + "</option>").join("");
-      qs("#people").value = String(clientPolicy.defaultPeople || 1);
+      if (payments.includes(currentPayment)) {
+        qs("#paymentMethod").value = currentPayment;
+      }
+      if (!qs("#people").value || Number(qs("#people").value) < 1) {
+        qs("#people").value = String(clientPolicy.defaultPeople || 1);
+      }
       document.querySelectorAll("[data-field]").forEach((node) => {
         const field = node.getAttribute("data-field");
         node.hidden = field !== "value" && !fieldAllowed(field);
@@ -715,6 +730,9 @@ function remoteClientHtml(port: number): string {
       }
     };
     qs("#reloadButton").onclick = load;
+    qs("#type").onchange = () => {
+      localStorage.setItem(modeStorageKey(), qs("#type").value);
+    };
     qs("#sendButton").onclick = async () => {
       try {
         await api("/api/entries", {

@@ -358,6 +358,25 @@ def main() -> int:
       expect(page.get_by_text("Cliente conectado no app")).to_be_visible(timeout=15000)
       expect(page.get_by_text("Historico vindo do caixa principal")).to_be_visible(timeout=15000)
       expect(page.locator(".connect-panel .description-field input")).to_have_count(0)
+      connect_panel = page.locator(".connect-panel")
+      connect_panel.get_by_role("button", name="Onibus").click()
+      connect_panel.get_by_label("Valor").first.fill("44,40")
+      connect_panel.locator(".small-field").filter(has_text="Onibus").locator("input").fill("7")
+      connect_panel.get_by_role("button", name="Registrar").first.click()
+      expect(page.get_by_text("Lancamento enviado ao caixa principal.")).to_be_visible(timeout=15000)
+      if connect_panel.locator(".mode-chips button.selected").inner_text().strip() != "Onibus":
+        print("Remote client did not keep its own operational mode after sending.", file=sys.stderr)
+        return 1
+      api_after_client_mode = api_json(remote_base, "/api/entries", remote_password)
+      if not any(
+        item["originDevice"] == "App cliente smoke"
+        and item["type"] == "Onibus"
+        and item["busNumber"] == "7"
+        and item["finalValue"] == 44.4
+        for item in api_after_client_mode["entries"]
+      ):
+        print("Remote client did not send an independent Onibus entry to the principal caixa.", file=sys.stderr)
+        return 1
       page.get_by_role("button", name="Ajustes").click()
       page.locator(".settings-nav").get_by_role("button", name="Vendas").click()
       expect(page.get_by_text("Modo cliente remoto ativo")).to_be_visible(timeout=10000)
@@ -369,7 +388,7 @@ def main() -> int:
         print("Remote client edited a server-owned setting while connected.", file=sys.stderr)
         return 1
       page.get_by_role("button", name="Rede").click()
-      page.get_by_role("button", name="Conectar").click()
+      page.get_by_role("button", name="Conectar", exact=True).click()
       page.locator(".connect-panel").get_by_label("Valor").first.fill("18,75")
       page.locator(".connect-panel").get_by_role("button", name="Registrar").first.click()
       expect(page.get_by_text("Lancamento enviado ao caixa principal.")).to_be_visible(timeout=15000)

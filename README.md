@@ -50,7 +50,8 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
 - Total do dia, painel lateral e servidor local somam somente lancamentos do dia atual.
 - Servidor local com senha, permissoes, cliente remoto dentro do proprio app, mini-caixa web em estilo DataCaixa, cadastro remoto, edicao, cancelamento, lixeira, origem do dispositivo e atualizacao em tempo real via WebSocket.
-- Cliente remoto obedece o contrato do servidor: modos, campos visiveis, mesa/onibus, pagamento e descricao seguem o computador principal para nao mudar o formato do Excel.
+- Cliente remoto obedece o contrato do servidor: modos permitidos, campos visiveis, mesa/onibus, pagamento e descricao seguem o computador principal para nao mudar o formato do Excel.
+- O modo operacional do cliente e independente por maquina: um PC pode registrar Onibus enquanto outro fica em Mesa ou Dinheiro, desde que esses modos estejam permitidos pelo servidor.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
@@ -163,6 +164,8 @@ Quando backup automatico estiver ativo, arquivos existentes sao copiados para a 
 
 No modo cliente, a aparencia local continua podendo ser ajustada, mas o resultado enviado para o Excel segue o computador principal. Se o servidor esconder descricao, tipo, mesa, onibus, pagamento ou outro campo da barra, o cliente tambem nao envia esse campo. A barra fixada do cliente usa a mesma sessao remota e manda os lancamentos para o caixa principal.
 
+Cada computador escolhe seu modo de trabalho localmente. Por exemplo, o servidor pode estar atendendo Mesa, um cliente pode registrar Onibus e outro pode usar Dinheiro/Troco ao mesmo tempo. O servidor so limita quais modos e campos sao aceitos para manter a planilha consistente.
+
 Enquanto conectado como cliente, os ajustes que mudam planilha, campos, modos, perfis, backup e servidor ficam somente leitura. O usuario ainda consegue ver essas telas; ao clicar nelas, o app avisa que so o computador servidor pode editar. Ao desconectar, as configuracoes locais daquele PC voltam a ser editaveis normalmente.
 
 Se o servidor estiver desligado, o aplicativo continua funcionando normalmente no computador principal.
@@ -192,7 +195,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - hover legivel no tema DataCaixa;
 - total de hoje sem somar lancamentos de ontem;
 - exportacao diaria separada pela data real do lancamento;
-- cliente remoto dentro do app, mini-caixa web, totais mascarados, registro, edicao, cancelamento e lixeira;
+- cliente remoto dentro do app, mini-caixa web, totais mascarados, modo operacional independente, registro, edicao, cancelamento e lixeira;
 - XLSX com estilo, filtro e formula de total;
 - ausencia de erros de console.
 
