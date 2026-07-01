@@ -864,6 +864,22 @@ h3 {
   border-radius: var(--radius);
 }
 
+.list-footnote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.list-footnote .ghost-button {
+  min-height: 34px;
+  padding: 0 12px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -1526,6 +1542,24 @@ th {
 
 .remote-metrics {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.remote-lite-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, var(--muted) 28%, var(--line));
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: color-mix(in srgb, var(--panel) 88%, #e3ebf1 12%);
+  color: color-mix(in srgb, var(--text) 70%, var(--muted));
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.remote-lite-note svg {
+  color: var(--muted);
+  flex: 0 0 auto;
 }
 
 .remote-history-card {

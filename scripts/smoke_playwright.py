@@ -431,6 +431,10 @@ def main() -> int:
         "POST",
         {"type": "Venda", "value": 29.9, "people": 1, "description": "Remoto smoke"},
       )["entry"]
+      limited_remote = api_json(remote_base, "/api/entries?limit=1", remote_password)
+      if len(limited_remote["entries"]) != 1 or not limited_remote.get("limited") or limited_remote.get("totalCount", 0) < 2:
+        print(f"Remote limited payload did not return expected metadata: {limited_remote}", file=sys.stderr)
+        return 1
       masked = api_json(remote_base, "/api/entries", remote_password)
       if masked["summary"] is not None:
         print("Remote API exposed summary when viewTotals was disabled.", file=sys.stderr)

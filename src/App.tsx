@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -88,6 +88,9 @@ type ServerPanelMode = "create" | "connect" | "permissions";
 interface RemoteEntriesResponse {
   entries: LedgerEntry[];
   summary: DaySummary | null;
+  todayCount?: number;
+  totalCount?: number;
+  limited?: boolean;
   permissions: ServerPermissions;
   clientPolicy: RemoteClientPolicy;
 }
@@ -98,6 +101,9 @@ interface RemoteClientSession {
   deviceName: string;
   entries: LedgerEntry[];
   summary: DaySummary | null;
+  todayCount?: number;
+  totalCount?: number;
+  limited?: boolean;
   permissions: ServerPermissions;
   clientPolicy: RemoteClientPolicy;
   connectedAt: string;
@@ -131,6 +137,8 @@ const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floa
 const CDA_ICON_SRC = "/cda-icon.png";
 const REMOTE_SESSION_STORAGE_KEY = "caixaRemoteSession";
 const QUICK_ENTRY_MODE_STORAGE_PREFIX = "caixaQuickEntryMode";
+const REMOTE_ENTRY_LIMIT = 700;
+const HISTORY_PAGE_SIZE = 160;
 
 const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: "Mesa", label: "Mesa" },
@@ -365,10 +373,10 @@ function quickEntryStorageScopeForSession(session: RemoteClientSession | null): 
   return session ? `remote:${session.baseUrl}:${session.deviceName}` : "local";
 }
 
-function privateSummaryForEntries(entries: LedgerEntry[]): DaySummary {
+function privateSummaryForCount(count: number): DaySummary {
   return {
     ...summarizeEntries([]),
-    count: entries.filter((entry) => entry.status === "active").length
+    count
   };
 }
 
@@ -1060,11 +1068,14 @@ export function App() {
     if (!session || !settings) {
       return;
     }
-    const data = await remoteRequest<RemoteEntriesResponse>(session, "/api/entries");
+    const data = await remoteRequest<RemoteEntriesResponse>(session, `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`);
     const nextSession = {
       ...session,
       entries: data.entries,
       summary: data.summary,
+      todayCount: data.todayCount,
+      totalCount: data.totalCount,
+      limited: data.limited,
       permissions: data.permissions,
       clientPolicy: normalizeRemotePolicy(data.clientPolicy, settings)
     };
@@ -1086,15 +1097,21 @@ export function App() {
         deviceName: deviceName.trim() || "App cliente",
         entries: [],
         summary: null,
+        todayCount: 0,
+        totalCount: 0,
+        limited: false,
         permissions: { view: false, create: false, edit: false, delete: false, viewEntryValues: false, viewTotals: false },
         clientPolicy: clientPolicyFromSettings(settings),
         connectedAt: new Date().toISOString()
       };
-      const data = await remoteRequest<RemoteEntriesResponse>(pendingSession, "/api/entries");
+      const data = await remoteRequest<RemoteEntriesResponse>(pendingSession, `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`);
       const connectedSession: RemoteClientSession = {
         ...pendingSession,
         entries: data.entries,
         summary: data.summary,
+        todayCount: data.todayCount,
+        totalCount: data.totalCount,
+        limited: data.limited,
         permissions: data.permissions,
         clientPolicy: normalizeRemotePolicy(data.clientPolicy, settings)
       };
@@ -1314,7 +1331,7 @@ export function App() {
   const canViewRemoteTotals = !remoteSession || remoteSession.permissions.viewTotals;
   const canViewRemoteEntryValues = !remoteSession || remoteSession.permissions.viewEntryValues;
   const displaySummary = remoteSession
-    ? remoteSession.summary || privateSummaryForEntries(displayTodayEntries)
+    ? remoteSession.summary || privateSummaryForCount(remoteSession.todayCount ?? displayTodayEntries.filter((entry) => entry.status === "active").length)
     : summary;
   const quickEntryStorageScope = quickEntryStorageScopeForSession(remoteSession);
 
@@ -2305,8 +2322,11 @@ function HistoryPanel({
   const [statusFilter, setStatusFilter] = useState("visiveis");
   const [date, setDate] = useState("");
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
+  const [visibleCount, setVisibleCount] = useState(HISTORY_PAGE_SIZE);
+  const deferredQuery = useDeferredValue(query);
 
   const filtered = useMemo(() => {
+    const search = deferredQuery.toLowerCase();
     return entries.filter((entry) => {
       const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${entry.paymentMethod}`.toLowerCase();
       const sameType = type === "Todos" || entry.type === type;
@@ -2317,9 +2337,14 @@ function HistoryPanel({
         (statusFilter === "cancelled" && entry.status === "cancelled") ||
         (statusFilter === "deleted" && entry.status === "deleted");
       const sameDate = !date || getLocalDateKey(entry.createdAt) === date;
-      return sameType && sameStatus && sameDate && haystack.includes(query.toLowerCase());
+      return sameType && sameStatus && sameDate && haystack.includes(search);
     });
-  }, [entries, query, type, statusFilter, date]);
+  }, [entries, deferredQuery, type, statusFilter, date]);
+  const visibleRows = filtered.slice(0, visibleCount);
+
+  useEffect(() => {
+    setVisibleCount(HISTORY_PAGE_SIZE);
+  }, [deferredQuery, type, statusFilter, date]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     try {
@@ -2377,7 +2402,7 @@ function HistoryPanel({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((entry) => {
+            {visibleRows.map((entry) => {
               const { time } = formatDateTime(entry.createdAt);
               return (
                 <tr key={entry.id} className={entry.status !== "active" ? "muted-row" : ""}>
@@ -2411,7 +2436,20 @@ function HistoryPanel({
         </table>
       </div>
 
-      {!filtered.length && <p className="empty-text">Nada encontrado com esses filtros.</p>}
+      <div className="list-footnote">
+        {filtered.length ? (
+          <>
+            <span>Mostrando {Math.min(visibleRows.length, filtered.length)} de {filtered.length} lancamento(s) filtrado(s).</span>
+            {visibleRows.length < filtered.length && (
+              <button className="ghost-button" type="button" onClick={() => setVisibleCount((current) => current + HISTORY_PAGE_SIZE)}>
+                Mostrar mais {Math.min(HISTORY_PAGE_SIZE, filtered.length - visibleRows.length)}
+              </button>
+            )}
+          </>
+        ) : (
+          <p className="empty-text">Nada encontrado com esses filtros.</p>
+        )}
+      </div>
 
       {editing && (
         <EditEntryModal
@@ -2638,6 +2676,7 @@ function ReportsPanel({
   const [table, setTable] = useState("");
   const [bus, setBus] = useState("");
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [showSensitive, setShowSensitive] = useState(canViewTotals && !settings.privacy.hideReportTotals);
   const showReportTotals = canViewTotals && showSensitive;
 
@@ -2645,36 +2684,68 @@ function ReportsPanel({
     setShowSensitive(canViewTotals && !settings.privacy.hideReportTotals);
   }, [settings.privacy.hideReportTotals, canViewTotals]);
 
-  const periodEntries = entries.filter((entry) => {
-    const date = getLocalDateKey(entry.createdAt);
-    const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${entry.originDevice}`.toLowerCase();
-    return (
-      (!from || date >= from) &&
-      (!to || date <= to) &&
-      (type === "Todos" || entry.type === type) &&
-      (payment === "Todos" || entry.paymentMethod === payment) &&
-      (!table || entry.tableNumber === table) &&
-      (!bus || entry.busNumber === bus) &&
-      haystack.includes(query.toLowerCase())
-    );
-  });
-  const periodSummary = summarizeEntries(periodEntries);
-  const activeRows = periodEntries.filter((entry) => entry.status === "active");
-  const cancelledCount = periodEntries.filter((entry) => entry.status === "cancelled").length;
-  const deletedCount = periodEntries.filter((entry) => entry.status === "deleted").length;
-  const dailyTotals = summarizeByDay(activeRows);
-  const originTotals = summarizeByOrigin(activeRows);
-  const peakDay = [...dailyTotals].sort((left, right) =>
-    showReportTotals ? right.total - left.total : right.count - left.count
-  )[0];
-  const topEntries = showReportTotals
-    ? [...activeRows].sort((left, right) => getEntryAmount(right) - getEntryAmount(left)).slice(0, 5)
-    : activeRows.slice(0, 5);
-  const dailyAverage = dailyTotals.length ? roundMoney(periodSummary.total / dailyTotals.length) : 0;
-  const cashShare = periodSummary.total ? Math.round((periodSummary.cashTotal / periodSummary.total) * 100) : 0;
-  const busShare = periodSummary.total ? Math.round((periodSummary.busTotal / periodSummary.total) * 100) : 0;
-  const tables = uniqueFilled(entries.map((entry) => entry.tableNumber));
-  const buses = uniqueFilled(entries.map((entry) => entry.busNumber));
+  const periodEntries = useMemo(() => {
+    const search = deferredQuery.toLowerCase();
+    return entries.filter((entry) => {
+      const date = getLocalDateKey(entry.createdAt);
+      const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${entry.originDevice}`.toLowerCase();
+      return (
+        (!from || date >= from) &&
+        (!to || date <= to) &&
+        (type === "Todos" || entry.type === type) &&
+        (payment === "Todos" || entry.paymentMethod === payment) &&
+        (!table || entry.tableNumber === table) &&
+        (!bus || entry.busNumber === bus) &&
+        haystack.includes(search)
+      );
+    });
+  }, [entries, from, to, type, payment, table, bus, deferredQuery]);
+  const reportStats = useMemo(() => {
+    const periodSummary = summarizeEntries(periodEntries);
+    const activeRows = periodEntries.filter((entry) => entry.status === "active");
+    const cancelledCount = periodEntries.filter((entry) => entry.status === "cancelled").length;
+    const deletedCount = periodEntries.filter((entry) => entry.status === "deleted").length;
+    const dailyTotals = summarizeByDay(activeRows);
+    const originTotals = summarizeByOrigin(activeRows);
+    const peakDay = [...dailyTotals].sort((left, right) =>
+      showReportTotals ? right.total - left.total : right.count - left.count
+    )[0];
+    const topEntries = showReportTotals
+      ? [...activeRows].sort((left, right) => getEntryAmount(right) - getEntryAmount(left)).slice(0, 5)
+      : activeRows.slice(0, 5);
+    const dailyAverage = dailyTotals.length ? roundMoney(periodSummary.total / dailyTotals.length) : 0;
+    const cashShare = periodSummary.total ? Math.round((periodSummary.cashTotal / periodSummary.total) * 100) : 0;
+    const busShare = periodSummary.total ? Math.round((periodSummary.busTotal / periodSummary.total) * 100) : 0;
+
+    return {
+      periodSummary,
+      activeRows,
+      cancelledCount,
+      deletedCount,
+      dailyTotals,
+      originTotals,
+      peakDay,
+      topEntries,
+      dailyAverage,
+      cashShare,
+      busShare
+    };
+  }, [periodEntries, showReportTotals]);
+  const {
+    periodSummary,
+    activeRows,
+    cancelledCount,
+    deletedCount,
+    dailyTotals,
+    originTotals,
+    peakDay,
+    topEntries,
+    dailyAverage,
+    cashShare,
+    busShare
+  } = reportStats;
+  const tables = useMemo(() => uniqueFilled(entries.map((entry) => entry.tableNumber)), [entries]);
+  const buses = useMemo(() => uniqueFilled(entries.map((entry) => entry.busNumber)), [entries]);
   const exportLabel = [from || "inicio", to || "hoje", type, payment]
     .join("-")
     .replace(/\s+/g, "-")
@@ -3299,6 +3370,13 @@ function RemoteClientWorkspace({
         <Metric label="Lixeira remota" value={String(deletedEntries.length)} />
       </div>
 
+      {session.limited && (
+        <section className="remote-lite-note">
+          <ShieldCheck size={17} />
+          <span>Modo leve ativo: este cliente carregou os {session.entries.length} lancamentos mais recentes de {session.totalCount || "varios"} no servidor.</span>
+        </section>
+      )}
+
       {session.permissions.create ? (
         <QuickEntry
           entries={session.entries}
@@ -3320,7 +3398,7 @@ function RemoteClientWorkspace({
       <section className="flat-section remote-history-card">
         <div className="section-title">
           <strong>Historico vindo do caixa principal</strong>
-          <span>{visibleEntries.length} visiveis | {deletedEntries.length} na lixeira</span>
+          <span>{visibleEntries.length} visiveis | {deletedEntries.length} na lixeira{session.limited ? ` | ultimos ${session.entries.length}` : ""}</span>
         </div>
         <div className="remote-entry-list">
           {session.entries.slice(0, 16).map((entry) => {

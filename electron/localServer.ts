@@ -69,13 +69,18 @@ export class LocalServer {
       response.status(ok ? 200 : 401).json({ ok });
     });
 
-    app.get("/api/entries", this.authorize("view"), async (_request, response) => {
+    app.get("/api/entries", this.authorize("view"), async (request, response) => {
       const entries = await this.options.getEntries();
       const settings = await this.options.getSettings();
       const todayEntries = filterEntriesByLocalDate(entries);
+      const limit = normalizeEntryLimit(request.query.limit);
+      const responseEntries = limit ? entries.slice(0, limit) : entries;
       response.json({
-        entries: this.permissions.viewEntryValues ? entries : entries.map(maskMoneyFields),
+        entries: this.permissions.viewEntryValues ? responseEntries : responseEntries.map(maskMoneyFields),
         summary: this.permissions.viewTotals ? summarizeEntries(todayEntries) : null,
+        todayCount: todayEntries.filter((entry) => entry.status === "active").length,
+        totalCount: entries.length,
+        limited: Boolean(limit && entries.length > limit),
         permissions: this.permissions,
         clientPolicy: buildClientPolicy(settings)
       });
@@ -258,6 +263,15 @@ function getLocalIps(): string[] {
     }
   }
   return ips;
+}
+
+function normalizeEntryLimit(value: unknown): number | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return Math.max(1, Math.min(2000, Math.floor(parsed)));
 }
 
 function buildClientPolicy(settings: AppSettings): RemoteClientPolicy {
@@ -597,6 +611,7 @@ function remoteClientHtml(port: number): string {
     let permissions = {};
     let clientPolicy = null;
     let entriesCache = [];
+    let serverMeta = { todayCount: 0, totalCount: 0, limited: false };
     let socket = null;
     const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
     const qs = (selector) => document.querySelector(selector);
@@ -672,7 +687,7 @@ function remoteClientHtml(port: number): string {
           ]
         : [
             ["Total hoje", "Restrito"],
-            ["Lancamentos", String(entriesCache.length)],
+            ["Lancamentos", String(serverMeta.todayCount || entriesCache.length)],
             ["Permissao", "Totais ocultos"]
           ];
       qs("#summaryCards").innerHTML = cards.map((card) => "<article class='stat'><span>" + card[0] + "</span><strong>" + card[1] + "</strong></article>").join("");
@@ -698,10 +713,11 @@ function remoteClientHtml(port: number): string {
         "</div>";
     }
     async function load() {
-      const data = await api("/api/entries");
+      const data = await api("/api/entries?limit=300");
       permissions = data.permissions || {};
       clientPolicy = data.clientPolicy || clientPolicy;
       entriesCache = data.entries || [];
+      serverMeta = { todayCount: data.todayCount || 0, totalCount: data.totalCount || entriesCache.length, limited: Boolean(data.limited) };
       applyClientPolicy();
       qs("#permissionBadge").textContent =
         (permissions.create ? "Registra" : "So visualiza") +
@@ -712,7 +728,7 @@ function remoteClientHtml(port: number): string {
       qs("#app").hidden = !permissions.create;
       qs("#summary").textContent = data.summary
         ? "Hoje: " + money.format(data.summary.total) + " | Lancamentos: " + data.summary.count
-        : "Totais ocultos pelas permissoes do servidor.";
+        : "Totais ocultos pelas permissoes do servidor. " + (serverMeta.todayCount || entriesCache.length) + " lancamento(s) hoje.";
       permissionChips();
       summaryCards(data.summary);
       qs("#entries").innerHTML = entriesCache.slice(0, 24).map(renderEntry).join("") || "<p class='muted'>Nenhum lancamento ainda.</p>";

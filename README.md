@@ -54,6 +54,9 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - O modo operacional do cliente e independente por maquina: um PC pode registrar Onibus enquanto outro fica em Mesa ou Dinheiro, desde que esses modos estejam permitidos pelo servidor.
 - Permissoes, campos da barra e modos permitidos mudam em tempo real nos clientes conectados, incluindo a barra fixada aberta.
 - Relatorios no cliente remoto respeitam as permissoes do servidor: sem permissao de totais, o cliente nao recalcula valores mesmo mudando periodo.
+- Modo leve para clientes remotos: o app cliente carrega os lancamentos recentes e metadados de contagem, reduzindo trafego e memoria em PCs mais fracos.
+- Historico local renderiza em blocos com **Mostrar mais**, evitando tabelas gigantes na tela de uma vez.
+- Relatorios usam calculos memorizados e busca suavizada para manter a interface responsiva com historico maior.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
@@ -170,6 +173,8 @@ Cada computador escolhe seu modo de trabalho localmente. Por exemplo, o servidor
 
 Mudancas de permissoes, campos da barra e modos permitidos sao enviadas em tempo real para os clientes conectados. Se o servidor ocultar Mesa, Onibus, pagamento, descricao ou totais vendidos, a tela principal, a barra fixada e os relatorios do cliente atualizam sem reiniciar.
 
+Para PCs mais fracos, o cliente remoto trabalha em modo leve por padrao: baixa os lancamentos mais recentes para historico/operacao e recebe do servidor a contagem do dia e os totais permitidos. O computador servidor continua mantendo o historico completo e a planilha principal.
+
 Enquanto conectado como cliente, os ajustes que mudam planilha, campos, modos, perfis, backup e servidor ficam somente leitura. O usuario ainda consegue ver essas telas; ao clicar nelas, o app avisa que so o computador servidor pode editar. Ao desconectar, as configuracoes locais daquele PC voltam a ser editaveis normalmente.
 
 Se o servidor estiver desligado, o aplicativo continua funcionando normalmente no computador principal.
@@ -199,7 +204,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - hover legivel no tema DataCaixa;
 - total de hoje sem somar lancamentos de ontem;
 - exportacao diaria separada pela data real do lancamento;
-- cliente remoto dentro do app, mini-caixa web, totais mascarados, permissao em tempo real, modo operacional independente, registro, edicao, cancelamento e lixeira;
+- cliente remoto dentro do app, mini-caixa web, totais mascarados, permissao em tempo real, payload remoto limitado, modo operacional independente, registro, edicao, cancelamento e lixeira;
 - XLSX com estilo, filtro e formula de total;
 - ausencia de erros de console.
 
