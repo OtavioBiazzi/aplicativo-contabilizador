@@ -63,6 +63,7 @@ import type {
   LedgerImportPreview,
   PaymentMethod,
   QuickTabSettings,
+  RemoteClientPolicy,
   RoundDirection,
   ServerPermissions,
   ServerState,
@@ -88,6 +89,7 @@ interface RemoteEntriesResponse {
   entries: LedgerEntry[];
   summary: DaySummary | null;
   permissions: ServerPermissions;
+  clientPolicy: RemoteClientPolicy;
 }
 
 interface RemoteClientSession {
@@ -97,6 +99,7 @@ interface RemoteClientSession {
   entries: LedgerEntry[];
   summary: DaySummary | null;
   permissions: ServerPermissions;
+  clientPolicy: RemoteClientPolicy;
   connectedAt: string;
 }
 
@@ -120,6 +123,7 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
 
 const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floating") === "1";
 const CDA_ICON_SRC = "/cda-icon.png";
+const REMOTE_SESSION_STORAGE_KEY = "caixaRemoteSession";
 
 const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: "Mesa", label: "Mesa" },
@@ -574,6 +578,96 @@ function normalizeFloatingFields(fields?: string[]): string[] {
   return next.includes("value") ? next : ["value", ...next];
 }
 
+function clientPolicyFromSettings(settings: AppSettings): RemoteClientPolicy {
+  const quickTabs = enabledQuickTabs(settings);
+  const allowed = new Set<EntryType>();
+  allowed.add(settings.defaultType);
+  quickTabs.forEach((tab) => {
+    allowed.add(tab.type);
+    if (tab.cashLinkedType) {
+      allowed.add(tab.cashLinkedType);
+    }
+  });
+  if (settings.tableNumberEnabled === false) {
+    allowed.delete("Mesa");
+  }
+  if (settings.busNumberEnabled === false) {
+    allowed.delete("Onibus");
+  }
+  if (!allowed.size) {
+    allowed.add("Venda");
+  }
+  const allowedTypes = [...allowed];
+  const defaultType = allowedTypes.includes(settings.defaultType) ? settings.defaultType : allowedTypes[0] || "Venda";
+  const filteredFields = normalizeFloatingFields(settings.floating.visibleFields).filter((field) => {
+    if (field === "tableNumber") {
+      return settings.tableNumberEnabled !== false;
+    }
+    if (field === "busNumber") {
+      return settings.busNumberEnabled !== false;
+    }
+    return true;
+  });
+  const visibleFields = filteredFields.includes("submit") ? filteredFields : [...filteredFields, "submit"];
+
+  return {
+    defaultType,
+    defaultPeople: Math.max(1, Math.floor(settings.defaultPeople || 1)),
+    defaultRoundingStep: settings.defaultRoundingStep,
+    defaultRoundingDirection: settings.defaultRoundingDirection,
+    tableNumberEnabled: settings.tableNumberEnabled !== false,
+    busNumberEnabled: settings.busNumberEnabled !== false,
+    allowedTypes,
+    visibleFields,
+    quickTabs: quickTabs.filter((tab) => allowedTypes.includes(tab.type)),
+    paymentMethods: PAYMENT_METHODS,
+    spreadsheetMode: settings.spreadsheetMode,
+    visibleColumns: settings.visibleColumns
+  };
+}
+
+function normalizeRemotePolicy(policy: RemoteClientPolicy | undefined, settings: AppSettings): RemoteClientPolicy {
+  const fallback = clientPolicyFromSettings(settings);
+  if (!policy) {
+    return fallback;
+  }
+  const allowedTypes = (policy.allowedTypes?.length ? policy.allowedTypes : fallback.allowedTypes).filter((type): type is EntryType => ENTRY_TYPES.includes(type));
+  const safeAllowedTypes: EntryType[] = allowedTypes.length ? allowedTypes : ["Venda"];
+  return {
+    ...fallback,
+    ...policy,
+    defaultType: safeAllowedTypes.includes(policy.defaultType) ? policy.defaultType : safeAllowedTypes[0],
+    defaultPeople: Math.max(1, Math.floor(policy.defaultPeople || fallback.defaultPeople)),
+    allowedTypes: safeAllowedTypes,
+    visibleFields: normalizeFloatingFields(policy.visibleFields).includes("submit")
+      ? normalizeFloatingFields(policy.visibleFields)
+      : [...normalizeFloatingFields(policy.visibleFields), "submit"],
+    quickTabs: (policy.quickTabs?.length ? policy.quickTabs : fallback.quickTabs)
+      .filter((tab) => tab.enabled !== false && safeAllowedTypes.includes(tab.type))
+      .map((tab) => ({ ...tab, enabled: true })),
+    paymentMethods: policy.paymentMethods?.length ? policy.paymentMethods : fallback.paymentMethods,
+    visibleColumns: policy.visibleColumns?.length ? policy.visibleColumns : fallback.visibleColumns
+  };
+}
+
+function settingsForRemoteClient(settings: AppSettings, policy: RemoteClientPolicy): AppSettings {
+  return normalizeSettingsDraft(settings, {
+    defaultType: policy.defaultType,
+    defaultPeople: policy.defaultPeople,
+    defaultRoundingStep: policy.defaultRoundingStep,
+    defaultRoundingDirection: policy.defaultRoundingDirection,
+    tableNumberEnabled: policy.tableNumberEnabled,
+    busNumberEnabled: policy.busNumberEnabled,
+    quickTabs: policy.quickTabs.length
+      ? policy.quickTabs.map((tab) => ({ ...tab, enabled: true }))
+      : [{ id: "remote-default", label: policy.defaultType, enabled: true, type: policy.defaultType }],
+    floating: {
+      ...settings.floating,
+      visibleFields: normalizeFloatingFields(policy.visibleFields)
+    }
+  });
+}
+
 function applyFloatingPresetToSettings(settings: AppSettings, preset: FloatingPreset): AppSettings {
   return normalizeSettingsDraft(settings, {
     defaultType: preset.defaultType,
@@ -667,6 +761,12 @@ export function App() {
   const [importPreview, setImportPreview] = useState<LedgerImportPreview | null>(null);
   const [importingPreview, setImportingPreview] = useState(false);
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey());
+  const [remoteSession, setRemoteSession] = useState<RemoteClientSession | null>(null);
+  const [remoteMessage, setRemoteMessage] = useState("");
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const remoteSocket = useRef<WebSocket | null>(null);
+  const remoteSessionRef = useRef<RemoteClientSession | null>(null);
+  const remoteRestoreAttempted = useRef(false);
 
   const todayEntries = useMemo(() => filterEntriesByLocalDate(entries, currentDateKey), [entries, currentDateKey]);
   const summary = useMemo(() => summarizeEntries(todayEntries), [todayEntries]);
@@ -695,6 +795,36 @@ export function App() {
       offSettings();
     };
   }, []);
+
+  useEffect(() => {
+    remoteSessionRef.current = remoteSession;
+  }, [remoteSession]);
+
+  useEffect(() => {
+    return () => {
+      remoteSocket.current?.close();
+      remoteSocket.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!settings || remoteRestoreAttempted.current) {
+      return;
+    }
+    remoteRestoreAttempted.current = true;
+    const saved = window.localStorage.getItem(REMOTE_SESSION_STORAGE_KEY);
+    if (!saved) {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(saved) as { baseUrl?: string; password?: string; deviceName?: string };
+      if (parsed.baseUrl && parsed.password) {
+        void connectRemoteClient(parsed.baseUrl, parsed.password, parsed.deviceName || "App cliente", { quiet: true });
+      }
+    } catch {
+      window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+    }
+  }, [settings]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setCurrentDateKey(getLocalDateKey()), 30000);
@@ -781,11 +911,196 @@ export function App() {
     showToast("success", "Configuracoes salvas.");
   };
 
+  const remoteRequest = async <T,>(session: RemoteClientSession, path: string, options: RequestInit = {}): Promise<T> => {
+    const response = await fetch(`${session.baseUrl}${path}`, {
+      ...options,
+      headers: {
+        "content-type": "application/json",
+        "x-caixa-password": session.password,
+        "x-device-name": session.deviceName,
+        ...(options.headers || {})
+      }
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      let errorMessage = text || response.statusText;
+      try {
+        const parsed = JSON.parse(text) as { error?: string };
+        errorMessage = parsed.error || errorMessage;
+      } catch {
+        // A resposta remota pode ser texto puro.
+      }
+      throw new Error(errorMessage);
+    }
+    return (text ? JSON.parse(text) : {}) as T;
+  };
+
+  const openRemoteSocket = (session: RemoteClientSession) => {
+    remoteSocket.current?.close();
+    const wsUrl = `${session.baseUrl.replace(/^http/i, "ws")}/sync?password=${encodeURIComponent(session.password)}&device=${encodeURIComponent(session.deviceName)}`;
+    remoteSocket.current = new WebSocket(wsUrl);
+    remoteSocket.current.onopen = () => setRemoteMessage("Tempo real ativo.");
+    remoteSocket.current.onmessage = () => {
+      const current = remoteSessionRef.current;
+      if (current) {
+        void refreshRemote(current);
+      }
+    };
+    remoteSocket.current.onclose = () => setRemoteMessage("Conexao em tempo real fechada. Use Atualizar ou conecte novamente.");
+  };
+
+  const refreshRemote = async (session = remoteSessionRef.current) => {
+    if (!session || !settings) {
+      return;
+    }
+    const data = await remoteRequest<RemoteEntriesResponse>(session, "/api/entries");
+    const nextSession = {
+      ...session,
+      entries: data.entries,
+      summary: data.summary,
+      permissions: data.permissions,
+      clientPolicy: normalizeRemotePolicy(data.clientPolicy, settings)
+    };
+    setRemoteSession(nextSession);
+    remoteSessionRef.current = nextSession;
+  };
+
+  const connectRemoteClient = async (host: string, password: string, deviceName: string, options: { quiet?: boolean } = {}) => {
+    if (!settings) {
+      return;
+    }
+    setRemoteLoading(true);
+    setRemoteMessage("");
+    try {
+      const baseUrl = normalizeRemoteBaseUrl(host);
+      const pendingSession: RemoteClientSession = {
+        baseUrl,
+        password,
+        deviceName: deviceName.trim() || "App cliente",
+        entries: [],
+        summary: null,
+        permissions: { view: false, create: false, edit: false, delete: false, viewEntryValues: false, viewTotals: false },
+        clientPolicy: clientPolicyFromSettings(settings),
+        connectedAt: new Date().toISOString()
+      };
+      const data = await remoteRequest<RemoteEntriesResponse>(pendingSession, "/api/entries");
+      const connectedSession: RemoteClientSession = {
+        ...pendingSession,
+        entries: data.entries,
+        summary: data.summary,
+        permissions: data.permissions,
+        clientPolicy: normalizeRemotePolicy(data.clientPolicy, settings)
+      };
+      setRemoteSession(connectedSession);
+      remoteSessionRef.current = connectedSession;
+      window.localStorage.setItem(
+        REMOTE_SESSION_STORAGE_KEY,
+        JSON.stringify({ baseUrl, password, deviceName: connectedSession.deviceName })
+      );
+      openRemoteSocket(connectedSession);
+      if (!options.quiet) {
+        showToast("success", "Cliente conectado ao caixa principal.");
+      }
+    } catch (error) {
+      window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+      setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel conectar.");
+      if (!options.quiet) {
+        showToast("error", error instanceof Error ? error.message : "Nao foi possivel conectar.");
+      }
+    } finally {
+      setRemoteLoading(false);
+    }
+  };
+
+  const disconnectRemoteClient = () => {
+    remoteSocket.current?.close();
+    remoteSocket.current = null;
+    remoteSessionRef.current = null;
+    setRemoteSession(null);
+    setRemoteMessage("");
+    window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+    showToast("info", "Cliente remoto desconectado.");
+  };
+
   const addEntry = async (draft: EntryDraft) => {
     const result = await window.caixa.addEntry(draft);
     await reload();
     setExportStatus(result.exportStatus);
     showToast(result.exportStatus.ok ? "success" : "error", result.exportStatus.ok ? "Lancamento registrado." : result.exportStatus.message || "Lancamento salvo localmente.");
+  };
+
+  const submitRemoteEntry = async (draft: EntryDraft) => {
+    if (!remoteSession?.permissions.create) {
+      showToast("error", "Este cliente nao tem permissao para registrar.");
+      return;
+    }
+    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, "/api/entries", {
+      method: "POST",
+      body: JSON.stringify(draft)
+    });
+    await refreshRemote(remoteSession);
+    showToast("success", "Lancamento enviado ao caixa principal.");
+  };
+
+  const submitEntry = async (draft: EntryDraft) => {
+    if (remoteSession) {
+      await submitRemoteEntry(draft);
+      return;
+    }
+    await addEntry(draft);
+  };
+
+  const editRemoteEntry = async (entry: LedgerEntry) => {
+    if (!remoteSession?.permissions.edit) {
+      return;
+    }
+    const description = window.prompt("Nova descricao", entry.description || "");
+    if (description === null) {
+      return;
+    }
+    const payload: Record<string, unknown> = {};
+    if (remoteSession.clientPolicy.visibleFields.includes("description")) {
+      payload.description = description;
+    }
+    if (remoteSession.permissions.viewEntryValues && remoteSession.clientPolicy.visibleFields.includes("value")) {
+      const value = window.prompt("Novo valor", String(entry.finalValue || 0).replace(".", ","));
+      if (value !== null) {
+        payload.value = parseMoney(value);
+      }
+    }
+    if (!Object.keys(payload).length) {
+      showToast("info", "O servidor nao permite editar esses campos neste cliente.");
+      return;
+    }
+    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, `/api/entries/${entry.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+    await refreshRemote(remoteSession);
+    showToast("success", "Lancamento remoto editado.");
+  };
+
+  const cancelRemoteEntry = async (entry: LedgerEntry) => {
+    if (!remoteSession?.permissions.edit) {
+      return;
+    }
+    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, `/api/entries/${entry.id}/cancel`, { method: "POST" });
+    await refreshRemote(remoteSession);
+    showToast("info", "Lancamento remoto cancelado.");
+  };
+
+  const deleteRemoteEntry = async (entry: LedgerEntry, permanent = false) => {
+    if (!remoteSession?.permissions.delete) {
+      return;
+    }
+    if (!window.confirm(permanent ? "Apagar definitivamente no caixa principal?" : "Enviar para a lixeira no caixa principal?")) {
+      return;
+    }
+    await remoteRequest<{ ok: boolean }>(remoteSession, `/api/entries/${entry.id}${permanent ? "?permanent=1" : ""}`, {
+      method: "DELETE"
+    });
+    await refreshRemote(remoteSession);
+    showToast(permanent ? "info" : "success", permanent ? "Lancamento remoto apagado." : "Lancamento remoto enviado para a lixeira.");
   };
 
   const importLedgerFile = async () => {
@@ -886,15 +1201,21 @@ export function App() {
     );
   }
 
+  const entrySettings = remoteSession ? settingsForRemoteClient(settings, remoteSession.clientPolicy) : settings;
+  const displayEntries = remoteSession ? remoteSession.entries : entries;
+  const displayTodayEntries = remoteSession ? filterEntriesByLocalDate(remoteSession.entries, currentDateKey) : todayEntries;
+  const displaySummary = remoteSession?.summary || (remoteSession ? summarizeEntries(displayTodayEntries) : summary);
+
   if (IS_FLOATING_WINDOW) {
     return (
       <div className="pinned-app">
         <QuickEntry
-          entries={entries}
-          settings={settings}
+          entries={displayEntries}
+          settings={entrySettings}
+          clientPolicy={remoteSession?.clientPolicy}
           pinned
           modeCommand={modeCommand}
-          onSubmit={addEntry}
+          onSubmit={submitEntry}
           onUnpin={togglePinned}
         />
         {toast && <Toast toast={toast} />}
@@ -902,7 +1223,7 @@ export function App() {
     );
   }
 
-  const header = headerForTab(activeTab, summary.count);
+  const header = headerForTab(activeTab, displaySummary.count);
 
   return (
     <div className="app-shell">
@@ -913,7 +1234,7 @@ export function App() {
           </div>
           <div>
             <strong>Contabilizador</strong>
-            <span>PDV local rapido</span>
+            <span>{remoteSession ? "Cliente do caixa principal" : "PDV local rapido"}</span>
           </div>
         </div>
 
@@ -936,9 +1257,9 @@ export function App() {
         <div className="sidebar-card topbar-card">
           <span>{settings.privacy.hideHeaderTotal ? "Total oculto" : "Total hoje"}</span>
           <strong className={settings.privacy.hideHeaderTotal ? "private-value" : ""}>
-            {settings.privacy.hideHeaderTotal ? "Privado" : formatCurrency(summary.total)}
+            {settings.privacy.hideHeaderTotal || (remoteSession && !remoteSession.permissions.viewTotals) ? "Privado" : formatCurrency(displaySummary.total)}
           </strong>
-          <small>{summary.count} lancamentos</small>
+          <small>{displaySummary.count} lancamentos{remoteSession ? " no servidor" : ""}</small>
         </div>
 
         <button className="pin-button" onClick={togglePinned}>
@@ -960,20 +1281,22 @@ export function App() {
           <div className="status-strip">
             <StatusPill label="Excel/CSV" ok={exportStatus?.ok ?? true} text={exportStatus?.pendingCount ? `${exportStatus.pendingCount} pendente` : "sincronizado"} />
             <StatusPill label="Servidor" ok={server.running} text={server.running ? `:${server.port}` : "off"} />
+            {remoteSession && <StatusPill label="Cliente" ok text="remoto" />}
           </div>
         </header>
 
         {activeTab === "register" && (
           <div className="register-layout">
             <QuickEntry
-              entries={entries}
-              settings={settings}
+              entries={displayEntries}
+              settings={entrySettings}
+              clientPolicy={remoteSession?.clientPolicy}
               pinned={false}
               modeCommand={modeCommand}
-              onSubmit={addEntry}
+              onSubmit={submitEntry}
               onUnpin={togglePinned}
             />
-            <TodayPanel summary={summary} entries={todayEntries} settings={settings} onMode={commandMode} />
+            <TodayPanel summary={displaySummary} entries={displayTodayEntries} settings={settings} onMode={commandMode} />
           </div>
         )}
 
@@ -1003,9 +1326,19 @@ export function App() {
           <ServerPanel
             settings={settings}
             server={server}
+            remoteSession={remoteSession}
+            remoteMessage={remoteMessage}
+            remoteLoading={remoteLoading}
             onSaveSettings={saveSettings}
             onServerChange={setServer}
             onToast={showToast}
+            onConnectRemote={connectRemoteClient}
+            onDisconnectRemote={disconnectRemoteClient}
+            onRefreshRemote={() => refreshRemote()}
+            onSubmitRemote={submitRemoteEntry}
+            onEditRemote={editRemoteEntry}
+            onCancelRemote={cancelRemoteEntry}
+            onDeleteRemote={deleteRemoteEntry}
           />
         )}
 
@@ -1036,6 +1369,7 @@ export function App() {
 function QuickEntry({
   entries,
   settings,
+  clientPolicy,
   pinned,
   modeCommand,
   onSubmit,
@@ -1043,12 +1377,13 @@ function QuickEntry({
 }: {
   entries: LedgerEntry[];
   settings: AppSettings;
+  clientPolicy?: RemoteClientPolicy;
   pinned: boolean;
   modeCommand: ModeCommand | null;
   onSubmit: (draft: EntryDraft) => Promise<void>;
   onUnpin?: () => Promise<void> | void;
 }) {
-  const [type, setType] = useState<EntryType>(settings.defaultType);
+  const [type, setType] = useState<EntryType>(() => clientPolicy?.defaultType || settings.defaultType);
   const [valueText, setValueText] = useState("");
   const [description, setDescription] = useState("");
   const [people, setPeople] = useState(settings.defaultPeople);
@@ -1065,36 +1400,44 @@ function QuickEntry({
   const [activeQuickTabId, setActiveQuickTabId] = useState(() => quickTabForType(enabledQuickTabs(settings), settings.defaultType)?.id || "account");
   const [submitting, setSubmitting] = useState(false);
 
+  const remoteFieldLimited = Boolean(clientPolicy);
+  const allowedTypes = clientPolicy?.allowedTypes?.length ? clientPolicy.allowedTypes : ENTRY_TYPES;
+  const policyVisibleFields = normalizeFloatingFields(clientPolicy?.visibleFields || settings.floating.visibleFields);
+  const quickTabsForEntry = clientPolicy?.quickTabs?.length ? clientPolicy.quickTabs.filter((tab) => allowedTypes.includes(tab.type)) : enabledQuickTabs(settings);
+  const paymentMethodsForEntry = clientPolicy?.paymentMethods?.length ? clientPolicy.paymentMethods : PAYMENT_METHODS;
   const value = parseMoney(valueText);
   const paidWith = parseMoney(paidWithText);
   const split = calculateSplit(value, people, roundingStep, roundingDirection, registerDifference);
   const effectivePaidWith = paidWith > 0 ? paidWith : value;
   const cash = calculateCash(value, effectivePaidWith);
   const lastActive = entries.find((entry) => entry.status === "active");
-  const tableFieldEnabled = settings.tableNumberEnabled !== false;
-  const busFieldEnabled = settings.busNumberEnabled !== false;
-  const floatingVisibleFields = normalizeFloatingFields(settings.floating.visibleFields);
+  const tableFieldEnabled = settings.tableNumberEnabled !== false && clientPolicy?.tableNumberEnabled !== false;
+  const busFieldEnabled = settings.busNumberEnabled !== false && clientPolicy?.busNumberEnabled !== false;
 
   useEffect(() => {
     if (modeCommand) {
       if (settings.floating.syncMoneyWithEntryType && modeCommand.type === "Dinheiro/Troco") {
         setCashLinkedType(cashLinkFromEntryType(type, cashLinkedType));
       }
-      setType(modeCommand.type);
-      const matchingTab = quickTabForType(enabledQuickTabs(settings), modeCommand.type);
+      const nextType = allowedTypes.includes(modeCommand.type) ? modeCommand.type : clientPolicy?.defaultType || settings.defaultType;
+      setType(nextType);
+      const matchingTab = quickTabForType(quickTabsForEntry, nextType);
       setActiveQuickTabId(matchingTab?.id || "manual");
     }
-  }, [modeCommand?.nonce, settings.floating.syncMoneyWithEntryType, settings.quickTabs]);
+  }, [modeCommand?.nonce, settings.floating.syncMoneyWithEntryType, settings.quickTabs, clientPolicy?.allowedTypes, clientPolicy?.quickTabs]);
 
   useEffect(() => {
-    const tabs = enabledQuickTabs(settings);
-    const currentTab = tabs.find((tab) => tab.id === activeQuickTabId);
+    if (!allowedTypes.includes(type)) {
+      setType(clientPolicy?.defaultType || allowedTypes[0] || "Venda");
+      return;
+    }
+    const currentTab = quickTabsForEntry.find((tab) => tab.id === activeQuickTabId);
     if (currentTab?.type === type) {
       return;
     }
-    const matchingTab = quickTabForType(tabs, type);
+    const matchingTab = quickTabForType(quickTabsForEntry, type);
     setActiveQuickTabId(matchingTab?.id || currentTab?.id || "manual");
-  }, [settings.quickTabs, type, activeQuickTabId]);
+  }, [settings.quickTabs, clientPolicy?.quickTabs, clientPolicy?.allowedTypes, type, activeQuickTabId]);
 
   useEffect(() => {
     if (tableFieldEnabled && type === "Mesa" && tableNumber && !description) {
@@ -1111,12 +1454,12 @@ function QuickEntry({
     }
   }, [type, cashLinkedType, tableNumber, busNumber, tableFieldEnabled, busFieldEnabled]);
 
-  const visible = (field: string) => !pinned || floatingVisibleFields.includes(field);
+  const visible = (field: string) => (!pinned && !remoteFieldLimited) || policyVisibleFields.includes(field);
 
   const clearForm = () => {
     setValueText("");
     setDescription("");
-    setPeople(settings.defaultPeople);
+    setPeople(clientPolicy?.defaultPeople || settings.defaultPeople);
     setTableNumber("");
     setBusNumber("");
     setPaidWithText("");
@@ -1128,25 +1471,28 @@ function QuickEntry({
       return;
     }
     setSubmitting(true);
+    const visibleFields = new Set(policyVisibleFields);
     const isMoney = type === "Dinheiro/Troco";
     const effectiveType: EntryType =
-      pinned && type !== "Dinheiro/Troco" && people > 1 ? "Divisao de conta" : type;
+      pinned && type !== "Dinheiro/Troco" && people > 1 && allowedTypes.includes("Divisao de conta") ? "Divisao de conta" : type;
     const effectiveSplit = effectiveType === "Divisao de conta" ? split : undefined;
     const effectiveCash = effectiveType === "Dinheiro/Troco" ? cash : undefined;
     const effectiveDescription =
-      description ||
-      (isMoney && cashLinkedType === "Mesa" && tableNumber ? `Mesa ${tableNumber}` : "") ||
-      (isMoney && cashLinkedType === "Onibus" && busNumber ? `Onibus ${busNumber}` : "");
+      visibleFields.has("description")
+        ? description ||
+          (isMoney && cashLinkedType === "Mesa" && tableNumber ? `Mesa ${tableNumber}` : "") ||
+          (isMoney && cashLinkedType === "Onibus" && busNumber ? `Onibus ${busNumber}` : "")
+        : "";
     const draft: EntryDraft = {
       type: effectiveType,
       value,
       description: effectiveDescription,
-      people: effectiveSplit?.people ?? people,
-      tableNumber: tableFieldEnabled && !(isMoney && cashLinkedType !== "Mesa") ? tableNumber : "",
-      busNumber: busFieldEnabled && !(isMoney && cashLinkedType !== "Onibus") ? busNumber : "",
-      paymentMethod: effectiveType === "Dinheiro/Troco" ? "Dinheiro" : paymentMethod,
-      paidWith: effectiveType === "Dinheiro/Troco" ? effectivePaidWith : paidWith,
-      observations,
+      people: visibleFields.has("people") ? effectiveSplit?.people ?? people : clientPolicy?.defaultPeople || settings.defaultPeople,
+      tableNumber: tableFieldEnabled && visibleFields.has("tableNumber") && !(isMoney && cashLinkedType !== "Mesa") ? tableNumber : "",
+      busNumber: busFieldEnabled && visibleFields.has("busNumber") && !(isMoney && cashLinkedType !== "Onibus") ? busNumber : "",
+      paymentMethod: effectiveType === "Dinheiro/Troco" ? "Dinheiro" : visibleFields.has("paymentMethod") ? paymentMethod : "Nao informado",
+      paidWith: visibleFields.has("paidWith") ? effectiveType === "Dinheiro/Troco" ? effectivePaidWith : paidWith : 0,
+      observations: visibleFields.has("observations") ? observations : "",
       customType: effectiveType === "Dinheiro/Troco" ? `Dinheiro/${cashLinkedType}` : undefined,
       splitDetails: effectiveSplit,
       cashDetails: effectiveCash
@@ -1187,12 +1533,13 @@ function QuickEntry({
   };
 
   if (pinned) {
-    const quickTabs = enabledQuickTabs(settings);
+    const quickTabs = quickTabsForEntry;
     const isMoney = type === "Dinheiro/Troco";
     const nextModeLabel = isMoney ? "Conta" : "Dinheiro";
     const moneyDisabled = false;
     const disabled = submitting || value <= 0 || moneyDisabled;
-    const floatingTypes: EntryType[] = ["Venda", "Mesa", "Onibus", "Extra", "Taxa", "Personalizado"];
+    const floatingTypeOptions: EntryType[] = ["Venda", "Mesa", "Onibus", "Extra", "Taxa", "Personalizado"];
+    const floatingTypes = floatingTypeOptions.filter((item) => allowedTypes.includes(item));
     const activeQuickTab = quickTabs.find((tab) => tab.id === activeQuickTabId);
     const compactFloating = Boolean(activeQuickTab?.compact);
     const detailKind = isMoney
@@ -1219,7 +1566,7 @@ function QuickEntry({
     const showSubmit = visible("submit");
     const applyQuickTab = (tab: QuickTabSettings) => {
       setActiveQuickTabId(tab.id);
-      setType(tab.type);
+      setType(allowedTypes.includes(tab.type) ? tab.type : clientPolicy?.defaultType || "Venda");
       if (tab.type === "Dinheiro/Troco") {
         setCashLinkedType(
           settings.floating.syncMoneyWithEntryType
@@ -1238,12 +1585,16 @@ function QuickEntry({
       const syncModes = settings.floating.syncMoneyWithEntryType;
       const moneyTab = quickTabs.find((tab) => tab.type === "Dinheiro/Troco");
       if (!isMoney) {
+        if (!allowedTypes.includes("Dinheiro/Troco")) {
+          return;
+        }
         setType("Dinheiro/Troco");
         setCashLinkedType(syncModes ? cashLinkFromEntryType(type, cashLinkedType) : moneyTab?.cashLinkedType || "Mesa");
         setActiveQuickTabId(moneyTab?.id || "manual");
         return;
       }
-      const nextType: EntryType = syncModes ? entryTypeFromCashLink(cashLinkedType) : "Venda";
+      const preferredType: EntryType = syncModes ? entryTypeFromCashLink(cashLinkedType) : "Venda";
+      const nextType: EntryType = allowedTypes.includes(preferredType) ? preferredType : clientPolicy?.defaultType || allowedTypes[0] || "Venda";
       const matchingTab = quickTabs.find((tab) => tab.type === nextType && !tab.compact);
       if (matchingTab) {
         setActiveQuickTabId(matchingTab.id);
@@ -1254,6 +1605,9 @@ function QuickEntry({
       setActiveQuickTabId("manual");
     };
     const chooseType = (nextType: EntryType) => {
+      if (!allowedTypes.includes(nextType)) {
+        return;
+      }
       setType(nextType);
       if (settings.floating.syncMoneyWithEntryType) {
         setCashLinkedType(cashLinkFromEntryType(nextType, cashLinkedType));
@@ -1301,7 +1655,7 @@ function QuickEntry({
           <label className="floating-field floating-kind floating-cash-kind">
             <span>VINCULAR A</span>
             <select value={cashLinkedType} onChange={(event) => setCashLinkedType(event.target.value as EntryType)}>
-              {CASH_LINKED_TYPES.map((item) => (
+              {CASH_LINKED_TYPES.filter((item) => allowedTypes.includes(item.value)).map((item) => (
                 <option key={item.value} value={item.value}>{item.label}</option>
               ))}
             </select>
@@ -1385,7 +1739,7 @@ function QuickEntry({
           <label className="floating-field payment-field">
             <span>PAGAMENTO</span>
             <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}>
-              {PAYMENT_METHODS.map((item) => (
+              {paymentMethodsForEntry.map((item) => (
                 <option key={item}>{item}</option>
               ))}
             </select>
@@ -1441,9 +1795,11 @@ function QuickEntry({
         {!pinned && (
           <div className="mode-chips">
             {(["Venda", "Mesa", "Onibus", "Dinheiro/Troco", "Divisao de conta"] as EntryType[]).map((item) => (
+              allowedTypes.includes(item) && (
               <button type="button" key={item} className={type === item ? "selected" : ""} onClick={() => setType(item)}>
                 {item}
               </button>
+              )
             ))}
           </div>
         )}
@@ -1454,7 +1810,7 @@ function QuickEntry({
           <label className="field">
             <span>Tipo</span>
             <select value={type} onChange={(event) => setType(event.target.value as EntryType)}>
-              {ENTRY_TYPES.map((item) => (
+              {ENTRY_TYPES.filter((item) => allowedTypes.includes(item)).map((item) => (
                 <option key={item}>{item}</option>
               ))}
             </select>
@@ -1493,25 +1849,25 @@ function QuickEntry({
           </label>
         )}
 
-        {tableFieldEnabled && (type === "Mesa" || (type === "Dinheiro/Troco" && cashLinkedType === "Mesa")) && !pinned && (
+        {visible("tableNumber") && tableFieldEnabled && (type === "Mesa" || (type === "Dinheiro/Troco" && cashLinkedType === "Mesa")) && !pinned && (
           <label className="field small-field">
             <span>Mesa</span>
             <input value={tableNumber} onChange={(event) => setTableNumber(event.target.value)} placeholder="8" />
           </label>
         )}
 
-        {busFieldEnabled && (type === "Onibus" || (type === "Dinheiro/Troco" && cashLinkedType === "Onibus")) && !pinned && (
+        {visible("busNumber") && busFieldEnabled && (type === "Onibus" || (type === "Dinheiro/Troco" && cashLinkedType === "Onibus")) && !pinned && (
           <label className="field small-field">
             <span>Onibus</span>
             <input value={busNumber} onChange={(event) => setBusNumber(event.target.value)} placeholder="2" />
           </label>
         )}
 
-        {!pinned && (
+        {visible("paymentMethod") && !pinned && (
           <label className="field">
             <span>Pagamento</span>
             <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}>
-              {PAYMENT_METHODS.map((item) => (
+              {paymentMethodsForEntry.map((item) => (
                 <option key={item}>{item}</option>
               ))}
             </select>
@@ -1522,7 +1878,7 @@ function QuickEntry({
           <label className="field">
             <span>Vincular a</span>
             <select value={cashLinkedType} onChange={(event) => setCashLinkedType(event.target.value as EntryType)}>
-              {CASH_LINKED_TYPES.map((item) => (
+              {CASH_LINKED_TYPES.filter((item) => allowedTypes.includes(item.value)).map((item) => (
                 <option key={item.value} value={item.value}>{item.label}</option>
               ))}
             </select>
@@ -1530,7 +1886,7 @@ function QuickEntry({
         )}
       </div>
 
-      {type === "Divisao de conta" && !pinned && (
+      {visible("people") && type === "Divisao de conta" && !pinned && (
         <SplitBox
           split={split}
           roundingStep={roundingStep}
@@ -1544,7 +1900,7 @@ function QuickEntry({
         />
       )}
 
-      {type === "Dinheiro/Troco" && !pinned && (
+      {visible("paidWith") && type === "Dinheiro/Troco" && !pinned && (
         <CashBox
           cash={cash}
           paidWithText={paidWithText}
@@ -1558,7 +1914,7 @@ function QuickEntry({
         />
       )}
 
-      {!pinned && (
+      {visible("observations") && !pinned && (
         <label className="field observations-field">
           <span>Observacoes</span>
           <input value={observations} onChange={(event) => setObservations(event.target.value)} placeholder="Ajuste, identificador, detalhe do pagamento..." />
@@ -2439,15 +2795,35 @@ function ReportAlertsCard({
 function ServerPanel({
   settings,
   server,
+  remoteSession,
+  remoteMessage,
+  remoteLoading,
   onSaveSettings,
   onServerChange,
-  onToast
+  onToast,
+  onConnectRemote,
+  onDisconnectRemote,
+  onRefreshRemote,
+  onSubmitRemote,
+  onEditRemote,
+  onCancelRemote,
+  onDeleteRemote
 }: {
   settings: AppSettings;
   server: ServerState;
+  remoteSession: RemoteClientSession | null;
+  remoteMessage: string;
+  remoteLoading: boolean;
   onSaveSettings: (settings: AppSettings) => Promise<void>;
   onServerChange: (server: ServerState) => void;
   onToast: (tone: ToastState["tone"], message: string) => void;
+  onConnectRemote: (host: string, password: string, deviceName: string) => Promise<void>;
+  onDisconnectRemote: () => void;
+  onRefreshRemote: () => Promise<void> | void;
+  onSubmitRemote: (draft: EntryDraft) => Promise<void>;
+  onEditRemote: (entry: LedgerEntry) => Promise<void>;
+  onCancelRemote: (entry: LedgerEntry) => Promise<void>;
+  onDeleteRemote: (entry: LedgerEntry, permanent?: boolean) => Promise<void>;
 }) {
   const [port, setPort] = useState(settings.server.port);
   const [password, setPassword] = useState(settings.server.password);
@@ -2456,17 +2832,6 @@ function ServerPanel({
   const [connectHost, setConnectHost] = useState(server.url || "");
   const [connectPassword, setConnectPassword] = useState("");
   const [connectDeviceName, setConnectDeviceName] = useState("App cliente");
-  const [remoteSession, setRemoteSession] = useState<RemoteClientSession | null>(null);
-  const [remoteLoading, setRemoteLoading] = useState(false);
-  const [remoteMessage, setRemoteMessage] = useState("");
-  const remoteSocket = useRef<WebSocket | null>(null);
-
-  useEffect(() => {
-    return () => {
-      remoteSocket.current?.close();
-      remoteSocket.current = null;
-    };
-  }, []);
 
   const start = async () => {
     try {
@@ -2486,142 +2851,8 @@ function ServerPanel({
     onToast("info", "Servidor desligado.");
   };
 
-  const remoteRequest = async <T,>(session: RemoteClientSession, path: string, options: RequestInit = {}): Promise<T> => {
-    const response = await fetch(`${session.baseUrl}${path}`, {
-      ...options,
-      headers: {
-        "content-type": "application/json",
-        "x-caixa-password": session.password,
-        "x-device-name": session.deviceName,
-        ...(options.headers || {})
-      }
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      let errorMessage = text || response.statusText;
-      try {
-        const parsed = JSON.parse(text) as { error?: string };
-        errorMessage = parsed.error || errorMessage;
-      } catch {
-        // A resposta remota pode ser texto puro.
-      }
-      throw new Error(errorMessage);
-    }
-    return (text ? JSON.parse(text) : {}) as T;
-  };
-
-  const refreshRemote = async (session = remoteSession) => {
-    if (!session) {
-      return;
-    }
-    const data = await remoteRequest<RemoteEntriesResponse>(session, "/api/entries");
-    setRemoteSession({
-      ...session,
-      entries: data.entries,
-      summary: data.summary,
-      permissions: data.permissions
-    });
-  };
-
   const connectRemote = async () => {
-    setRemoteLoading(true);
-    setRemoteMessage("");
-    try {
-      const baseUrl = normalizeRemoteBaseUrl(connectHost);
-      const session: RemoteClientSession = {
-        baseUrl,
-        password: connectPassword,
-        deviceName: connectDeviceName.trim() || "App cliente",
-        entries: [],
-        summary: null,
-        permissions: { view: false, create: false, edit: false, delete: false, viewEntryValues: false, viewTotals: false },
-        connectedAt: new Date().toISOString()
-      };
-      const data = await remoteRequest<RemoteEntriesResponse>(session, "/api/entries");
-      const connectedSession = { ...session, entries: data.entries, summary: data.summary, permissions: data.permissions };
-      setRemoteSession(connectedSession);
-      remoteSocket.current?.close();
-      const wsUrl = `${baseUrl.replace(/^http/i, "ws")}/sync?password=${encodeURIComponent(connectPassword)}&device=${encodeURIComponent(session.deviceName)}`;
-      remoteSocket.current = new WebSocket(wsUrl);
-      remoteSocket.current.onopen = () => setRemoteMessage("Tempo real ativo.");
-      remoteSocket.current.onmessage = () => {
-        void refreshRemote(connectedSession);
-      };
-      remoteSocket.current.onclose = () => setRemoteMessage("Conexao em tempo real fechada. Use Atualizar ou conecte novamente.");
-      onToast("success", "Cliente conectado ao caixa principal.");
-    } catch (error) {
-      setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel conectar.");
-      onToast("error", error instanceof Error ? error.message : "Nao foi possivel conectar.");
-    } finally {
-      setRemoteLoading(false);
-    }
-  };
-
-  const disconnectRemote = () => {
-    remoteSocket.current?.close();
-    remoteSocket.current = null;
-    setRemoteSession(null);
-    setRemoteMessage("");
-    onToast("info", "Cliente remoto desconectado.");
-  };
-
-  const submitRemoteEntry = async (draft: EntryDraft) => {
-    if (!remoteSession?.permissions.create) {
-      onToast("error", "Este cliente nao tem permissao para registrar.");
-      return;
-    }
-    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, "/api/entries", {
-      method: "POST",
-      body: JSON.stringify(draft)
-    });
-    await refreshRemote();
-    onToast("success", "Lancamento enviado ao caixa principal.");
-  };
-
-  const editRemoteEntry = async (entry: LedgerEntry) => {
-    if (!remoteSession?.permissions.edit) {
-      return;
-    }
-    const description = window.prompt("Nova descricao", entry.description || "");
-    if (description === null) {
-      return;
-    }
-    const payload: Record<string, unknown> = { description };
-    if (remoteSession.permissions.viewEntryValues) {
-      const value = window.prompt("Novo valor", String(entry.finalValue || 0).replace(".", ","));
-      if (value !== null) {
-        payload.value = parseMoney(value);
-      }
-    }
-    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, `/api/entries/${entry.id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload)
-    });
-    await refreshRemote();
-    onToast("success", "Lancamento remoto editado.");
-  };
-
-  const cancelRemoteEntry = async (entry: LedgerEntry) => {
-    if (!remoteSession?.permissions.edit) {
-      return;
-    }
-    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, `/api/entries/${entry.id}/cancel`, { method: "POST" });
-    await refreshRemote();
-    onToast("info", "Lancamento remoto cancelado.");
-  };
-
-  const deleteRemoteEntry = async (entry: LedgerEntry, permanent = false) => {
-    if (!remoteSession?.permissions.delete) {
-      return;
-    }
-    if (!window.confirm(permanent ? "Apagar definitivamente no caixa principal?" : "Enviar para a lixeira no caixa principal?")) {
-      return;
-    }
-    await remoteRequest<{ ok: boolean }>(remoteSession, `/api/entries/${entry.id}${permanent ? "?permanent=1" : ""}`, {
-      method: "DELETE"
-    });
-    await refreshRemote();
-    onToast(permanent ? "info" : "success", permanent ? "Lancamento remoto apagado." : "Lancamento remoto enviado para a lixeira.");
+    await onConnectRemote(connectHost, connectPassword, connectDeviceName);
   };
 
   return (
@@ -2729,12 +2960,12 @@ function ServerPanel({
               settings={settings}
               message={remoteMessage}
               loading={remoteLoading}
-              onRefresh={() => refreshRemote()}
-              onDisconnect={disconnectRemote}
-              onSubmit={submitRemoteEntry}
-              onEdit={editRemoteEntry}
-              onCancel={cancelRemoteEntry}
-              onDelete={deleteRemoteEntry}
+              onRefresh={onRefreshRemote}
+              onDisconnect={onDisconnectRemote}
+              onSubmit={onSubmitRemote}
+              onEdit={onEditRemote}
+              onCancel={onCancelRemote}
+              onDelete={onDeleteRemote}
             />
           )}
         </section>
@@ -2813,13 +3044,15 @@ function RemoteClientWorkspace({
 }) {
   const visibleEntries = session.entries.filter((entry) => entry.status !== "deleted");
   const deletedEntries = session.entries.filter((entry) => entry.status === "deleted");
+  const entrySettings = settingsForRemoteClient(settings, session.clientPolicy);
   const permissionBadges = [
     session.permissions.view ? "Visualizar" : "",
     session.permissions.create ? "Registrar" : "",
     session.permissions.edit ? "Editar" : "",
     session.permissions.delete ? "Apagar" : "",
     session.permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
-    session.permissions.viewTotals ? "Ver totais" : "Totais ocultos"
+    session.permissions.viewTotals ? "Ver totais" : "Totais ocultos",
+    `${session.clientPolicy.allowedTypes.length} modo(s) do servidor`
   ].filter(Boolean);
 
   return (
@@ -2859,7 +3092,8 @@ function RemoteClientWorkspace({
       {session.permissions.create ? (
         <QuickEntry
           entries={session.entries}
-          settings={settings}
+          settings={entrySettings}
+          clientPolicy={session.clientPolicy}
           pinned={false}
           modeCommand={null}
           onSubmit={onSubmit}

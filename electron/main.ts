@@ -348,6 +348,7 @@ async function bootstrap() {
 
   localServer = new LocalServer({
     permissions: (await store.getSettings()).server.permissions,
+    getSettings: () => store.getSettings(),
     getEntries: () => store.getEntries(),
     addEntry: async (draft: EntryDraft) => {
       const entry = await store.addEntry(draft);

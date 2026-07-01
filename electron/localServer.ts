@@ -4,12 +4,13 @@ import os from "node:os";
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocket, WebSocketServer } from "ws";
-import { ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
-import type { EntryDraft, EntryType, LedgerEntry, PaymentMethod, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import { calculateCash, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
+import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
+import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
+import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
   permissions: ServerPermissions;
+  getSettings: () => Promise<AppSettings>;
   getEntries: () => Promise<LedgerEntry[]>;
   addEntry: (draft: EntryDraft) => Promise<LedgerEntry>;
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => Promise<LedgerEntry>;
@@ -65,28 +66,20 @@ export class LocalServer {
 
     app.get("/api/entries", this.authorize("view"), async (_request, response) => {
       const entries = await this.options.getEntries();
+      const settings = await this.options.getSettings();
       const todayEntries = filterEntriesByLocalDate(entries);
       response.json({
         entries: this.permissions.viewEntryValues ? entries : entries.map(maskMoneyFields),
         summary: this.permissions.viewTotals ? summarizeEntries(todayEntries) : null,
-        permissions: this.permissions
+        permissions: this.permissions,
+        clientPolicy: buildClientPolicy(settings)
       });
     });
 
     app.post("/api/entries", this.authorize("create"), async (request, response) => {
       const device = String(request.header("x-device-name") || request.ip || "Dispositivo remoto");
-      const entry = await this.options.addEntry({
-        type: request.body.type || "Venda",
-        value: Number(request.body.value || 0),
-        description: request.body.description || "",
-        people: Number(request.body.people || 1),
-        tableNumber: request.body.tableNumber || "",
-        busNumber: request.body.busNumber || "",
-        paymentMethod: request.body.paymentMethod || "Nao informado",
-        paidWith: Number(request.body.paidWith || 0),
-        observations: request.body.observations || "",
-        originDevice: device
-      });
+      const settings = await this.options.getSettings();
+      const entry = await this.options.addEntry(buildRemoteDraft(request.body || {}, settings, device));
       const visibleEntry = this.permissions.viewEntryValues ? entry : maskMoneyFields(entry);
       this.broadcast({ type: "entry-added", entry: visibleEntry });
       this.options.onRemoteChange();
@@ -101,7 +94,8 @@ export class LocalServer {
           response.status(404).json({ error: "Lancamento nao encontrado." });
           return;
         }
-        const entry = await this.options.updateEntry(request.params.id, buildRemotePatch(request.body || {}, current));
+        const settings = await this.options.getSettings();
+        const entry = await this.options.updateEntry(request.params.id, buildRemotePatch(request.body || {}, current, settings));
         const visibleEntry = this.permissions.viewEntryValues ? entry : maskMoneyFields(entry);
         this.broadcast({ type: "entry-updated", entry: visibleEntry });
         this.options.onRemoteChange();
@@ -261,6 +255,77 @@ function getLocalIps(): string[] {
   return ips;
 }
 
+function buildClientPolicy(settings: AppSettings): RemoteClientPolicy {
+  const quickTabs = normalizeQuickTabs(settings.quickTabs);
+  const allowedTypes = allowedTypesForSettings(settings, quickTabs);
+  const defaultType = allowedTypes.includes(settings.defaultType) ? settings.defaultType : allowedTypes[0] || "Venda";
+  const visibleFields = normalizeRemoteFields(settings.floating.visibleFields, settings);
+
+  return {
+    defaultType,
+    defaultPeople: Math.max(1, Math.floor(settings.defaultPeople || 1)),
+    defaultRoundingStep: settings.defaultRoundingStep,
+    defaultRoundingDirection: settings.defaultRoundingDirection,
+    tableNumberEnabled: settings.tableNumberEnabled !== false,
+    busNumberEnabled: settings.busNumberEnabled !== false,
+    allowedTypes,
+    visibleFields,
+    quickTabs: quickTabs.filter((tab) => allowedTypes.includes(tab.type)),
+    paymentMethods: PAYMENT_METHODS,
+    spreadsheetMode: settings.spreadsheetMode,
+    visibleColumns: settings.visibleColumns
+  };
+}
+
+function buildRemoteDraft(body: Record<string, unknown>, settings: AppSettings, device: string): EntryDraft {
+  const policy = buildClientPolicy(settings);
+  const visibleFields = new Set(policy.visibleFields);
+  const type = toAllowedEntryType(body.type, policy) || policy.defaultType;
+  const value = roundMoney(Math.max(0, Number(body.value || 0)));
+  const people = visibleFields.has("people")
+    ? Math.max(1, Math.floor(Number(body.people || policy.defaultPeople) || policy.defaultPeople))
+    : policy.defaultPeople;
+  const description = visibleFields.has("description") && typeof body.description === "string" ? body.description.trim() : "";
+  const tableNumber =
+    policy.tableNumberEnabled && visibleFields.has("tableNumber") && typeof body.tableNumber === "string"
+      ? body.tableNumber.trim()
+      : "";
+  const busNumber =
+    policy.busNumberEnabled && visibleFields.has("busNumber") && typeof body.busNumber === "string"
+      ? body.busNumber.trim()
+      : "";
+  const paidWith = visibleFields.has("paidWith") && Number.isFinite(Number(body.paidWith))
+    ? Math.max(0, Number(body.paidWith))
+    : 0;
+  const splitDetails =
+    type === "Divisao de conta"
+      ? calculateSplit(value, people, policy.defaultRoundingStep, policy.defaultRoundingDirection, Boolean((body.splitDetails as { registerDifference?: unknown } | undefined)?.registerDifference))
+      : undefined;
+  const cashDetails = type === "Dinheiro/Troco" && paidWith > 0 ? calculateCash(value, paidWith) : undefined;
+  const paymentMethod =
+    type === "Dinheiro/Troco"
+      ? "Dinheiro"
+      : visibleFields.has("paymentMethod") && isPaymentMethod(body.paymentMethod)
+        ? body.paymentMethod
+        : "Nao informado";
+
+  return {
+    type,
+    value,
+    description,
+    people,
+    tableNumber,
+    busNumber,
+    paymentMethod,
+    paidWith,
+    observations: visibleFields.has("observations") && typeof body.observations === "string" ? body.observations.trim() : "",
+    originDevice: device,
+    customType: type === "Dinheiro/Troco" ? `Dinheiro/${tableNumber ? "Mesa" : busNumber ? "Onibus" : "Venda"}` : undefined,
+    splitDetails,
+    cashDetails
+  };
+}
+
 function maskMoneyFields(entry: LedgerEntry): LedgerEntry {
   return {
     ...entry,
@@ -293,45 +358,47 @@ function maskMoneyFields(entry: LedgerEntry): LedgerEntry {
   };
 }
 
-function buildRemotePatch(body: Record<string, unknown>, current: LedgerEntry): Partial<LedgerEntry> {
+function buildRemotePatch(body: Record<string, unknown>, current: LedgerEntry, settings: AppSettings): Partial<LedgerEntry> {
+  const policy = buildClientPolicy(settings);
+  const visibleFields = new Set(policy.visibleFields);
   const patch: Partial<LedgerEntry> = {};
-  const nextType = toEntryType(body.type);
-  const nextPeople = body.people !== undefined ? Math.max(1, Math.floor(Number(body.people) || 1)) : current.people;
+  const nextType = toAllowedEntryType(body.type, policy);
+  const nextPeople = body.people !== undefined && visibleFields.has("people") ? Math.max(1, Math.floor(Number(body.people) || 1)) : current.people;
   const rawValue = body.value ?? body.finalValue;
   const nextValue =
-    rawValue !== undefined && Number.isFinite(Number(rawValue))
+    rawValue !== undefined && visibleFields.has("value") && Number.isFinite(Number(rawValue))
       ? roundMoney(Math.max(0, Number(rawValue)))
       : current.finalValue;
 
   if (nextType) {
     patch.type = nextType;
   }
-  if (typeof body.description === "string") {
+  if (visibleFields.has("description") && typeof body.description === "string") {
     patch.description = body.description.trim() || "Venda";
   }
-  if (rawValue !== undefined) {
+  if (rawValue !== undefined && visibleFields.has("value")) {
     patch.originalValue = nextValue;
     patch.finalValue = nextValue;
   }
-  if (body.people !== undefined) {
+  if (body.people !== undefined && visibleFields.has("people")) {
     patch.people = nextPeople;
   }
-  if (rawValue !== undefined || body.people !== undefined) {
+  if ((rawValue !== undefined && visibleFields.has("value")) || (body.people !== undefined && visibleFields.has("people"))) {
     patch.perPerson = roundMoney(nextValue / nextPeople);
   }
-  if (typeof body.tableNumber === "string") {
+  if (policy.tableNumberEnabled && visibleFields.has("tableNumber") && typeof body.tableNumber === "string") {
     patch.tableNumber = body.tableNumber.trim();
   }
-  if (typeof body.busNumber === "string") {
+  if (policy.busNumberEnabled && visibleFields.has("busNumber") && typeof body.busNumber === "string") {
     patch.busNumber = body.busNumber.trim();
   }
-  if (typeof body.observations === "string") {
+  if (visibleFields.has("observations") && typeof body.observations === "string") {
     patch.observations = body.observations.trim();
   }
-  if (isPaymentMethod(body.paymentMethod)) {
+  if (visibleFields.has("paymentMethod") && isPaymentMethod(body.paymentMethod)) {
     patch.paymentMethod = body.paymentMethod;
   }
-  if (body.paidWith !== undefined && Number.isFinite(Number(body.paidWith))) {
+  if (visibleFields.has("paidWith") && body.paidWith !== undefined && Number.isFinite(Number(body.paidWith))) {
     const cash = calculateCash(nextValue, Number(body.paidWith));
     patch.paidWith = cash.paidWith;
     patch.change = cash.change;
@@ -345,8 +412,57 @@ function buildRemotePatch(body: Record<string, unknown>, current: LedgerEntry): 
   return patch;
 }
 
+function normalizeQuickTabs(tabs: QuickTabSettings[] | undefined): QuickTabSettings[] {
+  const source = tabs?.length ? tabs : DEFAULT_QUICK_TABS;
+  return source.filter((tab) => tab.enabled && toEntryType(tab.type));
+}
+
+function normalizeRemoteFields(fields: string[] | undefined, settings: AppSettings): string[] {
+  const values = fields?.length ? fields : DEFAULT_FLOATING_FIELDS;
+  const normalized = new Set(values);
+  normalized.add("value");
+  normalized.add("submit");
+  if (settings.tableNumberEnabled === false) {
+    normalized.delete("tableNumber");
+  }
+  if (settings.busNumberEnabled === false) {
+    normalized.delete("busNumber");
+  }
+  return [...normalized];
+}
+
+function allowedTypesForSettings(settings: AppSettings, tabs: QuickTabSettings[]): EntryType[] {
+  const allowed = new Set<EntryType>();
+  const add = (value: EntryType | undefined) => {
+    if (value && toEntryType(value)) {
+      allowed.add(value);
+    }
+  };
+
+  add(settings.defaultType);
+  for (const tab of tabs) {
+    add(tab.type);
+    add(tab.cashLinkedType);
+  }
+  if (settings.tableNumberEnabled === false) {
+    allowed.delete("Mesa");
+  }
+  if (settings.busNumberEnabled === false) {
+    allowed.delete("Onibus");
+  }
+  if (!allowed.size) {
+    allowed.add("Venda");
+  }
+  return [...allowed];
+}
+
 function toEntryType(value: unknown): EntryType | undefined {
   return typeof value === "string" && ENTRY_TYPES.includes(value as EntryType) ? (value as EntryType) : undefined;
+}
+
+function toAllowedEntryType(value: unknown, policy: RemoteClientPolicy): EntryType | undefined {
+  const type = toEntryType(value);
+  return type && policy.allowedTypes.includes(type) ? type : undefined;
 }
 
 function isPaymentMethod(value: unknown): value is PaymentMethod {
@@ -363,6 +479,7 @@ function remoteClientHtml(port: number): string {
   <style>
     :root { color-scheme: light; font-family: Bahnschrift, "Segoe UI Variable Text", "Segoe UI", sans-serif; background: #e8f3fb; color: #092844; }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body { margin: 0; padding: 16px; background: radial-gradient(circle at top left, rgba(5, 101, 183, 0.18), transparent 32%), linear-gradient(180deg, #f7fcff, #e8f3fb); }
     main { max-width: 1060px; margin: 0 auto; display: grid; gap: 12px; }
     header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: stretch; }
@@ -439,17 +556,18 @@ function remoteClientHtml(port: number): string {
     </section>
     <section id="app" hidden>
       <div class="grid">
-        <label>Tipo
+        <label data-field="type">Tipo
           <select id="type">
             <option>Venda</option><option>Mesa</option><option>Onibus</option><option>Dinheiro/Troco</option><option>Extra</option><option>Taxa</option><option>Personalizado</option>
           </select>
         </label>
-        <label>Valor <input id="value" inputmode="decimal" placeholder="0,00" /></label>
-        <label>Pago com <input id="paidWith" inputmode="decimal" placeholder="Opcional" /></label>
-        <label class="small">Pessoas <input id="people" type="number" value="1" min="1" /></label>
-        <label class="small">Mesa <input id="tableNumber" placeholder="8" /></label>
-        <label class="small">Onibus <input id="busNumber" placeholder="2" /></label>
-        <label class="wide">Descricao <input id="description" placeholder="Mesa 4, Cliente..." /></label>
+        <label data-field="value">Valor <input id="value" inputmode="decimal" placeholder="0,00" /></label>
+        <label data-field="paidWith">Pago com <input id="paidWith" inputmode="decimal" placeholder="Opcional" /></label>
+        <label data-field="people" class="small">Pessoas <input id="people" type="number" value="1" min="1" /></label>
+        <label data-field="tableNumber" class="small">Mesa <input id="tableNumber" placeholder="8" /></label>
+        <label data-field="busNumber" class="small">Onibus <input id="busNumber" placeholder="2" /></label>
+        <label data-field="paymentMethod">Pagamento <select id="paymentMethod"></select></label>
+        <label data-field="description" class="wide">Descricao <input id="description" placeholder="Mesa 4, Cliente..." /></label>
       </div>
       <div class="actions">
         <button id="sendButton">Registrar</button>
@@ -472,6 +590,7 @@ function remoteClientHtml(port: number): string {
   <script>
     let password = "";
     let permissions = {};
+    let clientPolicy = null;
     let entriesCache = [];
     let socket = null;
     const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -505,6 +624,24 @@ function remoteClientHtml(port: number): string {
         permissions.viewTotals ? "Ver totais" : "Totais ocultos"
       ].filter(Boolean);
       qs("#permissionList").innerHTML = rows.map((item) => "<span>" + item + "</span>").join("");
+    }
+    function fieldAllowed(field) {
+      if (!clientPolicy) return true;
+      return (clientPolicy.visibleFields || []).includes(field);
+    }
+    function applyClientPolicy() {
+      if (!clientPolicy) return;
+      const allowedTypes = clientPolicy.allowedTypes && clientPolicy.allowedTypes.length ? clientPolicy.allowedTypes : ["Venda"];
+      qs("#type").innerHTML = allowedTypes.map((type) => "<option>" + escapeText(type) + "</option>").join("");
+      qs("#type").value = allowedTypes.includes(clientPolicy.defaultType) ? clientPolicy.defaultType : allowedTypes[0];
+      const payments = clientPolicy.paymentMethods && clientPolicy.paymentMethods.length ? clientPolicy.paymentMethods : ["Nao informado", "Dinheiro"];
+      qs("#paymentMethod").innerHTML = payments.map((item) => "<option>" + escapeText(item) + "</option>").join("");
+      qs("#people").value = String(clientPolicy.defaultPeople || 1);
+      document.querySelectorAll("[data-field]").forEach((node) => {
+        const field = node.getAttribute("data-field");
+        node.hidden = field !== "value" && !fieldAllowed(field);
+      });
+      qs("#sendButton").textContent = permissions.create ? "Registrar no caixa principal" : "Sem permissao";
     }
     function summaryCards(summary) {
       const cards = summary
@@ -543,7 +680,9 @@ function remoteClientHtml(port: number): string {
     async function load() {
       const data = await api("/api/entries");
       permissions = data.permissions || {};
+      clientPolicy = data.clientPolicy || clientPolicy;
       entriesCache = data.entries || [];
+      applyClientPolicy();
       qs("#permissionBadge").textContent =
         (permissions.create ? "Registra" : "So visualiza") +
         (permissions.edit ? " + edita" : "") +
@@ -583,11 +722,12 @@ function remoteClientHtml(port: number): string {
           body: JSON.stringify({
             type: qs("#type").value,
             value: parseValue(qs("#value").value),
-            paidWith: parseValue(qs("#paidWith").value),
-            people: Number(qs("#people").value || 1),
-            description: qs("#description").value,
-            tableNumber: qs("#tableNumber").value,
-            busNumber: qs("#busNumber").value
+            paidWith: fieldAllowed("paidWith") ? parseValue(qs("#paidWith").value) : 0,
+            people: fieldAllowed("people") ? Number(qs("#people").value || 1) : clientPolicy?.defaultPeople || 1,
+            description: fieldAllowed("description") ? qs("#description").value : "",
+            tableNumber: fieldAllowed("tableNumber") ? qs("#tableNumber").value : "",
+            busNumber: fieldAllowed("busNumber") ? qs("#busNumber").value : "",
+            paymentMethod: fieldAllowed("paymentMethod") ? qs("#paymentMethod").value : "Nao informado"
           })
         });
         qs("#value").value = "";

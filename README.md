@@ -50,6 +50,7 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
 - Total do dia, painel lateral e servidor local somam somente lancamentos do dia atual.
 - Servidor local com senha, permissoes, cliente remoto dentro do proprio app, mini-caixa web em estilo DataCaixa, cadastro remoto, edicao, cancelamento, lixeira, origem do dispositivo e atualizacao em tempo real via WebSocket.
+- Cliente remoto obedece o contrato do servidor: modos, campos visiveis, mesa/onibus, pagamento e descricao seguem o computador principal para nao mudar o formato do Excel.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
 - Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
@@ -159,6 +160,8 @@ Quando backup automatico estiver ativo, arquivos existentes sao copiados para a 
 4. Clique em **Abrir servidor**.
 5. Em outro computador da mesma rede, abra o endereco mostrado pelo app ou use a subaba **Conectar** para montar o link.
 6. Para usar outro PC com o proprio aplicativo, abra **Rede > Conectar**, informe endereco, senha e nome do caixa, e clique em **Conectar no app**.
+
+No modo cliente, a aparencia local continua podendo ser ajustada, mas o resultado enviado para o Excel segue o computador principal. Se o servidor esconder descricao, tipo, mesa, onibus, pagamento ou outro campo da barra, o cliente tambem nao envia esse campo. A barra fixada do cliente usa a mesma sessao remota e manda os lancamentos para o caixa principal.
 
 Se o servidor estiver desligado, o aplicativo continua funcionando normalmente no computador principal.
 

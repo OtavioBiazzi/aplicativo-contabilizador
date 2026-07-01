@@ -113,6 +113,21 @@ export interface ServerPermissions {
   viewTotals: boolean;
 }
 
+export interface RemoteClientPolicy {
+  defaultType: EntryType;
+  defaultPeople: number;
+  defaultRoundingStep: number;
+  defaultRoundingDirection: RoundDirection;
+  tableNumberEnabled: boolean;
+  busNumberEnabled: boolean;
+  allowedTypes: EntryType[];
+  visibleFields: string[];
+  quickTabs: QuickTabSettings[];
+  paymentMethods: PaymentMethod[];
+  spreadsheetMode: SpreadsheetMode;
+  visibleColumns: string[];
+}
+
 export interface FloatingSettings {
   visibleFields: string[];
   opacity: number;

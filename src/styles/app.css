@@ -12,7 +12,9 @@
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
   --radius: 8px;
   --field-pad: 12px;
+  --field-font-size: 1rem;
   --density-gap: 14px;
+  font-size: 16px;
   font-family: Bahnschrift, "Segoe UI Variable Text", "Segoe UI", sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -92,17 +94,18 @@
 }
 
 :root[data-field-size="small"] {
-  font-size: 13px;
+  --field-pad: 9px;
+  --field-font-size: 0.94rem;
 }
 
 :root[data-field-size="large"] {
-  font-size: 17px;
+  --field-pad: 15px;
+  --field-font-size: 1.04rem;
 }
 
 :root.is-floating-root {
   --field-pad: 12px;
   --density-gap: 14px;
-  font-size: 16px;
 }
 
 * {

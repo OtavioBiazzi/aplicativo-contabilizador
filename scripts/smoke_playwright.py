@@ -329,6 +329,10 @@ def main() -> int:
           const snapshot = await window.caixa.getSnapshot();
           await window.caixa.saveSettings({
             ...snapshot.settings,
+            floating: {
+              ...snapshot.settings.floating,
+              visibleFields: ['tabs', 'mode', 'value', 'people', 'tableNumber', 'busNumber', 'paidWith', 'result', 'submit']
+            },
             server: {
               ...snapshot.settings.server,
               port,
@@ -347,16 +351,14 @@ def main() -> int:
       page.get_by_role("button", name="Conectar no app").click()
       expect(page.get_by_text("Cliente conectado no app")).to_be_visible(timeout=15000)
       expect(page.get_by_text("Historico vindo do caixa principal")).to_be_visible(timeout=15000)
+      expect(page.locator(".connect-panel .description-field input")).to_have_count(0)
       page.locator(".connect-panel").get_by_label("Valor").first.fill("18,75")
-      page.locator(".connect-panel").get_by_label("Descricao").first.fill("Cliente app smoke")
       page.locator(".connect-panel").get_by_role("button", name="Registrar").first.click()
       expect(page.get_by_text("Lancamento enviado ao caixa principal.")).to_be_visible(timeout=15000)
       api_after_app_client = api_json(remote_base, "/api/entries", remote_password)
-      if not any(item["description"] == "Cliente app smoke" for item in api_after_app_client["entries"]):
+      if not any(item["originDevice"] == "App cliente smoke" and item["finalValue"] == 18.75 and item["description"] != "Cliente app smoke" for item in api_after_app_client["entries"]):
         print("Native app remote client did not create the remote entry.", file=sys.stderr)
         return 1
-      page.get_by_role("button", name="Desconectar").click()
-      expect(page.get_by_role("button", name="Conectar no app")).to_be_visible(timeout=10000)
       created = api_json(
         remote_base,
         "/api/entries",
@@ -372,6 +374,9 @@ def main() -> int:
       if not remote_entry or remote_entry["finalValue"] != 29.9:
         print("Remote API did not keep entry values visible when only totals were hidden.", file=sys.stderr)
         return 1
+      if remote_entry["description"] == "Remoto smoke":
+        print("Remote API accepted a description that the server policy hides.", file=sys.stderr)
+        return 1
       remote_browser = playwright.chromium.launch(headless=True)
       try:
         remote_page = remote_browser.new_page()
@@ -384,6 +389,7 @@ def main() -> int:
         expect(remote_page.locator("#history")).to_be_visible(timeout=10000)
         expect(remote_page.locator("#summary")).to_contain_text("Totais ocultos", timeout=10000)
         expect(remote_page.get_by_text("Permissoes deste dispositivo")).to_be_visible(timeout=10000)
+        expect(remote_page.locator("[data-field='description']")).to_be_hidden(timeout=10000)
         if remote_errors:
           print("\n".join(remote_errors), file=sys.stderr)
           return 1
@@ -409,6 +415,7 @@ def main() -> int:
       floating_page = find_app_page(browser, floating=True)
       floating_page.on("console", lambda message: console_errors.append(message.text) if message.type == "error" else None)
       expect(floating_page.locator(".floating-bar")).to_be_visible(timeout=15000)
+      expect(floating_page.get_by_text("Cliente conectado:")).not_to_be_visible()
       body_classes = floating_page.locator("body").get_attribute("class") or ""
       if "floating-borderless" not in body_classes:
         print(f"Floating bar did not use the borderless class: {body_classes}", file=sys.stderr)
@@ -427,7 +434,17 @@ def main() -> int:
       expect(floating_page.locator(".floating-result strong")).to_contain_text("0,00")
       floating_page.locator(".floating-detail input").fill("12")
       floating_page.locator(".floating-send").click()
-      expect(floating_page.get_by_text("Lancamento registrado.")).to_be_visible(timeout=15000)
+      expect(floating_page.get_by_text("Lancamento enviado ao caixa principal.")).to_be_visible(timeout=15000)
+      after_floating_remote = api_json(remote_base, "/api/entries", remote_password)
+      if not any(
+        item["originDevice"] == "App cliente smoke"
+        and item["busNumber"] == "12"
+        and item["type"] == "Dinheiro/Troco"
+        and item["finalValue"] == 87.5
+        for item in after_floating_remote["entries"]
+      ):
+        print("Floating remote bar did not send the entry to the principal caixa.", file=sys.stderr)
+        return 1
       removed = page.evaluate(
         """async () => {
           const snapshot = await window.caixa.getSnapshot();
@@ -473,7 +490,7 @@ def main() -> int:
           has_styles = has_styles or "xl/styles.xml" in zip_file.namelist()
           sheets.append(zip_file.read("xl/worksheets/sheet1.xml").decode("utf-8"))
       sheet = "\n".join(sheets)
-      if "Mesa 4" in sheet or "Onibus 12" not in sheet or "TOTAL" not in sheet:
+      if "Mesa 4" in sheet or "TOTAL" not in sheet:
         print("Exported xlsx did not reflect removal/total correctly.", file=sys.stderr)
         return 1
       if not has_styles or "SUBTOTAL(109" not in sheet or "<autoFilter" not in sheet:
