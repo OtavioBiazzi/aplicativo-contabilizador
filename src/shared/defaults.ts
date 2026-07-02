@@ -96,16 +96,33 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     profiles: {
       "Perfil PC": { theme: "datacaixa", fieldSize: "medium", density: "normal", layout: "complete" },
       "Perfil Notebook": { theme: "datacaixa", density: "compact", fieldSize: "small", layout: "compact" },
-      "Perfil tela pequena": { theme: "datacaixa-dark", density: "compact", fieldSize: "small", layout: "sidePanel" },
+      "Perfil tela pequena": {
+        theme: "datacaixa",
+        density: "compact",
+        fieldSize: "small",
+        layout: "compact",
+        floating: {
+          visibleFields: ["mode", "value", "tableNumber", "busNumber", "paidWith", "submit"],
+          layoutMode: "mini",
+          opacity: 1,
+          borderless: true,
+          lockPosition: false,
+          dragWholeBar: true,
+          theme: "follow",
+          syncMoneyWithEntryType: true
+        }
+      },
       "Perfil fixado": {
         layout: "pinnedBar",
         density: "compact",
         fieldSize: "small",
         floating: {
           visibleFields: ["mode", "value", "people", "tableNumber", "busNumber", "paidWith", "result", "submit"],
+          layoutMode: "compact",
           opacity: 1,
           borderless: true,
           lockPosition: false,
+          dragWholeBar: false,
           theme: "follow",
           syncMoneyWithEntryType: true
         }
@@ -118,9 +135,11 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     quickTabs: DEFAULT_QUICK_TABS,
     floating: {
       visibleFields: DEFAULT_FLOATING_FIELDS,
+      layoutMode: "adaptive",
       opacity: 1,
       borderless: true,
       lockPosition: false,
+      dragWholeBar: false,
       theme: "follow",
       syncMoneyWithEntryType: true
     },

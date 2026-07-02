@@ -109,6 +109,17 @@ interface RemoteClientSession {
   connectedAt: string;
 }
 
+interface ReportFocusPeriod {
+  from: string;
+  to: string;
+  nonce: number;
+}
+
+interface HistoryFocusDate {
+  date: string;
+  nonce: number;
+}
+
 interface ToastState {
   tone: "success" | "error" | "info";
   message: string;
@@ -205,6 +216,7 @@ interface FloatingPreset {
   fields: string[];
   quickTabs: QuickTabSettings[];
   borderless?: boolean;
+  layoutMode?: AppSettings["floating"]["layoutMode"];
 }
 
 const FLOATING_PRESETS: FloatingPreset[] = [
@@ -233,7 +245,8 @@ const FLOATING_PRESETS: FloatingPreset[] = [
       { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
       { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
     ],
-    borderless: true
+    borderless: true,
+    layoutMode: "compact"
   },
   {
     id: "bus",
@@ -250,7 +263,8 @@ const FLOATING_PRESETS: FloatingPreset[] = [
       { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
       { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
     ],
-    borderless: true
+    borderless: true,
+    layoutMode: "compact"
   },
   {
     id: "money",
@@ -267,7 +281,8 @@ const FLOATING_PRESETS: FloatingPreset[] = [
       { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
       { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
     ],
-    borderless: true
+    borderless: true,
+    layoutMode: "compact"
   },
   {
     id: "minimal",
@@ -284,7 +299,8 @@ const FLOATING_PRESETS: FloatingPreset[] = [
       { id: "minimal", label: "Minimo", enabled: false, type: "Venda", compact: true },
       { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
     ],
-    borderless: true
+    borderless: true,
+    layoutMode: "mini"
   }
 ];
 
@@ -593,6 +609,17 @@ function mergeProfileSettings(
         visibleFields: normalizeFloatingFields(next.floating?.visibleFields || saved.floating?.visibleFields || base.floating?.visibleFields)
       };
     }
+    if (name === "Perfil tela pequena" && profile.theme === "datacaixa-dark" && profile.layout === "sidePanel") {
+      profile.theme = "datacaixa";
+      profile.layout = "compact";
+      profile.floating = {
+        ...fallbackSettings.floating,
+        ...profile.floating,
+        visibleFields: normalizeFloatingFields(["mode", "value", "tableNumber", "busNumber", "paidWith", "submit"]),
+        layoutMode: "mini",
+        dragWholeBar: true
+      };
+    }
     merged[name] = profile;
   });
   return merged;
@@ -800,6 +827,7 @@ function applyFloatingPresetToSettings(settings: AppSettings, preset: FloatingPr
       ...settings.floating,
       visibleFields: normalizeFloatingFields(preset.fields),
       borderless: preset.borderless ?? settings.floating.borderless,
+      layoutMode: preset.layoutMode || settings.floating.layoutMode || "adaptive",
       syncMoneyWithEntryType: true
     }
   });
@@ -912,6 +940,9 @@ export function App() {
   const [importPreview, setImportPreview] = useState<LedgerImportPreview | null>(null);
   const [importingPreview, setImportingPreview] = useState(false);
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey());
+  const [totalMenuOpen, setTotalMenuOpen] = useState(false);
+  const [reportFocus, setReportFocus] = useState<ReportFocusPeriod | null>(null);
+  const [historyFocus, setHistoryFocus] = useState<HistoryFocusDate | null>(null);
   const [remoteSession, setRemoteSession] = useState<RemoteClientSession | null>(null);
   const [remoteMessage, setRemoteMessage] = useState("");
   const [remoteLoading, setRemoteLoading] = useState(false);
@@ -951,6 +982,10 @@ export function App() {
   useEffect(() => {
     remoteSessionRef.current = remoteSession;
   }, [remoteSession]);
+
+  useEffect(() => {
+    setTotalMenuOpen(false);
+  }, [activeTab, remoteSession?.baseUrl, remoteSession?.permissions.viewTotals]);
 
   useEffect(() => {
     return () => {
@@ -1063,6 +1098,26 @@ export function App() {
     showToast("success", "Configuracoes salvas.");
   };
 
+  const toggleHeaderPrivacy = async () => {
+    if (!settings) {
+      return;
+    }
+    await saveSettings({
+      ...settings,
+      privacy: {
+        ...settings.privacy,
+        hideHeaderTotal: !settings.privacy.hideHeaderTotal
+      }
+    });
+    setTotalMenuOpen(false);
+  };
+
+  const openTodayReport = () => {
+    setReportFocus({ from: currentDateKey, to: currentDateKey, nonce: Date.now() });
+    setActiveTab("reports");
+    setTotalMenuOpen(false);
+  };
+
   const remoteRequest = async <T,>(session: RemoteClientSession, path: string, options: RequestInit = {}): Promise<T> => {
     const response = await fetch(`${session.baseUrl}${path}`, {
       ...options,
@@ -1143,7 +1198,7 @@ export function App() {
     setRemoteLoading(true);
     setRemoteMessage("");
     try {
-      const baseUrl = normalizeRemoteBaseUrl(host);
+      const baseUrl = normalizeRemoteBaseUrl(host, settings.server.port, server?.ips || []);
       const pendingSession: RemoteClientSession = {
         baseUrl,
         password,
@@ -1402,6 +1457,7 @@ export function App() {
     ? remoteSession.summary || privateSummaryForCount(remoteSession.todayCount ?? displayTodayEntries.filter((entry) => entry.status === "active").length)
     : summary;
   const quickEntryStorageScope = quickEntryStorageScopeForSession(remoteSession);
+  const canUseTotalMenu = canViewRemoteTotals;
 
   if (IS_FLOATING_WINDOW) {
     return (
@@ -1452,12 +1508,61 @@ export function App() {
           })}
         </nav>
 
-        <div className="sidebar-card topbar-card">
-          <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total hoje"}</span>
-          <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "private-value" : ""}>
-            {settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Privado" : formatCurrency(displaySummary.total)}
-          </strong>
-          <small>{displaySummary.count} lancamentos{remoteSession ? " no servidor" : ""}</small>
+        <div className="total-menu-wrap">
+          <button
+            type="button"
+            className="sidebar-card topbar-card topbar-card-button"
+            disabled={!canUseTotalMenu}
+            title={canUseTotalMenu ? "Abrir acoes do total de hoje" : "O servidor bloqueou o menu de totais neste cliente."}
+            onClick={() => setTotalMenuOpen((open) => !open)}
+          >
+            <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total hoje"}</span>
+            <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "private-value" : ""}>
+              {settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Privado" : formatCurrency(displaySummary.total)}
+            </strong>
+            <small>{displaySummary.count} lancamentos{remoteSession ? " no servidor" : ""}</small>
+          </button>
+          {totalMenuOpen && canUseTotalMenu && (
+            <div className="total-popover" role="menu">
+              <div>
+                <strong>Hoje</strong>
+                <span>{displaySummary.count} lancamento(s)</span>
+              </div>
+              <button type="button" onClick={toggleHeaderPrivacy}>
+                <Eye size={16} />
+                {settings.privacy.hideHeaderTotal ? "Mostrar total no topo" : "Ativar privacidade"}
+              </button>
+              <button type="button" onClick={openTodayReport}>
+                <BarChart3 size={16} />
+                Relatorio deste dia
+              </button>
+              {remoteSession ? (
+                <button type="button" onClick={() => {
+                  setActiveTab("server");
+                  setTotalMenuOpen(false);
+                }}>
+                  <PlugZap size={16} />
+                  Ver cliente remoto
+                </button>
+              ) : (
+                <button type="button" onClick={() => {
+                  setHistoryFocus({ date: currentDateKey, nonce: Date.now() });
+                  setActiveTab("history");
+                  setTotalMenuOpen(false);
+                }}>
+                  <History size={16} />
+                  Historico de hoje
+                </button>
+              )}
+              <button type="button" onClick={() => {
+                setActiveTab("settings");
+                setTotalMenuOpen(false);
+              }}>
+                <Settings size={16} />
+                Ajustes de privacidade
+              </button>
+            </div>
+          )}
         </div>
 
         <button className="pin-button" onClick={togglePinned}>
@@ -1509,6 +1614,7 @@ export function App() {
         {activeTab === "history" && (
           <HistoryPanel
             entries={entries}
+            focusDate={historyFocus}
             onChange={async () => {
               await reload();
             }}
@@ -1517,7 +1623,7 @@ export function App() {
         )}
 
         {activeTab === "reports" && (
-            <ReportsPanel entries={displayEntries} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} onExport={async () => {
+            <ReportsPanel entries={displayEntries} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onExport={async () => {
             if (remoteSession) {
               showToast("info", "Exportacao de relatorio remoto fica no computador servidor.");
               return;
@@ -1802,7 +1908,9 @@ function QuickEntry({
     const floatingTypeOptions: EntryType[] = ["Venda", "Mesa", "Onibus", "Extra", "Taxa", "Personalizado"];
     const floatingTypes = floatingTypeOptions.filter((item) => allowedTypes.includes(item));
     const activeQuickTab = quickTabs.find((tab) => tab.id === activeQuickTabId);
-    const compactFloating = Boolean(activeQuickTab?.compact);
+    const floatingLayout = settings.floating.layoutMode || "adaptive";
+    const miniFloating = floatingLayout === "mini";
+    const compactFloating = Boolean(activeQuickTab?.compact) || floatingLayout === "compact" || miniFloating;
     const detailKind = isMoney
       ? tableFieldEnabled && cashLinkedType === "Mesa"
         ? "mesa"
@@ -1814,13 +1922,13 @@ function QuickEntry({
         : busFieldEnabled && type === "Onibus"
           ? "onibus"
           : "";
-    const showTabs = visible("tabs") && quickTabs.length > 0;
+    const showTabs = visible("tabs") && quickTabs.length > 0 && !miniFloating;
     const showMode = visible("mode");
-    const showType = visible("type");
-    const showPeople = visible("people");
+    const showType = visible("type") && !miniFloating;
+    const showPeople = visible("people") && !miniFloating;
     const detailFieldId = detailKind === "mesa" ? "tableNumber" : detailKind === "onibus" ? "busNumber" : "";
     const showDetail = Boolean(detailFieldId && visible(detailFieldId));
-    const showDescription = visible("description");
+    const showDescription = visible("description") && !miniFloating;
     const showPaidWith = visible("paidWith");
     const showPaymentMethod = visible("paymentMethod") && !isMoney && !compactFloating;
     const showResult = visible("result");
@@ -1878,7 +1986,11 @@ function QuickEntry({
     };
 
     return (
-      <form className={`floating-bar ${isMoney ? "money" : "account"} ${showDetail ? "has-detail" : ""} ${compactFloating ? "compact-tab" : ""} ${showTabs ? "with-tabs" : ""}`} onSubmit={onSubmitForm} onKeyDown={onEntryKeyDown}>
+      <form
+        className={`floating-bar ${isMoney ? "money" : "account"} ${showDetail ? "has-detail" : ""} ${compactFloating ? "compact-ui" : ""} ${miniFloating ? "mini-bar" : ""} ${showTabs ? "with-tabs" : ""} ${settings.floating.dragWholeBar ? "drag-anywhere" : ""}`}
+        onSubmit={onSubmitForm}
+        onKeyDown={onEntryKeyDown}
+      >
         <div className="floating-grip" aria-hidden="true">
           <i />
           <i />
@@ -2379,10 +2491,12 @@ function TodayPanel({
 
 function HistoryPanel({
   entries,
+  focusDate,
   onChange,
   onToast
 }: {
   entries: LedgerEntry[];
+  focusDate?: HistoryFocusDate | null;
   onChange: () => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
 }) {
@@ -2393,6 +2507,17 @@ function HistoryPanel({
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const [visibleCount, setVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const deferredQuery = useDeferredValue(query);
+
+  useEffect(() => {
+    if (!focusDate) {
+      return;
+    }
+    setDate(focusDate.date);
+    setStatusFilter("visiveis");
+    setType("Todos");
+    setQuery("");
+    setVisibleCount(HISTORY_PAGE_SIZE);
+  }, [focusDate?.nonce]);
 
   const filtered = useMemo(() => {
     const search = deferredQuery.toLowerCase();
@@ -2725,6 +2850,8 @@ function ReportsPanel({
   remoteClientActive = false,
   canViewTotals = true,
   canViewEntryValues = true,
+  focusPeriod,
+  onFocusConsumed,
   onExport,
   onExportFiltered
 }: {
@@ -2735,6 +2862,8 @@ function ReportsPanel({
   remoteClientActive?: boolean;
   canViewTotals?: boolean;
   canViewEntryValues?: boolean;
+  focusPeriod?: ReportFocusPeriod | null;
+  onFocusConsumed?: () => void;
   onExport: () => Promise<void>;
   onExportFiltered: (ids: string[], label: string) => Promise<void>;
 }) {
@@ -2752,6 +2881,20 @@ function ReportsPanel({
   useEffect(() => {
     setShowSensitive(canViewTotals && !settings.privacy.hideReportTotals);
   }, [settings.privacy.hideReportTotals, canViewTotals]);
+
+  useEffect(() => {
+    if (!focusPeriod) {
+      return;
+    }
+    setFrom(focusPeriod.from);
+    setTo(focusPeriod.to);
+    setType("Todos");
+    setPayment("Todos");
+    setTable("");
+    setBus("");
+    setQuery("");
+    onFocusConsumed?.();
+  }, [focusPeriod?.nonce]);
 
   const periodEntries = useMemo(() => {
     const search = deferredQuery.toLowerCase();
@@ -3277,7 +3420,7 @@ function ServerPanel({
               <div className="entry-grid">
                 <label className="field description-field">
                   <span>Endereco do servidor</span>
-                  <input value={connectHost} onChange={(event) => setConnectHost(event.target.value)} placeholder="http://192.168.0.10:4317" />
+                  <input value={connectHost} onChange={(event) => setConnectHost(event.target.value)} placeholder="192.168.0.10, 192.168.0.10:4317 ou so 10" />
                 </label>
                 <label className="field">
                   <span>Senha</span>
@@ -3291,7 +3434,7 @@ function ServerPanel({
               <div className="connection-steps">
                 <span><Wifi size={16} /> 1. Abra o servidor no PC principal.</span>
                 <span><KeyRound size={16} /> 2. Digite endereco, senha e o nome deste caixa.</span>
-                <span><PlugZap size={16} /> 3. Clique em Conectar no app para operar como extensao do caixa principal.</span>
+                <span><PlugZap size={16} /> 3. Pode digitar IP completo, IP:porta ou so o ultimo numero se estiver na mesma rede.</span>
               </div>
               {remoteMessage && <p className="settings-note">{remoteMessage}</p>}
               <div className="submit-row">
@@ -3306,7 +3449,14 @@ function ServerPanel({
                 <button
                   className="ghost-button"
                   disabled={!connectHost}
-                  onClick={() => window.open(connectPassword ? `${normalizeRemoteBaseUrl(connectHost)}?password=${encodeURIComponent(connectPassword)}&device=${encodeURIComponent(connectDeviceName || "App cliente")}` : normalizeRemoteBaseUrl(connectHost))}
+                  onClick={() => {
+                    try {
+                      const baseUrl = normalizeRemoteBaseUrl(connectHost, port, server.ips);
+                      window.open(connectPassword ? `${baseUrl}?password=${encodeURIComponent(connectPassword)}&device=${encodeURIComponent(connectDeviceName || "App cliente")}` : baseUrl);
+                    } catch (error) {
+                      onToast("error", error instanceof Error ? error.message : "Endereco invalido.");
+                    }
+                  }}
                 >
                   <ExternalLink size={18} /> Abrir no navegador
                 </button>
@@ -3515,13 +3665,30 @@ function RemoteClientWorkspace({
   );
 }
 
-function normalizeRemoteBaseUrl(value: string): string {
+function normalizeRemoteBaseUrl(value: string, defaultPort = 4317, localIps: string[] = []): string {
   const trimmed = value.trim();
   if (!trimmed) {
     throw new Error("Informe o endereco do servidor.");
   }
-  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
-  return withProtocol.replace(/\/+$/, "");
+  let hostInput = trimmed;
+  const shortIpMatch = hostInput.match(/^(\d{1,3})(?::(\d{1,5}))?$/);
+  if (shortIpMatch) {
+    const lastOctet = Number(shortIpMatch[1]);
+    const localIp = localIps.find((ip) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip));
+    if (!localIp || lastOctet < 0 || lastOctet > 255) {
+      throw new Error("Digite o IP completo do servidor ou use um ultimo numero valido da rede.");
+    }
+    hostInput = `${localIp.split(".").slice(0, 3).join(".")}.${lastOctet}${shortIpMatch[2] ? `:${shortIpMatch[2]}` : ""}`;
+  }
+  const withProtocol = /^https?:\/\//i.test(hostInput) ? hostInput : `http://${hostInput}`;
+  const url = new URL(withProtocol);
+  if (!url.port) {
+    url.port = String(defaultPort || 4317);
+  }
+  url.pathname = "";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/+$/, "");
 }
 
 function SettingsPanel({
@@ -3601,6 +3768,14 @@ function SettingsPanel({
     if (folder) {
       update("outputDirectory", folder);
     }
+  };
+
+  const useSafeOutputFolder = async () => {
+    const snapshot = await window.caixa.getDiagnostics();
+    const base = snapshot.dataDirectory.replace(/[\\/]data$/i, "");
+    const separator = snapshot.dataDirectory.includes("\\") ? "\\" : "/";
+    update("outputDirectory", `${base}${separator}planilhas`);
+    onToast("info", "Pasta segura do app aplicada ao rascunho. Salve para usar.");
   };
 
   const applyFloatingPreset = (preset: FloatingPreset) => {
@@ -4169,7 +4344,7 @@ function SettingsPanel({
               Gerar/abrir arquivo
             </button>
           </div>
-          <label className="field path-field"><span>Pasta padrao</span><input value={draft.outputDirectory} onChange={(event) => update("outputDirectory", event.target.value)} /><button onClick={chooseFolder} type="button">Escolher</button></label>
+          <label className="field path-field"><span>Pasta padrao</span><input value={draft.outputDirectory} onChange={(event) => update("outputDirectory", event.target.value)} /><button onClick={chooseFolder} type="button">Escolher</button><button onClick={useSafeOutputFolder} type="button">Usar pasta segura</button></label>
           <label className="field"><span>Formato</span>
             <select value={draft.fileFormat} onChange={(event) => update("fileFormat", event.target.value as AppSettings["fileFormat"])}>
               <option value="xlsx">Excel (.xlsx)</option>
@@ -4224,6 +4399,7 @@ function SettingsPanel({
               const active =
                 draft.defaultType === preset.defaultType &&
                 normalizeFloatingFields(draft.floating.visibleFields).join("|") === normalizeFloatingFields(preset.fields).join("|") &&
+                (draft.floating.layoutMode || "adaptive") === (preset.layoutMode || "adaptive") &&
                 draft.quickTabs.filter((tab) => tab.enabled).map((tab) => tab.id).join("|") ===
                   preset.quickTabs.filter((tab) => tab.enabled).map((tab) => tab.id).join("|");
               return (
@@ -4252,6 +4428,13 @@ function SettingsPanel({
               <option value="italia">Italia</option>
             </select>
           </label>
+          <label className="field"><span>Modo visual</span>
+            <select value={draft.floating.layoutMode || "adaptive"} onChange={(event) => update("floating", { ...draft.floating, layoutMode: event.target.value as AppSettings["floating"]["layoutMode"] })}>
+              <option value="adaptive">Adaptavel</option>
+              <option value="compact">Compacto</option>
+              <option value="mini">Mini caixa</option>
+            </select>
+          </label>
           <label className="field">
             <span>Opacidade ({Math.round(draft.floating.opacity * 100)}%)</span>
             <input
@@ -4267,6 +4450,7 @@ function SettingsPanel({
           </label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar posicao</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.borderless} onChange={(event) => update("floating", { ...draft.floating, borderless: event.target.checked })} /> Visual sem borda de janela</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.dragWholeBar} onChange={(event) => update("floating", { ...draft.floating, dragWholeBar: event.target.checked })} /> Arrastar pela barra inteira</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.syncMoneyWithEntryType} onChange={(event) => update("floating", { ...draft.floating, syncMoneyWithEntryType: event.target.checked })} /> Manter Mesa ou Onibus ao trocar Conta/Dinheiro</label>
           <div className="floating-field-picker">
             <div className="section-title">

@@ -137,7 +137,7 @@ def main() -> int:
             ...snapshot.settings,
             theme: 'datacaixa',
             accentColor: '#0565b7',
-            floating: { ...snapshot.settings.floating, theme: 'follow', opacity: 1 }
+            floating: { ...snapshot.settings.floating, theme: 'follow', opacity: 1, layoutMode: 'adaptive', dragWholeBar: false }
           });
           const yesterdayResult = await window.caixa.addEntry({ type: 'Venda', value: 800, people: 1, description: 'Ontem smoke' });
           const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -171,6 +171,21 @@ def main() -> int:
       page.get_by_role("button", name="Registrar").first.click()
       expect(page.get_by_text("Lancamento registrado.")).to_be_visible(timeout=15000)
       expect(page.locator(".topbar-card strong")).to_contain_text("R$ 45,00")
+      page.locator(".topbar-card-button").click()
+      expect(page.get_by_text("Relatorio deste dia")).to_be_visible(timeout=10000)
+      page.get_by_role("button", name="Ativar privacidade").click()
+      expect(page.locator(".topbar-card strong")).to_contain_text("Privado")
+      page.locator(".topbar-card-button").click()
+      page.get_by_role("button", name="Mostrar total no topo").click()
+      expect(page.locator(".topbar-card strong")).to_contain_text("R$ 45,00")
+      page.locator(".topbar-card-button").click()
+      page.get_by_role("button", name="Relatorio deste dia").click()
+      today_key = datetime.now().strftime("%Y-%m-%d")
+      report_dates = page.locator(".report-filter-bar input[type='date']")
+      expect(page.get_by_text("Relatorios com filtros")).to_be_visible(timeout=10000)
+      if report_dates.nth(0).input_value() != today_key or report_dates.nth(1).input_value() != today_key:
+        print("Total menu did not open the report focused on today.", file=sys.stderr)
+        return 1
       page.get_by_role("button", name="Caixa").click()
       page.get_by_role("button", name="Divisao de conta").click()
       page.get_by_label("Valor").first.fill("10,64")
@@ -203,6 +218,7 @@ def main() -> int:
       expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Barra fixada").click()
       expect(page.get_by_text("Elementos da barra")).to_be_visible()
+      expect(page.get_by_label("Modo visual")).to_be_visible()
       expect(page.get_by_text("Campo curto para numero da mesa.")).to_be_visible()
       expect(page.get_by_text("Campo curto para numero do onibus.")).to_be_visible()
       expect(page.get_by_text("Pix, debito, credito ou voucher.")).to_be_visible()
@@ -211,12 +227,18 @@ def main() -> int:
       expect(page.get_by_text("Preset Onibus enxuto aplicado ao rascunho.")).to_be_visible(timeout=10000)
       page.get_by_role("button", name="Minimalista Barra bem pequena").click()
       expect(page.get_by_text("Preset Minimalista aplicado ao rascunho.")).to_be_visible(timeout=10000)
+      if page.get_by_label("Modo visual").input_value() != "mini":
+        print("Minimalist floating preset did not switch to mini mode.", file=sys.stderr)
+        return 1
       root_font_after = page.locator("html").evaluate("""(element) => getComputedStyle(element).fontSize""")
       if root_font_before != root_font_after:
         print(f"Floating preset changed global font size: {root_font_before} -> {root_font_after}", file=sys.stderr)
         return 1
       page.get_by_role("button", name="Onibus enxuto").click()
       expect(page.get_by_text("Preset Onibus enxuto aplicado ao rascunho.")).to_be_visible(timeout=10000)
+      if page.get_by_label("Modo visual").input_value() != "compact":
+        print("Bus floating preset did not switch to compact mode.", file=sys.stderr)
+        return 1
       expect(page.get_by_label("Visual sem borda de janela")).to_be_checked()
       range_fill = page.get_by_label("Opacidade (100%)").evaluate("""(element) => getComputedStyle(element).getPropertyValue('--range-fill').trim()""")
       if range_fill != "100%":
@@ -225,6 +247,7 @@ def main() -> int:
       page.locator(".settings-nav").get_by_role("button", name="Planilha e backup").click()
       expect(page.get_by_role("button", name="Importar Excel/CSV")).to_be_visible()
       expect(page.get_by_role("button", name="Gerar/abrir arquivo")).to_be_visible()
+      expect(page.get_by_role("button", name="Usar pasta segura")).to_be_visible()
       import_preview = page.evaluate("""async (filePath) => await window.caixa.previewLedgerImport(filePath)""", str(import_file))
       if import_preview["newRows"] != 1 or import_preview["duplicateRows"] != 0 or not import_preview["sample"]:
         print(f"Import preview did not detect the new row: {import_preview}", file=sys.stderr)
@@ -354,7 +377,7 @@ def main() -> int:
         print("Connect tab should be disabled while this app is running the local server.", file=sys.stderr)
         return 1
       remote_base = f"http://127.0.0.1:{remote_port}"
-      page.locator(".connect-panel").get_by_label("Endereco do servidor").fill(remote_base)
+      page.locator(".connect-panel").get_by_label("Endereco do servidor").fill(f"127.0.0.1:{remote_port}")
       page.locator(".connect-panel").get_by_label("Senha").fill(remote_password)
       page.locator(".connect-panel").get_by_label("Nome deste caixa").fill("App cliente smoke")
       page.get_by_role("button", name="Conectar no app").click()
@@ -362,6 +385,7 @@ def main() -> int:
       expect(page.get_by_text("Historico vindo do caixa principal")).to_be_visible(timeout=15000)
       expect(page.locator(".connect-panel .description-field input")).to_have_count(0)
       expect(page.locator(".topbar-card")).to_contain_text("Privado", timeout=10000)
+      expect(page.locator(".topbar-card-button")).to_be_disabled(timeout=10000)
       page.evaluate(
         """async () => {
           const snapshot = await window.caixa.getSnapshot();
@@ -375,6 +399,10 @@ def main() -> int:
         }"""
       )
       expect(page.locator(".topbar-card")).to_contain_text("R$", timeout=15000)
+      expect(page.locator(".topbar-card-button")).to_be_enabled(timeout=10000)
+      page.locator(".topbar-card-button").click()
+      expect(page.get_by_role("button", name="Relatorio deste dia")).to_be_visible(timeout=10000)
+      page.keyboard.press("Escape")
       page.evaluate(
         """async () => {
           const snapshot = await window.caixa.getSnapshot();

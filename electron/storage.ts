@@ -413,6 +413,17 @@ function mergeProfiles(defaultProfiles: AppSettings["profiles"], savedProfiles?:
         visibleFields: mergeFloatingFields(base.floating?.visibleFields || fallbackSettings.floating.visibleFields, saved.floating?.visibleFields)
       };
     }
+    if (name === "Perfil tela pequena" && profile.theme === "datacaixa-dark" && profile.layout === "sidePanel") {
+      profile.theme = "datacaixa";
+      profile.layout = "compact";
+      profile.floating = {
+        ...fallbackSettings.floating,
+        ...profile.floating,
+        visibleFields: mergeFloatingFields(fallbackSettings.floating.visibleFields, ["mode", "value", "tableNumber", "busNumber", "paidWith", "submit"]),
+        layoutMode: "mini",
+        dragWholeBar: true
+      };
+    }
     merged[name] = profile;
   }
   return merged;

@@ -342,7 +342,7 @@ async function bootstrap() {
   registerAppProtocol();
   const dataDirectory = process.env.CAIXA_DATA_DIR || path.join(app.getPath("userData"), "data");
   const defaultOutputDirectory =
-    process.env.CAIXA_OUTPUT_DIR || path.join(app.getPath("documents"), "Contabilizador Caixa");
+    process.env.CAIXA_OUTPUT_DIR || path.join(app.getPath("userData"), "planilhas");
   store = new LedgerStore({ dataDirectory, defaultOutputDirectory });
   exporter = new LedgerExporter(dataDirectory);
   logger = new DiagnosticLogger(dataDirectory);

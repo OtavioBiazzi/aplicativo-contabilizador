@@ -42,8 +42,9 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Presets da barra fixada: Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, todos editaveis depois.
 - Presets da barra fixada ajustam apenas a barra, sem alterar fonte, densidade ou layout global do aplicativo.
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
-- Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida, limite minimo menor para notebooks e arraste apenas pela alca de tres pontos.
-- Barra fixada entra em modo baixo automaticamente quando a janela e reduzida, escondendo rotulos e compactando botoes/campos para ocupar menos altura.
+- Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida, limite minimo menor para notebooks e opcao de arrastar pela barra inteira.
+- Barra fixada com modos **Adaptavel**, **Compacto** e **Mini caixa**. O Mini caixa ocupa pouca altura, esconde rotulos e prioriza valor, vinculo Mesa/Onibus, pago com e enviar.
+- Total de hoje no topo abre um menu rapido para privacidade, relatorio do dia e historico, respeitando permissoes do cliente remoto.
 - Temas DataCaixa PDV, DataCaixa PDV escuro e Italia como base do remake visual, com contraste revisado em menus e hovers.
 - Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
 - Historico com lixeira, restauracao e exclusao definitiva.
@@ -137,11 +138,13 @@ Os atalhos podem ser alterados ou desativados em **Ajustes > Atalhos**: clique n
 
 O app salva dados internos no diretorio de dados do Electron do usuario e exporta planilhas para a pasta configurada em **Configuracoes > Arquivos**.
 
-Por padrao, a pasta de exportacao e:
+Por padrao, novas instalacoes salvam planilhas em uma pasta interna segura do app para reduzir alertas do Windows Defender em pastas protegidas:
 
 ```text
-Documentos/Contabilizador Caixa
+AppData/Roaming/Contabilizador Caixa/planilhas
 ```
+
+Voce ainda pode escolher **Documentos/Contabilizador Caixa** ou qualquer outra pasta em **Ajustes > Planilha e backup**. Se o Windows Defender avisar sobre pasta protegida, use **Usar pasta segura** nessa mesma tela e salve as configuracoes.
 
 Exemplos de arquivos:
 
@@ -168,7 +171,7 @@ Quando backup automatico estiver ativo, arquivos existentes sao copiados para a 
 3. Em **Permissoes**, escolha visualizar, registrar, editar, apagar, ver totais vendidos e, se quiser, liberar o acesso local completo do cliente.
 4. Clique em **Abrir servidor**.
 5. Em outro computador da mesma rede, abra o endereco mostrado pelo app ou use a subaba **Conectar** para montar o link.
-6. Para usar outro PC com o proprio aplicativo, abra **Rede > Conectar**, informe endereco, senha e nome do caixa, e clique em **Conectar no app**.
+6. Para usar outro PC com o proprio aplicativo, abra **Rede > Conectar**, informe endereco, senha e nome do caixa, e clique em **Conectar no app**. O campo aceita link completo, `IP:porta`, apenas o IP ou so o ultimo numero do IP quando os computadores estao na mesma rede.
 
 No modo cliente, a aparencia local continua podendo ser ajustada, mas o resultado enviado para o Excel segue o computador principal. Se o servidor esconder descricao, tipo, mesa, onibus, pagamento ou outro campo da barra, o cliente tambem nao envia esse campo. A barra fixada do cliente usa a mesma sessao remota e manda os lancamentos para o caixa principal.
 
@@ -207,7 +210,7 @@ No desenvolvimento local deste projeto, o teste abre o Electron real via porta d
 - categoria Perfis e API de exportar/importar configuracoes;
 - barra fixada com troca de modo e troco;
 - elementos configuraveis da barra fixada;
-- barra fixada compacta em 76px de altura com controles principais visiveis;
+- barra fixada compacta em 76px de altura com controles principais visiveis e modo Mini caixa;
 - importacao CSV e XLSX com deduplicacao;
 - hover legivel no tema DataCaixa;
 - total de hoje sem somar lancamentos de ontem;

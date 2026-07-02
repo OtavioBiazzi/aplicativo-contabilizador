@@ -24,6 +24,7 @@ export type FileStrategy = "daily" | "monthlyTabs" | "fixedAll" | "byType";
 export type SpreadsheetMode = "simple" | "advanced";
 export type ThemeMode = "light" | "dark" | "auto" | "contrast" | "datacaixa" | "datacaixa-dark" | "italia";
 export type FloatingThemeMode = "follow" | ThemeMode;
+export type FloatingLayoutMode = "adaptive" | "compact" | "mini";
 export type DensityMode = "compact" | "normal" | "comfortable";
 export type LayoutMode = "complete" | "compact" | "pinnedBar" | "grid" | "sidePanel";
 
@@ -131,9 +132,11 @@ export interface RemoteClientPolicy {
 
 export interface FloatingSettings {
   visibleFields: string[];
+  layoutMode: FloatingLayoutMode;
   opacity: number;
   borderless: boolean;
   lockPosition: boolean;
+  dragWholeBar: boolean;
   theme: FloatingThemeMode;
   syncMoneyWithEntryType: boolean;
 }
