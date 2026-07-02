@@ -78,7 +78,7 @@ type SettingsCategory =
   | "defaults"
   | "profiles"
   | "files"
-  | "reports"
+  | "privacy"
   | "server"
   | "shortcuts"
   | "updates"
@@ -943,6 +943,7 @@ export function App() {
   const [totalMenuOpen, setTotalMenuOpen] = useState(false);
   const [reportFocus, setReportFocus] = useState<ReportFocusPeriod | null>(null);
   const [historyFocus, setHistoryFocus] = useState<HistoryFocusDate | null>(null);
+  const [settingsFocus, setSettingsFocus] = useState<{ category: SettingsCategory; nonce: number } | null>(null);
   const [remoteSession, setRemoteSession] = useState<RemoteClientSession | null>(null);
   const [remoteMessage, setRemoteMessage] = useState("");
   const [remoteLoading, setRemoteLoading] = useState(false);
@@ -1555,6 +1556,7 @@ export function App() {
                 </button>
               )}
               <button type="button" onClick={() => {
+                setSettingsFocus({ category: "privacy", nonce: Date.now() });
                 setActiveTab("settings");
                 setTotalMenuOpen(false);
               }}>
@@ -1667,6 +1669,8 @@ export function App() {
               settings={settings}
               remoteClientActive={Boolean(remoteSession)}
               remoteClientPermissions={remoteSession?.permissions}
+              focusCategory={settingsFocus}
+              onFocusCategoryConsumed={() => setSettingsFocus(null)}
               onSave={saveSettings}
               onToast={showToast}
               onImportLedger={importLedgerFile}
@@ -2013,6 +2017,7 @@ function QuickEntry({
           </div>
         )}
 
+        <div className="floating-main-row">
         {showMode && (
           <button
             className="floating-mode"
@@ -2150,6 +2155,7 @@ function QuickEntry({
             Enviar
           </button>
         )}
+        </div>
 
         <button className="floating-close" type="button" onClick={onUnpin} title="Voltar ao app completo">
           <Undo2 size={16} />
@@ -3695,6 +3701,8 @@ function SettingsPanel({
   settings,
   remoteClientActive,
   remoteClientPermissions,
+  focusCategory,
+  onFocusCategoryConsumed,
   onSave,
   onToast,
   onImportLedger,
@@ -3703,6 +3711,8 @@ function SettingsPanel({
   settings: AppSettings;
   remoteClientActive: boolean;
   remoteClientPermissions?: ServerPermissions | null;
+  focusCategory?: { category: SettingsCategory; nonce: number } | null;
+  onFocusCategoryConsumed?: () => void;
   onSave: (settings: AppSettings) => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
   onImportLedger: () => Promise<void>;
@@ -3725,6 +3735,13 @@ function SettingsPanel({
   const remoteLockMessage = "So o computador servidor pode editar essa parte enquanto este app esta conectado como cliente. Desconecte do servidor para editar as configuracoes locais deste PC.";
 
   useEffect(() => setDraft(settings), [settings]);
+
+  useEffect(() => {
+    if (focusCategory) {
+      setCategory(focusCategory.category);
+      onFocusCategoryConsumed?.();
+    }
+  }, [focusCategory, onFocusCategoryConsumed]);
 
   useEffect(() => {
     if (category === "advanced") {
@@ -4046,7 +4063,7 @@ function SettingsPanel({
       if (target === "server") {
         return { ...current, server: defaults.server };
       }
-      if (target === "reports") {
+      if (target === "privacy") {
         return { ...current, privacy: defaults.privacy };
       }
       if (target === "shortcuts") {
@@ -4114,7 +4131,7 @@ function SettingsPanel({
     { key: "defaults", label: "Vendas", description: "Tipo, pessoas e arredondamento usados por padrao.", icon: Send },
     { key: "profiles", label: "Perfis", description: "Perfis para alternar entre PC, notebook, tela pequena e barra fixada.", icon: MonitorUp },
     { key: "files", label: "Planilha e backup", description: "Pasta, formato, colunas, backups e organizacao dos arquivos.", icon: FileSpreadsheet },
-    { key: "reports", label: "Relatorios", description: "Visibilidade de totais e comportamento de relatorios.", icon: BarChart3 },
+    { key: "privacy", label: "Privacidade", description: "Controle o que aparece na tela quando ha cliente por perto.", icon: ShieldCheck },
     { key: "server", label: "Servidor", description: "Porta, senha e permissoes para outro dispositivo.", icon: RadioTower },
     { key: "shortcuts", label: "Atalhos", description: "Comandos de teclado para operar mais rapido.", icon: KeyRound },
     { key: "updates", label: "Atualizacoes", description: "Checagem de versoes publicadas no GitHub.", icon: Download },
@@ -4542,25 +4559,80 @@ function SettingsPanel({
           </div>
         </section>
 
-        <section className={categoryClass("reports", "settings-group wide")}>
-          <h3>Privacidade e relatorios</h3>
-          <label className="switch-line">
-            <input
-              type="checkbox"
-              checked={draft.privacy.hideHeaderTotal}
-              onChange={(event) => update("privacy", { ...draft.privacy, hideHeaderTotal: event.target.checked })}
-            />
-            Ocultar total no topo e no painel do caixa
-          </label>
-          <label className="switch-line">
-            <input
-              type="checkbox"
-              checked={draft.privacy.hideReportTotals}
-              onChange={(event) => update("privacy", { ...draft.privacy, hideReportTotals: event.target.checked })}
-            />
-            Abrir relatorios locais com totais ocultos
-          </label>
-          <p className="settings-note">Isso esconde totais gerais na interface local, mas nao apaga valores dos lancamentos nem muda a planilha.</p>
+        <section className={categoryClass("privacy", "settings-group wide privacy-settings")}>
+          <div className="privacy-overview">
+            <div className="privacy-mark">
+              <ShieldCheck size={22} />
+            </div>
+            <div>
+              <span className="settings-overline">Valores sensiveis</span>
+              <h3>Privacidade de caixa</h3>
+              <p>
+                Esconda totais grandes quando o app estiver visivel para cliente, atendente ou outro computador.
+                Os lancamentos continuam salvos normalmente na planilha.
+              </p>
+            </div>
+            <strong>{draft.privacy.hideHeaderTotal || draft.privacy.hideReportTotals ? "Protecao ativa" : "Visao aberta"}</strong>
+          </div>
+
+          <div className="privacy-mode-grid">
+            <button
+              type="button"
+              className={`privacy-mode-card ${!draft.privacy.hideHeaderTotal && !draft.privacy.hideReportTotals ? "active" : ""}`}
+              onClick={() => update("privacy", { ...draft.privacy, hideHeaderTotal: false, hideReportTotals: false })}
+            >
+              <Eye size={18} />
+              <strong>Normal</strong>
+              <span>Mostra total do dia e relatorios completos.</span>
+            </button>
+            <button
+              type="button"
+              className={`privacy-mode-card ${draft.privacy.hideHeaderTotal && !draft.privacy.hideReportTotals ? "active" : ""}`}
+              onClick={() => update("privacy", { ...draft.privacy, hideHeaderTotal: true, hideReportTotals: false })}
+            >
+              <ShieldCheck size={18} />
+              <strong>Balcao</strong>
+              <span>Esconde o total no topo, mas deixa relatorio disponivel.</span>
+            </button>
+            <button
+              type="button"
+              className={`privacy-mode-card ${draft.privacy.hideHeaderTotal && draft.privacy.hideReportTotals ? "active" : ""}`}
+              onClick={() => update("privacy", { ...draft.privacy, hideHeaderTotal: true, hideReportTotals: true })}
+            >
+              <BarChart3 size={18} />
+              <strong>Reservado</strong>
+              <span>Abre relatorios com totais ocultos por padrao.</span>
+            </button>
+          </div>
+
+          <div className="privacy-control-grid">
+            <label className={`privacy-toggle-card ${draft.privacy.hideHeaderTotal ? "enabled" : ""}`}>
+              <input
+                type="checkbox"
+                checked={draft.privacy.hideHeaderTotal}
+                onChange={(event) => update("privacy", { ...draft.privacy, hideHeaderTotal: event.target.checked })}
+              />
+              <span>
+                <strong>Ocultar total no topo</strong>
+                <small>Troca o valor do card superior por "Privado" e reduz exposicao na tela principal.</small>
+              </span>
+            </label>
+            <label className={`privacy-toggle-card ${draft.privacy.hideReportTotals ? "enabled" : ""}`}>
+              <input
+                type="checkbox"
+                checked={draft.privacy.hideReportTotals}
+                onChange={(event) => update("privacy", { ...draft.privacy, hideReportTotals: event.target.checked })}
+              />
+              <span>
+                <strong>Relatorios abrirem ocultos</strong>
+                <small>O relatorio abre protegido, e voce decide quando revelar os totais na tela.</small>
+              </span>
+            </label>
+          </div>
+
+          <p className="settings-note">
+            Privacidade muda somente a visualizacao local. Ela nao altera permissao do servidor, historico, importacao ou arquivo Excel.
+          </p>
         </section>
 
         <section className={categoryClass("server", "settings-group wide")} {...remoteSectionProps("server")}>

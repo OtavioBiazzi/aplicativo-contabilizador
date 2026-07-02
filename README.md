@@ -44,7 +44,9 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
 - Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida, limite minimo menor para notebooks e opcao de arrastar pela barra inteira.
 - Barra fixada com modos **Adaptavel**, **Compacto** e **Mini caixa**. O Mini caixa ocupa pouca altura, esconde rotulos e prioriza valor, vinculo Mesa/Onibus, pago com e enviar.
+- Barra fixada com layout recalculado por linhas: ao ocultar abas ou campos, o espaco livre realmente diminui, sem reservar faixa fantasma nem jogar o valor para baixo.
 - Total de hoje no topo abre um menu rapido para privacidade, relatorio do dia e historico, respeitando permissoes do cliente remoto.
+- Menu do total abre direto a central **Privacidade** quando o usuario clica em ajustes de privacidade.
 - Temas DataCaixa PDV, DataCaixa PDV escuro e Italia como base do remake visual, com contraste revisado em menus e hovers.
 - Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
 - Historico com lixeira, restauracao e exclusao definitiva.
@@ -63,11 +65,11 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Relatorios usam calculos memorizados e busca suavizada para manter a interface responsiva com historico maior.
 - Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
 - Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
-- Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Relatorios, Servidor, Atalhos, Atualizacoes e Avancado.
+- Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Privacidade, Servidor, Atalhos, Atualizacoes e Avancado.
 - Categoria Perfis para aplicar, atualizar, criar e remover perfis sem mexer nos dados de venda.
 - Tela de configuracoes com cabecalho por categoria, presets operacionais e layout mais controlado para monitores grandes.
 - Cabecalho principal contextual por aba, separando operacao de caixa, historico, relatorios, rede e ajustes.
-- Privacidade local para ocultar total do topo/painel e abrir relatorios com totais escondidos sem apagar valores.
+- Central de privacidade local com modos Normal, Balcao e Reservado para ocultar total do topo/painel e abrir relatorios com totais escondidos sem apagar valores.
 - Permissoes remotas separadas para ver valores de vendas e ver totais sensiveis no servidor.
 - Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
 - Checagem de releases pela area de Atualizacoes, com botao para baixar, fechar, instalar e abrir o app de novo sem abrir o GitHub nem janela de terminal.

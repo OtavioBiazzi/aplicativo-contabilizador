@@ -35,7 +35,7 @@ const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
 const FLOATING_MIN_WIDTH = 520;
 const FLOATING_MAX_WIDTH = 1240;
-const FLOATING_MIN_HEIGHT = 76;
+const FLOATING_MIN_HEIGHT = 56;
 
 interface GitHubReleaseAsset {
   name?: string;
@@ -158,6 +158,8 @@ async function createFloatingWindow(options?: { opacity?: number; lockPosition?:
 
 function floatingWindowSize(settings: AppSettings) {
   const fields = new Set(settings.floating.visibleFields?.length ? settings.floating.visibleFields : ["mode", "type", "value", "people", "description", "submit"]);
+  const layoutMode = settings.floating.layoutMode || "adaptive";
+  const hasTabs = fields.has("tabs") && layoutMode !== "mini";
   const weights: Record<string, number> = {
     tabs: 80,
     mode: 126,
@@ -182,8 +184,8 @@ function floatingWindowSize(settings: AppSettings) {
   return {
     width,
     minWidth: FLOATING_MIN_WIDTH,
-    height: fields.has("tabs") ? 118 : 92,
-    minHeight: FLOATING_MIN_HEIGHT
+    height: hasTabs ? 106 : layoutMode === "mini" ? 62 : 86,
+    minHeight: hasTabs ? 76 : layoutMode === "mini" ? FLOATING_MIN_HEIGHT : 62
   };
 }
 
