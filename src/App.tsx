@@ -4768,7 +4768,7 @@ function SettingsPanel({
             </select>
           </label>
           {draft.server.autoConnection.mode === "client" && (
-            <div className="entry-grid">
+            <div className="entry-grid server-auto-grid">
               <label className="field description-field">
                 <span>Endereco do servidor automatico</span>
                 <input
