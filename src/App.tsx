@@ -109,6 +109,12 @@ interface RemoteClientSession {
   connectedAt: string;
 }
 
+interface RemoteSessionStoragePayload {
+  baseUrl: string;
+  password: string;
+  deviceName: string;
+}
+
 interface ReportFocusPeriod {
   from: string;
   to: string;
@@ -387,6 +393,44 @@ function sanitizeQuickEntryModeState(
 
 function quickEntryStorageScopeForSession(session: RemoteClientSession | null): string {
   return session ? `remote:${session.baseUrl}:${session.deviceName}` : "local";
+}
+
+function readStoredRemoteSession(): RemoteSessionStoragePayload | null {
+  try {
+    const raw = window.localStorage.getItem(REMOTE_SESSION_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<RemoteSessionStoragePayload>;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof parsed.baseUrl !== "string" ||
+      typeof parsed.password !== "string" ||
+      typeof parsed.deviceName !== "string"
+    ) {
+      return null;
+    }
+    return {
+      baseUrl: parsed.baseUrl,
+      password: parsed.password,
+      deviceName: parsed.deviceName
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredRemoteSession(session: RemoteSessionStoragePayload | null) {
+  try {
+    if (!session) {
+      window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(REMOTE_SESSION_STORAGE_KEY, JSON.stringify(session));
+  } catch {
+    // O modo fixado precisa funcionar mesmo se o storage estiver indisponivel.
+  }
 }
 
 function privateSummaryForCount(count: number): DaySummary {
@@ -1004,6 +1048,36 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const syncStoredRemoteSession = () => {
+      const stored = readStoredRemoteSession();
+      const current = remoteSessionRef.current;
+      if (!stored) {
+        if (current) {
+          disconnectRemoteClient();
+        }
+        return;
+      }
+
+      if (current && current.baseUrl === stored.baseUrl && current.password === stored.password && current.deviceName === stored.deviceName) {
+        return;
+      }
+
+      void connectRemoteClient(stored.baseUrl, stored.password, stored.deviceName, { quiet: true, auto: true });
+    };
+
+    syncStoredRemoteSession();
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === REMOTE_SESSION_STORAGE_KEY) {
+        syncStoredRemoteSession();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [settings, server]);
+
+  useEffect(() => {
     if (!settings || !server || IS_FLOATING_WINDOW) {
       return;
     }
@@ -1203,7 +1277,7 @@ export function App() {
       remoteSessionRef.current = null;
       setRemoteSession(null);
       setRemoteMessage("Servidor desconectado. Este app voltou para o modo local.");
-      window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+      writeStoredRemoteSession(null);
       showToast("info", "O servidor foi desligado ou ficou indisponivel. Cliente voltou ao modo local.");
     };
   };
@@ -1282,10 +1356,7 @@ export function App() {
       };
       setRemoteSession(connectedSession);
       remoteSessionRef.current = connectedSession;
-      window.localStorage.setItem(
-        REMOTE_SESSION_STORAGE_KEY,
-        JSON.stringify({ baseUrl, password, deviceName: connectedSession.deviceName })
-      );
+      writeStoredRemoteSession({ baseUrl, password, deviceName: connectedSession.deviceName });
       openRemoteSocket(connectedSession);
       if (!options.quiet) {
         showToast("success", "Cliente conectado ao caixa principal.");
@@ -1294,7 +1365,7 @@ export function App() {
       }
       return true;
     } catch (error) {
-      window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+      writeStoredRemoteSession(null);
       setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel conectar.");
       if (!options.quiet) {
         showToast("error", error instanceof Error ? error.message : "Nao foi possivel conectar.");
@@ -1313,7 +1384,7 @@ export function App() {
     remoteSessionRef.current = null;
     setRemoteSession(null);
     setRemoteMessage("");
-    window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+    writeStoredRemoteSession(null);
     showToast("info", "Cliente remoto desconectado.");
   };
 
