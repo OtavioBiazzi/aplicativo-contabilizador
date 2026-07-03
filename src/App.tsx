@@ -1388,6 +1388,19 @@ export function App() {
     showToast("info", "Cliente remoto desconectado.");
   };
 
+  const ensureRemoteSession = async () => {
+    const current = remoteSessionRef.current;
+    if (current) {
+      return current;
+    }
+    const stored = readStoredRemoteSession();
+    if (!stored) {
+      return null;
+    }
+    const connected = await connectRemoteClient(stored.baseUrl, stored.password, stored.deviceName, { quiet: true, auto: true });
+    return connected ? remoteSessionRef.current : null;
+  };
+
   const addEntry = async (draft: EntryDraft) => {
     const result = await window.caixa.addEntry(draft);
     await reload();
@@ -1395,22 +1408,23 @@ export function App() {
     showToast(result.exportStatus.ok ? "success" : "error", result.exportStatus.ok ? "Lancamento registrado." : result.exportStatus.message || "Lancamento salvo localmente.");
   };
 
-  const submitRemoteEntry = async (draft: EntryDraft) => {
-    if (!remoteSession?.permissions.create) {
+  const submitRemoteEntry = async (draft: EntryDraft, session = remoteSessionRef.current) => {
+    if (!session?.permissions.create) {
       showToast("error", "Este cliente nao tem permissao para registrar.");
       return;
     }
-    await remoteRequest<{ entry: LedgerEntry }>(remoteSession, "/api/entries", {
+    await remoteRequest<{ entry: LedgerEntry }>(session, "/api/entries", {
       method: "POST",
       body: JSON.stringify(draft)
     });
-    await refreshRemote(remoteSession);
+    await refreshRemote(session);
     showToast("success", "Lancamento enviado ao caixa principal.");
   };
 
   const submitEntry = async (draft: EntryDraft) => {
-    if (remoteSession) {
-      await submitRemoteEntry(draft);
+    const activeRemoteSession = remoteSessionRef.current || (await ensureRemoteSession());
+    if (activeRemoteSession) {
+      await submitRemoteEntry(draft, activeRemoteSession);
       return;
     }
     await addEntry(draft);
