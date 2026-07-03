@@ -1002,6 +1002,7 @@ export function App() {
   const remoteSocket = useRef<WebSocket | null>(null);
   const remoteSessionRef = useRef<RemoteClientSession | null>(null);
   const remoteManualDisconnect = useRef(false);
+  const remoteReconnectTimer = useRef<number | null>(null);
   const autoConnectionAttemptKey = useRef<string | null>(null);
 
   const todayEntries = useMemo(() => filterEntriesByLocalDate(entries, currentDateKey), [entries, currentDateKey]);
@@ -1042,6 +1043,10 @@ export function App() {
 
   useEffect(() => {
     return () => {
+      if (remoteReconnectTimer.current !== null) {
+        window.clearTimeout(remoteReconnectTimer.current);
+        remoteReconnectTimer.current = null;
+      }
       remoteSocket.current?.close();
       remoteSocket.current = null;
     };
@@ -1253,6 +1258,10 @@ export function App() {
   };
 
   const openRemoteSocket = (session: RemoteClientSession) => {
+    if (remoteReconnectTimer.current !== null) {
+      window.clearTimeout(remoteReconnectTimer.current);
+      remoteReconnectTimer.current = null;
+    }
     if (remoteSocket.current) {
       remoteSocket.current.onclose = null;
       remoteSocket.current.close();
@@ -1277,8 +1286,19 @@ export function App() {
       remoteSessionRef.current = null;
       setRemoteSession(null);
       setRemoteMessage("Servidor desconectado. Este app voltou para o modo local.");
-      writeStoredRemoteSession(null);
       showToast("info", "O servidor foi desligado ou ficou indisponivel. Cliente voltou ao modo local.");
+      if (IS_FLOATING_WINDOW && readStoredRemoteSession()) {
+        remoteReconnectTimer.current = window.setTimeout(() => {
+          remoteReconnectTimer.current = null;
+          const stored = readStoredRemoteSession();
+          if (!stored || remoteSocket.current || remoteManualDisconnect.current) {
+            return;
+          }
+          void ensureRemoteSession().catch((error) => {
+            setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel reconectar.");
+          });
+        }, 1200);
+      }
     };
   };
 
@@ -1381,6 +1401,10 @@ export function App() {
   const disconnectRemoteClient = () => {
     const socket = remoteSocket.current;
     remoteManualDisconnect.current = Boolean(socket);
+    if (remoteReconnectTimer.current !== null) {
+      window.clearTimeout(remoteReconnectTimer.current);
+      remoteReconnectTimer.current = null;
+    }
     socket?.close();
     remoteSocket.current = null;
     remoteSessionRef.current = null;
