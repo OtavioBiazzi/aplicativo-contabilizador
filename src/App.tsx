@@ -1365,7 +1365,9 @@ export function App() {
       }
       return true;
     } catch (error) {
-      writeStoredRemoteSession(null);
+      if (!options.auto) {
+        writeStoredRemoteSession(null);
+      }
       setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel conectar.");
       if (!options.quiet) {
         showToast("error", error instanceof Error ? error.message : "Nao foi possivel conectar.");
@@ -1422,9 +1424,18 @@ export function App() {
   };
 
   const submitEntry = async (draft: EntryDraft) => {
+    const remoteIntent = Boolean(remoteSessionRef.current || readStoredRemoteSession());
     const activeRemoteSession = remoteSessionRef.current || (await ensureRemoteSession());
     if (activeRemoteSession) {
       await submitRemoteEntry(draft, activeRemoteSession);
+      return;
+    }
+    if (remoteIntent) {
+      const message = IS_FLOATING_WINDOW
+        ? "A barra fixada perdeu a conexao com o servidor. Reconecte o cliente antes de enviar."
+        : "Este app esta em modo cliente, mas nao conseguiu reconectar ao servidor.";
+      setRemoteMessage(message);
+      showToast("error", message);
       return;
     }
     await addEntry(draft);
