@@ -9,6 +9,7 @@ interface ExportState {
   pendingCount: number;
   lastError?: string;
   lastFilePath?: string;
+  lastFilePaths?: string[];
 }
 
 const EXPORT_STATE_FILE = "export-state.json";
@@ -45,6 +46,7 @@ export class LedgerExporter {
         }
         writtenFiles.push(target.filePath);
       }
+      await this.cleanupObsoleteGeneratedFiles(settings, writtenFiles);
 
       const filePath = writtenFiles.length === 1 ? writtenFiles[0] : settings.outputDirectory;
       const status: ExportStatus = {
@@ -53,7 +55,7 @@ export class LedgerExporter {
         pendingCount: 0,
         message: "Exportacao sincronizada."
       };
-      await this.writeState({ pendingCount: 0, lastFilePath: filePath });
+      await this.writeState({ pendingCount: 0, lastFilePath: filePath, lastFilePaths: writtenFiles });
       return status;
     } catch (error) {
       const previous = await this.readState();
@@ -126,6 +128,7 @@ export class LedgerExporter {
 
   private buildTargets(entries: LedgerEntry[], settings: AppSettings) {
     const extension = settings.fileFormat;
+    const exportableEntries = entries.filter((entry) => entry.status !== "deleted");
     const visibleColumns =
       settings.spreadsheetMode === "simple"
         ? SIMPLE_COLUMNS
@@ -133,36 +136,35 @@ export class LedgerExporter {
           ? settings.visibleColumns
           : DEFAULT_COLUMNS;
 
-    const rowsFor = (rows: LedgerEntry[]) =>
-      rows.filter((entry) => entry.status !== "deleted").map((entry) => toRow(entry, visibleColumns));
+    const rowsFor = (rows: LedgerEntry[]) => rows.map((entry) => toRow(entry, visibleColumns));
 
     if (settings.fileStrategy === "daily" || (settings.fileStrategy === "monthlyTabs" && settings.fileFormat !== "xlsx")) {
-      const grouped = groupBy(entries, (entry) => formatDateToken(new Date(entry.createdAt), settings));
-      return Object.entries(grouped).map(([date, rows]) => ({
+      const grouped = groupBy(exportableEntries, (entry) => formatDateToken(entryDate(entry), settings));
+      return Object.entries(grouped).sort(([left], [right]) => left.localeCompare(right)).map(([date, rows]) => ({
         filePath: path.join(settings.outputDirectory, `vendas-${date}.${extension}`),
         sheets: [{ name: "Lancamentos", rows: rowsFor(rows) }]
       }));
     }
 
     if (settings.fileStrategy === "byType") {
-      const grouped = groupBy(entries, (entry) => {
+      const grouped = groupBy(exportableEntries, (entry) => {
         const type = sanitizeFilePart(entry.type);
-        const date = formatDateToken(new Date(entry.createdAt), settings);
+        const date = formatDateToken(entryDate(entry), settings);
         return `${type}-${date}`;
       });
-      return Object.entries(grouped).map(([filePart, rows]) => ({
+      return Object.entries(grouped).sort(([left], [right]) => left.localeCompare(right)).map(([filePart, rows]) => ({
         filePath: path.join(settings.outputDirectory, `${filePart}.${extension}`),
         sheets: [{ name: "Lancamentos", rows: rowsFor(rows) }]
       }));
     }
 
     if (settings.fileStrategy === "monthlyTabs" && settings.fileFormat === "xlsx") {
-      const groupedByMonth = groupBy(entries, (entry) => getLocalMonthKey(entry.createdAt));
-      return Object.entries(groupedByMonth).map(([month, monthRows]) => {
-        const groupedByDay = groupBy(monthRows, (entry) => formatDateToken(new Date(entry.createdAt), settings));
+      const groupedByMonth = groupBy(exportableEntries, (entry) => getLocalMonthKey(entryDate(entry)));
+      return Object.entries(groupedByMonth).sort(([left], [right]) => left.localeCompare(right)).map(([month, monthRows]) => {
+        const groupedByDay = groupBy(monthRows, (entry) => formatDateToken(entryDate(entry), settings));
         return {
           filePath: path.join(settings.outputDirectory, `caixa-${month}.${extension}`),
-          sheets: Object.entries(groupedByDay).map(([date, rows]) => ({
+          sheets: Object.entries(groupedByDay).sort(([left], [right]) => left.localeCompare(right)).map(([date, rows]) => ({
             name: date.slice(0, 31),
             rows: rowsFor(rows)
           }))
@@ -173,7 +175,7 @@ export class LedgerExporter {
     return [
       {
         filePath: path.join(settings.outputDirectory, `caixa-geral.${extension}`),
-        sheets: [{ name: "Lancamentos", rows: rowsFor(entries) }]
+        sheets: [{ name: "Lancamentos", rows: rowsFor(exportableEntries) }]
       }
     ];
   }
@@ -194,7 +196,7 @@ export class LedgerExporter {
     });
 
     const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    await fs.writeFile(filePath, buffer);
+    await writeFileAtomic(filePath, buffer);
   }
 
   private async writeCsv(filePath: string, rows: Record<string, unknown>[], separator: string) {
@@ -204,7 +206,35 @@ export class LedgerExporter {
       columns.map((column) => escapeCsv(column, separator)).join(separator),
       ...rowsWithTotal.map((row) => columns.map((column) => escapeCsv(row[column], separator)).join(separator))
     ];
-    await fs.writeFile(filePath, lines.join("\n"), "utf8");
+    await writeFileAtomic(filePath, lines.join("\n"), "utf8");
+  }
+
+  private async cleanupObsoleteGeneratedFiles(settings: AppSettings, expectedFiles: string[]) {
+    const expected = new Set(expectedFiles.map(normalizePath));
+    let files: import("node:fs").Dirent[];
+    try {
+      files = await fs.readdir(settings.outputDirectory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const file of files) {
+      if (!file.isFile() || !isGeneratedLedgerFile(file.name, settings)) {
+        continue;
+      }
+      const filePath = path.join(settings.outputDirectory, file.name);
+      if (expected.has(normalizePath(filePath))) {
+        continue;
+      }
+      await this.backupIfNeeded(filePath, settings.backupEnabled);
+      try {
+        await fs.unlink(filePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
   }
 
   private async backupIfNeeded(filePath: string, enabled: boolean) {
@@ -237,6 +267,61 @@ export class LedgerExporter {
   private async writeState(state: ExportState) {
     await fs.mkdir(this.dataDirectory, { recursive: true });
     await fs.writeFile(this.statePath, JSON.stringify(state, null, 2), "utf8");
+  }
+}
+
+function entryDate(entry: LedgerEntry): Date {
+  const created = new Date(entry.createdAt);
+  if (!Number.isNaN(created.getTime())) {
+    return created;
+  }
+  const updated = new Date(entry.updatedAt);
+  return Number.isNaN(updated.getTime()) ? new Date() : updated;
+}
+
+function normalizePath(filePath: string): string {
+  return path.resolve(filePath).toLowerCase();
+}
+
+function isGeneratedLedgerFile(fileName: string, settings: AppSettings): boolean {
+  const extension = escapeRegExp(settings.fileFormat);
+  const dateToken = "(?:\\d{4}-\\d{2}-\\d{2}|\\d{2}-\\d{2}-\\d{4}|\\d{8})";
+
+  if (new RegExp(`^relatorio-.*\\.${extension}$`, "i").test(fileName)) {
+    return false;
+  }
+  if (settings.fileStrategy === "daily" || (settings.fileStrategy === "monthlyTabs" && settings.fileFormat !== "xlsx")) {
+    return new RegExp(`^vendas-${dateToken}\\.${extension}$`, "i").test(fileName);
+  }
+  if (settings.fileStrategy === "monthlyTabs" && settings.fileFormat === "xlsx") {
+    return /^caixa-\d{4}-\d{2}\.xlsx$/i.test(fileName);
+  }
+  if (settings.fileStrategy === "fixedAll") {
+    return new RegExp(`^caixa-geral\\.${extension}$`, "i").test(fileName);
+  }
+  if (settings.fileStrategy === "byType") {
+    return new RegExp(`^[a-z0-9-]+-${dateToken}\\.${extension}$`, "i").test(fileName);
+  }
+  return false;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function writeFileAtomic(filePath: string, data: string | Buffer, encoding?: BufferEncoding) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    if (typeof data === "string") {
+      await fs.writeFile(tempPath, data, encoding || "utf8");
+    } else {
+      await fs.writeFile(tempPath, data);
+    }
+    await fs.rename(tempPath, filePath);
+  } catch (error) {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
   }
 }
 

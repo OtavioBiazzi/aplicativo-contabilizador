@@ -52,6 +52,8 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 - Historico com lixeira, restauracao e exclusao definitiva.
 - Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL por formula.
 - Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
+- Arquivos diarios/mensais antigos gerados pelo app sao limpos quando o ultimo lancamento daquele dia/mes e apagado ou movido, evitando dados fantasmas em planilhas antigas.
+- Escrita de Excel/CSV usa arquivo temporario e troca atomica para reduzir risco de arquivo corrompido se o Excel estiver aberto, travado ou se ocorrer falha durante a gravacao.
 - Total do dia, painel lateral e servidor local somam somente lancamentos do dia atual.
 - Servidor local com senha, permissoes, cliente remoto dentro do proprio app, mini-caixa web em estilo DataCaixa, cadastro remoto, edicao, cancelamento, lixeira, origem do dispositivo e atualizacao em tempo real via WebSocket.
 - Cliente remoto obedece o contrato do servidor: modos permitidos, campos visiveis, mesa/onibus, pagamento e descricao seguem o computador principal para nao mudar o formato do Excel.

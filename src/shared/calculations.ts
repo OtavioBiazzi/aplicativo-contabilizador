@@ -51,9 +51,10 @@ export function formatCurrency(value: number): string {
 
 export function formatDateTime(iso: string): { date: string; time: string } {
   const date = new Date(iso);
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
   return {
-    date: date.toLocaleDateString("pt-BR"),
-    time: date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    date: safeDate.toLocaleDateString("pt-BR"),
+    time: safeDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
   };
 }
 
