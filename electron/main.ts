@@ -560,6 +560,15 @@ function registerIpc() {
     return status;
   });
 
+  ipcMain.handle("export:today", async () => {
+    const status = await exporter.exportTodayRecovery(await store.getEntries(), await store.getSettings());
+    await logExportStatus("arquivo de resgate de hoje", status);
+    if (status.filePath) {
+      shell.showItemInFolder(status.filePath);
+    }
+    return status;
+  });
+
   ipcMain.handle("reports:exportFiltered", async (_event, ids: string[], label: string) => {
     const idSet = new Set(ids);
     const entries = (await store.getEntries()).filter((entry) => idSet.has(entry.id));

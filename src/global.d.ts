@@ -30,6 +30,7 @@ export interface CaixaApi {
   importLedgerFile: (filePath?: string) => Promise<LedgerImportResult | null>;
   importLedgerFolder: (folderPath?: string) => Promise<LedgerFolderImportResult | null>;
   exportNow: () => Promise<ExportStatus>;
+  exportTodayRecovery: () => Promise<ExportStatus>;
   exportFilteredReport: (ids: string[], label: string) => Promise<ExportStatus>;
   getDiagnostics: () => Promise<DiagnosticsSnapshot>;
   createDataBackup: (reason?: string) => Promise<DataBackupInfo>;

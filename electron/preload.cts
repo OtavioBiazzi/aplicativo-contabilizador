@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("caixa", {
   importLedgerFile: (filePath?: string) => ipcRenderer.invoke("entries:importFile", filePath),
   importLedgerFolder: (folderPath?: string) => ipcRenderer.invoke("entries:importFolder", folderPath),
   exportNow: () => ipcRenderer.invoke("export:now"),
+  exportTodayRecovery: () => ipcRenderer.invoke("export:today"),
   exportFilteredReport: (ids: string[], label: string) => ipcRenderer.invoke("reports:exportFiltered", ids, label),
   getDiagnostics: () => ipcRenderer.invoke("diagnostics:get"),
   createDataBackup: (reason?: string) => ipcRenderer.invoke("diagnostics:createBackup", reason),

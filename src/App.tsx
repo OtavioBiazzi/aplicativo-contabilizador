@@ -4122,6 +4122,11 @@ function SettingsPanel({
     onToast(status.ok ? "success" : "error", status.ok ? "Arquivo atual gerado e aberto na pasta." : status.message || "Nao foi possivel abrir a planilha.");
   };
 
+  const openTodayRecoveryFile = async () => {
+    const status = await window.caixa.exportTodayRecovery();
+    onToast(status.ok ? "success" : "error", status.message || "Nao foi possivel gerar o arquivo de hoje.");
+  };
+
   const resetCategory = (target: SettingsCategory) => {
     setDraft((current) => {
       const defaults = createSettingsFallback(current);
@@ -4466,6 +4471,10 @@ function SettingsPanel({
             <button className="ghost-button" type="button" onClick={onImportLedgerFolder}>
               <Upload size={18} />
               Importar pasta
+            </button>
+            <button className="ghost-button" type="button" onClick={openTodayRecoveryFile}>
+              <ExternalLink size={18} />
+              Gerar/abrir arquivo de hoje
             </button>
             <button className="ghost-button" type="button" onClick={openCurrentExport}>
               <ExternalLink size={18} />

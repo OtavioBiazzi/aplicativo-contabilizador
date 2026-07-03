@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
 import { DEFAULT_COLUMNS, SIMPLE_COLUMNS } from "../src/shared/defaults.js";
-import { formatDateTime, getEntryAmount, getLocalDateKey, getLocalMonthKey, roundMoney } from "../src/shared/calculations.js";
+import { filterEntriesByLocalDate, formatDateTime, getEntryAmount, getLocalDateKey, getLocalMonthKey, roundMoney } from "../src/shared/calculations.js";
 import type { AppSettings, ExportStatus, LedgerEntry } from "../src/shared/types.js";
 
 interface ExportState {
@@ -66,6 +66,21 @@ export class LedgerExporter {
       const message = isLikelyLockedFileError(rawMessage)
         ? "O arquivo parece estar aberto ou bloqueado. O lancamento ficou salvo no app; feche o Excel e use Gerar/abrir arquivo ou registre outro valor para sincronizar."
         : rawMessage;
+      if (isLikelyLockedFileError(rawMessage)) {
+        try {
+          const recoveryFilePath = await this.writeTodayRecoveryFile(entries, settings);
+          const recoveryMessage = `${message} Arquivo de resgate criado em ${path.basename(recoveryFilePath)}.`;
+          await this.writeState({ pendingCount: 0, lastFilePath: recoveryFilePath });
+          return {
+            ok: true,
+            filePath: recoveryFilePath,
+            pendingCount: 0,
+            message: recoveryMessage
+          };
+        } catch {
+          // Se o resgate falhar, seguimos com o erro original abaixo.
+        }
+      }
       const pendingCount = Math.max(1, previous.pendingCount + 1);
       await this.writeState({
         pendingCount,
@@ -79,6 +94,19 @@ export class LedgerExporter {
         message
       };
     }
+  }
+
+  async exportTodayRecovery(entries: LedgerEntry[], settings: AppSettings): Promise<ExportStatus> {
+    await fs.mkdir(settings.outputDirectory, { recursive: true });
+    const filePath = await this.writeTodayRecoveryFile(entries, settings);
+    const status: ExportStatus = {
+      ok: true,
+      filePath,
+      pendingCount: 0,
+      message: `Arquivo de resgate de hoje gerado em ${path.basename(filePath)}.`
+    };
+    await this.writeState({ pendingCount: 0, lastFilePath: filePath });
+    return status;
   }
 
   async exportReport(entries: LedgerEntry[], settings: AppSettings, label: string): Promise<ExportStatus> {
@@ -178,6 +206,28 @@ export class LedgerExporter {
         sheets: [{ name: "Lancamentos", rows: rowsFor(exportableEntries) }]
       }
     ];
+  }
+
+  private async writeTodayRecoveryFile(entries: LedgerEntry[], settings: AppSettings): Promise<string> {
+    const todayEntries = filterEntriesByLocalDate(entries.filter((entry) => entry.status !== "deleted"), getLocalDateKey());
+    const extension = settings.fileFormat;
+    const dateToken = formatDateToken(new Date(), settings);
+    const visibleColumns =
+      settings.spreadsheetMode === "simple"
+        ? SIMPLE_COLUMNS
+        : settings.visibleColumns.length
+          ? settings.visibleColumns
+          : DEFAULT_COLUMNS;
+    const rows = todayEntries.map((entry) => toRow(entry, visibleColumns));
+    const filePath = path.join(settings.outputDirectory, `caixa-resgate-${dateToken}.${extension}`);
+
+    await this.backupIfNeeded(filePath, settings.backupEnabled);
+    if (settings.fileFormat === "xlsx") {
+      await this.writeXlsx(filePath, [{ name: "Lancamentos", rows }]);
+    } else {
+      await this.writeCsv(filePath, rows, settings.csvSeparator);
+    }
+    return filePath;
   }
 
   private async writeXlsx(filePath: string, sheets: Array<{ name: string; rows: Record<string, unknown>[] }>) {
