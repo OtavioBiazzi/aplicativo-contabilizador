@@ -354,6 +354,10 @@ function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppS
     server: {
       ...defaults.server,
       ...saved.server,
+      autoConnection: {
+        ...defaults.server.autoConnection,
+        ...saved.server?.autoConnection
+      },
       permissions: {
         ...defaults.server.permissions,
         ...saved.server?.permissions

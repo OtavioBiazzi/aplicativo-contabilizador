@@ -640,6 +640,11 @@ function normalizeSettingsDraft(current: AppSettings, patch: Partial<AppSettings
       ...defaults.server,
       ...current.server,
       ...patch.server,
+      autoConnection: {
+        ...defaults.server.autoConnection,
+        ...current.server.autoConnection,
+        ...patch.server?.autoConnection
+      },
       permissions: {
         ...defaults.server.permissions,
         ...current.server.permissions,
@@ -882,6 +887,9 @@ function settingsChangeWarnings(previous: AppSettings, next: AppSettings): strin
   if (previous.server.port !== next.server.port || previous.server.password !== next.server.password) {
     warnings.push("porta ou senha do servidor");
   }
+  if (JSON.stringify(previous.server.autoConnection) !== JSON.stringify(next.server.autoConnection)) {
+    warnings.push("autoconexao ao abrir o app");
+  }
   if (JSON.stringify(previous.server.permissions) !== JSON.stringify(next.server.permissions)) {
     warnings.push("permissoes dos dispositivos remotos");
   }
@@ -950,7 +958,7 @@ export function App() {
   const remoteSocket = useRef<WebSocket | null>(null);
   const remoteSessionRef = useRef<RemoteClientSession | null>(null);
   const remoteManualDisconnect = useRef(false);
-  const remoteRestoreAttempted = useRef(false);
+  const autoConnectionAttemptKey = useRef<string | null>(null);
 
   const todayEntries = useMemo(() => filterEntriesByLocalDate(entries, currentDateKey), [entries, currentDateKey]);
   const summary = useMemo(() => summarizeEntries(todayEntries), [todayEntries]);
@@ -996,23 +1004,50 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!settings || remoteRestoreAttempted.current) {
+    if (!settings || !server || IS_FLOATING_WINDOW) {
       return;
     }
-    remoteRestoreAttempted.current = true;
-    const saved = window.localStorage.getItem(REMOTE_SESSION_STORAGE_KEY);
-    if (!saved) {
+
+    const auto = settings.server.autoConnection;
+    if (!auto || auto.mode === "none") {
+      autoConnectionAttemptKey.current = null;
       return;
     }
-    try {
-      const parsed = JSON.parse(saved) as { baseUrl?: string; password?: string; deviceName?: string };
-      if (parsed.baseUrl && parsed.password) {
-        void connectRemoteClient(parsed.baseUrl, parsed.password, parsed.deviceName || "App cliente", { quiet: true });
+
+    if (auto.mode === "server") {
+      if (server.running || remoteSession) {
+        return;
       }
-    } catch {
-      window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
+      const key = `server:${settings.server.port}:${settings.server.password}`;
+      if (autoConnectionAttemptKey.current === key) {
+        return;
+      }
+      autoConnectionAttemptKey.current = key;
+      void window.caixa
+        .startServer(settings.server.port, settings.server.password)
+        .then((nextServer) => {
+          setServer(nextServer);
+          showToast("success", "Servidor automatico aberto neste PC.");
+        })
+        .catch((error) => {
+          setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel abrir o servidor automatico.");
+          showToast("error", error instanceof Error ? error.message : "Nao foi possivel abrir o servidor automatico.");
+        });
+      return;
     }
-  }, [settings]);
+
+    if (auto.mode === "client") {
+      if (server.running || remoteSession || !auto.host || !auto.password) {
+        return;
+      }
+      const key = `client:${auto.host}:${auto.password}:${auto.deviceName}:${settings.server.port}`;
+      if (autoConnectionAttemptKey.current === key) {
+        return;
+      }
+      autoConnectionAttemptKey.current = key;
+      void connectRemoteClient(auto.host, auto.password, auto.deviceName || "App cliente", { quiet: true, auto: true });
+    }
+  }, [settings, server, remoteSession]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setCurrentDateKey(getLocalDateKey()), 30000);
@@ -1192,9 +1227,22 @@ export function App() {
     remoteSessionRef.current = nextSession;
   };
 
-  const connectRemoteClient = async (host: string, password: string, deviceName: string, options: { quiet?: boolean } = {}) => {
+  const connectRemoteClient = async (
+    host: string,
+    password: string,
+    deviceName: string,
+    options: { quiet?: boolean; auto?: boolean } = {}
+  ): Promise<boolean> => {
     if (!settings) {
-      return;
+      return false;
+    }
+    if (server?.running) {
+      const message = "Desligue o servidor deste app antes de conectar como cliente de outro caixa.";
+      setRemoteMessage(message);
+      if (!options.quiet) {
+        showToast("error", message);
+      }
+      return false;
     }
     setRemoteLoading(true);
     setRemoteMessage("");
@@ -1241,13 +1289,17 @@ export function App() {
       openRemoteSocket(connectedSession);
       if (!options.quiet) {
         showToast("success", "Cliente conectado ao caixa principal.");
+      } else if (options.auto) {
+        setRemoteMessage("Cliente conectado automaticamente ao caixa principal.");
       }
+      return true;
     } catch (error) {
       window.localStorage.removeItem(REMOTE_SESSION_STORAGE_KEY);
       setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel conectar.");
       if (!options.quiet) {
         showToast("error", error instanceof Error ? error.message : "Nao foi possivel conectar.");
       }
+      return false;
     } finally {
       setRemoteLoading(false);
     }
@@ -3310,7 +3362,7 @@ function ServerPanel({
   onSaveSettings: (settings: AppSettings) => Promise<void>;
   onServerChange: (server: ServerState) => void;
   onToast: (tone: ToastState["tone"], message: string) => void;
-  onConnectRemote: (host: string, password: string, deviceName: string) => Promise<void>;
+  onConnectRemote: (host: string, password: string, deviceName: string) => Promise<boolean>;
   onDisconnectRemote: () => void;
   onRefreshRemote: () => Promise<void> | void;
   onSubmitRemote: (draft: EntryDraft) => Promise<void>;
@@ -3322,22 +3374,44 @@ function ServerPanel({
   const [password, setPassword] = useState(settings.server.password);
   const [permissions, setPermissions] = useState(settings.server.permissions);
   const [mode, setMode] = useState<ServerPanelMode>("create");
-  const [connectHost, setConnectHost] = useState(server.url || "");
-  const [connectPassword, setConnectPassword] = useState("");
-  const [connectDeviceName, setConnectDeviceName] = useState("App cliente");
+  const [connectHost, setConnectHost] = useState(settings.server.autoConnection.mode === "client" ? settings.server.autoConnection.host : server.url || "");
+  const [connectPassword, setConnectPassword] = useState(settings.server.autoConnection.mode === "client" ? settings.server.autoConnection.password : "");
+  const [connectDeviceName, setConnectDeviceName] = useState(settings.server.autoConnection.deviceName || "App cliente");
+  const [autoStartServer, setAutoStartServer] = useState(settings.server.autoConnection.mode === "server");
+  const [autoConnectClient, setAutoConnectClient] = useState(settings.server.autoConnection.mode === "client");
 
   useEffect(() => {
     setPort(settings.server.port);
     setPassword(settings.server.password);
     setPermissions(settings.server.permissions);
-  }, [settings.server.port, settings.server.password, settings.server.permissions]);
+    setAutoStartServer(settings.server.autoConnection.mode === "server");
+    setAutoConnectClient(settings.server.autoConnection.mode === "client");
+    if (settings.server.autoConnection.mode === "client") {
+      setConnectHost(settings.server.autoConnection.host);
+      setConnectPassword(settings.server.autoConnection.password);
+      setConnectDeviceName(settings.server.autoConnection.deviceName || "App cliente");
+    }
+  }, [settings.server.port, settings.server.password, settings.server.permissions, settings.server.autoConnection]);
 
   const start = async () => {
     try {
-      const nextSettings = { ...settings, server: { ...settings.server, port, password, permissions } };
-      await onSaveSettings(nextSettings);
+      const nextSettings = {
+        ...settings,
+        server: {
+          ...settings.server,
+          port,
+          password,
+          permissions,
+          autoConnection: autoStartServer
+            ? { mode: "server" as const, host: "", password: "", deviceName: settings.server.autoConnection.deviceName || "App cliente" }
+            : settings.server.autoConnection.mode === "server"
+              ? { ...settings.server.autoConnection, mode: "none" as const }
+              : settings.server.autoConnection
+        }
+      };
       const next = await window.caixa.startServer(port, password);
       onServerChange(next);
+      await onSaveSettings(nextSettings);
       onToast("success", "Servidor local aberto.");
     } catch (error) {
       onToast("error", error instanceof Error ? error.message : "Nao foi possivel abrir o servidor.");
@@ -3351,7 +3425,30 @@ function ServerPanel({
   };
 
   const connectRemote = async () => {
-    await onConnectRemote(connectHost, connectPassword, connectDeviceName);
+    const nextAutoConnection = autoConnectClient
+      ? {
+          mode: "client" as const,
+          host: connectHost.trim(),
+          password: connectPassword,
+          deviceName: connectDeviceName.trim() || "App cliente"
+        }
+      : settings.server.autoConnection.mode === "client"
+        ? { ...settings.server.autoConnection, mode: "none" as const }
+        : settings.server.autoConnection;
+    const connected = await onConnectRemote(connectHost, connectPassword, connectDeviceName);
+    if (!connected) {
+      return;
+    }
+    await onSaveSettings({
+      ...settings,
+      server: {
+        ...settings.server,
+        port,
+        password,
+        permissions,
+        autoConnection: nextAutoConnection
+      }
+    });
   };
   const connectDisabledByServer = server.running && !remoteSession;
 
@@ -3405,6 +3502,13 @@ function ServerPanel({
               <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Defina uma senha" />
             </label>
           </div>
+          <label className={`privacy-toggle-card ${autoStartServer ? "enabled" : ""}`}>
+            <input type="checkbox" checked={autoStartServer} onChange={(event) => setAutoStartServer(event.target.checked)} />
+            <span>
+              <strong>Abrir este PC como servidor ao iniciar</strong>
+              <small>Quando este computador for o caixa principal, o app abre o servidor sozinho usando esta porta e senha.</small>
+            </span>
+          </label>
           <div className="submit-row">
             {server.running ? (
               <button className="danger-button" onClick={stop}>Desligar servidor</button>
@@ -3437,6 +3541,13 @@ function ServerPanel({
                   <input value={connectDeviceName} onChange={(event) => setConnectDeviceName(event.target.value)} placeholder="Notebook, caixa 2..." />
                 </label>
               </div>
+              <label className={`privacy-toggle-card ${autoConnectClient ? "enabled" : ""}`}>
+                <input type="checkbox" checked={autoConnectClient} onChange={(event) => setAutoConnectClient(event.target.checked)} />
+                <span>
+                  <strong>Conectar automaticamente ao abrir este app</strong>
+                  <small>Use no computador cliente. Ele tenta entrar no caixa principal com estes dados quando o aplicativo iniciar.</small>
+                </span>
+              </label>
               <div className="connection-steps">
                 <span><Wifi size={16} /> 1. Abra o servidor no PC principal.</span>
                 <span><KeyRound size={16} /> 2. Digite endereco, senha e o nome deste caixa.</span>
@@ -4637,6 +4748,71 @@ function SettingsPanel({
 
         <section className={categoryClass("server", "settings-group wide")} {...remoteSectionProps("server")}>
           <h3>Servidor e sincronizacao</h3>
+          <label className="field">
+            <span>Autoconexao ao abrir</span>
+            <select
+              value={draft.server.autoConnection.mode}
+              onChange={(event) =>
+                update("server", {
+                  ...draft.server,
+                  autoConnection: {
+                    ...draft.server.autoConnection,
+                    mode: event.target.value as AppSettings["server"]["autoConnection"]["mode"]
+                  }
+                })
+              }
+            >
+              <option value="none">Nao conectar automaticamente</option>
+              <option value="server">Este PC sempre abre o servidor</option>
+              <option value="client">Este PC sempre entra como cliente</option>
+            </select>
+          </label>
+          {draft.server.autoConnection.mode === "client" && (
+            <div className="entry-grid">
+              <label className="field description-field">
+                <span>Endereco do servidor automatico</span>
+                <input
+                  value={draft.server.autoConnection.host}
+                  onChange={(event) =>
+                    update("server", {
+                      ...draft.server,
+                      autoConnection: { ...draft.server.autoConnection, host: event.target.value }
+                    })
+                  }
+                  placeholder="192.168.0.10:4317"
+                />
+              </label>
+              <label className="field">
+                <span>Senha do servidor automatico</span>
+                <input
+                  type="password"
+                  value={draft.server.autoConnection.password}
+                  onChange={(event) =>
+                    update("server", {
+                      ...draft.server,
+                      autoConnection: { ...draft.server.autoConnection, password: event.target.value }
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Nome deste cliente</span>
+                <input
+                  value={draft.server.autoConnection.deviceName}
+                  onChange={(event) =>
+                    update("server", {
+                      ...draft.server,
+                      autoConnection: { ...draft.server.autoConnection, deviceName: event.target.value }
+                    })
+                  }
+                  placeholder="Notebook, caixa 2..."
+                />
+              </label>
+            </div>
+          )}
+          {draft.server.autoConnection.mode === "server" && (
+            <p className="settings-note">Ao abrir o aplicativo, este computador tenta iniciar o servidor com a porta e senha abaixo. Se a porta estiver ocupada, ele avisa e permanece local.</p>
+          )}
           <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
           <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
           <div className="permission-box permission-grid">

@@ -27,6 +27,7 @@ export type FloatingThemeMode = "follow" | ThemeMode;
 export type FloatingLayoutMode = "adaptive" | "compact" | "mini";
 export type DensityMode = "compact" | "normal" | "comfortable";
 export type LayoutMode = "complete" | "compact" | "pinnedBar" | "grid" | "sidePanel";
+export type ServerAutoConnectionMode = "none" | "server" | "client";
 
 export interface QuickTabSettings {
   id: string;
@@ -115,6 +116,13 @@ export interface ServerPermissions {
   allowClientCustomization: boolean;
 }
 
+export interface ServerAutoConnectionSettings {
+  mode: ServerAutoConnectionMode;
+  host: string;
+  password: string;
+  deviceName: string;
+}
+
 export interface RemoteClientPolicy {
   defaultType: EntryType;
   defaultPeople: number;
@@ -174,6 +182,7 @@ export interface AppSettings {
     port: number;
     password: string;
     permissions: ServerPermissions;
+    autoConnection: ServerAutoConnectionSettings;
   };
   shortcuts: Record<string, string>;
 }

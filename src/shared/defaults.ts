@@ -146,6 +146,12 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     server: {
       port: 4317,
       password: "",
+      autoConnection: {
+        mode: "none",
+        host: "",
+        password: "",
+        deviceName: "App cliente"
+      },
       permissions: {
         view: true,
         create: true,
