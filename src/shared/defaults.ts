@@ -1,5 +1,6 @@
 import type { AppSettings, EntryType, PaymentMethod, QuickTabSettings } from "./types.js";
 
+// Lista de tipos de lançamento disponíveis
 export const ENTRY_TYPES: EntryType[] = [
   "Venda",
   "Mesa",
@@ -12,6 +13,7 @@ export const ENTRY_TYPES: EntryType[] = [
   "Personalizado"
 ];
 
+// Lista de formas de pagamento suportadas
 export const PAYMENT_METHODS: PaymentMethod[] = [
   "Nao informado",
   "Dinheiro",
@@ -22,6 +24,7 @@ export const PAYMENT_METHODS: PaymentMethod[] = [
   "Misto"
 ];
 
+// Colunas padrão para planilhas completas
 export const DEFAULT_COLUMNS = [
   "Data",
   "Hora",
@@ -45,7 +48,19 @@ export const DEFAULT_COLUMNS = [
   "Status"
 ];
 
-export const SIMPLE_COLUMNS = ["Data", "Hora", "Valor pago", "Descricao", "Tipo", "Pessoas", "Pago com", "Troco"];
+// Colunas padrão para planilhas simples. Inclui a forma de pagamento para
+// permitir distinguir entre débito e crédito nas exportações.
+export const SIMPLE_COLUMNS = [
+  "Data",
+  "Hora",
+  "Valor pago",
+  "Descricao",
+  "Tipo",
+  "Pessoas",
+  "Forma de pagamento",
+  "Pago com",
+  "Troco"
+];
 
 export const DEFAULT_FLOATING_FIELDS = [
   "tabs",
@@ -70,6 +85,12 @@ export const DEFAULT_QUICK_TABS: QuickTabSettings[] = [
   { id: "custom", label: "Extra", enabled: false, type: "Personalizado" }
 ];
 
+/**
+ * Gera as configurações padrão do aplicativo.
+ * Adiciona a coluna "Forma de pagamento" às planilhas simples, inclui a
+ * permissão allowReports para controlar geração de relatórios e adiciona
+ * um campo savedPosition em floating para permitir salvar a posição da barra.
+ */
 export function createDefaultSettings(outputDirectory: string): AppSettings {
   return {
     outputDirectory,
@@ -109,7 +130,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
           lockPosition: false,
           dragWholeBar: true,
           theme: "follow",
-          syncMoneyWithEntryType: true
+          syncMoneyWithEntryType: true,
+          savedPosition: undefined
         }
       },
       "Perfil fixado": {
@@ -124,7 +146,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
           lockPosition: false,
           dragWholeBar: false,
           theme: "follow",
-          syncMoneyWithEntryType: true
+          syncMoneyWithEntryType: true,
+          savedPosition: undefined
         }
       }
     },
@@ -141,7 +164,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
       lockPosition: false,
       dragWholeBar: false,
       theme: "follow",
-      syncMoneyWithEntryType: true
+      syncMoneyWithEntryType: true,
+      savedPosition: undefined
     },
     server: {
       port: 4317,
@@ -159,7 +183,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
         delete: false,
         viewEntryValues: true,
         viewTotals: true,
-        allowClientCustomization: false
+        allowClientCustomization: false,
+        allowReports: true
       }
     },
     shortcuts: {

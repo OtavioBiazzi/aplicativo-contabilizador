@@ -1052,7 +1052,19 @@ export function App() {
     };
   }, []);
 
+  // Sincroniza o cliente remoto salvo em localStorage com a sessão atual.
+  // Esta lógica apenas roda na janela flutuante (barra fixa). A janela
+  // principal nunca deve restaurar automaticamente uma sessão remota, pois
+  // isso pode entrar em conflito com o modo de auto conexão definido nas
+  // configurações (servidor/cliente/nenhum).
   useEffect(() => {
+    // Early return when not in floating window. Only floating windows should
+    // sync a stored remote session; the main window's connection is
+    // controlled exclusively via the autoConnection settings.
+    if (!IS_FLOATING_WINDOW) {
+      return;
+    }
+
     const syncStoredRemoteSession = () => {
       const stored = readStoredRemoteSession();
       const current = remoteSessionRef.current;
@@ -1062,39 +1074,60 @@ export function App() {
         }
         return;
       }
-
-      if (current && current.baseUrl === stored.baseUrl && current.password === stored.password && current.deviceName === stored.deviceName) {
+      if (
+        current &&
+        current.baseUrl === stored.baseUrl &&
+        current.password === stored.password &&
+        current.deviceName === stored.deviceName
+      ) {
         return;
       }
-
-      void connectRemoteClient(stored.baseUrl, stored.password, stored.deviceName, { quiet: true, auto: true });
+      void connectRemoteClient(stored.baseUrl, stored.password, stored.deviceName, {
+        quiet: true,
+        auto: true
+      });
     };
 
     syncStoredRemoteSession();
-
     const handleStorage = (event: StorageEvent) => {
       if (event.key === REMOTE_SESSION_STORAGE_KEY) {
         syncStoredRemoteSession();
       }
     };
-
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
   }, [settings, server]);
 
+  // Lógica de auto conexão do servidor/cliente. Esta lógica roda somente na
+  // janela principal; a barra fixa sempre segue a conexão existente do app
+  // principal.
   useEffect(() => {
     if (!settings || !server || IS_FLOATING_WINDOW) {
       return;
     }
 
     const auto = settings.server.autoConnection;
+    // Quando o modo é "none" limpamos qualquer sessão remota e cancelamos
+    // tentativas automáticas de conexão. Isso evita que uma sessão antiga
+    // permaneça gravada e o app tente conectar no próximo início.
     if (!auto || auto.mode === "none") {
       autoConnectionAttemptKey.current = null;
+      writeStoredRemoteSession(null);
+      if (remoteSession) {
+        disconnectRemoteClient();
+      }
       return;
     }
 
+    // No modo servidor, limpamos a sessão remota antiga e garantimos que
+    // qualquer cliente remoto seja desconectado antes de iniciar o servidor.
     if (auto.mode === "server") {
-      if (server.running || remoteSession) {
+      writeStoredRemoteSession(null);
+      if (remoteSession) {
+        disconnectRemoteClient();
+        return;
+      }
+      if (server.running) {
         return;
       }
       const key = `server:${settings.server.port}:${settings.server.password}`;
@@ -1109,12 +1142,21 @@ export function App() {
           showToast("success", "Servidor automatico aberto neste PC.");
         })
         .catch((error) => {
-          setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel abrir o servidor automatico.");
-          showToast("error", error instanceof Error ? error.message : "Nao foi possivel abrir o servidor automatico.");
+          setRemoteMessage(
+            error instanceof Error ? error.message : "Nao foi possivel abrir o servidor automatico."
+          );
+          showToast(
+            "error",
+            error instanceof Error ? error.message : "Nao foi possivel abrir o servidor automatico."
+          );
         });
       return;
     }
 
+    // No modo cliente, não conectamos novamente se já houver um servidor
+    // rodando ou uma sessão remota ativa. Se as credenciais estiverem
+    // configuradas, tentamos uma conexão imediata e, em caso de falha,
+    // limpamos a chave de tentativa para permitir novas tentativas.
     if (auto.mode === "client") {
       if (server.running || remoteSession || !auto.host || !auto.password) {
         return;
@@ -1124,8 +1166,47 @@ export function App() {
         return;
       }
       autoConnectionAttemptKey.current = key;
-      void connectRemoteClient(auto.host, auto.password, auto.deviceName || "App cliente", { quiet: true, auto: true });
+      void connectRemoteClient(auto.host, auto.password, auto.deviceName || "App cliente", {
+        quiet: true,
+        auto: true
+      }).then((connected) => {
+        if (!connected) {
+          // Reset key so that the next interval can retry.
+          autoConnectionAttemptKey.current = null;
+        }
+      });
     }
+  }, [settings, server, remoteSession]);
+
+  // Intervalo para tentar reconectar clientes automaticamente a cada minuto
+  // quando o modo autoConnection é "client". Isso garante que um cliente
+  // iniciado antes do servidor continue tentando se conectar até que o
+  // servidor esteja disponível.
+  useEffect(() => {
+    if (!settings || !server || IS_FLOATING_WINDOW) {
+      return;
+    }
+    const auto = settings.server.autoConnection;
+    if (!auto || auto.mode !== "client") {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      if (!server.running && !remoteSession && auto.host && auto.password) {
+        const key = `client:${auto.host}:${auto.password}:${auto.deviceName}:${settings.server.port}`;
+        if (autoConnectionAttemptKey.current !== key) {
+          autoConnectionAttemptKey.current = key;
+          void connectRemoteClient(auto.host, auto.password, auto.deviceName || "App cliente", {
+            quiet: true,
+            auto: true
+          }).then((connected) => {
+            if (!connected) {
+              autoConnectionAttemptKey.current = null;
+            }
+          });
+        }
+      }
+    }, 60_000);
+    return () => window.clearInterval(intervalId);
   }, [settings, server, remoteSession]);
 
   useEffect(() => {
@@ -1358,7 +1439,8 @@ export function App() {
           delete: false,
           viewEntryValues: false,
           viewTotals: false,
-          allowClientCustomization: false
+          allowClientCustomization: false,
+          allowReports: false
         },
         clientPolicy: clientPolicyFromSettings(settings),
         connectedAt: new Date().toISOString()
@@ -5290,13 +5372,14 @@ function shortcutLabel(key: string): string {
 }
 
 function permissionLabel(key: keyof ServerPermissions): string {
-  return {
+  return ({
     view: "Somente visualizar",
     create: "Registrar vendas",
     edit: "Editar lancamentos",
     delete: "Apagar lancamentos",
     viewEntryValues: "Ver valores das vendas",
     viewTotals: "Ver totais vendidos",
-    allowClientCustomization: "Acesso local completo do cliente"
-  }[key];
+    allowClientCustomization: "Acesso local completo do cliente",
+    allowReports: "Gerar relatorios e exportar"
+  } as Record<string, string>)[key] ?? key;
 }

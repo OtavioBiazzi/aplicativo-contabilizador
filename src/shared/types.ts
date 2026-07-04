@@ -1,3 +1,25 @@
+/*
+ * Shared type declarations for the Contabilizador application.
+ *
+ * This file mirrors the structure of the upstream `src/shared/types.ts` file
+ * but introduces a few additional fields to support new features requested
+ * by the application maintainer. The key additions are:
+ *
+ * - A new permission `allowReports` on `ServerPermissions` which can be
+ *   toggled by the server administrator to enable or disable report and
+ *   export functionality for connected clients. When set to `false`, the
+ *   client UI should hide or disable buttons related to exporting data.
+ * - An optional `savedPosition` on `FloatingSettings`. This stores an
+ *   `[x, y]` tuple representing the last saved coordinates of the pinned
+ *   floating bar. When present, the floating bar should be positioned at
+ *   this point on startup. A future UI control should allow users to
+ *   reposition the bar and save its position for subsequent sessions.
+ *
+ * These additions are designed to be backwards compatible with existing
+ * installations. Any code consuming these interfaces should guard against
+ * missing properties and apply sensible defaults when they are absent.
+ */
+
 export type EntryType =
   | "Venda"
   | "Mesa"
@@ -22,11 +44,23 @@ export type RoundDirection = "up" | "down" | "nearest";
 export type FileFormat = "xlsx" | "csv";
 export type FileStrategy = "daily" | "monthlyTabs" | "fixedAll" | "byType";
 export type SpreadsheetMode = "simple" | "advanced";
-export type ThemeMode = "light" | "dark" | "auto" | "contrast" | "datacaixa" | "datacaixa-dark" | "italia";
+export type ThemeMode =
+  | "light"
+  | "dark"
+  | "auto"
+  | "contrast"
+  | "datacaixa"
+  | "datacaixa-dark"
+  | "italia";
 export type FloatingThemeMode = "follow" | ThemeMode;
 export type FloatingLayoutMode = "adaptive" | "compact" | "mini";
 export type DensityMode = "compact" | "normal" | "comfortable";
-export type LayoutMode = "complete" | "compact" | "pinnedBar" | "grid" | "sidePanel";
+export type LayoutMode =
+  | "complete"
+  | "compact"
+  | "pinnedBar"
+  | "grid"
+  | "sidePanel";
 export type ServerAutoConnectionMode = "none" | "server" | "client";
 
 export interface QuickTabSettings {
@@ -107,13 +141,39 @@ export interface EntryDraft {
 }
 
 export interface ServerPermissions {
+  /**
+   * Whether the connected client can view entries and totals.
+   */
   view: boolean;
+  /**
+   * Whether the client can create new entries.
+   */
   create: boolean;
+  /**
+   * Whether the client can edit existing entries.
+   */
   edit: boolean;
+  /**
+   * Whether the client can delete entries.
+   */
   delete: boolean;
+  /**
+   * Whether the client can see entry values (otherwise only counts are shown).
+   */
   viewEntryValues: boolean;
+  /**
+   * Whether the client can see totals across all entries.
+   */
   viewTotals: boolean;
+  /**
+   * Whether the client may adjust its own settings (colours, columns, etc.).
+   */
   allowClientCustomization: boolean;
+  /**
+   * Whether the client is permitted to generate and download reports (CSV/XLSX).
+   * When false, the report generation UI should be hidden or disabled.
+   */
+  allowReports: boolean;
 }
 
 export interface ServerAutoConnectionSettings {
@@ -147,6 +207,12 @@ export interface FloatingSettings {
   dragWholeBar: boolean;
   theme: FloatingThemeMode;
   syncMoneyWithEntryType: boolean;
+  /**
+   * Optional saved position for the floating bar. If provided, the bar should
+   * be repositioned to these coordinates upon mounting. Coordinates are in
+   * window pixels relative to the top-left corner of the screen.
+   */
+  savedPosition?: [number, number];
 }
 
 export interface AppSettings {

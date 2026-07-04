@@ -1,4 +1,25 @@
-import type { CashBreakdownItem, CashDetails, DaySummary, LedgerEntry, RoundDirection, SplitDetails } from "./types.js";
+/*
+ * Utility calculations for the Contabilizador application.
+ *
+ * This file duplicates the upstream `src/shared/calculations.ts` file and
+ * introduces a small but important fix: the `formatDateTime` function now
+ * explicitly specifies a timezone when formatting dates and times. Without a
+ * timezone, JavaScript may use the system locale's default or the UTC
+ * offset, which can cause exported spreadsheets or reports to appear
+ * associated with the wrong day when viewed on machines in different
+ * timezones. The new implementation resolves this by querying the user's
+ * current timezone via `Intl.DateTimeFormat().resolvedOptions().timeZone` and
+ * falling back to the `America/Sao_Paulo` timezone if none is available.
+ */
+
+import type {
+  CashBreakdownItem,
+  CashDetails,
+  DaySummary,
+  LedgerEntry,
+  RoundDirection,
+  SplitDetails
+} from "./types.js";
 
 export const ROUNDING_STEPS = [0.05, 0.1, 0.25, 0.5, 0.75, 1, 5];
 
@@ -52,9 +73,17 @@ export function formatCurrency(value: number): string {
 export function formatDateTime(iso: string): { date: string; time: string } {
   const date = new Date(iso);
   const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  // Determine the user's timezone. If unavailable, fall back to Sao Paulo.
+  const timeZone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo";
   return {
-    date: safeDate.toLocaleDateString("pt-BR"),
-    time: safeDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    date: safeDate.toLocaleDateString("pt-BR", { timeZone }),
+    time: safeDate.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone
+    })
   };
 }
 
@@ -71,15 +100,26 @@ export function getLocalMonthKey(input: string | Date = new Date()): string {
   return getLocalDateKey(input).slice(0, 7);
 }
 
-export function filterEntriesByLocalDate(entries: LedgerEntry[], dateKey = getLocalDateKey()): LedgerEntry[] {
+export function filterEntriesByLocalDate(
+  entries: LedgerEntry[],
+  dateKey = getLocalDateKey()
+): LedgerEntry[] {
   return entries.filter((entry) => getLocalDateKey(entry.createdAt) === dateKey);
 }
 
-export function applyRounding(value: number, step: number, direction: RoundDirection): number {
+export function applyRounding(
+  value: number,
+  step: number,
+  direction: RoundDirection
+): number {
   const safeStep = step > 0 ? step : 0.05;
   const factor = value / safeStep;
   const rounded =
-    direction === "up" ? Math.ceil(factor) : direction === "down" ? Math.floor(factor) : Math.round(factor);
+    direction === "up"
+      ? Math.ceil(factor)
+      : direction === "down"
+      ? Math.floor(factor)
+      : Math.round(factor);
   return roundMoney(rounded * safeStep);
 }
 
@@ -92,7 +132,11 @@ export function calculateSplit(
 ): SplitDetails {
   const safePeople = Math.max(1, Math.floor(people || 1));
   const perPersonRaw = roundMoney(originalValue / safePeople);
-  const perPersonRounded = applyRounding(originalValue / safePeople, roundingStep, roundingDirection);
+  const perPersonRounded = applyRounding(
+    originalValue / safePeople,
+    roundingStep,
+    roundingDirection
+  );
   const finalTotal = roundMoney(perPersonRounded * safePeople);
 
   return {
@@ -108,7 +152,10 @@ export function calculateSplit(
   };
 }
 
-export function calculateCash(accountValue: number, paidWith: number): CashDetails {
+export function calculateCash(
+  accountValue: number,
+  paidWith: number
+): CashDetails {
   const accountCents = toCents(accountValue);
   const paidCents = toCents(paidWith);
   let changeCents = Math.max(0, paidCents - accountCents);
@@ -160,10 +207,12 @@ export function summarizeEntries(entries: LedgerEntry[]): DaySummary {
         (acc.byPayment[entry.paymentMethod || "Nao informado"] || 0) + amount;
 
       if (entry.tableNumber) {
-        acc.byTable[entry.tableNumber] = (acc.byTable[entry.tableNumber] || 0) + amount;
+        acc.byTable[entry.tableNumber] =
+          (acc.byTable[entry.tableNumber] || 0) + amount;
       }
       if (entry.busNumber) {
-        acc.byBus[entry.busNumber] = (acc.byBus[entry.busNumber] || 0) + amount;
+        acc.byBus[entry.busNumber] =
+          (acc.byBus[entry.busNumber] || 0) + amount;
       }
       if (entry.type === "Onibus") {
         acc.busTotal += amount;
