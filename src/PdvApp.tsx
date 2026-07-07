@@ -23,7 +23,7 @@ import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvO
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 type CheckoutTarget =
   | { kind: "direct"; total: number }
-  | { kind: "table"; table: PdvOpenTable; total: number; discount: number }
+  | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[] }
   | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[] }
   | { kind: "table-partial-manual"; table: PdvOpenTable; total: number; items: PdvCartItem[] };
 
@@ -644,6 +644,7 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
         <PaymentModal
           total={checkoutTarget.total}
           busy={busy}
+          initialPayments={checkoutTarget.kind === "table" ? checkoutTarget.initialPayments || [] : []}
           onCancel={() => setCheckoutTarget(null)}
           onConfirm={(payments) => {
             if (checkoutTarget.kind === "direct") {
@@ -669,9 +670,9 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
             setTableCloseMenuOpen(false);
             requestPartialByValue();
           }}
-          onCloseTotal={(total, discount) => {
+          onCloseTotal={(total, discount, initialPayments) => {
             setTableCloseMenuOpen(false);
-            setCheckoutTarget({ kind: "table", table: activeTable, total, discount });
+            setCheckoutTarget({ kind: "table", table: activeTable, total, discount, initialPayments });
           }}
         />
       )}
@@ -1068,17 +1069,7 @@ function PaymentModal({
   };
 
   const splitEqually = () => {
-    const people = Math.max(1, Math.floor(splitPeople || 1));
-    const cents = Math.round(total * 100);
-    const base = Math.floor(cents / people);
-    const remainder = cents - base * people;
-    setPayments(
-      Array.from({ length: people }, (_, index) => ({
-        id: crypto.randomUUID(),
-        method: "Nao definido" as const,
-        amount: roundMoney((base + (index === people - 1 ? remainder : 0)) / 100)
-      }))
-    );
+    setPayments(splitAmountIntoPayments(total, splitPeople));
   };
 
   return (
@@ -1335,12 +1326,14 @@ function TableCloseMenu({
   onCancel: () => void;
   onPartialItems: () => void;
   onPartialManual: () => void;
-  onCloseTotal: (total: number, discount: number) => void;
+  onCloseTotal: (total: number, discount: number, initialPayments?: PdvPayment[]) => void;
 }) {
   const [discountValue, setDiscountValue] = useState("");
   const [discountPercent, setDiscountPercent] = useState("");
+  const [people, setPeople] = useState(Math.max(1, table.people || 1));
   const discount = Math.min(subtotal, roundMoney(parseBrazilianNumber(discountValue) + subtotal * (parseBrazilianNumber(discountPercent) / 100)));
   const total = Math.max(0, roundMoney(subtotal - discount));
+  const splitPreview = splitAmountIntoPayments(total, people);
 
   return (
     <div className="pdv-modal-backdrop">
@@ -1367,11 +1360,20 @@ function TableCloseMenu({
             <span>Desconto em %</span>
             <input value={discountPercent} onChange={(event) => setDiscountPercent(event.target.value)} placeholder="0" />
           </label>
+          <label>
+            <span>Dividir por pessoas</span>
+            <input type="number" min={1} value={people} onChange={(event) => setPeople(Math.max(1, Number(event.target.value || 1)))} />
+          </label>
+        </div>
+        <div className="pdv-split-preview">
+          <strong>Valor sugerido por pessoa</strong>
+          <span>{splitPreview.map((payment, index) => `Pessoa ${index + 1}: ${money(payment.amount)}`).join(" | ")}</span>
         </div>
         <div className="pdv-action-row">
           <button className="pdv-ghost-button" onClick={onCancel}>Voltar</button>
           <button className="pdv-ghost-button" onClick={onPartialItems}>Fechar parcial por itens</button>
           <button className="pdv-ghost-button" onClick={onPartialManual}>Fechar parcial por valor</button>
+          <button className="pdv-ghost-button" onClick={() => onCloseTotal(total, discount, splitPreview)}>Dividir por pessoas</button>
           <button className="pdv-primary-button" onClick={() => onCloseTotal(total, discount)}>Fechar total</button>
         </div>
       </section>
@@ -2036,6 +2038,18 @@ function splitCartItemForTransfer(item: PdvCartItem, quantity: number, subtableN
     discount,
     total: Math.max(0, roundMoney(quantity * item.unitPrice - discount))
   };
+}
+
+function splitAmountIntoPayments(total: number, people: number): PdvPayment[] {
+  const safePeople = Math.max(1, Math.floor(people || 1));
+  const cents = Math.round(total * 100);
+  const base = Math.floor(cents / safePeople);
+  const remainder = cents - base * safePeople;
+  return Array.from({ length: safePeople }, (_, index) => ({
+    id: crypto.randomUUID(),
+    method: "Nao definido" as const,
+    amount: roundMoney((base + (index === safePeople - 1 ? remainder : 0)) / 100)
+  }));
 }
 
 function subtractCartItemQuantity(items: PdvCartItem[], id: string, quantity: number): PdvCartItem[] {
