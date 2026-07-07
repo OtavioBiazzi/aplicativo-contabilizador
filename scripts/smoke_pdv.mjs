@@ -121,6 +121,9 @@ const backupDir = path.join(dataDir, "pdv-backups");
 if (!existsSync(backupDir) || !readdirSync(backupDir).some((file) => file.includes("antes-importacao-produtos"))) {
   throw new Error("Backup automatico do SQLite nao foi criado antes da importacao.");
 }
+if (!readdirSync(backupDir).some((file) => file.includes("automatico"))) {
+  throw new Error("Backup diario automatico do SQLite nao foi criado.");
+}
 
 const exportStatus = await new PdvExporter(exportDir).exportSales(store.getSales({}), {});
 if (!exportStatus.ok || !exportStatus.filePath) {

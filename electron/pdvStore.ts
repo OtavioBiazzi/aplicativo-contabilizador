@@ -48,6 +48,7 @@ export class PdvStore {
     }
     this.migrate();
     await this.persist();
+    await this.backupSqliteDaily("automatico");
   }
 
   getDataFile() {
@@ -581,6 +582,24 @@ export class PdvStore {
     await fs.mkdir(directory, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     await fs.copyFile(this.dbFilePath, path.join(directory, `pdv-${reason}-${timestamp}.sqlite.bak`));
+  }
+
+  private async backupSqliteDaily(reason: string): Promise<void> {
+    try {
+      await fs.access(this.dbFilePath);
+    } catch {
+      return;
+    }
+    const directory = path.join(this.dataDirectory, PDV_BACKUP_DIRECTORY);
+    await fs.mkdir(directory, { recursive: true });
+    const date = new Date().toISOString().slice(0, 10);
+    const target = path.join(directory, `pdv-${reason}-${date}.sqlite.bak`);
+    try {
+      await fs.access(target);
+      return;
+    } catch {
+      await fs.copyFile(this.dbFilePath, target);
+    }
   }
 
   private requireDb(): Database {
