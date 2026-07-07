@@ -3770,6 +3770,19 @@ body.floating-borderless .floating-bar {
   padding: 10px 0 0;
 }
 
+.pdv-settings-panel {
+  min-height: 760px;
+}
+
+.pdv-settings-panel .pdv-shell.embedded {
+  height: 680px;
+  border: 1px solid var(--border);
+}
+
+.pdv-open-table-modal {
+  max-width: 560px;
+}
+
 .pdv-loading {
   display: grid;
   place-items: center;

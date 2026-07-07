@@ -79,6 +79,7 @@ type SettingsCategory =
   | "defaults"
   | "profiles"
   | "files"
+  | "pdv"
   | "privacy"
   | "server"
   | "shortcuts"
@@ -4352,6 +4353,7 @@ function SettingsPanel({
     { key: "defaults", label: "Vendas", description: "Tipo, pessoas e arredondamento usados por padrao.", icon: Send },
     { key: "profiles", label: "Perfis", description: "Perfis para alternar entre PC, notebook, tela pequena e barra fixada.", icon: MonitorUp },
     { key: "files", label: "Planilha e backup", description: "Pasta, formato, colunas, backups e organizacao dos arquivos.", icon: FileSpreadsheet },
+    { key: "pdv", label: "PDV local", description: "Produtos, categorias, importacao, mesas, adicionais e banco SQLite do PDV.", icon: LayoutPanelTop },
     { key: "privacy", label: "Privacidade", description: "Controle o que aparece na tela quando ha cliente por perto.", icon: ShieldCheck },
     { key: "server", label: "Servidor", description: "Porta, senha e permissoes para outro dispositivo.", icon: RadioTower },
     { key: "shortcuts", label: "Atalhos", description: "Comandos de teclado para operar mais rapido.", icon: KeyRound },
@@ -4782,6 +4784,14 @@ function SettingsPanel({
               </article>
             ))}
           </div>
+        </section>
+
+        <section className={categoryClass("pdv", "settings-group wide pdv-settings-panel")}>
+          <h3>PDV local</h3>
+          <p className="helper-text">
+            Cadastre produtos e categorias, importe a planilha da Cose Dell Abadia, ajuste mesas, adicionais, submesas e exportacao do PDV local.
+          </p>
+          <PdvApp embedded initialTab="products" />
         </section>
 
         <section className={categoryClass("privacy", "settings-group wide privacy-settings")}>

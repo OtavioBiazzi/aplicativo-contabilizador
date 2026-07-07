@@ -122,6 +122,7 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
   const [currentSubtable, setCurrentSubtable] = useState("");
   const [pendingProduct, setPendingProduct] = useState<PendingProduct | null>(null);
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number; table: PdvOpenTable } | null>(null);
+  const [openingTable, setOpeningTable] = useState<PdvOpenTable | null>(null);
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
@@ -196,17 +197,7 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
 
   const openTable = async (table: PdvOpenTable) => {
     if (table.status === "Livre") {
-      await window.caixa.openPdvTable(table.number, 1, "");
-      await load();
-      const fresh = (await window.caixa.getPdvSnapshot()).tables.find((item) => item.number === table.number);
-      if (fresh) {
-        setActiveTable(fresh);
-        setTableCart(fresh.items);
-        setTablePeople(fresh.people || 1);
-        setTableNote(fresh.note || "");
-        setSelectedTableItemIds([]);
-        setCurrentSubtable("");
-      }
+      setOpeningTable(table);
       return;
     }
     setActiveTable(table);
@@ -215,6 +206,21 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
     setTableNote(table.note || "");
     setSelectedTableItemIds([]);
     setCurrentSubtable("");
+  };
+
+  const confirmOpenTable = async (table: PdvOpenTable, people: number, note: string) => {
+    await window.caixa.openPdvTable(table.number, people, note);
+    await load();
+    const fresh = (await window.caixa.getPdvSnapshot()).tables.find((item) => item.number === table.number);
+    if (fresh) {
+      setActiveTable(fresh);
+      setTableCart(fresh.items);
+      setTablePeople(fresh.people || 1);
+      setTableNote(fresh.note || "");
+      setSelectedTableItemIds([]);
+      setCurrentSubtable("");
+    }
+    setOpeningTable(null);
   };
 
   const runTableAction = async (action: string, table: PdvOpenTable) => {
@@ -638,6 +644,13 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
           complements={snapshot.products.filter((product) => pendingProduct.product.complementProductIds.includes(product.id) && product.active && product.canBeComplement)}
           onCancel={() => setPendingProduct(null)}
           onConfirm={addConfiguredProduct}
+        />
+      )}
+      {openingTable && (
+        <OpenTableModal
+          table={openingTable}
+          onCancel={() => setOpeningTable(null)}
+          onConfirm={confirmOpenTable}
         />
       )}
     </div>
@@ -1182,6 +1195,54 @@ function ComplementModal({
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
           <button className="pdv-ghost-button" onClick={() => onConfirm(product, unitPrice, [])}>Sem adicionais</button>
           <button className="pdv-primary-button" onClick={() => onConfirm(product, unitPrice, selectedComplements)}>Adicionar item</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function OpenTableModal({ table, onCancel, onConfirm }: { table: PdvOpenTable; onCancel: () => void; onConfirm: (table: PdvOpenTable, people: number, note: string) => void | Promise<void> }) {
+  const [people, setPeople] = useState(table.people || 1);
+  const [note, setNote] = useState(table.note || "");
+  const [busy, setBusy] = useState(false);
+
+  const confirm = async () => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onConfirm(table, Math.max(1, Math.floor(people || 1)), note.trim());
+    } catch (error) {
+      setBusy(false);
+      throw error;
+    }
+  };
+
+  return (
+    <div className="pdv-modal-backdrop">
+      <section className="pdv-payment-modal pdv-open-table-modal">
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Abrir mesa</span>
+            <h1>Mesa {String(table.number).padStart(3, "0")}</h1>
+            <p>Informe apenas o que for util agora. Da para ajustar depois dentro da mesa.</p>
+          </div>
+          <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
+        </div>
+        <div className="pdv-editor-grid">
+          <label>
+            <span>Quantidade de pessoas</span>
+            <input autoFocus type="number" min={1} value={people} onChange={(event) => setPeople(Number(event.target.value || 1))} />
+          </label>
+          <label>
+            <span>Observacao discreta</span>
+            <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Ex.: Joao, varanda, casal" />
+          </label>
+        </div>
+        <div className="pdv-action-row">
+          <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
+          <button className="pdv-primary-button" disabled={busy} onClick={confirm}>{busy ? "Abrindo..." : "Abrir mesa"}</button>
         </div>
       </section>
     </div>
