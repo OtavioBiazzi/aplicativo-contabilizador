@@ -13,9 +13,25 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "./shared/types";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus } from "./shared/pdvTypes";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
+  getPdvSnapshot: () => Promise<PdvSnapshot>;
+  savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>;
+  updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean }) => Promise<void>;
+  savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
+  savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
+  importCoseProducts: () => Promise<PdvProductImportResult>;
+  importPdvProductsFile: () => Promise<PdvProductImportResult | null>;
+  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[]) => Promise<PdvSale>;
+  openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
+  setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
+  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
+  cancelPdvSale: (id: string) => Promise<void>;
+  exportPdvSales: (filters?: PdvExportFilters) => Promise<ExportStatus>;
   addEntry: (draft: EntryDraft) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;
   removeEntry: (id: string) => Promise<{ exportStatus: ExportStatus }>;
@@ -52,6 +68,7 @@ export interface CaixaApi {
   onServerChanged: (callback: (state: ServerState) => void) => () => void;
   onPinnedChanged: (callback: (pinned: boolean) => void) => () => void;
   onSettingsChanged: (callback: (settings: AppSettings) => void) => () => void;
+  onPdvChanged: (callback: () => void) => () => void;
 }
 
 declare global {

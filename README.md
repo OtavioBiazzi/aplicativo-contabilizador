@@ -1,8 +1,8 @@
 # Contabilizador Caixa
 
-Aplicativo desktop para registrar vendas, mesas, onibus, pagamentos em dinheiro, troco, divisoes de conta, estornos, extras e lancamentos personalizados com exportacao automatica para Excel ou CSV.
+Aplicativo desktop para caixa/PDV local com venda direta, mesas, produtos, adicionais, pagamentos multiplos, historico, relatorios e exportacao para Excel/CSV.
 
-Esta primeira versao foi pensada para uso diario em caixa: abrir, digitar valor, descrever a mesa/cliente/onibus, registrar e manter o arquivo do dia sempre atualizado.
+A versao `0.3.x` inicia o remake do PDV local simples. O app antigo foi preservado no codigo, mas a tela principal nova usa SQLite como fonte principal dos dados do PDV. Excel agora e saida de relatorio/exportacao, nao banco principal.
 
 ## Plano de remake
 
@@ -12,11 +12,30 @@ O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/pl
 
 - **Electron**: melhor encaixe para app desktop real, janela sempre visivel, acesso a arquivos locais, dialogos de pasta e empacotamento Windows.
 - **React + Vite + TypeScript**: interface rapida, componentizada e facil de evoluir.
+- **SQLite local via sql.js**: banco principal do novo PDV, salvo como `pdv.sqlite`.
 - **XLSX local + CSV nativo**: geracao local de planilhas `.xlsx` e `.csv`, sem depender de Excel aberto.
 - **Express + WebSocket**: servidor local com senha para outro computador na mesma rede visualizar ou registrar lancamentos.
-- **JSON local como fonte confiavel**: os arquivos Excel/CSV sao exportacoes; o historico principal fica salvo localmente para reduzir risco de perda.
+- **JSON local legado + SQLite PDV**: os dados antigos continuam em JSON local; os dados novos do PDV ficam no SQLite.
 
 ## Funcionalidades implementadas
+
+### PDV local novo
+
+- Venda direta com carrinho, quantidade, desconto, observacao e preco editavel apenas no lancamento.
+- Mesas com status, abertura, itens persistidos, fechamento total e fechamento parcial.
+- Submesas/comandas opcionais por mesa, com fechamento separado e movimentacao de itens.
+- Produtos e categorias no SQLite, com importacao da planilha `produtos.xlsx` da Cose Dell Abadia.
+- Preset nativo **Cose Dell Abadia** para uso em qualquer instalacao.
+- Adicionais opcionais: um produto pode continuar como item normal e tambem ser marcado como complemento de outro produto.
+- Produtos que abrem adicionais mostram selecao de complementos; `Shift+clique` lanca direto sem abrir a tela.
+- Pagamentos multiplos com dinheiro recebido e troco, sem gravar troco como pagamento.
+- Historico detalhado por venda, mesa, item, adicional e pagamento, com cancelamento preservado como auditoria.
+- Relatorios por periodo, pagamento, produto, categoria e horario.
+- Exportacao Excel do PDV com abas `Resumo`, `Vendas`, `Itens` e `Pagamentos`.
+- Configuracao de quantidade de mesas, submesas e complementos em **Avancado**.
+- Backup automatico do `pdv.sqlite` antes de migracoes/importacoes e backup de seguranca ao atualizar de versoes antigas.
+
+### Caixa legado preservado
 
 - Registro rapido com valor, descricao, tipo, pessoas, mesa, onibus, pagamento e observacoes.
 - Descricao automatica como `Venda` quando o campo fica vazio.
@@ -160,6 +179,16 @@ venda-2026-06-28.xlsx
 onibus-2026-06-28.xlsx
 ```
 
+O remake PDV cria tambem:
+
+```text
+pdv.sqlite
+pdv-backups/
+upgrade-backups/
+```
+
+`ledger.json` e `settings.json` continuam sendo preservados para os dados e configuracoes antigas. Na primeira abertura da base nova, o app cria um backup de seguranca em `upgrade-backups/` quando encontra arquivos antigos ou um `pdv.sqlite` existente.
+
 Em **Ajustes > Planilha e backup**, use **Importar Excel/CSV** para trazer planilhas antigas compativeis para o historico do app. Antes de gravar, o app mostra uma previa com linhas novas, duplicadas, ignoradas, avisos e uma amostra dos lancamentos. Linhas `TOTAL` sao ignoradas e lancamentos repetidos sao pulados automaticamente.
 
 Use **Importar pasta** para apontar uma pasta com varios arquivos de dias diferentes. O app procura `.xlsx`, `.csv` e `.tsv`, pula duplicados e atualiza o historico local.
@@ -203,6 +232,12 @@ python -m playwright install chromium
 python scripts/smoke_playwright.py
 ```
 
+O núcleo do PDV novo tambem tem um smoke sem Playwright:
+
+```bash
+npm run smoke:pdv
+```
+
 No desenvolvimento local deste projeto, o teste abre o Electron real via porta de depuracao e validou:
 
 - carregamento da tela principal;
@@ -232,14 +267,19 @@ electron/
   preload.ts       Ponte segura exposta ao React
   storage.ts       JSON local e operacoes de lancamento
   exporter.ts      Exportacao Excel/CSV e backups
+  pdvStore.ts      SQLite do PDV local
+  pdvExporter.ts   Exportacao Excel do PDV
+  productImporter.ts Importacao de produtos para o PDV
   localServer.ts   Servidor HTTP/WebSocket local
 src/
   App.tsx          Interface principal
+  PdvApp.tsx       Interface principal do remake PDV local
   main.tsx         Bootstrap React
   shared/          Tipos, defaults e calculos reutilizaveis
   styles/          CSS da aplicacao
 scripts/
   smoke_playwright.py
+  smoke_pdv.mjs
 ```
 
 ## Observacoes de seguranca

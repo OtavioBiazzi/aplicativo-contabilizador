@@ -7,6 +7,9 @@ import { DiagnosticLogger } from "./diagnostics.js";
 import { LedgerExporter } from "./exporter.js";
 import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
+import { PdvExporter } from "./pdvExporter.js";
+import { normalizeImportedProducts, readPdvProductsFromXlsx } from "./productImporter.js";
+import { PdvStore } from "./pdvStore.js";
 import { LedgerStore } from "./storage.js";
 import type {
   AppSettings,
@@ -21,12 +24,14 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "../src/shared/types.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvTableStatus } from "../src/shared/pdvTypes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
 let floatingWindow: BrowserWindow | null = null;
 let store: LedgerStore;
+let pdvStore: PdvStore;
 let exporter: LedgerExporter;
 let localServer: LocalServer;
 let logger: DiagnosticLogger;
@@ -339,16 +344,64 @@ async function listImportableLedgerFiles(directory: string): Promise<string[]> {
   return files.sort((left, right) => left.localeCompare(right, "pt-BR", { numeric: true }));
 }
 
+async function importPdvProducts(filePath: string): Promise<PdvProductImportResult> {
+  const rows = await readPdvProductsFromXlsx(filePath);
+  const normalized = normalizeImportedProducts(rows);
+  const result = await pdvStore.replaceProducts(normalized.categories, normalized.products, filePath);
+  await logger.info(
+    "Produtos PDV importados",
+    `${result.importedProducts} produto(s), ${result.importedCategories} categoria(s): ${path.basename(filePath)}`
+  );
+  sendToAll("pdv:changed");
+  return {
+    ...result,
+    skippedRows: normalized.skippedRows
+  };
+}
+
+async function createUpgradeSafetyBackup(dataDirectory: string) {
+  await fs.mkdir(dataDirectory, { recursive: true });
+  const markerPath = path.join(dataDirectory, ".pdv-remake-safety-backup");
+  try {
+    await fs.access(markerPath);
+    return;
+  } catch {
+    // Primeira execucao da base PDV nova neste diretorio.
+  }
+
+  const files = ["settings.json", "ledger.json", "pdv.sqlite"];
+  const existing: string[] = [];
+  for (const file of files) {
+    try {
+      await fs.access(path.join(dataDirectory, file));
+      existing.push(file);
+    } catch {
+      // Instalacoes novas podem nao ter arquivos antigos ainda.
+    }
+  }
+
+  if (existing.length) {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const targetDirectory = path.join(dataDirectory, "upgrade-backups", `antes-remake-pdv-${timestamp}`);
+    await fs.mkdir(targetDirectory, { recursive: true });
+    await Promise.all(existing.map((file) => fs.copyFile(path.join(dataDirectory, file), path.join(targetDirectory, file))));
+  }
+  await fs.writeFile(markerPath, new Date().toISOString(), "utf8");
+}
+
 async function bootstrap() {
   Menu.setApplicationMenu(null);
   registerAppProtocol();
   const dataDirectory = process.env.CAIXA_DATA_DIR || path.join(app.getPath("userData"), "data");
   const defaultOutputDirectory =
     process.env.CAIXA_OUTPUT_DIR || path.join(app.getPath("userData"), "planilhas");
+  await createUpgradeSafetyBackup(dataDirectory);
   store = new LedgerStore({ dataDirectory, defaultOutputDirectory });
+  pdvStore = new PdvStore(dataDirectory);
   exporter = new LedgerExporter(dataDirectory);
   logger = new DiagnosticLogger(dataDirectory);
   await store.initialize();
+  await pdvStore.initialize();
   await logger.info("Aplicativo iniciado", `Versao ${app.getVersion()}`);
 
   localServer = new LocalServer({
@@ -430,6 +483,93 @@ function registerIpc() {
     server: localServer.getState(),
     exportStatus: await exporter.getStatus()
   }));
+
+  ipcMain.handle("pdv:getSnapshot", async () => pdvStore.getSnapshot());
+
+  ipcMain.handle("pdv:saveSettings", async (_event, patch: Partial<PdvSettings>) => {
+    const settings = await pdvStore.saveSettings(patch);
+    sendToAll("pdv:changed");
+    return settings;
+  });
+
+  ipcMain.handle("pdv:updateProducts", async (_event, ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean }) => {
+    await pdvStore.updateProducts(ids, patch);
+    sendToAll("pdv:changed");
+  });
+
+  ipcMain.handle("pdv:saveCategory", async (_event, draft: PdvCategoryDraft): Promise<PdvCategory> => {
+    const category = await pdvStore.saveCategory(draft);
+    sendToAll("pdv:changed");
+    return category;
+  });
+
+  ipcMain.handle("pdv:saveProduct", async (_event, draft: PdvProductDraft): Promise<PdvProduct> => {
+    const product = await pdvStore.saveProduct(draft);
+    sendToAll("pdv:changed");
+    return product;
+  });
+
+  ipcMain.handle("pdv:importCoseProducts", async (): Promise<PdvProductImportResult> => {
+    const defaultPath = path.join(app.getPath("downloads"), "produtos.xlsx");
+    return importPdvProducts(defaultPath);
+  });
+
+  ipcMain.handle("pdv:importProductsFile", async (): Promise<PdvProductImportResult | null> => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: "Importar produtos para o PDV",
+      properties: ["openFile"],
+      filters: [{ name: "Planilha de produtos", extensions: ["xlsx"] }]
+    });
+    if (result.canceled || !result.filePaths[0]) {
+      return null;
+    }
+    return importPdvProducts(result.filePaths[0]);
+  });
+
+  ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[] }): Promise<PdvSale> => {
+    const sale = await pdvStore.saveSale({ type: "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
+    sendToAll("pdv:changed");
+    return sale;
+  });
+
+  ipcMain.handle("pdv:openTable", async (_event, tableNumber: number, people?: number, note?: string) => {
+    await pdvStore.openTable(tableNumber, people, note);
+    sendToAll("pdv:changed");
+  });
+
+  ipcMain.handle("pdv:setTableStatus", async (_event, tableNumber: number, status: PdvTableStatus) => {
+    await pdvStore.setTableStatus(tableNumber, status);
+    sendToAll("pdv:changed");
+  });
+
+  ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[]) => {
+    await pdvStore.saveTableItems(tableNumber, items);
+    sendToAll("pdv:changed");
+  });
+
+  ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number): Promise<PdvSale> => {
+    const sale = await pdvStore.closeTable(tableNumber, payments, discount);
+    sendToAll("pdv:changed");
+    return sale;
+  });
+
+  ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number): Promise<PdvSale> => {
+    const sale = await pdvStore.saveSale({ type: "Mesa", tableNumber, status: "Parcial", items, discount: discount || 0, payments });
+    sendToAll("pdv:changed");
+    return sale;
+  });
+
+  ipcMain.handle("pdv:cancelSale", async (_event, id: string) => {
+    await pdvStore.cancelSale(id);
+    sendToAll("pdv:changed");
+  });
+
+  ipcMain.handle("pdv:exportSales", async (_event, filters: PdvExportFilters = {}) => {
+    const settings = await store.getSettings();
+    const status = await new PdvExporter(settings.outputDirectory).exportSales(pdvStore.getSales(filters), filters);
+    await logExportStatus("exportacao PDV", status);
+    return status;
+  });
 
   ipcMain.handle("entries:add", async (_event, draft: EntryDraft) => {
     const entry = await store.addEntry(draft);

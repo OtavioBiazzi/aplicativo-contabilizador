@@ -1,8 +1,27 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings, EntryDraft, LedgerEntry, ServerState } from "../src/shared/types.js";
+import type { PdvCartItem, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProductDraft, PdvSettings, PdvTableStatus } from "../src/shared/pdvTypes.js";
 
 contextBridge.exposeInMainWorld("caixa", {
   getSnapshot: () => ipcRenderer.invoke("app:getSnapshot"),
+  getPdvSnapshot: () => ipcRenderer.invoke("pdv:getSnapshot"),
+  savePdvSettings: (patch: Partial<PdvSettings>) => ipcRenderer.invoke("pdv:saveSettings", patch),
+  updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean }) =>
+    ipcRenderer.invoke("pdv:updateProducts", ids, patch),
+  savePdvCategory: (draft: PdvCategoryDraft) => ipcRenderer.invoke("pdv:saveCategory", draft),
+  savePdvProduct: (draft: PdvProductDraft) => ipcRenderer.invoke("pdv:saveProduct", draft),
+  importCoseProducts: () => ipcRenderer.invoke("pdv:importCoseProducts"),
+  importPdvProductsFile: () => ipcRenderer.invoke("pdv:importProductsFile"),
+  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[]) =>
+    ipcRenderer.invoke("pdv:saveDirectSale", { items, discount, payments }),
+  openPdvTable: (tableNumber: number, people?: number, note?: string) => ipcRenderer.invoke("pdv:openTable", tableNumber, people, note),
+  setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => ipcRenderer.invoke("pdv:setTableStatus", tableNumber, status),
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => ipcRenderer.invoke("pdv:saveTableItems", tableNumber, items),
+  closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number) => ipcRenderer.invoke("pdv:closeTable", tableNumber, payments, discount),
+  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number) =>
+    ipcRenderer.invoke("pdv:saveTablePartial", tableNumber, items, payments, discount),
+  cancelPdvSale: (id: string) => ipcRenderer.invoke("pdv:cancelSale", id),
+  exportPdvSales: (filters?: PdvExportFilters) => ipcRenderer.invoke("pdv:exportSales", filters),
   addEntry: (draft: EntryDraft) => ipcRenderer.invoke("entries:add", draft),
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => ipcRenderer.invoke("entries:update", id, patch),
   removeEntry: (id: string) => ipcRenderer.invoke("entries:remove", id),
@@ -51,5 +70,10 @@ contextBridge.exposeInMainWorld("caixa", {
     const handler = (_event: Electron.IpcRendererEvent, settings: AppSettings) => callback(settings);
     ipcRenderer.on("settings:changed", handler);
     return () => ipcRenderer.removeListener("settings:changed", handler);
+  },
+  onPdvChanged: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("pdv:changed", handler);
+    return () => ipcRenderer.removeListener("pdv:changed", handler);
   }
 });
