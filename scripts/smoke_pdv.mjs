@@ -82,6 +82,26 @@ const cancelled = await store.saveSale({
 });
 await store.cancelSale(cancelled.id);
 
+await store.openTable(7, 2, "Smoke mesa");
+await store.saveTableItems(7, [{
+  id: crypto.randomUUID(),
+  productId: baseProduct.id,
+  productName: baseProduct.name,
+  categoryName: category.name,
+  quantity: 2,
+  baseUnitPrice: 10,
+  unitPrice: 10,
+  discount: 0,
+  total: 20,
+  subtableName: "Cliente 1"
+}]);
+let tableSeven = (await store.getSnapshot()).tables.find((table) => table.number === 7);
+await store.saveTableItems(7, (tableSeven?.items || []).map((item) => ({ ...item, subtableName: item.subtableName === "Cliente 1" ? "Joao" : item.subtableName })));
+tableSeven = (await store.getSnapshot()).tables.find((table) => table.number === 7);
+if (!tableSeven?.items.some((item) => item.subtableName === "Joao")) {
+  throw new Error("Renomeacao/persistencia de submesa nao funcionou como esperado.");
+}
+
 const snapshot = await store.getSnapshot();
 const savedSale = snapshot.recentSales.find((item) => item.id === sale.id);
 if (!savedSale || savedSale.items[0].complements?.[0]?.name !== complement.name) {

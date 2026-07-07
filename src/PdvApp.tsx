@@ -361,6 +361,22 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
     await load();
   };
 
+  const renameSubtable = async (oldName: string, newName: string) => {
+    const nextName = newName.trim();
+    if (!activeTable || !oldName || !nextName || oldName === nextName) {
+      return;
+    }
+    if (tableCart.some((item) => (item.subtableName || "") === nextName) && !window.confirm(`Ja existe uma submesa chamada "${nextName}". Juntar os itens nela?`)) {
+      return;
+    }
+    const renamedItems = tableCart.map((item) => (item.subtableName || "") === oldName ? { ...item, subtableName: nextName } : item);
+    setTableCart(renamedItems);
+    setCurrentSubtable(nextName);
+    await window.caixa.savePdvTableItems(activeTable.number, renamedItems);
+    setToast(`Submesa ${oldName} renomeada para ${nextName}.`);
+    await load();
+  };
+
   const requestPartialByValue = () => {
     if (!activeTable) {
       return;
@@ -587,6 +603,7 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
             onDeleteSubtable={deleteSubtable}
             onDeleteAllSubtables={deleteAllSubtables}
             onMoveSelectedToSubtable={moveSelectedItemsToSubtable}
+            onRenameSubtable={renameSubtable}
             extraActions={
               <>
                 <button className="pdv-ghost-button" disabled={busy || !tableCart.length} onClick={requestCloseTable}>
@@ -690,6 +707,7 @@ function PdvSaleScreen(props: {
   onDeleteSubtable?: (name: string) => void;
   onDeleteAllSubtables?: () => void;
   onMoveSelectedToSubtable?: (name: string) => void;
+  onRenameSubtable?: (oldName: string, newName: string) => void;
   extraActions?: React.ReactNode;
 }) {
   const subtotal = roundMoney(props.cart.reduce((total, item) => total + item.total, 0));
@@ -868,6 +886,7 @@ function PdvSaleScreen(props: {
             onDeleteSubtable={props.onDeleteSubtable}
             onDeleteAllSubtables={props.onDeleteAllSubtables}
             onMoveSelectedToSubtable={props.onMoveSelectedToSubtable}
+            onRenameSubtable={props.onRenameSubtable}
           />
         )}
         <div className="pdv-cart-list">
@@ -1116,7 +1135,8 @@ function SubtablePicker({
   onCloseSubtable,
   onDeleteSubtable,
   onDeleteAllSubtables,
-  onMoveSelectedToSubtable
+  onMoveSelectedToSubtable,
+  onRenameSubtable
 }: {
   cart: PdvCartItem[];
   value: string;
@@ -1125,6 +1145,7 @@ function SubtablePicker({
   onDeleteSubtable?: (name: string) => void;
   onDeleteAllSubtables?: () => void;
   onMoveSelectedToSubtable?: (name: string) => void;
+  onRenameSubtable?: (oldName: string, newName: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const names = [...new Set([...cart.map((item) => item.subtableName || "").filter(Boolean), value].filter(Boolean))].sort((left, right) => left.localeCompare(right, "pt-BR"));
@@ -1153,6 +1174,12 @@ function SubtablePicker({
       </div>
       <div className="pdv-subtable-actions">
         <button className="pdv-ghost-button" onClick={() => onMoveSelectedToSubtable?.(value)}>Mover selecionados para atual</button>
+        {value && <button className="pdv-ghost-button" onClick={() => {
+          const next = window.prompt("Novo nome da submesa", value);
+          if (next !== null) {
+            onRenameSubtable?.(value, next);
+          }
+        }}>Renomear submesa</button>}
         {value && <button className="pdv-ghost-button" onClick={() => onCloseSubtable?.(value)}>Fechar submesa</button>}
         {value && <button className="pdv-danger-button" onClick={() => onDeleteSubtable?.(value)}>Apagar submesa</button>}
         {names.length > 0 && <button className="pdv-danger-button" onClick={onDeleteAllSubtables}>Apagar todas submesas</button>}
