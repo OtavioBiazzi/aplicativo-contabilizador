@@ -48,6 +48,25 @@ function localDateInputValue(date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+function reportPeriodRange(period: "today" | "yesterday" | "week" | "month"): { from: string; to: string } {
+  const now = new Date();
+  const start = new Date(now);
+  const end = new Date(now);
+  if (period === "yesterday") {
+    start.setDate(now.getDate() - 1);
+    end.setDate(now.getDate() - 1);
+  }
+  if (period === "week") {
+    const day = now.getDay();
+    const diff = day === 0 ? 6 : day - 1;
+    start.setDate(now.getDate() - diff);
+  }
+  if (period === "month") {
+    start.setDate(1);
+  }
+  return { from: localDateInputValue(start), to: localDateInputValue(end) };
+}
+
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -1757,6 +1776,12 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
         </div>
       </div>
       <div className="pdv-history-filters">
+        <div className="pdv-period-shortcuts">
+          <button type="button" onClick={() => setFilters({ ...filters, ...reportPeriodRange("today") })}>Hoje</button>
+          <button type="button" onClick={() => setFilters({ ...filters, ...reportPeriodRange("yesterday") })}>Ontem</button>
+          <button type="button" onClick={() => setFilters({ ...filters, ...reportPeriodRange("week") })}>Semana</button>
+          <button type="button" onClick={() => setFilters({ ...filters, ...reportPeriodRange("month") })}>Mes</button>
+        </div>
         <label><span>De</span><input type="date" value={filters.from || ""} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
         <label><span>Ate</span><input type="date" value={filters.to || ""} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
         <label><span>Tipo</span><select value={filters.type || "Todos"} onChange={(event) => setFilters({ ...filters, type: event.target.value as PdvExportFilters["type"] })}><option>Todos</option><option>Venda direta</option><option>Mesa</option></select></label>

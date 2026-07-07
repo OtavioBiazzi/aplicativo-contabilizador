@@ -4463,6 +4463,24 @@ body.floating-borderless .floating-bar {
   margin-bottom: 12px;
 }
 
+.pdv-period-shortcuts {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pdv-period-shortcuts button {
+  min-height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 5px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 900;
+  cursor: pointer;
+}
+
 .pdv-history-filters label {
   display: grid;
   gap: 5px;
