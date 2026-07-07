@@ -1473,6 +1473,7 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
     table: ""
   });
   const [selectedSale, setSelectedSale] = useState<PdvSale | null>(null);
+  const [saleMenu, setSaleMenu] = useState<{ x: number; y: number; sale: PdvSale } | null>(null);
   const sales = filterSales(snapshot.recentSales, filters);
 
   const cancelSale = async (sale: PdvSale) => {
@@ -1482,6 +1483,23 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
     await window.caixa.cancelPdvSale(sale.id);
     setSelectedSale(null);
     onChanged();
+  };
+
+  const runSaleAction = async (action: string, sale: PdvSale) => {
+    setSaleMenu(null);
+    if (action === "details" || action === "items") {
+      setSelectedSale(sale);
+      return;
+    }
+    if (action === "export") {
+      const date = sale.createdAt.slice(0, 10);
+      const status = await window.caixa.exportPdvSales({ from: date, to: date, type: "Todos", payment: "Todos", table: sale.tableNumber ? String(sale.tableNumber) : "" });
+      window.alert(status.message || (status.ok ? "Exportacao concluida." : "Nao foi possivel exportar."));
+      return;
+    }
+    if (action === "cancel" && sale.status !== "Cancelada") {
+      await cancelSale(sale);
+    }
   };
 
   return (
@@ -1503,7 +1521,15 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
       </div>
       <div className="pdv-history-list">
         {sales.map((sale) => (
-          <article className={sale.status === "Cancelada" ? "cancelled" : ""} key={sale.id} onDoubleClick={() => setSelectedSale(sale)}>
+          <article
+            className={sale.status === "Cancelada" ? "cancelled" : ""}
+            key={sale.id}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setSaleMenu({ x: event.clientX, y: event.clientY, sale });
+            }}
+            onDoubleClick={() => setSelectedSale(sale)}
+          >
             <div>
               <strong>{sale.type}{sale.tableNumber ? ` ${String(sale.tableNumber).padStart(3, "0")}` : ""}</strong>
               <span>{new Date(sale.createdAt).toLocaleString("pt-BR")} | {sale.items.length} item(ns) | {sale.status}</span>
@@ -1515,6 +1541,15 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
         ))}
         {!sales.length && <div className="pdv-empty">Nenhuma venda encontrada para os filtros.</div>}
       </div>
+      {saleMenu && (
+        <ContextMenu x={saleMenu.x} y={saleMenu.y} onClose={() => setSaleMenu(null)}>
+          <button onClick={() => runSaleAction("details", saleMenu.sale)}>Ver detalhes</button>
+          <button onClick={() => runSaleAction("items", saleMenu.sale)}>Ver produtos da venda</button>
+          <button onClick={() => runSaleAction("export", saleMenu.sale)}>Exportar dia da venda</button>
+          <button disabled>Alterar forma de pagamento</button>
+          {saleMenu.sale.status !== "Cancelada" && <button className="danger" onClick={() => runSaleAction("cancel", saleMenu.sale)}>Cancelar/estornar</button>}
+        </ContextMenu>
+      )}
       {selectedSale && <SaleDetailModal sale={selectedSale} onClose={() => setSelectedSale(null)} onCancel={() => cancelSale(selectedSale)} />}
     </section>
   );
