@@ -1709,6 +1709,7 @@ function AdvancedScreen({ snapshot, onImportCose, onImportFile, busy, onSettings
           <Banknote size={22} />
           <strong>Excel agora e importacao/exportacao</strong>
           <span>Produtos e vendas ficam no SQLite. Relatorios e exportacoes do PDV saem a partir deste banco.</span>
+          <button className="pdv-ghost-button" type="button" onClick={() => window.caixa.openOutputDirectory()}>Abrir pasta dos Excel</button>
         </article>
         <article>
           <FileSpreadsheet size={22} />
