@@ -569,6 +569,7 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
             onFinish={saveTable}
             tablePeople={tablePeople}
             tableNote={tableNote}
+            activeTableNumber={activeTable.number}
             setTablePeople={setTablePeople}
             setTableNote={setTableNote}
             selectedItemIds={selectedTableItemIds}
@@ -664,6 +665,7 @@ function PdvSaleScreen(props: {
   onFinish: () => void;
   tablePeople?: number;
   tableNote?: string;
+  activeTableNumber?: number;
   setTablePeople?: (value: number) => void;
   setTableNote?: (value: string) => void;
   selectedItemIds?: string[];
@@ -680,7 +682,7 @@ function PdvSaleScreen(props: {
   const subtotal = roundMoney(props.cart.reduce((total, item) => total + item.total, 0));
   const finalTotal = Math.max(0, roundMoney(subtotal - props.discount));
   const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: PdvCartItem } | null>(null);
-  const runItemAction = (action: string, item: PdvCartItem) => {
+  const runItemAction = async (action: string, item: PdvCartItem) => {
     setItemMenu(null);
     if (action === "quantity") {
       const value = window.prompt("Nova quantidade", String(item.quantity).replace(".", ","));
@@ -727,6 +729,51 @@ function PdvSaleScreen(props: {
       const value = window.prompt("Numero do item de referencia", "1");
       if (value !== null) {
         props.setCart((current) => moveCartItemNear(current, item.id, Math.max(0, Math.floor(Number(value) || 1) - 1), action === "after"));
+      }
+    }
+    if (action === "transfer-table") {
+      const tableValue = window.prompt("Transferir para qual mesa?", "");
+      if (!tableValue) {
+        return;
+      }
+      const tableNumber = Math.max(1, Math.floor(Number(tableValue.replace(/\D/g, "")) || 0));
+      if (!tableNumber) {
+        window.alert("Informe uma mesa valida.");
+        return;
+      }
+      const quantityToTransfer = askTransferQuantity(item);
+      if (!quantityToTransfer) {
+        return;
+      }
+      const snapshot = await window.caixa.getPdvSnapshot();
+      const target = snapshot.tables.find((table) => table.number === tableNumber);
+      if (!target) {
+        window.alert("Mesa nao encontrada.");
+        return;
+      }
+      const transferItem = splitCartItemForTransfer(item, quantityToTransfer, "");
+      await window.caixa.openPdvTable(tableNumber, target.people || 1, target.note || "");
+      await window.caixa.savePdvTableItems(tableNumber, mergeCartItem(target.items, transferItem));
+      const nextSource = subtractCartItemQuantity(props.cart, item.id, quantityToTransfer);
+      props.setCart(nextSource);
+      if (props.activeTableNumber) {
+        await window.caixa.savePdvTableItems(props.activeTableNumber, nextSource);
+      }
+    }
+    if (action === "transfer-subtable") {
+      const name = window.prompt("Transferir para qual submesa/comanda? Deixe vazio para mesa principal.", item.subtableName || "");
+      if (name === null) {
+        return;
+      }
+      const quantityToTransfer = askTransferQuantity(item);
+      if (!quantityToTransfer) {
+        return;
+      }
+      const transferItem = splitCartItemForTransfer(item, quantityToTransfer, name.trim());
+      const nextSource = mergeCartItem(subtractCartItemQuantity(props.cart, item.id, quantityToTransfer), transferItem);
+      props.setCart(nextSource);
+      if (props.activeTableNumber) {
+        await window.caixa.savePdvTableItems(props.activeTableNumber, nextSource);
       }
     }
   };
@@ -848,6 +895,8 @@ function PdvSaleScreen(props: {
             <button onClick={() => runItemAction("discount-percent", itemMenu.item)}>Desconto em %</button>
             <button onClick={() => runItemAction("price", itemMenu.item)}>Alterar preco neste lancamento</button>
             <button onClick={() => runItemAction("note", itemMenu.item)}>Adicionar observacao</button>
+            {props.setCurrentSubtable && <button onClick={() => runItemAction("transfer-table", itemMenu.item)}>Transferir para outra mesa</button>}
+            {props.setCurrentSubtable && <button onClick={() => runItemAction("transfer-subtable", itemMenu.item)}>Transferir para submesa</button>}
             <button onClick={() => runItemAction("up", itemMenu.item)}>Mover para cima</button>
             <button onClick={() => runItemAction("down", itemMenu.item)}>Mover para baixo</button>
             <button onClick={() => runItemAction("before", itemMenu.item)}>Colocar antes de outro item</button>
@@ -1709,6 +1758,55 @@ function moveCartItemNear(items: PdvCartItem[], id: string, referenceIndex: numb
   const adjustedReference = index < referenceIndex ? referenceIndex - 1 : referenceIndex;
   next.splice(Math.min(next.length, adjustedReference + (after ? 1 : 0)), 0, item);
   return next;
+}
+
+function askTransferQuantity(item: PdvCartItem): number | null {
+  if (item.quantity <= 1) {
+    return item.quantity;
+  }
+  const value = window.prompt(`Quantidade para transferir de ${item.productName}`, String(item.quantity).replace(".", ","));
+  if (value === null) {
+    return null;
+  }
+  const quantity = parseBrazilianNumber(value);
+  if (quantity <= 0 || quantity > item.quantity) {
+    window.alert("Informe uma quantidade valida para transferir.");
+    return null;
+  }
+  return roundMoney(quantity);
+}
+
+function splitCartItemForTransfer(item: PdvCartItem, quantity: number, subtableName: string): PdvCartItem {
+  const ratio = item.quantity > 0 ? quantity / item.quantity : 1;
+  const discount = roundMoney(item.discount * ratio);
+  return {
+    ...item,
+    id: crypto.randomUUID(),
+    quantity,
+    subtableName,
+    discount,
+    total: Math.max(0, roundMoney(quantity * item.unitPrice - discount))
+  };
+}
+
+function subtractCartItemQuantity(items: PdvCartItem[], id: string, quantity: number): PdvCartItem[] {
+  return items.flatMap((item) => {
+    if (item.id !== id) {
+      return [item];
+    }
+    const nextQuantity = roundMoney(item.quantity - quantity);
+    if (nextQuantity <= 0.0001) {
+      return [];
+    }
+    const ratio = item.quantity > 0 ? nextQuantity / item.quantity : 1;
+    const discount = roundMoney(item.discount * ratio);
+    return [{
+      ...item,
+      quantity: nextQuantity,
+      discount,
+      total: Math.max(0, roundMoney(nextQuantity * item.unitPrice - discount))
+    }];
+  });
 }
 
 function updateCartItem(items: PdvCartItem[], id: string, patch: Partial<Pick<PdvCartItem, "quantity" | "discount" | "note" | "unitPrice">>): PdvCartItem[] {
