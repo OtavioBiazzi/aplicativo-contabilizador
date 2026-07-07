@@ -1405,7 +1405,7 @@ function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProducts
   const [targetCategoryId, setTargetCategoryId] = useState(snapshot.categories[0]?.id || "");
   const [editingProduct, setEditingProduct] = useState<PdvProduct | "new" | null>(null);
   const [editingCategory, setEditingCategory] = useState<PdvCategory | "new" | null>(null);
-  const updateSelected = async (patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean }) => {
+  const updateSelected = async (patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => {
     await window.caixa.updatePdvProducts(selectedIds, patch);
     setSelectedIds([]);
     onProductsUpdated();
@@ -1452,6 +1452,10 @@ function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProducts
         <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ canBeComplement: false })}>Nao complemento</button>
         <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ hasComplements: true })}>Abrir adicionais</button>
         <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ hasComplements: false })}>Nao abrir adicionais</button>
+        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ favorite: true })}>Favoritar</button>
+        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ favorite: false })}>Tirar favorito</button>
+        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ showOnPdv: true })}>Exibir no PDV</button>
+        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ showOnPdv: false })}>Ocultar do PDV</button>
       </div>
       <div className="pdv-product-table">
         {snapshot.products.map((product) => (

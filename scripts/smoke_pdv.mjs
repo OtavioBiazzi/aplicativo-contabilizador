@@ -50,6 +50,13 @@ const favoriteSnapshot = await store.getSnapshot();
 if (!favoriteSnapshot.categories[0]?.favorite || !favoriteSnapshot.products[0]?.favorite) {
   throw new Error("Favoritos de produto/categoria nao ficaram no topo.");
 }
+await store.updateProducts([baseProduct.id], { favorite: false, showOnPdv: false });
+const bulkSnapshot = await store.getSnapshot();
+const bulkProduct = bulkSnapshot.products.find((item) => item.id === baseProduct.id);
+if (!bulkProduct || bulkProduct.favorite || bulkProduct.showOnPdv) {
+  throw new Error("Atualizacao em massa de favorito/visibilidade nao funcionou.");
+}
+await store.updateProducts([baseProduct.id], { favorite: true, showOnPdv: true });
 
 const sale = await store.saveSale({
   type: "Venda direta",

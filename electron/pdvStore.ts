@@ -86,7 +86,7 @@ export class PdvStore {
     return next;
   }
 
-  async updateProducts(ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean }): Promise<void> {
+  async updateProducts(ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }): Promise<void> {
     if (!ids.length) {
       return;
     }
@@ -102,6 +102,12 @@ export class PdvStore {
         }
         if (typeof patch.hasComplements === "boolean") {
           db.run("UPDATE products SET has_complements = ? WHERE id = ?", [patch.hasComplements ? 1 : 0, id]);
+        }
+        if (typeof patch.showOnPdv === "boolean") {
+          db.run("UPDATE products SET show_on_pdv = ? WHERE id = ?", [patch.showOnPdv ? 1 : 0, id]);
+        }
+        if (typeof patch.favorite === "boolean") {
+          db.run("UPDATE products SET favorite = ? WHERE id = ?", [patch.favorite ? 1 : 0, id]);
         }
       }
       db.run("COMMIT");

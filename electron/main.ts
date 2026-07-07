@@ -492,7 +492,7 @@ function registerIpc() {
     return settings;
   });
 
-  ipcMain.handle("pdv:updateProducts", async (_event, ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean }) => {
+  ipcMain.handle("pdv:updateProducts", async (_event, ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => {
     await pdvStore.updateProducts(ids, patch);
     sendToAll("pdv:changed");
   });

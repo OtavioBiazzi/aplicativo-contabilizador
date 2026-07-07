@@ -19,7 +19,7 @@ export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
   getPdvSnapshot: () => Promise<PdvSnapshot>;
   savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>;
-  updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean }) => Promise<void>;
+  updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
   importCoseProducts: () => Promise<PdvProductImportResult>;
