@@ -16,7 +16,7 @@ mkdirSync(exportDir, { recursive: true });
 const store = new PdvStore(dataDir);
 await store.initialize();
 
-const category = await store.saveCategory({ name: "Smoke PDV", active: true, sortOrder: 1 });
+const category = await store.saveCategory({ name: "Smoke PDV", active: true, favorite: true, sortOrder: 1 });
 const baseProduct = await store.saveProduct({
   name: "Cuscuz smoke",
   categoryId: category.id,
@@ -25,6 +25,7 @@ const baseProduct = await store.saveProduct({
   unitMode: "unidade",
   active: true,
   showOnPdv: true,
+  favorite: true,
   canBeComplement: false,
   hasComplements: true,
   complementProductIds: [],
@@ -38,12 +39,17 @@ const complement = await store.saveProduct({
   unitMode: "unidade",
   active: true,
   showOnPdv: true,
+  favorite: false,
   canBeComplement: true,
   hasComplements: false,
   complementProductIds: [],
   sortOrder: 2
 });
 await store.saveProduct({ ...baseProduct, complementProductIds: [complement.id] });
+const favoriteSnapshot = await store.getSnapshot();
+if (!favoriteSnapshot.categories[0]?.favorite || !favoriteSnapshot.products[0]?.favorite) {
+  throw new Error("Favoritos de produto/categoria nao ficaram no topo.");
+}
 
 const sale = await store.saveSale({
   type: "Venda direta",

@@ -79,6 +79,7 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
           id: randomUUID(),
           name: row.categoryName,
           active: true,
+          favorite: false,
           sortOrder: categoryByName.size
         };
         categoryByName.set(categoryKey, category);
@@ -99,6 +100,7 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
         unitMode: inferUnitMode(row.unit),
         active: row.active,
         showOnPdv: row.showOnPdv,
+        favorite: false,
         canBeComplement: isLikelyComplement(row.name),
         hasComplements: false,
         complementProductIds: [],

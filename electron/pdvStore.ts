@@ -118,12 +118,13 @@ export class PdvStore {
       id,
       name: draft.name.trim() || "Sem categoria",
       active: draft.active,
+      favorite: draft.favorite,
       sortOrder: Math.floor(draft.sortOrder || 0)
     };
     this.requireDb().run(
-      `INSERT INTO categories (id, name, active, sort_order) VALUES (?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET name=excluded.name, active=excluded.active, sort_order=excluded.sort_order`,
-      [category.id, category.name, category.active ? 1 : 0, category.sortOrder]
+      `INSERT INTO categories (id, name, active, favorite, sort_order) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, active=excluded.active, favorite=excluded.favorite, sort_order=excluded.sort_order`,
+      [category.id, category.name, category.active ? 1 : 0, category.favorite ? 1 : 0, category.sortOrder]
     );
     await this.persist();
     return category;
@@ -131,15 +132,15 @@ export class PdvStore {
 
   async saveProduct(draft: PdvProductDraft): Promise<PdvProduct> {
     const categories = this.getCategories();
-    const fallbackCategoryId = categories[0]?.id || (await this.saveCategory({ name: "Geral", active: true, sortOrder: 0 })).id;
+    const fallbackCategoryId = categories[0]?.id || (await this.saveCategory({ name: "Geral", active: true, favorite: false, sortOrder: 0 })).id;
     const categoryId = categories.some((category) => category.id === draft.categoryId) ? draft.categoryId : fallbackCategoryId;
     const id = draft.id || slugId("produto", draft.name);
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
       db.run(
-        `INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, can_be_complement, has_complements, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, favorite, can_be_complement, has_complements, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
           name=excluded.name,
           category_id=excluded.category_id,
@@ -148,6 +149,7 @@ export class PdvStore {
           unit_mode=excluded.unit_mode,
           active=excluded.active,
           show_on_pdv=excluded.show_on_pdv,
+          favorite=excluded.favorite,
           can_be_complement=excluded.can_be_complement,
           has_complements=excluded.has_complements,
           sort_order=excluded.sort_order`,
@@ -160,6 +162,7 @@ export class PdvStore {
           normalizeUnitMode(draft.unitMode),
           draft.active ? 1 : 0,
           draft.showOnPdv ? 1 : 0,
+          draft.favorite ? 1 : 0,
           draft.canBeComplement ? 1 : 0,
           draft.hasComplements ? 1 : 0,
           Math.floor(draft.sortOrder || 0)
@@ -188,14 +191,14 @@ export class PdvStore {
       db.run("DELETE FROM product_complements");
       db.run("DELETE FROM products");
       db.run("DELETE FROM categories");
-      const categoryStatement = db.prepare("INSERT INTO categories (id, name, active, sort_order) VALUES (?, ?, ?, ?)");
+      const categoryStatement = db.prepare("INSERT INTO categories (id, name, active, favorite, sort_order) VALUES (?, ?, ?, ?, ?)");
       for (const category of categories) {
-        categoryStatement.run([category.id, category.name, category.active ? 1 : 0, category.sortOrder]);
+        categoryStatement.run([category.id, category.name, category.active ? 1 : 0, category.favorite ? 1 : 0, category.sortOrder]);
       }
       categoryStatement.free();
 
       const productStatement = db.prepare(
-        "INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, can_be_complement, has_complements, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, favorite, can_be_complement, has_complements, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
       for (const product of products) {
         productStatement.run([
@@ -207,6 +210,7 @@ export class PdvStore {
           normalizeUnitMode(product.unitMode),
           product.active ? 1 : 0,
           product.showOnPdv ? 1 : 0,
+          product.favorite ? 1 : 0,
           product.canBeComplement ? 1 : 0,
           product.hasComplements ? 1 : 0,
           product.sortOrder
@@ -358,7 +362,7 @@ export class PdvStore {
   private getCategories(): PdvCategory[] {
     return selectAll<PdvCategory>(
       this.requireDb(),
-      "SELECT id, name, active = 1 AS active, sort_order AS sortOrder FROM categories ORDER BY sort_order, name"
+      "SELECT id, name, active = 1 AS active, favorite = 1 AS favorite, sort_order AS sortOrder FROM categories ORDER BY favorite DESC, sort_order, name"
     );
   }
 
@@ -367,12 +371,12 @@ export class PdvStore {
       this.requireDb(),
       `SELECT p.id, p.name, p.category_id AS categoryId, c.name AS categoryName, p.price, p.unit,
         COALESCE(p.unit_mode, 'unidade') AS unitMode,
-        p.active = 1 AS active, p.show_on_pdv = 1 AS showOnPdv,
+        p.active = 1 AS active, p.show_on_pdv = 1 AS showOnPdv, p.favorite = 1 AS favorite,
        p.can_be_complement = 1 AS canBeComplement, p.has_complements = 1 AS hasComplements,
         p.sort_order AS sortOrder
        FROM products p
        LEFT JOIN categories c ON c.id = p.category_id
-       ORDER BY c.sort_order, c.name, p.sort_order, p.name`
+       ORDER BY c.favorite DESC, c.sort_order, c.name, p.favorite DESC, p.sort_order, p.name`
     );
     const links = selectAll<{ productId: string; complementProductId: string }>(
       this.requireDb(),
@@ -453,6 +457,7 @@ export class PdvStore {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
         active INTEGER NOT NULL DEFAULT 1,
+        favorite INTEGER NOT NULL DEFAULT 0,
         sort_order INTEGER NOT NULL DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS products (
@@ -463,6 +468,7 @@ export class PdvStore {
         unit TEXT NOT NULL DEFAULT 'UNID',
         active INTEGER NOT NULL DEFAULT 1,
         show_on_pdv INTEGER NOT NULL DEFAULT 1,
+        favorite INTEGER NOT NULL DEFAULT 0,
         can_be_complement INTEGER NOT NULL DEFAULT 0,
         has_complements INTEGER NOT NULL DEFAULT 0,
         unit_mode TEXT NOT NULL DEFAULT 'unidade',
@@ -541,6 +547,8 @@ export class PdvStore {
     addColumnIfMissing(db, "products", "can_be_complement", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "has_complements", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "unit_mode", "TEXT NOT NULL DEFAULT 'unidade'");
+    addColumnIfMissing(db, "products", "favorite", "INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "categories", "favorite", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "table_items", "base_unit_price", "REAL");
     addColumnIfMissing(db, "table_items", "complements_json", "TEXT NOT NULL DEFAULT '[]'");
     addColumnIfMissing(db, "table_items", "measure_label", "TEXT NOT NULL DEFAULT ''");

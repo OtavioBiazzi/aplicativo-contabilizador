@@ -6,6 +6,7 @@ export interface PdvCategory {
   id: string;
   name: string;
   active: boolean;
+  favorite: boolean;
   sortOrder: number;
 }
 
@@ -19,6 +20,7 @@ export interface PdvProduct {
   unitMode: PdvUnitMode;
   active: boolean;
   showOnPdv: boolean;
+  favorite: boolean;
   canBeComplement: boolean;
   hasComplements: boolean;
   complementProductIds: string[];
@@ -34,6 +36,7 @@ export interface PdvProductDraft {
   unitMode: PdvUnitMode;
   active: boolean;
   showOnPdv: boolean;
+  favorite: boolean;
   canBeComplement: boolean;
   hasComplements: boolean;
   complementProductIds: string[];
@@ -44,6 +47,7 @@ export interface PdvCategoryDraft {
   id?: string;
   name: string;
   active: boolean;
+  favorite: boolean;
   sortOrder: number;
 }
 

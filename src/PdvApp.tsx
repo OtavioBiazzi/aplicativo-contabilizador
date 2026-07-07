@@ -1419,7 +1419,7 @@ function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProducts
       <div className="pdv-category-manager">
         {snapshot.categories.map((category) => (
           <button key={category.id} className={category.active ? "" : "inactive"} onClick={() => setEditingCategory(category)}>
-            {category.name} <small>{category.active ? "ativa" : "oculta"} | ordem {category.sortOrder}</small>
+            {category.favorite ? "[Fav] " : ""}{category.name} <small>{category.active ? "ativa" : "oculta"} | {category.favorite ? "favorita | " : ""}ordem {category.sortOrder}</small>
           </button>
         ))}
       </div>
@@ -1438,11 +1438,11 @@ function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProducts
         {snapshot.products.map((product) => (
           <article key={product.id} className={product.active ? "" : "inactive"}>
             <input type="checkbox" checked={selectedIds.includes(product.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} />
-            <strong>{product.name}</strong>
+            <strong>{product.favorite ? "[Fav] " : ""}{product.name}</strong>
             <span>{product.categoryName}</span>
             <span>{product.unit} / {product.unitMode}</span>
             <b>{money(product.price)}</b>
-            <small>{product.active ? "Ativo" : "Inativo"} | {product.showOnPdv ? "PDV" : "Oculto"} {product.canBeComplement ? " | Complemento" : ""}{product.complementProductIds.length ? ` | ${product.complementProductIds.length} adicionais` : ""}</small>
+            <small>{product.active ? "Ativo" : "Inativo"} | {product.showOnPdv ? "PDV" : "Oculto"} {product.favorite ? " | Favorito" : ""}{product.canBeComplement ? " | Complemento" : ""}{product.complementProductIds.length ? ` | ${product.complementProductIds.length} adicionais` : ""}</small>
             <button className="pdv-ghost-button" onClick={() => setEditingProduct(product)}>Editar</button>
           </article>
         ))}
@@ -1477,6 +1477,7 @@ function ProductEditorModal({ product, categories, products, onCancel, onSave }:
     unitMode: product?.unitMode || "unidade",
     active: product?.active ?? true,
     showOnPdv: product?.showOnPdv ?? true,
+    favorite: product?.favorite ?? false,
     canBeComplement: product?.canBeComplement ?? false,
     hasComplements: product?.hasComplements ?? false,
     complementProductIds: product?.complementProductIds || [],
@@ -1509,6 +1510,7 @@ function ProductEditorModal({ product, categories, products, onCancel, onSave }:
           <label><span>Ordem</span><input type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value || 0) })} /></label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Ativo</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.showOnPdv} onChange={(event) => setDraft({ ...draft, showOnPdv: event.target.checked })} /> Exibir no PDV</label>
+          <label className="pdv-switch-line"><input type="checkbox" checked={draft.favorite} onChange={(event) => setDraft({ ...draft, favorite: event.target.checked })} /> Favorito no topo</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.canBeComplement} onChange={(event) => setDraft({ ...draft, canBeComplement: event.target.checked })} /> Pode ser adicional</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.hasComplements} onChange={(event) => setDraft({ ...draft, hasComplements: event.target.checked })} /> Abre tela de adicionais</label>
         </div>
@@ -1551,6 +1553,7 @@ function CategoryEditorModal({ category, onCancel, onSave }: { category: PdvCate
     id: category?.id,
     name: category?.name || "",
     active: category?.active ?? true,
+    favorite: category?.favorite ?? false,
     sortOrder: category?.sortOrder || 0
   });
   return (
@@ -1567,6 +1570,7 @@ function CategoryEditorModal({ category, onCancel, onSave }: { category: PdvCate
           <label><span>Nome</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
           <label><span>Ordem</span><input type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value || 0) })} /></label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Categoria ativa</label>
+          <label className="pdv-switch-line"><input type="checkbox" checked={draft.favorite} onChange={(event) => setDraft({ ...draft, favorite: event.target.checked })} /> Categoria favorita no topo</label>
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
