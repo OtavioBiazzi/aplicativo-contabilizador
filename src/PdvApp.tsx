@@ -23,7 +23,7 @@ import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvO
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 type CheckoutTarget =
   | { kind: "direct"; total: number }
-  | { kind: "table"; table: PdvOpenTable; total: number }
+  | { kind: "table"; table: PdvOpenTable; total: number; discount: number }
   | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[] }
   | { kind: "table-partial-manual"; table: PdvOpenTable; total: number; items: PdvCartItem[] };
 
@@ -126,6 +126,7 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
+  const [tableCloseMenuOpen, setTableCloseMenuOpen] = useState(false);
 
   const load = async () => {
     setSnapshot(await window.caixa.getPdvSnapshot());
@@ -288,7 +289,7 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
     if (!activeTable || !tableCart.length) {
       return;
     }
-    setCheckoutTarget({ kind: "table", table: activeTable, total: tableTotal });
+    setTableCloseMenuOpen(true);
   };
 
   const requestPartialByItems = () => {
@@ -407,7 +408,8 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
     setBusy(true);
     try {
       await window.caixa.savePdvTableItems(activeTable.number, tableCart);
-      await window.caixa.closePdvTable(activeTable.number, payments, 0);
+      const tableDiscount = checkoutTarget?.kind === "table" ? checkoutTarget.discount : 0;
+      await window.caixa.closePdvTable(activeTable.number, payments, tableDiscount);
       setToast(`Mesa ${String(activeTable.number).padStart(3, "0")} fechada.`);
       setActiveTable(null);
       setTableCart([]);
@@ -651,6 +653,25 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
             } else {
               return confirmPartialTable(checkoutTarget, payments);
             }
+          }}
+        />
+      )}
+      {tableCloseMenuOpen && activeTable && (
+        <TableCloseMenu
+          table={activeTable}
+          subtotal={tableTotal}
+          onCancel={() => setTableCloseMenuOpen(false)}
+          onPartialItems={() => {
+            setTableCloseMenuOpen(false);
+            requestPartialByItems();
+          }}
+          onPartialManual={() => {
+            setTableCloseMenuOpen(false);
+            requestPartialByValue();
+          }}
+          onCloseTotal={(total, discount) => {
+            setTableCloseMenuOpen(false);
+            setCheckoutTarget({ kind: "table", table: activeTable, total, discount });
           }}
         />
       )}
@@ -1295,6 +1316,63 @@ function OpenTableModal({ table, onCancel, onConfirm }: { table: PdvOpenTable; o
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" disabled={busy} onClick={confirm}>{busy ? "Abrindo..." : "Abrir mesa"}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TableCloseMenu({
+  table,
+  subtotal,
+  onCancel,
+  onPartialItems,
+  onPartialManual,
+  onCloseTotal
+}: {
+  table: PdvOpenTable;
+  subtotal: number;
+  onCancel: () => void;
+  onPartialItems: () => void;
+  onPartialManual: () => void;
+  onCloseTotal: (total: number, discount: number) => void;
+}) {
+  const [discountValue, setDiscountValue] = useState("");
+  const [discountPercent, setDiscountPercent] = useState("");
+  const discount = Math.min(subtotal, roundMoney(parseBrazilianNumber(discountValue) + subtotal * (parseBrazilianNumber(discountPercent) / 100)));
+  const total = Math.max(0, roundMoney(subtotal - discount));
+
+  return (
+    <div className="pdv-modal-backdrop">
+      <section className="pdv-payment-modal pdv-close-menu">
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Fechar conta</span>
+            <h1>Mesa {String(table.number).padStart(3, "0")}</h1>
+            <p>Escolha desconto, fechamento parcial ou fechamento total.</p>
+          </div>
+          <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
+        </div>
+        <div className="pdv-payment-summary">
+          <Metric title="Total bruto" value={money(subtotal)} />
+          <Metric title="Desconto" value={money(discount)} />
+          <Metric title="Total final" value={money(total)} />
+        </div>
+        <div className="pdv-editor-grid">
+          <label>
+            <span>Desconto em R$</span>
+            <input value={discountValue} onChange={(event) => setDiscountValue(event.target.value)} placeholder="0,00" />
+          </label>
+          <label>
+            <span>Desconto em %</span>
+            <input value={discountPercent} onChange={(event) => setDiscountPercent(event.target.value)} placeholder="0" />
+          </label>
+        </div>
+        <div className="pdv-action-row">
+          <button className="pdv-ghost-button" onClick={onCancel}>Voltar</button>
+          <button className="pdv-ghost-button" onClick={onPartialItems}>Fechar parcial por itens</button>
+          <button className="pdv-ghost-button" onClick={onPartialManual}>Fechar parcial por valor</button>
+          <button className="pdv-primary-button" onClick={() => onCloseTotal(total, discount)}>Fechar total</button>
         </div>
       </section>
     </div>
