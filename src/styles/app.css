@@ -3758,6 +3758,10 @@ body.floating-borderless .floating-bar {
   background: transparent;
 }
 
+.pdv-shell.no-topbar {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .pdv-shell.embedded .pdv-topbar {
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
@@ -4048,15 +4052,16 @@ body.floating-borderless .floating-bar {
 
 .pdv-cart-list article {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(112px, 0.45fr) 36px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid #d8e0e5;
   padding: 8px;
+  cursor: context-menu;
 }
 
 .pdv-cart-list article:has(.pdv-item-check) {
-  grid-template-columns: 24px minmax(0, 1fr) auto minmax(210px, 0.7fr) 36px;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
 }
 
 .pdv-item-check {
@@ -4102,6 +4107,38 @@ body.floating-borderless .floating-bar {
 
 .pdv-item-tools input {
   padding: 0 6px;
+}
+
+.pdv-context-menu {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  min-width: 230px;
+  overflow: hidden;
+  border: 1px solid rgba(8, 53, 86, 0.28);
+  border-radius: 6px;
+  background: #f7fbff;
+  color: #082942;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+}
+
+.pdv-context-menu button {
+  min-height: 38px;
+  border-bottom: 1px solid #d8e8f2;
+  padding: 0 12px;
+  background: transparent;
+  color: inherit;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pdv-context-menu button:hover {
+  background: #dff0fb;
+}
+
+.pdv-context-menu button.danger {
+  color: #9b2118;
 }
 
 .pdv-total-box {
@@ -4545,6 +4582,24 @@ body.floating-borderless .floating-bar {
 
 .pdv-complement-grid button.active {
   background: #e36d36;
+}
+
+.pdv-complement-config {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #b8d4e5;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pdv-complement-config-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
 }
 
 .pdv-toast {

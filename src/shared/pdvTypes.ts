@@ -1,5 +1,6 @@
 export type PdvPaymentMethod = "Dinheiro" | "Debito" | "Credito" | "Pix" | "Outros" | "Nao definido";
 export type PdvTableStatus = "Livre" | "Ocupada" | "Fechamento" | "Reservada";
+export type PdvUnitMode = "unidade" | "kg" | "grama";
 
 export interface PdvCategory {
   id: string;
@@ -15,10 +16,12 @@ export interface PdvProduct {
   categoryName: string;
   price: number;
   unit: string;
+  unitMode: PdvUnitMode;
   active: boolean;
   showOnPdv: boolean;
   canBeComplement: boolean;
   hasComplements: boolean;
+  complementProductIds: string[];
   sortOrder: number;
 }
 
@@ -28,10 +31,12 @@ export interface PdvProductDraft {
   categoryId: string;
   price: number;
   unit: string;
+  unitMode: PdvUnitMode;
   active: boolean;
   showOnPdv: boolean;
   canBeComplement: boolean;
   hasComplements: boolean;
+  complementProductIds: string[];
   sortOrder: number;
 }
 
@@ -54,6 +59,7 @@ export interface PdvCartItem {
   productName: string;
   categoryName: string;
   quantity: number;
+  measureLabel?: string;
   unitPrice: number;
   baseUnitPrice?: number;
   discount: number;

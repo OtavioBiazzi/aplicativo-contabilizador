@@ -133,32 +133,48 @@ export class PdvStore {
     const fallbackCategoryId = categories[0]?.id || (await this.saveCategory({ name: "Geral", active: true, sortOrder: 0 })).id;
     const categoryId = categories.some((category) => category.id === draft.categoryId) ? draft.categoryId : fallbackCategoryId;
     const id = draft.id || slugId("produto", draft.name);
-    this.requireDb().run(
-      `INSERT INTO products (id, name, category_id, price, unit, active, show_on_pdv, can_be_complement, has_complements, sort_order)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-        name=excluded.name,
-        category_id=excluded.category_id,
-        price=excluded.price,
-        unit=excluded.unit,
-        active=excluded.active,
-        show_on_pdv=excluded.show_on_pdv,
-        can_be_complement=excluded.can_be_complement,
-        has_complements=excluded.has_complements,
-        sort_order=excluded.sort_order`,
-      [
-        id,
-        draft.name.trim() || "Produto sem nome",
-        categoryId,
-        roundMoney(draft.price),
-        draft.unit.trim() || "UNID",
-        draft.active ? 1 : 0,
-        draft.showOnPdv ? 1 : 0,
-        draft.canBeComplement ? 1 : 0,
-        draft.hasComplements ? 1 : 0,
-        Math.floor(draft.sortOrder || 0)
-      ]
-    );
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run(
+        `INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, can_be_complement, has_complements, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+          name=excluded.name,
+          category_id=excluded.category_id,
+          price=excluded.price,
+          unit=excluded.unit,
+          unit_mode=excluded.unit_mode,
+          active=excluded.active,
+          show_on_pdv=excluded.show_on_pdv,
+          can_be_complement=excluded.can_be_complement,
+          has_complements=excluded.has_complements,
+          sort_order=excluded.sort_order`,
+        [
+          id,
+          draft.name.trim() || "Produto sem nome",
+          categoryId,
+          roundMoney(draft.price),
+          draft.unit.trim() || "UNID",
+          normalizeUnitMode(draft.unitMode),
+          draft.active ? 1 : 0,
+          draft.showOnPdv ? 1 : 0,
+          draft.canBeComplement ? 1 : 0,
+          draft.hasComplements ? 1 : 0,
+          Math.floor(draft.sortOrder || 0)
+        ]
+      );
+      db.run("DELETE FROM product_complements WHERE product_id = ?", [id]);
+      const complementStatement = db.prepare("INSERT INTO product_complements (product_id, complement_product_id, sort_order) VALUES (?, ?, ?)");
+      [...new Set(draft.complementProductIds || [])].filter((complementId) => complementId !== id).forEach((complementId, index) => {
+        complementStatement.run([id, complementId, index]);
+      });
+      complementStatement.free();
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
     await this.persist();
     return this.getProducts().find((product) => product.id === id) || this.getProducts()[0];
   }
@@ -168,6 +184,7 @@ export class PdvStore {
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
+      db.run("DELETE FROM product_complements");
       db.run("DELETE FROM products");
       db.run("DELETE FROM categories");
       const categoryStatement = db.prepare("INSERT INTO categories (id, name, active, sort_order) VALUES (?, ?, ?, ?)");
@@ -177,7 +194,7 @@ export class PdvStore {
       categoryStatement.free();
 
       const productStatement = db.prepare(
-        "INSERT INTO products (id, name, category_id, price, unit, active, show_on_pdv, can_be_complement, has_complements, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, can_be_complement, has_complements, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
       for (const product of products) {
         productStatement.run([
@@ -186,6 +203,7 @@ export class PdvStore {
           product.categoryId,
           product.price,
           product.unit,
+          normalizeUnitMode(product.unitMode),
           product.active ? 1 : 0,
           product.showOnPdv ? 1 : 0,
           product.canBeComplement ? 1 : 0,
@@ -194,6 +212,13 @@ export class PdvStore {
         ]);
       }
       productStatement.free();
+      const complementStatement = db.prepare("INSERT INTO product_complements (product_id, complement_product_id, sort_order) VALUES (?, ?, ?)");
+      for (const product of products) {
+        (product.complementProductIds || []).forEach((complementId, index) => {
+          complementStatement.run([product.id, complementId, index]);
+        });
+      }
+      complementStatement.free();
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -253,8 +278,8 @@ export class PdvStore {
     try {
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       const statement = db.prepare(
-        `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       items.forEach((item, index) => {
         statement.run([
@@ -264,6 +289,7 @@ export class PdvStore {
           item.productName,
           item.categoryName,
           item.quantity,
+          item.measureLabel || "",
           item.unitPrice,
           item.baseUnitPrice ?? item.unitPrice,
           item.discount,
@@ -309,9 +335,10 @@ export class PdvStore {
   }
 
   private getProducts(): PdvProduct[] {
-    return selectAll<PdvProduct>(
+    const products = selectAll<Omit<PdvProduct, "complementProductIds">>(
       this.requireDb(),
       `SELECT p.id, p.name, p.category_id AS categoryId, c.name AS categoryName, p.price, p.unit,
+        COALESCE(p.unit_mode, 'unidade') AS unitMode,
         p.active = 1 AS active, p.show_on_pdv = 1 AS showOnPdv,
        p.can_be_complement = 1 AS canBeComplement, p.has_complements = 1 AS hasComplements,
         p.sort_order AS sortOrder
@@ -319,6 +346,17 @@ export class PdvStore {
        LEFT JOIN categories c ON c.id = p.category_id
        ORDER BY c.sort_order, c.name, p.sort_order, p.name`
     );
+    const links = selectAll<{ productId: string; complementProductId: string }>(
+      this.requireDb(),
+      "SELECT product_id AS productId, complement_product_id AS complementProductId FROM product_complements ORDER BY product_id, sort_order"
+    );
+    const byProduct = new Map<string, string[]>();
+    links.forEach((link) => byProduct.set(link.productId, [...(byProduct.get(link.productId) || []), link.complementProductId]));
+    return products.map((product) => ({
+      ...product,
+      unitMode: normalizeUnitMode(product.unitMode),
+      complementProductIds: byProduct.get(product.id) || []
+    }));
   }
 
   private getTables(): PdvOpenTable[] {
@@ -349,7 +387,7 @@ export class PdvStore {
     return selectAll<PdvCartItem>(
       this.requireDb(),
       `SELECT id, product_id AS productId, product_name AS productName, category_name AS categoryName,
-        quantity, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total, subtable_name AS subtableName, note,
+        quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total, subtable_name AS subtableName, note,
         complements_json AS complementsJson
        FROM table_items WHERE table_number = ? ORDER BY sort_order, rowid`,
       [tableNumber]
@@ -366,7 +404,7 @@ export class PdvStore {
       items: selectAll<PdvCartItem>(
         this.requireDb(),
         `SELECT id, product_id AS productId, product_name AS productName, category_name AS categoryName,
-          quantity, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total, subtable_name AS subtableName, note,
+          quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total, subtable_name AS subtableName, note,
           complements_json AS complementsJson
          FROM sale_items WHERE sale_id = ? ORDER BY rowid`,
         [sale.id]
@@ -399,7 +437,14 @@ export class PdvStore {
         show_on_pdv INTEGER NOT NULL DEFAULT 1,
         can_be_complement INTEGER NOT NULL DEFAULT 0,
         has_complements INTEGER NOT NULL DEFAULT 0,
+        unit_mode TEXT NOT NULL DEFAULT 'unidade',
         sort_order INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS product_complements (
+        product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        complement_product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (product_id, complement_product_id)
       );
       CREATE TABLE IF NOT EXISTS pdv_settings (
         key TEXT PRIMARY KEY,
@@ -420,6 +465,7 @@ export class PdvStore {
         product_name TEXT NOT NULL,
         category_name TEXT NOT NULL,
         quantity REAL NOT NULL,
+        measure_label TEXT NOT NULL DEFAULT '',
         unit_price REAL NOT NULL,
         base_unit_price REAL,
         discount REAL NOT NULL DEFAULT 0,
@@ -446,6 +492,7 @@ export class PdvStore {
         product_name TEXT NOT NULL,
         category_name TEXT NOT NULL,
         quantity REAL NOT NULL,
+        measure_label TEXT NOT NULL DEFAULT '',
         unit_price REAL NOT NULL,
         base_unit_price REAL,
         discount REAL NOT NULL DEFAULT 0,
@@ -465,10 +512,13 @@ export class PdvStore {
     `);
     addColumnIfMissing(db, "products", "can_be_complement", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "has_complements", "INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "products", "unit_mode", "TEXT NOT NULL DEFAULT 'unidade'");
     addColumnIfMissing(db, "table_items", "base_unit_price", "REAL");
     addColumnIfMissing(db, "table_items", "complements_json", "TEXT NOT NULL DEFAULT '[]'");
+    addColumnIfMissing(db, "table_items", "measure_label", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sale_items", "base_unit_price", "REAL");
     addColumnIfMissing(db, "sale_items", "complements_json", "TEXT NOT NULL DEFAULT '[]'");
+    addColumnIfMissing(db, "sale_items", "measure_label", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sales", "status", "TEXT NOT NULL DEFAULT 'Finalizada'");
     const defaults = this.getSettings();
     const statement = db.prepare("INSERT INTO pdv_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING");
@@ -526,8 +576,8 @@ function insertSale(db: Database, sale: PdvSale) {
     sale.total
   ]);
   const itemStatement = db.prepare(
-    `INSERT INTO sale_items (id, sale_id, product_id, product_name, category_name, quantity, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO sale_items (id, sale_id, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   sale.items.forEach((item) =>
     itemStatement.run([
@@ -537,6 +587,7 @@ function insertSale(db: Database, sale: PdvSale) {
       item.productName,
       item.categoryName,
       item.quantity,
+      item.measureLabel || "",
       item.unitPrice,
       item.baseUnitPrice ?? item.unitPrice,
       item.discount,
@@ -599,6 +650,13 @@ function normalizeCartItem(row: PdvCartItem & { complementsJson?: string }): Pdv
     ...item,
     complements: parseComplements(complementsJson)
   };
+}
+
+function normalizeUnitMode(value?: string): "unidade" | "kg" | "grama" {
+  if (value === "kg" || value === "grama") {
+    return value;
+  }
+  return "unidade";
 }
 
 function parseComplements(raw?: string) {

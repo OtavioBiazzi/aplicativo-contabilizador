@@ -71,7 +71,7 @@ import type {
   UpdateInfo
 } from "./shared/types";
 
-type TabKey = "register" | "pdv" | "history" | "reports" | "server" | "settings";
+type TabKey = "sale" | "tables" | "history" | "reports" | "server" | "settings";
 type SettingsCategory =
   | "appearance"
   | "floating"
@@ -144,12 +144,12 @@ interface QuickEntryModeState {
 }
 
 const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
-  { key: "register", label: "Caixa", icon: Send },
-  { key: "pdv", label: "PDV", icon: LayoutPanelTop },
+  { key: "sale", label: "Venda", icon: Send },
+  { key: "tables", label: "Mesas", icon: LayoutPanelTop },
   { key: "history", label: "Historico", icon: History },
   { key: "reports", label: "Relatorios", icon: BarChart3 },
   { key: "server", label: "Rede", icon: Server },
-  { key: "settings", label: "Ajustes", icon: Settings }
+  { key: "settings", label: "Ajuste", icon: Settings }
 ];
 
 const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floating") === "1";
@@ -198,7 +198,7 @@ const SHORTCUT_ORDER = [
 
 type ShortcutAction = (typeof SHORTCUT_ORDER)[number];
 
-const GLOBAL_SHORTCUT_ACTIONS: ShortcutAction[] = ["pin", "money", "table", "bus", "history", "settings", "repeatLast"];
+const GLOBAL_SHORTCUT_ACTIONS: ShortcutAction[] = ["money", "table", "bus", "history", "settings", "repeatLast"];
 
 const SHORTCUT_HELPERS: Record<ShortcutAction, string> = {
   submit: "Envia o formulario atual quando estiver no caixa.",
@@ -987,7 +987,7 @@ export function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [server, setServer] = useState<ServerState | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("register");
+  const [activeTab, setActiveTab] = useState<TabKey>("sale");
   const [pinned, setPinnedState] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [modeCommand, setModeCommand] = useState<ModeCommand | null>(null);
@@ -1180,9 +1180,7 @@ export function App() {
         return;
       }
       event.preventDefault();
-      if (action === "pin") {
-        await togglePinned();
-      } else if (action === "money") {
+      if (action === "money") {
         commandMode("Dinheiro/Troco");
       } else if (action === "table") {
         commandMode("Mesa");
@@ -1205,7 +1203,7 @@ export function App() {
   };
 
   const commandMode = (type: EntryType) => {
-    setActiveTab("register");
+    setActiveTab("sale");
     setModeCommand({ type, nonce: Date.now() });
   };
 
@@ -1741,10 +1739,6 @@ export function App() {
           )}
         </div>
 
-        <button className="pin-button" onClick={togglePinned}>
-          <Pin size={18} />
-          {pinned ? "Fechar barra fixada" : "Abrir barra fixada"}
-        </button>
       </aside>
 
       <main className="workspace">
@@ -1764,32 +1758,15 @@ export function App() {
           </div>
         </header>
 
-        {activeTab === "register" && (
-          <div className="register-layout">
-            <QuickEntry
-              entries={displayEntries}
-              settings={entrySettings}
-              clientPolicy={effectiveRemotePolicy}
-              pinned={false}
-              modeCommand={modeCommand}
-              storageScope={quickEntryStorageScope}
-              onSubmit={submitEntry}
-              onUnpin={togglePinned}
-            />
-            <TodayPanel
-              summary={displaySummary}
-              entries={displayTodayEntries}
-              settings={settings}
-              canViewTotals={canViewRemoteTotals}
-              canViewEntryValues={canViewRemoteEntryValues}
-              onMode={commandMode}
-            />
+        {activeTab === "sale" && (
+          <div className="pdv-module-panel">
+            <PdvApp embedded initialTab="sale" hideTopbar />
           </div>
         )}
 
-        {activeTab === "pdv" && (
+        {activeTab === "tables" && (
           <div className="pdv-module-panel">
-            <PdvApp embedded />
+            <PdvApp embedded initialTab="tables" hideTopbar />
           </div>
         )}
 
@@ -5224,29 +5201,29 @@ function Toast({ toast }: { toast: ToastState }) {
 
 function titleForTab(tab: TabKey): string {
   const map: Record<TabKey, string> = {
-    register: "Registro rapido",
-    pdv: "PDV local",
+    sale: "Venda",
+    tables: "Mesas",
     history: "Historico editavel",
     reports: "Relatorios",
     server: "Servidor local",
-    settings: "Configuracoes"
+    settings: "Ajuste"
   };
   return map[tab];
 }
 
 function headerForTab(tab: TabKey, todayCount: number): { eyebrow: string; title: string; status: string; detail: string } {
   const map: Record<TabKey, { eyebrow: string; title: string; status: string; detail: string }> = {
-    register: {
+    sale: {
       eyebrow: "Operacao diaria",
       title: titleForTab(tab),
-      status: todayCount ? "Caixa em movimento" : "Pronto para lancar",
-      detail: "Fluxo rapido"
+      status: "Venda direta integrada ao sistema",
+      detail: "Produtos"
     },
-    pdv: {
-      eyebrow: "Modulo novo",
+    tables: {
+      eyebrow: "Atendimento por mesa",
       title: titleForTab(tab),
-      status: "Venda, mesas, produtos e adicionais",
-      detail: "SQLite local"
+      status: "Mapa de mesas e comandas",
+      detail: "Mesas"
     },
     history: {
       eyebrow: "Consulta e auditoria",

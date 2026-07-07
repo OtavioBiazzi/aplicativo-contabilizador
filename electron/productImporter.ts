@@ -96,10 +96,12 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
         categoryName: category.name,
         price: roundMoney(row.price),
         unit: row.unit,
+        unitMode: inferUnitMode(row.unit),
         active: row.active,
         showOnPdv: row.showOnPdv,
         canBeComplement: isLikelyComplement(row.name),
-        hasComplements: isLikelyProductWithComplements(row.name),
+        hasComplements: false,
+        complementProductIds: [],
         sortOrder: products.length
       });
     });
@@ -169,13 +171,19 @@ function isLikelyComplement(name: string): boolean {
   );
 }
 
-function isLikelyProductWithComplements(name: string): boolean {
-  const normalized = name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
-  return /\b(CUSCUZ|PAO|MISTO|MORTADELLA|OVO|ACAI|SUCO|VITAMINA|CAFE)\b/.test(normalized);
-}
-
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function inferUnitMode(unit: string): PdvProduct["unitMode"] {
+  const normalized = unit.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
+  if (normalized === "KG" || normalized.includes("KILO")) {
+    return "kg";
+  }
+  if (normalized === "G" || normalized === "GR" || normalized.includes("GRAMA")) {
+    return "grama";
+  }
+  return "unidade";
 }
 
 function decodeXml(value: string): string {

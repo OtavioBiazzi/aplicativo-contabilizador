@@ -28,6 +28,7 @@ type CheckoutTarget =
   | { kind: "table-partial-manual"; table: PdvOpenTable; total: number; items: PdvCartItem[] };
 
 const PAYMENT_METHODS: PdvPaymentMethod[] = ["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Nao definido"];
+type PendingProduct = { product: PdvProduct; quantity: number; measureLabel?: string };
 
 function money(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
@@ -51,7 +52,7 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function createCartItem(product: PdvProduct, quantity: number, complements: PdvCartItem["complements"] = [], customUnitPrice?: number, subtableName = ""): PdvCartItem {
+function createCartItem(product: PdvProduct, quantity: number, complements: PdvCartItem["complements"] = [], customUnitPrice?: number, subtableName = "", measureLabel = ""): PdvCartItem {
   const safeQuantity = Math.max(0.01, quantity || 1);
   const complementTotal = roundMoney((complements || []).reduce((total, item) => total + item.price, 0));
   const unitPrice = roundMoney((customUnitPrice ?? product.price) + complementTotal);
@@ -61,6 +62,7 @@ function createCartItem(product: PdvProduct, quantity: number, complements: PdvC
     productName: complements?.length ? `${product.name} + ${complements.map((item) => item.name).join(" + ")}` : product.name,
     categoryName: product.categoryName,
     quantity: safeQuantity,
+    measureLabel,
     unitPrice,
     baseUnitPrice: customUnitPrice ?? product.price,
     discount: 0,
@@ -70,9 +72,41 @@ function createCartItem(product: PdvProduct, quantity: number, complements: PdvC
   };
 }
 
-export function PdvApp({ embedded = false }: { embedded?: boolean }) {
+function parseLocalNumber(value: string): number {
+  return Number(value.replace(/\./g, "").replace(",", ".")) || 0;
+}
+
+function resolveProductQuantity(product: PdvProduct, defaultQuantity: number): { quantity: number; measureLabel?: string } | null {
+  if (product.unitMode === "kg") {
+    const raw = window.prompt(`Informe o peso em gramas para ${product.name}`, "250");
+    if (raw === null) {
+      return null;
+    }
+    const grams = parseLocalNumber(raw);
+    if (grams <= 0) {
+      window.alert("Informe um peso maior que zero.");
+      return null;
+    }
+    return { quantity: grams / 1000, measureLabel: `${grams} g` };
+  }
+  if (product.unitMode === "grama") {
+    const raw = window.prompt(`Informe a quantidade em gramas para ${product.name}`, "100");
+    if (raw === null) {
+      return null;
+    }
+    const grams = parseLocalNumber(raw);
+    if (grams <= 0) {
+      window.alert("Informe uma quantidade maior que zero.");
+      return null;
+    }
+    return { quantity: grams, measureLabel: `${grams} g` };
+  }
+  return { quantity: defaultQuantity };
+}
+
+export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = false }: { embedded?: boolean; initialTab?: PdvTab; hideTopbar?: boolean }) {
   const [snapshot, setSnapshot] = useState<PdvSnapshot | null>(null);
-  const [tab, setTab] = useState<PdvTab>("sale");
+  const [tab, setTab] = useState<PdvTab>(initialTab);
   const [activeCategory, setActiveCategory] = useState("todos");
   const [query, setQuery] = useState("");
   const [quantity, setQuantity] = useState(1);
@@ -86,7 +120,8 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
   const [selectedTableItemIds, setSelectedTableItemIds] = useState<string[]>([]);
   const [partialManualValue, setPartialManualValue] = useState("");
   const [currentSubtable, setCurrentSubtable] = useState("");
-  const [pendingProduct, setPendingProduct] = useState<PdvProduct | null>(null);
+  const [pendingProduct, setPendingProduct] = useState<PendingProduct | null>(null);
+  const [tableMenu, setTableMenu] = useState<{ x: number; y: number; table: PdvOpenTable } | null>(null);
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
@@ -99,6 +134,13 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
     load();
     return window.caixa.onPdvChanged(load);
   }, []);
+
+  useEffect(() => {
+    setTab(initialTab);
+    if (initialTab === "tables") {
+      setActiveTable(null);
+    }
+  }, [initialTab]);
 
   const products = useMemo(() => {
     const items = snapshot?.products.filter((product) => product.active && product.showOnPdv) || [];
@@ -114,11 +156,15 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
   const tableTotal = useMemo(() => roundMoney(tableCart.reduce((total, item) => total + item.total, 0)), [tableCart]);
 
   const addProduct = (product: PdvProduct, direct = false) => {
-    if (snapshot?.settings.complementsEnabled && product.hasComplements && !direct) {
-      setPendingProduct(product);
+    const resolvedQuantity = resolveProductQuantity(product, quantity);
+    if (!resolvedQuantity) {
       return;
     }
-    const item = createCartItem(product, quantity, [], undefined, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "");
+    if (snapshot?.settings.complementsEnabled && (product.complementProductIds || []).length > 0 && !direct) {
+      setPendingProduct({ product, ...resolvedQuantity });
+      return;
+    }
+    const item = createCartItem(product, resolvedQuantity.quantity, [], undefined, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "", resolvedQuantity.measureLabel);
     if (activeTable) {
       setTableCart((current) => mergeCartItem(current, item));
       return;
@@ -171,8 +217,49 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
     setCurrentSubtable("");
   };
 
+  const runTableAction = async (action: string, table: PdvOpenTable) => {
+    setTableMenu(null);
+    if (action === "open") {
+      await openTable(table);
+      return;
+    }
+    if (action === "reserve") {
+      await window.caixa.setPdvTableStatus(table.number, "Reservada");
+      await load();
+      return;
+    }
+    if (action === "free") {
+      if (table.items.length && !window.confirm(`A mesa ${table.number} tem itens. Cancelar tudo e liberar?`)) {
+        return;
+      }
+      await window.caixa.savePdvTableItems(table.number, []);
+      await window.caixa.setPdvTableStatus(table.number, "Livre");
+      await load();
+      return;
+    }
+    if (action === "closing") {
+      await window.caixa.setPdvTableStatus(table.number, "Fechamento");
+      await load();
+      return;
+    }
+    if (action === "details") {
+      window.alert(`Mesa ${String(table.number).padStart(3, "0")}\nStatus: ${table.status}\nAbertura: ${shortTime(table.openedAt) || "-"}\nPessoas: ${table.people || "-"}\nTotal: ${money(table.total)}\nObservacao: ${table.note || "-"}`);
+      return;
+    }
+    if (action === "history") {
+      setTab("history");
+      return;
+    }
+    if (action === "cancel" && window.confirm(`Cancelar a mesa ${String(table.number).padStart(3, "0")} e remover itens em aberto?`)) {
+      await window.caixa.savePdvTableItems(table.number, []);
+      await window.caixa.setPdvTableStatus(table.number, "Livre");
+      await load();
+    }
+  };
+
   const addConfiguredProduct = (product: PdvProduct, unitPrice: number, complements: PdvCartItem["complements"]) => {
-    const item = createCartItem(product, quantity, complements || [], unitPrice, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "");
+    const resolvedQuantity = pendingProduct?.product.id === product.id ? pendingProduct : { quantity, measureLabel: undefined };
+    const item = createCartItem(product, resolvedQuantity.quantity, complements || [], unitPrice, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "", resolvedQuantity.measureLabel);
     if (activeTable) {
       setTableCart((current) => mergeCartItem(current, item));
     } else {
@@ -357,24 +444,26 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
   }
 
   return (
-    <div className={`pdv-shell ${embedded ? "embedded" : ""}`}>
-      <aside className="pdv-topbar">
-        <div className="pdv-brand">
-          <img src="/cda-icon.png" alt="" />
-          <div>
-            <strong>Contabilizador PDV</strong>
-            <span>Venda local, mesas e produtos</span>
+    <div className={`pdv-shell ${embedded ? "embedded" : ""} ${hideTopbar ? "no-topbar" : ""}`}>
+      {!hideTopbar && (
+        <aside className="pdv-topbar">
+          <div className="pdv-brand">
+            <img src="/cda-icon.png" alt="" />
+            <div>
+              <strong>Contabilizador PDV</strong>
+              <span>Venda local, mesas e produtos</span>
+            </div>
           </div>
-        </div>
-        <nav className="pdv-tabs">
-          <TabButton icon={ShoppingCart} active={tab === "sale"} onClick={() => setTab("sale")} label="Venda" />
-          <TabButton icon={Utensils} active={tab === "tables"} onClick={() => setTab("tables")} label="Mesas" />
-          <TabButton icon={LayoutGrid} active={tab === "products"} onClick={() => setTab("products")} label="Produtos" />
-          <TabButton icon={ClipboardList} active={tab === "history"} onClick={() => setTab("history")} label="Historico" />
-          <TabButton icon={ReceiptText} active={tab === "reports"} onClick={() => setTab("reports")} label="Relatorios" />
-          <TabButton icon={Settings} active={tab === "advanced"} onClick={() => setTab("advanced")} label="Avancado" />
-        </nav>
-      </aside>
+          <nav className="pdv-tabs">
+            <TabButton icon={ShoppingCart} active={tab === "sale"} onClick={() => setTab("sale")} label="Venda" />
+            <TabButton icon={Utensils} active={tab === "tables"} onClick={() => setTab("tables")} label="Mesas" />
+            <TabButton icon={LayoutGrid} active={tab === "products"} onClick={() => setTab("products")} label="Produtos" />
+            <TabButton icon={ClipboardList} active={tab === "history"} onClick={() => setTab("history")} label="Historico" />
+            <TabButton icon={ReceiptText} active={tab === "reports"} onClick={() => setTab("reports")} label="Relatorios" />
+            <TabButton icon={Settings} active={tab === "advanced"} onClick={() => setTab("advanced")} label="Avancado" />
+          </nav>
+        </aside>
+      )}
 
       <main className="pdv-workspace">
         {tab === "sale" && (
@@ -397,7 +486,6 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
             finishLabel="Receber e finalizar"
             onFinish={finishDirectSale}
             settings={snapshot.settings}
-            complementProducts={snapshot.products.filter((product) => product.active && product.showOnPdv && product.canBeComplement)}
           />
         )}
 
@@ -426,6 +514,10 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
                     role="button"
                     tabIndex={0}
                     onClick={() => openTable(table)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setTableMenu({ x: event.clientX, y: event.clientY, table });
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
@@ -441,6 +533,17 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
                   </article>
                 ))}
             </div>
+            {tableMenu && (
+              <ContextMenu x={tableMenu.x} y={tableMenu.y} onClose={() => setTableMenu(null)}>
+                <button onClick={() => runTableAction("open", tableMenu.table)}>Abrir mesa</button>
+                <button onClick={() => runTableAction("reserve", tableMenu.table)}>Reservar mesa</button>
+                <button onClick={() => runTableAction("free", tableMenu.table)}>Cancelar reserva/liberar</button>
+                <button onClick={() => runTableAction("closing", tableMenu.table)}>Marcar fechamento</button>
+                <button onClick={() => runTableAction("details", tableMenu.table)}>Ver detalhes</button>
+                <button onClick={() => runTableAction("history", tableMenu.table)}>Ver historico da mesa</button>
+                <button className="danger" onClick={() => runTableAction("cancel", tableMenu.table)}>Cancelar mesa</button>
+              </ContextMenu>
+            )}
           </section>
         )}
 
@@ -471,7 +574,6 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
             selectedItemIds={selectedTableItemIds}
             setSelectedItemIds={setSelectedTableItemIds}
             settings={snapshot.settings}
-            complementProducts={snapshot.products.filter((product) => product.active && product.showOnPdv && product.canBeComplement)}
             currentSubtable={currentSubtable}
             setCurrentSubtable={setCurrentSubtable}
             onCloseSubtable={requestCloseSubtable}
@@ -530,9 +632,9 @@ export function PdvApp({ embedded = false }: { embedded?: boolean }) {
       )}
       {pendingProduct && snapshot.settings.complementsEnabled && (
         <ComplementModal
-          product={pendingProduct}
-          quantity={quantity}
-          complements={snapshot.products.filter((product) => product.active && product.showOnPdv && product.canBeComplement)}
+          product={pendingProduct.product}
+          quantity={pendingProduct.quantity}
+          complements={snapshot.products.filter((product) => pendingProduct.product.complementProductIds.includes(product.id) && product.active && product.canBeComplement)}
           onCancel={() => setPendingProduct(null)}
           onConfirm={addConfiguredProduct}
         />
@@ -567,7 +669,6 @@ function PdvSaleScreen(props: {
   selectedItemIds?: string[];
   setSelectedItemIds?: (value: string[] | ((current: string[]) => string[])) => void;
   settings: PdvSnapshot["settings"];
-  complementProducts: PdvProduct[];
   currentSubtable?: string;
   setCurrentSubtable?: (value: string) => void;
   onCloseSubtable?: (name: string) => void;
@@ -578,6 +679,57 @@ function PdvSaleScreen(props: {
 }) {
   const subtotal = roundMoney(props.cart.reduce((total, item) => total + item.total, 0));
   const finalTotal = Math.max(0, roundMoney(subtotal - props.discount));
+  const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: PdvCartItem } | null>(null);
+  const runItemAction = (action: string, item: PdvCartItem) => {
+    setItemMenu(null);
+    if (action === "quantity") {
+      const value = window.prompt("Nova quantidade", String(item.quantity).replace(".", ","));
+      if (value !== null) {
+        props.setCart((current) => updateCartItem(current, item.id, { quantity: Math.max(0.01, parseBrazilianNumber(value)) }));
+      }
+    }
+    if (action === "discount-value") {
+      const value = window.prompt("Desconto em reais", String(item.discount || 0).replace(".", ","));
+      if (value !== null) {
+        props.setCart((current) => updateCartItem(current, item.id, { discount: Math.max(0, parseBrazilianNumber(value)) }));
+      }
+    }
+    if (action === "discount-percent") {
+      const value = window.prompt("Desconto em porcentagem", "10");
+      if (value !== null) {
+        const percent = Math.max(0, parseBrazilianNumber(value));
+        props.setCart((current) => updateCartItem(current, item.id, { discount: roundMoney(item.quantity * item.unitPrice * (percent / 100)) }));
+      }
+    }
+    if (action === "price") {
+      const value = window.prompt("Preco unitario apenas neste lancamento", String(item.unitPrice).replace(".", ","));
+      if (value !== null) {
+        props.setCart((current) => updateCartItem(current, item.id, { unitPrice: Math.max(0, parseBrazilianNumber(value)) }));
+      }
+    }
+    if (action === "note") {
+      const value = window.prompt("Observacao do item", item.note || "");
+      if (value !== null) {
+        props.setCart((current) => updateCartItem(current, item.id, { note: value }));
+      }
+    }
+    if (action === "remove" && window.confirm(`Remover ${item.productName}?`)) {
+      props.setCart((current) => current.filter((row) => row.id !== item.id));
+      props.setSelectedItemIds?.((current) => current.filter((id) => id !== item.id));
+    }
+    if (action === "up") {
+      props.setCart((current) => moveCartItem(current, item.id, -1));
+    }
+    if (action === "down") {
+      props.setCart((current) => moveCartItem(current, item.id, 1));
+    }
+    if (action === "before" || action === "after") {
+      const value = window.prompt("Numero do item de referencia", "1");
+      if (value !== null) {
+        props.setCart((current) => moveCartItemNear(current, item.id, Math.max(0, Math.floor(Number(value) || 1) - 1), action === "after"));
+      }
+    }
+  };
   return (
     <section className="pdv-sale-grid">
       <div className="pdv-panel pdv-products-area">
@@ -626,7 +778,7 @@ function PdvSaleScreen(props: {
           {props.products.map((product) => (
             <button key={product.id} onClick={(event) => props.addProduct(product, event.shiftKey)}>
               <strong>{product.name}</strong>
-              <span>{money(product.price)}</span>
+              <span>{money(product.price)}{product.unitMode === "kg" ? "/kg" : product.unitMode === "grama" ? "/g" : ""}</span>
             </button>
           ))}
           {!props.products.length && <div className="pdv-empty">Importe produtos ou ajuste a pesquisa.</div>}
@@ -659,8 +811,15 @@ function PdvSaleScreen(props: {
           />
         )}
         <div className="pdv-cart-list">
-          {props.cart.map((item) => (
-            <article key={item.id}>
+          {props.cart.map((item, index) => (
+            <article
+              key={item.id}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setItemMenu({ x: event.clientX, y: event.clientY, item });
+              }}
+              onDoubleClick={() => runItemAction("remove", item)}
+            >
               {props.setSelectedItemIds && (
                 <input
                   className="pdv-item-check"
@@ -674,68 +833,28 @@ function PdvSaleScreen(props: {
                 />
               )}
               <div>
-                <strong>{item.productName}</strong>
-                <span>{item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}{item.note ? ` | ${item.note}` : ""}</span>
+                <strong>{index + 1}. {item.productName}</strong>
+                <span>{item.measureLabel || item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}{item.note ? ` | ${item.note}` : ""}</span>
               </div>
               <b>{money(item.total)}</b>
-              <div className="pdv-item-tools">
-                <button onClick={() => props.setCart((current) => updateCartItem(current, item.id, { quantity: Math.max(0.01, item.quantity - 1) }))}>
-                  <Minus size={14} />
-                </button>
-                <button onClick={() => props.setCart((current) => updateCartItem(current, item.id, { quantity: item.quantity + 1 }))}>
-                  <Plus size={14} />
-                </button>
-                <input
-                  title="Preco unitario do lancamento"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={item.unitPrice}
-                  onChange={(event) => props.setCart((current) => updateCartItem(current, item.id, { unitPrice: Number(event.target.value || 0) }))}
-                />
-                <input
-                  title="Desconto do item"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={item.discount}
-                  onChange={(event) => props.setCart((current) => updateCartItem(current, item.id, { discount: Number(event.target.value || 0) }))}
-                />
-                <input
-                  title="Desconto em porcentagem"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="1"
-                  placeholder="%"
-                  onChange={(event) =>
-                    props.setCart((current) =>
-                      updateCartItem(current, item.id, { discount: roundMoney(item.quantity * item.unitPrice * (Number(event.target.value || 0) / 100)) })
-                    )
-                  }
-                />
-                <input
-                  title="Observacao do item"
-                  value={item.note || ""}
-                  placeholder="Obs"
-                  onChange={(event) => props.setCart((current) => updateCartItem(current, item.id, { note: event.target.value }))}
-                />
-              </div>
-              <button
-                className="pdv-icon-button"
-                onClick={() => {
-                  if (window.confirm(`Remover ${item.productName}?`)) {
-                    props.setCart((current) => current.filter((row) => row.id !== item.id));
-                    props.setSelectedItemIds?.((current) => current.filter((id) => id !== item.id));
-                  }
-                }}
-              >
-                <X size={16} />
-              </button>
             </article>
           ))}
           {!props.cart.length && <div className="pdv-empty">Nenhum produto lancado.</div>}
         </div>
+        {itemMenu && (
+          <ContextMenu x={itemMenu.x} y={itemMenu.y} onClose={() => setItemMenu(null)}>
+            <button onClick={() => runItemAction("quantity", itemMenu.item)}>Alterar quantidade</button>
+            <button onClick={() => runItemAction("discount-value", itemMenu.item)}>Desconto em R$</button>
+            <button onClick={() => runItemAction("discount-percent", itemMenu.item)}>Desconto em %</button>
+            <button onClick={() => runItemAction("price", itemMenu.item)}>Alterar preco neste lancamento</button>
+            <button onClick={() => runItemAction("note", itemMenu.item)}>Adicionar observacao</button>
+            <button onClick={() => runItemAction("up", itemMenu.item)}>Mover para cima</button>
+            <button onClick={() => runItemAction("down", itemMenu.item)}>Mover para baixo</button>
+            <button onClick={() => runItemAction("before", itemMenu.item)}>Colocar antes de outro item</button>
+            <button onClick={() => runItemAction("after", itemMenu.item)}>Colocar depois de outro item</button>
+            <button className="danger" onClick={() => runItemAction("remove", itemMenu.item)}>Remover/cancelar produto</button>
+          </ContextMenu>
+        )}
         <label className="pdv-discount">
           <span>Desconto da conta</span>
           <input type="number" min={0} step="0.01" value={props.discount} onChange={(event) => props.setDiscount(Number(event.target.value || 0))} />
@@ -1039,9 +1158,9 @@ function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProducts
             <input type="checkbox" checked={selectedIds.includes(product.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} />
             <strong>{product.name}</strong>
             <span>{product.categoryName}</span>
-            <span>{product.unit}</span>
+            <span>{product.unit} / {product.unitMode}</span>
             <b>{money(product.price)}</b>
-            <small>{product.active ? "Ativo" : "Inativo"} | {product.showOnPdv ? "PDV" : "Oculto"} {product.canBeComplement ? " | Complemento" : ""}{product.hasComplements ? " | Abre adicionais" : ""}</small>
+            <small>{product.active ? "Ativo" : "Inativo"} | {product.showOnPdv ? "PDV" : "Oculto"} {product.canBeComplement ? " | Complemento" : ""}{product.complementProductIds.length ? ` | ${product.complementProductIds.length} adicionais` : ""}</small>
             <button className="pdv-ghost-button" onClick={() => setEditingProduct(product)}>Editar</button>
           </article>
         ))}
@@ -1050,6 +1169,7 @@ function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProducts
         <ProductEditorModal
           product={editingProduct === "new" ? null : editingProduct}
           categories={snapshot.categories}
+          products={snapshot.products}
           onCancel={() => setEditingProduct(null)}
           onSave={saveProduct}
         />
@@ -1065,19 +1185,22 @@ function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProducts
   );
 }
 
-function ProductEditorModal({ product, categories, onCancel, onSave }: { product: PdvProduct | null; categories: PdvCategory[]; onCancel: () => void; onSave: (draft: PdvProductDraft) => void }) {
+function ProductEditorModal({ product, categories, products, onCancel, onSave }: { product: PdvProduct | null; categories: PdvCategory[]; products: PdvProduct[]; onCancel: () => void; onSave: (draft: PdvProductDraft) => void }) {
   const [draft, setDraft] = useState<PdvProductDraft>({
     id: product?.id,
     name: product?.name || "",
     categoryId: product?.categoryId || categories[0]?.id || "",
     price: product?.price || 0,
     unit: product?.unit || "UNID",
+    unitMode: product?.unitMode || "unidade",
     active: product?.active ?? true,
     showOnPdv: product?.showOnPdv ?? true,
     canBeComplement: product?.canBeComplement ?? false,
     hasComplements: product?.hasComplements ?? false,
+    complementProductIds: product?.complementProductIds || [],
     sortOrder: product?.sortOrder || 0
   });
+  const complementOptions = products.filter((item) => item.id !== product?.id && item.canBeComplement);
   return (
     <div className="pdv-modal-backdrop">
       <section className="pdv-payment-modal pdv-editor-modal">
@@ -1093,11 +1216,44 @@ function ProductEditorModal({ product, categories, onCancel, onSave }: { product
           <label><span>Categoria</span><select value={draft.categoryId} onChange={(event) => setDraft({ ...draft, categoryId: event.target.value })}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
           <label><span>Preco venda</span><input type="number" min={0} step="0.01" value={draft.price} onChange={(event) => setDraft({ ...draft, price: Number(event.target.value || 0) })} /></label>
           <label><span>Unidade</span><input value={draft.unit} onChange={(event) => setDraft({ ...draft, unit: event.target.value })} /></label>
+          <label>
+            <span>Tipo de venda</span>
+            <select value={draft.unitMode} onChange={(event) => setDraft({ ...draft, unitMode: event.target.value as PdvProductDraft["unitMode"] })}>
+              <option value="unidade">Unidade</option>
+              <option value="kg">Kg</option>
+              <option value="grama">Grama</option>
+            </select>
+          </label>
           <label><span>Ordem</span><input type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value || 0) })} /></label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Ativo</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.showOnPdv} onChange={(event) => setDraft({ ...draft, showOnPdv: event.target.checked })} /> Exibir no PDV</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.canBeComplement} onChange={(event) => setDraft({ ...draft, canBeComplement: event.target.checked })} /> Pode ser adicional</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.hasComplements} onChange={(event) => setDraft({ ...draft, hasComplements: event.target.checked })} /> Abre tela de adicionais</label>
+        </div>
+        <div className="pdv-complement-config">
+          <strong>Adicionais permitidos neste produto</strong>
+          <small>Somente produtos marcados como "Pode ser adicional" aparecem aqui.</small>
+          <div className="pdv-complement-config-list">
+            {complementOptions.map((item) => (
+              <label key={item.id} className="pdv-switch-line">
+                <input
+                  type="checkbox"
+                  checked={draft.complementProductIds.includes(item.id)}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      hasComplements: event.target.checked || current.complementProductIds.length > 1 || (!event.target.checked && current.complementProductIds.filter((id) => id !== item.id).length > 0),
+                      complementProductIds: event.target.checked
+                        ? [...current.complementProductIds, item.id]
+                        : current.complementProductIds.filter((id) => id !== item.id)
+                    }))
+                  }
+                />
+                {item.name} - {money(item.price)}
+              </label>
+            ))}
+            {!complementOptions.length && <p className="pdv-empty">Marque produtos como adicionais para vincular aqui.</p>}
+          </div>
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
@@ -1135,6 +1291,23 @@ function CategoryEditorModal({ category, onCancel, onSave }: { category: PdvCate
           <button className="pdv-primary-button" disabled={!draft.name.trim()} onClick={() => onSave(draft)}>Salvar categoria</button>
         </div>
       </section>
+    </div>
+  );
+}
+
+function ContextMenu({ x, y, children, onClose }: { x: number; y: number; children: React.ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const close = () => onClose();
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [onClose]);
+  return (
+    <div className="pdv-context-menu" style={{ left: x, top: y }} onClick={(event) => event.stopPropagation()}>
+      {children}
     </div>
   );
 }
@@ -1472,6 +1645,30 @@ function mergeCartItem(items: PdvCartItem[], incoming: PdvCartItem): PdvCartItem
       total: roundMoney(quantity * item.unitPrice - item.discount)
     };
   });
+}
+
+function moveCartItem(items: PdvCartItem[], id: string, direction: -1 | 1): PdvCartItem[] {
+  const index = items.findIndex((item) => item.id === id);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= items.length) {
+    return items;
+  }
+  const next = [...items];
+  const [item] = next.splice(index, 1);
+  next.splice(target, 0, item);
+  return next;
+}
+
+function moveCartItemNear(items: PdvCartItem[], id: string, referenceIndex: number, after: boolean): PdvCartItem[] {
+  const index = items.findIndex((item) => item.id === id);
+  if (index < 0 || referenceIndex < 0 || referenceIndex >= items.length) {
+    return items;
+  }
+  const next = [...items];
+  const [item] = next.splice(index, 1);
+  const adjustedReference = index < referenceIndex ? referenceIndex - 1 : referenceIndex;
+  next.splice(Math.min(next.length, adjustedReference + (after ? 1 : 0)), 0, item);
+  return next;
 }
 
 function updateCartItem(items: PdvCartItem[], id: string, patch: Partial<Pick<PdvCartItem, "quantity" | "discount" | "note" | "unitPrice">>): PdvCartItem[] {
