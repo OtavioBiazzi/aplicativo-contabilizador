@@ -31,6 +31,7 @@ export interface CaixaApi {
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
   cancelPdvSale: (id: string) => Promise<void>;
+  updatePdvSalePayments: (id: string, payments: PdvPayment[]) => Promise<PdvSale>;
   exportPdvSales: (filters?: PdvExportFilters) => Promise<ExportStatus>;
   addEntry: (draft: EntryDraft) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => Promise<{ entry: LedgerEntry; exportStatus: ExportStatus }>;

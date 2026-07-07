@@ -564,6 +564,12 @@ function registerIpc() {
     sendToAll("pdv:changed");
   });
 
+  ipcMain.handle("pdv:updateSalePayments", async (_event, id: string, payments: PdvPayment[]): Promise<PdvSale> => {
+    const sale = await pdvStore.updateSalePayments(id, payments);
+    sendToAll("pdv:changed");
+    return sale;
+  });
+
   ipcMain.handle("pdv:exportSales", async (_event, filters: PdvExportFilters = {}) => {
     const settings = await store.getSettings();
     const status = await new PdvExporter(settings.outputDirectory).exportSales(pdvStore.getSales(filters), filters);

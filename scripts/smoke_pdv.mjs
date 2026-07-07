@@ -22,10 +22,12 @@ const baseProduct = await store.saveProduct({
   categoryId: category.id,
   price: 10,
   unit: "UNID",
+  unitMode: "unidade",
   active: true,
   showOnPdv: true,
   canBeComplement: false,
   hasComplements: true,
+  complementProductIds: [],
   sortOrder: 1
 });
 const complement = await store.saveProduct({
@@ -33,12 +35,15 @@ const complement = await store.saveProduct({
   categoryId: category.id,
   price: 2,
   unit: "UNID",
+  unitMode: "unidade",
   active: true,
   showOnPdv: true,
   canBeComplement: true,
   hasComplements: false,
+  complementProductIds: [],
   sortOrder: 2
 });
+await store.saveProduct({ ...baseProduct, complementProductIds: [complement.id] });
 
 const sale = await store.saveSale({
   type: "Venda direta",
@@ -86,6 +91,11 @@ if (snapshot.recentSales.find((item) => item.id === cancelled.id)?.status !== "C
   throw new Error("Cancelamento nao foi persistido corretamente.");
 }
 
+const updatedPaymentSale = await store.updateSalePayments(sale.id, [{ id: crypto.randomUUID(), method: "Pix", amount: 12 }]);
+if (updatedPaymentSale.payments[0]?.method !== "Pix" || updatedPaymentSale.payments[0]?.amount !== 12) {
+  throw new Error("Alteracao de forma de pagamento nao foi persistida corretamente.");
+}
+
 await store.replaceProducts(snapshot.categories, snapshot.products, "smoke.xlsx");
 const backupDir = path.join(dataDir, "pdv-backups");
 if (!existsSync(backupDir) || !readdirSync(backupDir).some((file) => file.includes("antes-importacao-produtos"))) {
@@ -102,7 +112,7 @@ if (!["Resumo", "Vendas", "Itens", "Pagamentos"].every((sheet) => workbook.inclu
   throw new Error("XLSX PDV nao contem as abas esperadas.");
 }
 const paymentsSheet = await zip.file("xl/worksheets/sheet4.xml").async("string");
-if (!paymentsSheet.includes("Dinheiro") || !paymentsSheet.includes("<v>12</v>") || !paymentsSheet.includes("<v>8</v>")) {
+if (!paymentsSheet.includes("Pix") || !paymentsSheet.includes("<v>12</v>")) {
   throw new Error("XLSX PDV nao registrou pagamento/recebido/troco como esperado.");
 }
 

@@ -327,6 +327,33 @@ export class PdvStore {
     await this.persist();
   }
 
+  async updateSalePayments(id: string, payments: PdvPayment[]): Promise<PdvSale> {
+    const sale = this.getSales().find((item) => item.id === id);
+    if (!sale) {
+      throw new Error("Venda nao encontrada.");
+    }
+    if (sale.status === "Cancelada") {
+      throw new Error("Venda cancelada nao pode ter pagamento alterado.");
+    }
+    const normalizedPayments = normalizePaymentsForTotal(payments, sale.total);
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
+      const statement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change) VALUES (?, ?, ?, ?, ?, ?)");
+      normalizedPayments.forEach((payment) => {
+        statement.run([payment.id || randomUUID(), id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null]);
+      });
+      statement.free();
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return this.getSales().find((item) => item.id === id) || sale;
+  }
+
   private getCategories(): PdvCategory[] {
     return selectAll<PdvCategory>(
       this.requireDb(),
@@ -609,9 +636,7 @@ function insertSale(db: Database, sale: PdvSale) {
 function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[] }): PdvSale {
   const subtotal = roundMoney(input.items.reduce((total, item) => total + item.total, 0));
   const total = Math.max(0, roundMoney(subtotal - input.discount));
-  const payments = input.payments.length
-    ? input.payments.map((payment) => ({ ...payment, amount: roundMoney(payment.amount), change: roundMoney(payment.change || 0) }))
-    : [{ id: randomUUID(), method: "Nao definido" as const, amount: total }];
+  const payments = normalizePaymentsForTotal(input.payments, total);
   return {
     id: randomUUID(),
     createdAt: new Date().toISOString(),
@@ -624,6 +649,23 @@ function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status
     payments,
     items: input.items
   };
+}
+
+function normalizePaymentsForTotal(payments: PdvPayment[], total: number): PdvPayment[] {
+  const normalized = payments.length
+    ? payments.map((payment) => ({
+        ...payment,
+        id: payment.id || randomUUID(),
+        amount: roundMoney(payment.amount),
+        received: payment.received === undefined ? undefined : roundMoney(payment.received),
+        change: roundMoney(payment.change || 0)
+      }))
+    : [{ id: randomUUID(), method: "Nao definido" as const, amount: roundMoney(total) }];
+  const sum = roundMoney(normalized.reduce((value, payment) => value + payment.amount, 0));
+  if (Math.abs(sum - roundMoney(total)) > 0.01) {
+    throw new Error("Pagamentos precisam somar o total final da venda.");
+  }
+  return normalized;
 }
 
 function selectAll<T>(db: Database, sql: string, params: SqlValue[] = []): T[] {

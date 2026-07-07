@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("caixa", {
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number) =>
     ipcRenderer.invoke("pdv:saveTablePartial", tableNumber, items, payments, discount),
   cancelPdvSale: (id: string) => ipcRenderer.invoke("pdv:cancelSale", id),
+  updatePdvSalePayments: (id: string, payments: PdvPayment[]) => ipcRenderer.invoke("pdv:updateSalePayments", id, payments),
   exportPdvSales: (filters?: PdvExportFilters) => ipcRenderer.invoke("pdv:exportSales", filters),
   addEntry: (draft: EntryDraft) => ipcRenderer.invoke("entries:add", draft),
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => ipcRenderer.invoke("entries:update", id, patch),

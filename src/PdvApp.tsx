@@ -947,8 +947,24 @@ function PdvSaleScreen(props: {
   );
 }
 
-function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; busy: boolean; onCancel: () => void; onConfirm: (payments: PdvPayment[]) => void | Promise<void> }) {
-  const [payments, setPayments] = useState<PdvPayment[]>([]);
+function PaymentModal({
+  total,
+  busy,
+  initialPayments = [],
+  title = "Pagamento",
+  confirmLabel = "Finalizar conta",
+  onCancel,
+  onConfirm
+}: {
+  total: number;
+  busy: boolean;
+  initialPayments?: PdvPayment[];
+  title?: string;
+  confirmLabel?: string;
+  onCancel: () => void;
+  onConfirm: (payments: PdvPayment[]) => void | Promise<void>;
+}) {
+  const [payments, setPayments] = useState<PdvPayment[]>(initialPayments);
   const [method, setMethod] = useState<PdvPaymentMethod | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [cashReceived, setCashReceived] = useState("");
@@ -990,7 +1006,7 @@ function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; bus
       window.alert("Ainda existe valor restante para fechar a conta.");
       return;
     }
-    if (!window.confirm("Confirmar fechamento da conta?")) {
+    if (!window.confirm(confirmLabel === "Finalizar conta" ? "Confirmar fechamento da conta?" : "Confirmar alteracao dos pagamentos?")) {
       return;
     }
     setSubmitting(true);
@@ -1022,7 +1038,7 @@ function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; bus
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Fechar conta</span>
-            <h1>Pagamento</h1>
+            <h1>{title}</h1>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
@@ -1085,7 +1101,7 @@ function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; bus
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
           <button className="pdv-primary-button" disabled={busy || submitting || (payments.length > 0 && remaining > 0.009)} onClick={finish}>
-            {busy || submitting ? "Finalizando..." : "Finalizar conta"}
+            {busy || submitting ? "Salvando..." : confirmLabel}
           </button>
         </div>
       </section>
@@ -1474,6 +1490,7 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
   });
   const [selectedSale, setSelectedSale] = useState<PdvSale | null>(null);
   const [saleMenu, setSaleMenu] = useState<{ x: number; y: number; sale: PdvSale } | null>(null);
+  const [editingPaymentsSale, setEditingPaymentsSale] = useState<PdvSale | null>(null);
   const sales = filterSales(snapshot.recentSales, filters);
 
   const cancelSale = async (sale: PdvSale) => {
@@ -1500,6 +1517,16 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
     if (action === "cancel" && sale.status !== "Cancelada") {
       await cancelSale(sale);
     }
+    if (action === "payments" && sale.status !== "Cancelada") {
+      setEditingPaymentsSale(sale);
+    }
+  };
+
+  const updateSalePayments = async (sale: PdvSale, payments: PdvPayment[]) => {
+    await window.caixa.updatePdvSalePayments(sale.id, payments);
+    setEditingPaymentsSale(null);
+    setSelectedSale(null);
+    onChanged();
   };
 
   return (
@@ -1546,11 +1573,22 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
           <button onClick={() => runSaleAction("details", saleMenu.sale)}>Ver detalhes</button>
           <button onClick={() => runSaleAction("items", saleMenu.sale)}>Ver produtos da venda</button>
           <button onClick={() => runSaleAction("export", saleMenu.sale)}>Exportar dia da venda</button>
-          <button disabled>Alterar forma de pagamento</button>
+          {saleMenu.sale.status !== "Cancelada" && <button onClick={() => runSaleAction("payments", saleMenu.sale)}>Alterar forma de pagamento</button>}
           {saleMenu.sale.status !== "Cancelada" && <button className="danger" onClick={() => runSaleAction("cancel", saleMenu.sale)}>Cancelar/estornar</button>}
         </ContextMenu>
       )}
       {selectedSale && <SaleDetailModal sale={selectedSale} onClose={() => setSelectedSale(null)} onCancel={() => cancelSale(selectedSale)} />}
+      {editingPaymentsSale && (
+        <PaymentModal
+          total={editingPaymentsSale.total}
+          busy={false}
+          initialPayments={editingPaymentsSale.payments}
+          title="Alterar pagamento"
+          confirmLabel="Salvar pagamentos"
+          onCancel={() => setEditingPaymentsSale(null)}
+          onConfirm={(payments) => updateSalePayments(editingPaymentsSale, payments)}
+        />
+      )}
     </section>
   );
 }
