@@ -621,11 +621,11 @@ export function PdvApp({ embedded = false, initialTab = "sale", hideTopbar = fal
           onCancel={() => setCheckoutTarget(null)}
           onConfirm={(payments) => {
             if (checkoutTarget.kind === "direct") {
-              confirmDirectSale(payments);
+              return confirmDirectSale(payments);
             } else if (checkoutTarget.kind === "table") {
-              confirmCloseTable(payments);
+              return confirmCloseTable(payments);
             } else {
-              confirmPartialTable(checkoutTarget, payments);
+              return confirmPartialTable(checkoutTarget, payments);
             }
           }}
         />
@@ -885,14 +885,25 @@ function PdvSaleScreen(props: {
   );
 }
 
-function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; busy: boolean; onCancel: () => void; onConfirm: (payments: PdvPayment[]) => void }) {
+function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; busy: boolean; onCancel: () => void; onConfirm: (payments: PdvPayment[]) => void | Promise<void> }) {
   const [payments, setPayments] = useState<PdvPayment[]>([]);
-  const [method, setMethod] = useState<PdvPaymentMethod>("Dinheiro");
+  const [method, setMethod] = useState<PdvPaymentMethod | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [cashReceived, setCashReceived] = useState("");
   const [splitPeople, setSplitPeople] = useState(2);
+  const [submitting, setSubmitting] = useState(false);
   const paid = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
   const remaining = Math.max(0, roundMoney(total - paid));
+  const editingAmount = parseBrazilianNumber(paymentAmount || String(remaining || total));
+  const editingReceived = method === "Dinheiro" ? parseBrazilianNumber(cashReceived || paymentAmount || String(editingAmount)) : editingAmount;
+  const editingChange = method === "Dinheiro" ? Math.max(0, roundMoney(editingReceived - Math.min(editingAmount, remaining || total))) : 0;
+
+  const openPaymentMethod = (selectedMethod: PdvPaymentMethod) => {
+    const defaultAmount = String(remaining || total).replace(".", ",");
+    setMethod(selectedMethod);
+    setPaymentAmount(defaultAmount);
+    setCashReceived(selectedMethod === "Dinheiro" ? defaultAmount : "");
+  };
 
   const addPayment = (selectedMethod: PdvPaymentMethod) => {
     const defaultAmount = remaining || total;
@@ -906,10 +917,27 @@ function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; bus
     setPayments((current) => [...current, { id: crypto.randomUUID(), method: selectedMethod, amount: roundMoney(amount), received, change }]);
     setPaymentAmount("");
     setCashReceived("");
+    setMethod(null);
   };
 
-  const finish = () => {
-    onConfirm(payments.length ? payments : [{ id: crypto.randomUUID(), method: "Nao definido", amount: total }]);
+  const finish = async () => {
+    if (submitting || busy) {
+      return;
+    }
+    if (payments.length > 0 && remaining > 0.009) {
+      window.alert("Ainda existe valor restante para fechar a conta.");
+      return;
+    }
+    if (!window.confirm("Confirmar fechamento da conta?")) {
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onConfirm(payments.length ? payments : [{ id: crypto.randomUUID(), method: "Nao definido", amount: total }]);
+    } catch (error) {
+      setSubmitting(false);
+      throw error;
+    }
   };
 
   const splitEqually = () => {
@@ -943,24 +971,36 @@ function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; bus
         </div>
         <div className="pdv-payment-methods">
           {PAYMENT_METHODS.map((item) => (
-            <button className={method === item ? "active" : ""} key={item} onClick={() => setMethod(item)}>
+            <button className={method === item ? "active" : ""} key={item} onClick={() => openPaymentMethod(item)}>
               {item}
             </button>
           ))}
         </div>
-        <div className="pdv-payment-inputs">
-          <label>
-            <span>Valor do pagamento</span>
-            <input value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder={String(remaining || total).replace(".", ",")} />
-          </label>
-          {method === "Dinheiro" && (
+        {method && (
+          <div className="pdv-payment-inputs pdv-payment-entry">
+            <div className="pdv-entry-head">
+              <strong>{method}</strong>
+              <span>Restante {money(remaining)}</span>
+            </div>
             <label>
-              <span>Valor recebido</span>
-              <input value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={paymentAmount || String(remaining || total).replace(".", ",")} />
+              <span>Valor do pagamento</span>
+              <input autoFocus value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder={String(remaining || total).replace(".", ",")} />
             </label>
-          )}
-          <button className="pdv-primary-button" onClick={() => addPayment(method)}>Adicionar {method}</button>
-        </div>
+            {method === "Dinheiro" && (
+              <>
+                <label>
+                  <span>Valor recebido</span>
+                  <input value={cashReceived} onChange={(event) => setCashReceived(event.target.value)} placeholder={paymentAmount || String(remaining || total).replace(".", ",")} />
+                </label>
+                <Metric title="Troco" value={money(editingChange)} />
+              </>
+            )}
+            <div className="pdv-action-row">
+              <button className="pdv-ghost-button" onClick={() => setMethod(null)}>Cancelar metodo</button>
+              <button className="pdv-primary-button" onClick={() => addPayment(method)}>Adicionar {method}</button>
+            </div>
+          </div>
+        )}
         <div className="pdv-split-box">
           <label>
             <span>Dividir igualmente</span>
@@ -982,8 +1022,8 @@ function PaymentModal({ total, busy, onCancel, onConfirm }: { total: number; bus
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
-          <button className="pdv-primary-button" disabled={busy || (payments.length > 0 && remaining > 0.009)} onClick={finish}>
-            Finalizar conta
+          <button className="pdv-primary-button" disabled={busy || submitting || (payments.length > 0 && remaining > 0.009)} onClick={finish}>
+            {busy || submitting ? "Finalizando..." : "Finalizar conta"}
           </button>
         </div>
       </section>

@@ -4660,6 +4660,31 @@ body.floating-borderless .floating-bar {
   gap: 8px;
 }
 
+.pdv-payment-entry {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.pdv-entry-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pdv-payment-entry .metric {
+  min-height: 58px;
+}
+
+.pdv-payment-entry .pdv-action-row {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
 .pdv-split-box {
   display: grid;
   grid-template-columns: minmax(140px, 220px) auto;

@@ -17,6 +17,7 @@ const MONEY_COLUMNS = new Set([
   "Total",
   "Preco base",
   "Preco unitario",
+  "Total adicionais",
   "Desconto item",
   "Total item",
   "Recebido",
@@ -97,24 +98,29 @@ function saleRow(sale: PdvSale): Record<string, unknown> {
 
 function itemRows(sale: PdvSale): Record<string, unknown>[] {
   const { date, time } = splitDateTime(sale.createdAt);
-  return sale.items.map((item) => ({
-    "ID venda": sale.id,
-    Data: date,
-    Hora: time,
-    Tipo: sale.type,
-    Mesa: sale.tableNumber || "",
-    "Submesa/comanda": item.subtableName || "",
-    "Status venda": sale.status,
-    Produto: item.productName,
-    Categoria: item.categoryName,
-    Qtde: item.quantity,
-    "Preco base": roundMoney(item.baseUnitPrice ?? item.unitPrice),
-    "Preco unitario": roundMoney(item.unitPrice),
-    "Desconto item": roundMoney(item.discount),
-    "Total item": roundMoney(item.total),
-    Adicionais: (item.complements || []).map((complement) => `${complement.name} (${formatMoney(complement.price)})`).join(", "),
-    Observacao: item.note || ""
-  }));
+  return sale.items.map((item) => {
+    const complements = item.complements || [];
+    return {
+      "ID venda": sale.id,
+      Data: date,
+      Hora: time,
+      Tipo: sale.type,
+      Mesa: sale.tableNumber || "",
+      "Submesa/comanda": item.subtableName || "",
+      "Status venda": sale.status,
+      Produto: item.productName,
+      Categoria: item.categoryName,
+      Qtde: item.quantity,
+      Medida: item.measureLabel || "",
+      "Preco base": roundMoney(item.baseUnitPrice ?? item.unitPrice),
+      "Preco unitario": roundMoney(item.unitPrice),
+      "Total adicionais": roundMoney(complements.reduce((sum, complement) => sum + complement.price, 0)),
+      "Desconto item": roundMoney(item.discount),
+      "Total item": roundMoney(item.total),
+      Adicionais: complements.map((complement) => `${complement.name} (${formatMoney(complement.price)})`).join(", "),
+      Observacao: item.note || ""
+    };
+  });
 }
 
 function paymentRows(sale: PdvSale): Record<string, unknown>[] {
