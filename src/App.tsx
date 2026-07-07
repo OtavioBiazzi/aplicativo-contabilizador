@@ -39,6 +39,7 @@ import {
   X
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
+import { PdvApp } from "./PdvApp";
 import {
   calculateCash,
   calculateSplit,
@@ -70,7 +71,7 @@ import type {
   UpdateInfo
 } from "./shared/types";
 
-type TabKey = "register" | "history" | "reports" | "server" | "settings";
+type TabKey = "register" | "pdv" | "history" | "reports" | "server" | "settings";
 type SettingsCategory =
   | "appearance"
   | "floating"
@@ -144,6 +145,7 @@ interface QuickEntryModeState {
 
 const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
   { key: "register", label: "Caixa", icon: Send },
+  { key: "pdv", label: "PDV", icon: LayoutPanelTop },
   { key: "history", label: "Historico", icon: History },
   { key: "reports", label: "Relatorios", icon: BarChart3 },
   { key: "server", label: "Rede", icon: Server },
@@ -1782,6 +1784,12 @@ export function App() {
               canViewEntryValues={canViewRemoteEntryValues}
               onMode={commandMode}
             />
+          </div>
+        )}
+
+        {activeTab === "pdv" && (
+          <div className="pdv-module-panel">
+            <PdvApp embedded />
           </div>
         )}
 
@@ -5217,6 +5225,7 @@ function Toast({ toast }: { toast: ToastState }) {
 function titleForTab(tab: TabKey): string {
   const map: Record<TabKey, string> = {
     register: "Registro rapido",
+    pdv: "PDV local",
     history: "Historico editavel",
     reports: "Relatorios",
     server: "Servidor local",
@@ -5232,6 +5241,12 @@ function headerForTab(tab: TabKey, todayCount: number): { eyebrow: string; title
       title: titleForTab(tab),
       status: todayCount ? "Caixa em movimento" : "Pronto para lancar",
       detail: "Fluxo rapido"
+    },
+    pdv: {
+      eyebrow: "Modulo novo",
+      title: titleForTab(tab),
+      status: "Venda, mesas, produtos e adicionais",
+      detail: "SQLite local"
     },
     history: {
       eyebrow: "Consulta e auditoria",

@@ -70,7 +70,7 @@ function createCartItem(product: PdvProduct, quantity: number, complements: PdvC
   };
 }
 
-export function PdvApp() {
+export function PdvApp({ embedded = false }: { embedded?: boolean }) {
   const [snapshot, setSnapshot] = useState<PdvSnapshot | null>(null);
   const [tab, setTab] = useState<PdvTab>("sale");
   const [activeCategory, setActiveCategory] = useState("todos");
@@ -357,7 +357,7 @@ export function PdvApp() {
   }
 
   return (
-    <div className="pdv-shell">
+    <div className={`pdv-shell ${embedded ? "embedded" : ""}`}>
       <aside className="pdv-topbar">
         <div className="pdv-brand">
           <img src="/cda-icon.png" alt="" />

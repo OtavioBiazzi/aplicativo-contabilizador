@@ -3745,6 +3745,27 @@ body.floating-borderless .floating-bar {
   font-family: Bahnschrift, "Segoe UI Variable Text", "Segoe UI", sans-serif;
 }
 
+.pdv-module-panel {
+  height: calc(100vh - 168px);
+  min-height: 560px;
+  overflow: hidden;
+}
+
+.pdv-shell.embedded {
+  min-height: 0;
+  height: 100%;
+  border-radius: var(--radius-lg);
+  background: transparent;
+}
+
+.pdv-shell.embedded .pdv-topbar {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.pdv-shell.embedded .pdv-workspace {
+  padding: 10px 0 0;
+}
+
 .pdv-loading {
   display: grid;
   place-items: center;
