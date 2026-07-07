@@ -133,5 +133,6 @@ export interface PdvExportFilters {
   to?: string;
   type?: "Todos" | PdvSale["type"];
   payment?: "Todos" | PdvPaymentMethod;
+  status?: "Todos" | PdvSale["status"];
   table?: string;
 }

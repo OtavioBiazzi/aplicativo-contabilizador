@@ -1630,7 +1630,7 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
     }
     if (action === "export") {
       const date = sale.createdAt.slice(0, 10);
-      const status = await window.caixa.exportPdvSales({ from: date, to: date, type: "Todos", payment: "Todos", table: sale.tableNumber ? String(sale.tableNumber) : "" });
+      const status = await window.caixa.exportPdvSales({ from: date, to: date, type: "Todos", payment: "Todos", status: "Todos", table: sale.tableNumber ? String(sale.tableNumber) : "" });
       window.alert(status.message || (status.ok ? "Exportacao concluida." : "Nao foi possivel exportar."));
       return;
     }
@@ -1715,9 +1715,9 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
 
 function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
   const today = localDateInputValue();
-  const [filters, setFilters] = useState<PdvExportFilters>({ from: today, to: today, payment: "Todos", type: "Todos", table: "" });
+  const [filters, setFilters] = useState<PdvExportFilters>({ from: today, to: today, payment: "Todos", type: "Todos", status: "Finalizada", table: "" });
   const [exporting, setExporting] = useState(false);
-  const sales = filterSales(snapshot.recentSales, { ...filters, query: "", status: "Todos" }).filter((sale) => sale.status !== "Cancelada");
+  const sales = filterSales(snapshot.recentSales, { ...filters, query: "" });
   const total = sales.reduce((sum, sale) => sum + sale.total, 0);
   const byPayment = new Map<string, number>();
   const byProduct = new Map<string, number>();
@@ -1761,6 +1761,7 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
         <label><span>Ate</span><input type="date" value={filters.to || ""} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
         <label><span>Tipo</span><select value={filters.type || "Todos"} onChange={(event) => setFilters({ ...filters, type: event.target.value as PdvExportFilters["type"] })}><option>Todos</option><option>Venda direta</option><option>Mesa</option></select></label>
         <label><span>Pagamento</span><select value={filters.payment || "Todos"} onChange={(event) => setFilters({ ...filters, payment: event.target.value as PdvExportFilters["payment"] })}><option>Todos</option>{PAYMENT_METHODS.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label><span>Status</span><select value={filters.status || "Todos"} onChange={(event) => setFilters({ ...filters, status: event.target.value as PdvExportFilters["status"] })}><option>Todos</option><option>Finalizada</option><option>Parcial</option><option>Cancelada</option></select></label>
         <label><span>Mesa</span><input value={filters.table || ""} onChange={(event) => setFilters({ ...filters, table: event.target.value })} placeholder="001" /></label>
       </div>
       <div className="pdv-report-grid">

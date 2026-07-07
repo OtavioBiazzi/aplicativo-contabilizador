@@ -116,6 +116,9 @@ if (!savedSale || savedSale.items[0].complements?.[0]?.name !== complement.name)
 if (snapshot.recentSales.find((item) => item.id === cancelled.id)?.status !== "Cancelada") {
   throw new Error("Cancelamento nao foi persistido corretamente.");
 }
+if (store.getSales({ status: "Cancelada" }).length !== 1 || store.getSales({ status: "Finalizada" }).some((item) => item.id === cancelled.id)) {
+  throw new Error("Filtro de status das vendas PDV nao funcionou corretamente.");
+}
 
 const updatedPaymentSale = await store.updateSalePayments(sale.id, [{ id: crypto.randomUUID(), method: "Pix", amount: 12 }]);
 if (updatedPaymentSale.payments[0]?.method !== "Pix" || updatedPaymentSale.payments[0]?.amount !== 12) {

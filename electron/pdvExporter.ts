@@ -59,6 +59,7 @@ function buildSheets(sales: PdvSale[], filters: PdvExportFilters): Sheet[] {
     { Indicador: "Periodo final", Valor: filters.to || "Tudo" },
     { Indicador: "Tipo", Valor: filters.type || "Todos" },
     { Indicador: "Pagamento", Valor: filters.payment || "Todos" },
+    { Indicador: "Status", Valor: filters.status || "Todos" },
     { Indicador: "Mesa", Valor: filters.table || "Todas" },
     { Indicador: "Vendas validas", Valor: validSales.length },
     { Indicador: "Vendas canceladas", Valor: cancelledSales.length },

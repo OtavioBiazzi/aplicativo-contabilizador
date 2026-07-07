@@ -764,6 +764,9 @@ function matchesSaleFilters(sale: PdvSale, filters: PdvExportFilters): boolean {
   if (filters.payment && filters.payment !== "Todos" && !sale.payments.some((payment) => payment.method === filters.payment)) {
     return false;
   }
+  if (filters.status && filters.status !== "Todos" && sale.status !== filters.status) {
+    return false;
+  }
   if (table && String(sale.tableNumber || "") !== table) {
     return false;
   }
