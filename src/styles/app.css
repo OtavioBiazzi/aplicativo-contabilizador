@@ -3950,7 +3950,7 @@ body.floating-borderless .floating-bar {
 
 .pdv-quantity-box {
   display: grid;
-  grid-template-columns: auto 46px 72px 46px;
+  grid-template-columns: 46px 72px 46px repeat(2, minmax(72px, auto));
   align-items: end;
   gap: 8px;
 }

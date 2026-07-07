@@ -713,6 +713,13 @@ function PdvSaleScreen(props: {
   const subtotal = roundMoney(props.cart.reduce((total, item) => total + item.total, 0));
   const finalTotal = Math.max(0, roundMoney(subtotal - props.discount));
   const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: PdvCartItem } | null>(null);
+  const repeatLastItem = () => {
+    const last = props.cart[props.cart.length - 1];
+    if (!last) {
+      return;
+    }
+    props.setCart((current) => mergeCartItem(current, { ...last, id: crypto.randomUUID(), quantity: 1, measureLabel: "", total: roundMoney(last.unitPrice) }));
+  };
   const runItemAction = async (action: string, item: PdvCartItem) => {
     setItemMenu(null);
     if (action === "quantity") {
@@ -822,6 +829,8 @@ function PdvSaleScreen(props: {
             <button onClick={() => props.setQuantity(Math.max(1, props.quantity - 1))}><Minus size={18} /></button>
             <input type="number" min={1} value={props.quantity} onChange={(event) => props.setQuantity(Number(event.target.value || 1))} />
             <button onClick={() => props.setQuantity(props.quantity + 1)}><Plus size={18} /></button>
+            <button title="Limpar quantidade" onClick={() => props.setQuantity(1)}>Limpar</button>
+            <button title="Repetir ultimo produto" disabled={!props.cart.length} onClick={repeatLastItem}>Repetir</button>
           </div>
         </div>
 
