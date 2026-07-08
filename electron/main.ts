@@ -443,27 +443,10 @@ async function bootstrap() {
       return sale;
     },
     savePdvTablePartial: async (tableNumber, items, payments, discount) => {
-      let lastSale: PdvSale | null = null;
-      if (payments.length > 1) {
-        const subtotal = Math.round((items.reduce((total, item) => total + item.total, 0) + Number.EPSILON) * 100) / 100;
-        for (const payment of payments) {
-          const paymentAmount = Math.round(((payment.amount || 0) + Number.EPSILON) * 100) / 100;
-          const paymentDiscount = Math.round((Math.max(0, subtotal - paymentAmount) + Number.EPSILON) * 100) / 100;
-          lastSale = await pdvStore.saveSale({
-            type: "Mesa",
-            tableNumber,
-            status: "Parcial",
-            items,
-            discount: paymentDiscount,
-            payments: [{ ...payment, amount: paymentAmount }]
-          });
-        }
-      } else {
-        lastSale = await pdvStore.saveSale({ type: "Mesa", tableNumber, status: "Parcial", items, discount: discount || 0, payments });
-      }
+      const sale = await pdvStore.saveSale({ type: "Mesa", tableNumber, status: "Parcial", items, discount: discount || 0, payments });
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
-      return lastSale as PdvSale;
+      return sale;
     },
     onRemoteChange: () => {
       sendToAll("entries:changed");

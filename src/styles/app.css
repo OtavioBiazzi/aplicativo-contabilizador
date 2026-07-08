@@ -5619,3 +5619,64 @@ body.floating-borderless .floating-bar {
 }
 
 
+
+
+/* Teclado numerico do modal de pagamento */
+.pdv-payment-amount-body {
+  align-items: stretch;
+  gap: 14px;
+}
+
+.pdv-payment-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(54px, 1fr));
+  gap: 8px;
+  min-width: 200px;
+}
+
+.pdv-payment-keypad button {
+  min-height: 48px;
+  border: 1px solid var(--pdv-border, rgba(148, 163, 184, 0.35));
+  border-radius: 12px;
+  background: var(--pdv-surface-strong, rgba(255, 255, 255, 0.08));
+  color: inherit;
+  font-size: 1.08rem;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pdv-payment-keypad button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+.pdv-payment-keypad button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pdv-payment-keypad .pdv-keypad-wide {
+  grid-column: span 2;
+}
+
+.pdv-payment-keypad .pdv-keypad-confirm {
+  background: var(--pdv-primary, #22c55e);
+  color: white;
+}
+
+.pdv-active-payment-field input {
+  outline: 2px solid var(--pdv-primary, #22c55e);
+  outline-offset: 2px;
+}
+
+@media (max-width: 780px) {
+  .pdv-payment-amount-body {
+    flex-direction: column;
+  }
+
+  .pdv-payment-keypad {
+    width: 100%;
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

@@ -350,28 +350,12 @@ export class PdvStore {
     if (!table || !table.items.length) {
       throw new Error("Mesa sem itens para fechar.");
     }
-    let lastSale: PdvSale | null = null;
-    if (payments.length > 1) {
-      const subtotal = roundMoney(table.items.reduce((total, item) => total + item.total, 0));
-      for (const payment of payments) {
-        const paymentAmount = roundMoney(payment.amount);
-        const paymentDiscount = roundMoney(Math.max(0, subtotal - paymentAmount));
-        lastSale = await this.saveSale({
-          type: "Mesa",
-          tableNumber,
-          items: table.items,
-          discount: paymentDiscount,
-          payments: [{ ...payment, id: payment.id || randomUUID(), amount: paymentAmount }]
-        });
-      }
-    } else {
-      lastSale = await this.saveSale({ type: "Mesa", tableNumber, items: table.items, discount, payments });
-    }
+    const sale = await this.saveSale({ type: "Mesa", tableNumber, items: table.items, discount, payments });
     const db = this.requireDb();
     db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
     db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
     await this.persist();
-    return lastSale as PdvSale;
+    return sale;
   }
 
   async cancelSale(id: string): Promise<void> {
@@ -738,7 +722,7 @@ function insertSale(db: Database, sale: PdvSale) {
   );
   sale.items.forEach((item) =>
     itemStatement.run([
-      item.id,
+      randomUUID(),
       sale.id,
       item.productId,
       item.productName,
