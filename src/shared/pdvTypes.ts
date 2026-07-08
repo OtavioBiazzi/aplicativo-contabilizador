@@ -97,7 +97,7 @@ export interface PdvSale {
   createdAt: string;
   type: "Venda direta" | "Mesa";
   tableNumber?: number;
-  status: "Finalizada" | "Cancelada" | "Parcial";
+  status: "Finalizada" | "Cancelada" | "Parcial" | "deleted";
   subtotal: number;
   discount: number;
   total: number;
