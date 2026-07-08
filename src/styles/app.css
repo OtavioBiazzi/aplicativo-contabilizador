@@ -5555,7 +5555,7 @@ body.floating-borderless .floating-bar {
 
 .pdv-transfer-qty {
   grid-column: 3;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -5578,9 +5578,10 @@ body.floating-borderless .floating-bar {
   text-align: center;
 }
 
-.pdv-transfer-list-modal .pdv-transfer-list strong {
+.pdv-transfer-list-modal .pdv-transfer-list strong,
+.pdv-partial-items-modal .pdv-transfer-list strong {
   grid-column: 4 !important;
-  grid-row: 1 / span 2 !important;
+  grid-row: 1 !important;
   text-align: right;
   min-width: 80px;
   color: #082942 !important;

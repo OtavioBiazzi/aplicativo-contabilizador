@@ -728,6 +728,8 @@ export function PdvApp({
           initialPayments={checkoutTarget.kind === "table" ? checkoutTarget.initialPayments || [] : []}
           onCancel={() => {
             if (checkoutTarget.kind === "table-partial-items") {
+              // Restaurar seleção anterior ao voltar do pagamento
+              setSelectedTableItemIds(checkoutTarget.items.map((i) => i.id));
               setCheckoutTarget(null);
               setPartialItemsModalOpen(true);
             } else {
@@ -1740,7 +1742,7 @@ function PartialItemsModal({
   onCancel: () => void;
   onConfirm: (items: PdvCartItem[]) => void;
 }) {
-  const [selectedIds, setSelectedIds] = useState<string[]>(defaultSelectedIds.length ? defaultSelectedIds : cart.at(-1)?.id ? [cart.at(-1)!.id] : []);
+  const [selectedIds, setSelectedIds] = useState<string[]>(defaultSelectedIds);
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, String(item.quantity).replace(".", ",")])));
   
   const selectedItems = cart.filter((item) => selectedIds.includes(item.id)).map((item) => {
