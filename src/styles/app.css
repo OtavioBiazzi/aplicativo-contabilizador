@@ -5491,3 +5491,61 @@ body.floating-borderless .floating-bar {
     grid-template-columns: 1fr;
   }
 }
+
+/* Modais de Transferência e Fechamento Parcial - Cores e Contrastes */
+.pdv-transfer-modal .pdv-section-head h1,
+.pdv-transfer-list-modal .pdv-section-head h1,
+.pdv-partial-items-modal .pdv-section-head h1 {
+  color: #0b3151 !important;
+}
+
+.pdv-transfer-modal .pdv-section-head p,
+.pdv-transfer-list-modal .pdv-section-head p,
+.pdv-partial-items-modal .pdv-section-head p,
+.pdv-transfer-modal .pdv-eyebrow,
+.pdv-transfer-list-modal .pdv-eyebrow,
+.pdv-partial-items-modal .pdv-eyebrow,
+.pdv-transfer-list-modal .pdv-empty,
+.pdv-partial-items-modal .pdv-empty {
+  color: #426b8a !important;
+}
+
+/* Alinhamento de Quantidade no modal de lote de transferência */
+.pdv-transfer-list-modal .pdv-transfer-list button {
+  grid-template-columns: 22px minmax(0, 1fr) auto auto !important;
+  align-items: center;
+}
+
+.pdv-transfer-qty {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #43637a;
+  border-right: 1px solid #c8e0f0;
+  padding-right: 12px;
+  margin-right: 4px;
+}
+
+.pdv-transfer-qty input {
+  width: 60px;
+  min-height: 28px !important;
+  height: 28px;
+  padding: 2px 6px !important;
+  border: 1px solid #b8d4e5 !important;
+  border-radius: 4px !important;
+  background: #ffffff !important;
+  color: #082942 !important;
+  text-align: center;
+}
+
+.pdv-transfer-list-modal .pdv-transfer-list strong {
+  grid-column: 4 !important;
+  grid-row: 1 / span 2 !important;
+  text-align: right;
+  min-width: 80px;
+  color: #082942;
+}
+

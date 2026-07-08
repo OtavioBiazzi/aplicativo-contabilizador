@@ -35,7 +35,7 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
     roundingStep: 0.01,
     roundingDirection: "nearest",
     difference: -Math.abs(sale.discount || 0),
-    description: `${tableLabel} - ${itemNames || sale.type}`,
+    description: sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta",
     tableNumber: sale.tableNumber ? String(sale.tableNumber) : "",
     busNumber: "",
     paymentMethod,
@@ -43,7 +43,7 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
     change: sale.payments.reduce((total, payment) => total + (payment.change || 0), 0),
     observations: `${sale.status === "Parcial" ? "Fechamento parcial de mesa. " : ""}${paymentsDescription}`,
     originDevice: "PDV local",
-    status: sale.status === "Cancelada" ? "cancelled" : "active",
+    status: sale.status === "Cancelada" ? "cancelled" : sale.status === "deleted" ? "deleted" : "active",
     customType: sale.status === "Parcial" ? "Mesa parcial" : sale.type
   };
 }

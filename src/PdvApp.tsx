@@ -1798,7 +1798,7 @@ function TransferItemModal({
 }) {
   const [targetTableNumber, setTargetTableNumber] = useState(sourceTableNumber);
   const [targetSubtable, setTargetSubtable] = useState(item.subtableName || "");
-  const [quantityText, setQuantityText] = useState(String(Math.min(1, item.quantity)).replace(".", ","));
+  const [quantityText, setQuantityText] = useState(String(item.quantity).replace(".", ","));
   const [busy, setBusy] = useState(false);
   const existingSubtables = [...new Set(tables.find((table) => table.number === targetTableNumber)?.items.map((row) => row.subtableName || "").filter(Boolean) || [])];
   const quantity = Math.min(item.quantity, Math.max(0.01, parseBrazilianNumber(quantityText)));
@@ -1889,7 +1889,7 @@ function QuantityPriceModal({
 }) {
   const isKg = product.unitMode === "kg";
   const isGram = product.unitMode === "grama";
-  const [activeField, setActiveField] = useState<"quantity" | "value">("quantity");
+  const [activeField, setActiveField] = useState<"quantity" | "value">(isKg ? "value" : "quantity");
   const [quantityText, setQuantityText] = useState(isKg ? "250" : String(defaultQuantity || 1).replace(".", ","));
   const [valueText, setValueText] = useState(isKg ? money(roundMoney(product.price * 0.25)).replace("R$", "").trim() : String(product.price || 0).replace(".", ","));
   const rawQuantity = Math.max(0, parseBrazilianNumber(quantityText));
@@ -1959,14 +1959,14 @@ function QuantityPriceModal({
             <label>
               <span>{isKg ? "Peso em gramas" : "Informe a Quantidade"} <b>{unitLabel}</b></span>
               <div className="pdv-inline-stepper">
-                <input autoFocus value={quantityText} onFocus={() => setActiveField("quantity")} onChange={(event) => onQuantityChange(event.target.value)} />
+                <input autoFocus={!isKg} value={quantityText} onFocus={() => setActiveField("quantity")} onChange={(event) => onQuantityChange(event.target.value)} />
                 <button onClick={() => onQuantityChange(String(Math.max(0, rawQuantity - 1)).replace(".", ","))}>-</button>
                 <button onClick={() => onQuantityChange(String(rawQuantity + 1).replace(".", ","))}>+</button>
               </div>
             </label>
             <label>
               <span>{isKg ? "Valor final" : "Valor unitario"}</span>
-              <input value={valueText} onFocus={() => setActiveField("value")} onChange={(event) => onValueChange(event.target.value)} />
+              <input autoFocus={isKg} value={valueText} onFocus={() => setActiveField("value")} onChange={(event) => onValueChange(event.target.value)} />
             </label>
             {isKg && <p className="pdv-helper-note">Edite o peso para calcular o valor, ou edite o valor para calcular o peso automaticamente.</p>}
             <div className="pdv-calculated-price">

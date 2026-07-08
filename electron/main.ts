@@ -626,8 +626,17 @@ function registerIpc() {
   });
 
   ipcMain.handle("entries:update", async (_event, id: string, patch: Partial<LedgerEntry>) => {
+    if (id.startsWith("pdv-")) {
+      const saleId = id.replace("pdv-", "");
+      await pdvStore.updateSale(saleId, patch);
+      const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await logExportStatus("edicao de lancamento pdv", exportStatus);
+      sendToAll("entries:changed");
+      sendToAll("pdv:changed");
+      return { entry: null, exportStatus };
+    }
     const entry = await store.updateEntry(id, patch);
-    const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     await logExportStatus("edicao de lancamento", exportStatus);
     localServer.broadcast({ type: "entry-updated", entry });
     sendToAll("entries:changed");
@@ -635,8 +644,17 @@ function registerIpc() {
   });
 
   ipcMain.handle("entries:remove", async (_event, id: string) => {
+    if (id.startsWith("pdv-")) {
+      const saleId = id.replace("pdv-", "");
+      await pdvStore.updateSale(saleId, { status: "deleted" });
+      const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await logExportStatus("lixeira pdv", exportStatus);
+      sendToAll("entries:changed");
+      sendToAll("pdv:changed");
+      return { exportStatus };
+    }
     await store.removeEntry(id);
-    const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     await logExportStatus("lixeira", exportStatus);
     localServer.broadcast({ type: "entry-removed", id });
     sendToAll("entries:changed");
@@ -644,8 +662,17 @@ function registerIpc() {
   });
 
   ipcMain.handle("entries:delete", async (_event, id: string) => {
+    if (id.startsWith("pdv-")) {
+      const saleId = id.replace("pdv-", "");
+      await pdvStore.deleteSale(saleId);
+      const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await logExportStatus("exclusao definitiva pdv", exportStatus);
+      sendToAll("entries:changed");
+      sendToAll("pdv:changed");
+      return { exportStatus };
+    }
     await store.deleteEntry(id);
-    const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     await logExportStatus("exclusao definitiva", exportStatus);
     localServer.broadcast({ type: "entry-deleted", id });
     sendToAll("entries:changed");
@@ -653,8 +680,11 @@ function registerIpc() {
   });
 
   ipcMain.handle("entries:duplicate", async (_event, id: string) => {
+    if (id.startsWith("pdv-")) {
+      throw new Error("Duplicacao de venda do PDV nao suportada.");
+    }
     const entry = await store.duplicateEntry(id);
-    const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     await logExportStatus("duplicacao", exportStatus);
     localServer.broadcast({ type: "entry-added", entry });
     sendToAll("entries:changed");
@@ -662,8 +692,17 @@ function registerIpc() {
   });
 
   ipcMain.handle("entries:cancel", async (_event, id: string) => {
+    if (id.startsWith("pdv-")) {
+      const saleId = id.replace("pdv-", "");
+      await pdvStore.cancelSale(saleId);
+      const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await logExportStatus("cancelamento pdv", exportStatus);
+      sendToAll("entries:changed");
+      sendToAll("pdv:changed");
+      return { entry: null, exportStatus };
+    }
     const entry = await store.cancelEntry(id);
-    const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     await logExportStatus("cancelamento", exportStatus);
     localServer.broadcast({ type: "entry-cancelled", entry });
     sendToAll("entries:changed");

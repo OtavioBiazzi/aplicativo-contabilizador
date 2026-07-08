@@ -362,6 +362,49 @@ export class PdvStore {
     await this.persist();
   }
 
+  async updateSale(id: string, patch: Record<string, any>): Promise<void> {
+    const db = this.requireDb();
+    let status = patch.status;
+    if (status === "cancelled") status = "Cancelada";
+    if (status === "active") status = "Finalizada";
+
+    db.run("BEGIN IMMEDIATE");
+    try {
+      if (status) {
+        db.run("UPDATE sales SET status = ? WHERE id = ?", [status, id]);
+      }
+      if (patch.createdAt) {
+        db.run("UPDATE sales SET created_at = ? WHERE id = ?", [patch.createdAt, id]);
+      }
+      if (patch.finalValue !== undefined) {
+        db.run("UPDATE sales SET total = ? WHERE id = ?", [patch.finalValue, id]);
+      }
+      if (patch.originalValue !== undefined) {
+        db.run("UPDATE sales SET subtotal = ? WHERE id = ?", [patch.originalValue, id]);
+      }
+      if (patch.difference !== undefined) {
+        db.run("UPDATE sales SET discount = ? WHERE id = ?", [-patch.difference, id]);
+      }
+      if (patch.paymentMethod) {
+        db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
+        const amt = patch.finalValue ?? (selectAll<{ total: number }>(db, "SELECT total FROM sales WHERE id = ?", [id])[0]?.total || 0);
+        db.run("INSERT INTO sale_payments (id, sale_id, method, amount, received, change) VALUES (?, ?, ?, ?, ?, ?)",
+          [randomUUID(), id, patch.paymentMethod, amt, amt, 0]);
+      }
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+  }
+
+  async deleteSale(id: string): Promise<void> {
+    const db = this.requireDb();
+    db.run("DELETE FROM sales WHERE id = ?", [id]);
+    await this.persist();
+  }
+
   async updateSalePayments(id: string, payments: PdvPayment[]): Promise<PdvSale> {
     const sale = this.getSales().find((item) => item.id === id);
     if (!sale) {
