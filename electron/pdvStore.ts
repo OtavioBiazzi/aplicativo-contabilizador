@@ -25,7 +25,8 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   complementsEnabled: true,
   subtablesEnabled: true,
   tablePeopleEnabled: false,
-  activePreset: "Cose Dell Abadia"
+  activePreset: "Cose Dell Abadia",
+  gridColumns: 5
 };
 const PDV_BACKUP_DIRECTORY = "pdv-backups";
 

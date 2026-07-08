@@ -525,8 +525,7 @@ export function PdvApp({
     try {
       await savePdvTablePartial(target.table.number, target.items, payments, 0);
       if (target.kind === "table-partial-items") {
-        const partialIds = new Set(target.items.map((item) => item.id));
-        const remainingItems = tableCart.filter((item) => !partialIds.has(item.id));
+        const remainingItems = target.items.reduce((acc, item) => subtractCartItemQuantity(acc, item.id, item.quantity), tableCart);
         setTableCart(remainingItems);
         setSelectedTableItemIds([]);
         await savePdvTableItems(target.table.number, remainingItems);
@@ -727,7 +726,14 @@ export function PdvApp({
           total={checkoutTarget.total}
           busy={busy}
           initialPayments={checkoutTarget.kind === "table" ? checkoutTarget.initialPayments || [] : []}
-          onCancel={() => setCheckoutTarget(null)}
+          onCancel={() => {
+            if (checkoutTarget.kind === "table-partial-items") {
+              setCheckoutTarget(null);
+              setPartialItemsModalOpen(true);
+            } else {
+              setCheckoutTarget(null);
+            }
+          }}
           onConfirm={(payments) => {
             if (checkoutTarget.kind === "direct") {
               return confirmDirectSale(payments);
@@ -945,7 +951,7 @@ function PdvSaleScreen(props: {
           ))}
         </div>
 
-        <div className="pdv-product-grid">
+        <div className="pdv-product-grid" style={{ "--pdv-grid-cols": props.snapshot.settings.gridColumns || 5 } as React.CSSProperties}>
           {props.products.map((product) => (
             <button key={product.id} onClick={(event) => props.addProduct(product, event.shiftKey)}>
               <strong>{product.name}</strong>
@@ -1735,9 +1741,23 @@ function PartialItemsModal({
   onConfirm: (items: PdvCartItem[]) => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultSelectedIds.length ? defaultSelectedIds : cart.at(-1)?.id ? [cart.at(-1)!.id] : []);
-  const selectedItems = cart.filter((item) => selectedIds.includes(item.id));
+  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, String(item.quantity).replace(".", ",")])));
+  
+  const selectedItems = cart.filter((item) => selectedIds.includes(item.id)).map((item) => {
+    const qText = quantities[item.id];
+    const q = Math.min(item.quantity, Math.max(0.01, parseBrazilianNumber(qText || String(item.quantity))));
+    const ratio = item.quantity > 0 ? q / item.quantity : 1;
+    return {
+      ...item,
+      quantity: q,
+      total: roundMoney(item.unitPrice * q),
+      discount: roundMoney(item.discount * ratio)
+    };
+  });
+  
   const selectedTotal = roundMoney(selectedItems.reduce((total, item) => total + item.total, 0));
   const remainingTotal = roundMoney(cart.reduce((total, item) => total + item.total, 0) - selectedTotal);
+  
   const toggle = (id: string) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
@@ -1749,7 +1769,7 @@ function PartialItemsModal({
           <div>
             <span className="pdv-eyebrow">Fechamento parcial</span>
             <h1>Mesa {String(table.number).padStart(3, "0")}</h1>
-            <p>Escolha os produtos que serao pagos agora. Depois disso abre o pagamento normal.</p>
+            <p>Escolha os produtos e quantidades que serao pagos agora.</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
@@ -1759,14 +1779,26 @@ function PartialItemsModal({
           <Metric title="Itens escolhidos" value={String(selectedItems.length)} />
         </div>
         <div className="pdv-transfer-list">
-          {cart.map((item, index) => (
-            <button className={selectedIds.includes(item.id) ? "selected" : ""} key={item.id} onClick={() => toggle(item.id)}>
-              <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggle(item.id)} onClick={(event) => event.stopPropagation()} />
-              <span>{index + 1}. {item.productName}</span>
-              <small>{item.measureLabel || item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}</small>
-              <strong>{money(item.total)}</strong>
-            </button>
-          ))}
+          {cart.map((item, index) => {
+            const isSelected = selectedIds.includes(item.id);
+            const qVal = quantities[item.id] ?? String(item.quantity).replace(".", ",");
+            const parsedQ = parseBrazilianNumber(qVal);
+            const currentItemTotal = isSelected ? roundMoney(parsedQ * item.unitPrice) : item.total;
+            return (
+              <button className={isSelected ? "selected" : ""} key={item.id} onClick={() => toggle(item.id)}>
+                <input type="checkbox" checked={isSelected} onChange={() => toggle(item.id)} onClick={(event) => event.stopPropagation()} />
+                <span>{index + 1}. {item.productName}</span>
+                <small>{item.measureLabel || item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}</small>
+                {isSelected && (
+                  <label className="pdv-transfer-qty" onClick={(event) => event.stopPropagation()}>
+                    Qtde
+                    <input value={qVal} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} />
+                  </label>
+                )}
+                <strong>{money(currentItemTotal)}</strong>
+              </button>
+            );
+          })}
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
@@ -1890,8 +1922,8 @@ function QuantityPriceModal({
   const isKg = product.unitMode === "kg";
   const isGram = product.unitMode === "grama";
   const [activeField, setActiveField] = useState<"quantity" | "value">(isKg ? "value" : "quantity");
-  const [quantityText, setQuantityText] = useState(isKg ? "250" : String(defaultQuantity || 1).replace(".", ","));
-  const [valueText, setValueText] = useState(isKg ? money(roundMoney(product.price * 0.25)).replace("R$", "").trim() : String(product.price || 0).replace(".", ","));
+  const [quantityText, setQuantityText] = useState(isKg ? "1000" : String(defaultQuantity || 1).replace(".", ","));
+  const [valueText, setValueText] = useState(isKg ? money(roundMoney(product.price * 1.0)).replace("R$", "").trim() : String(product.price || 0).replace(".", ","));
   const rawQuantity = Math.max(0, parseBrazilianNumber(quantityText));
   const typedValue = Math.max(0, parseBrazilianNumber(valueText));
   const saleQuantity = isKg
@@ -2658,6 +2690,15 @@ function AdvancedScreen({ snapshot, onImportCose, onImportFile, busy, onSettings
           <label className="pdv-setting-line">
             <span>Quantidade de mesas</span>
             <input type="number" min={1} max={300} value={snapshot.settings.tableCount} onChange={(event) => saveSetting({ tableCount: Number(event.target.value || 47) })} />
+          </label>
+          <label className="pdv-setting-line">
+            <span>Grid de produtos</span>
+            <select value={snapshot.settings.gridColumns || 5} onChange={(event) => saveSetting({ gridColumns: Number(event.target.value) })}>
+              <option value={4}>4 produtos por linha</option>
+              <option value={5}>5 produtos por linha</option>
+              <option value={6}>6 produtos por linha</option>
+              <option value={7}>7 produtos por linha</option>
+            </select>
           </label>
           <label className="pdv-switch-line">
             <input type="checkbox" checked={snapshot.settings.subtablesEnabled} onChange={(event) => saveSetting({ subtablesEnabled: event.target.checked })} />

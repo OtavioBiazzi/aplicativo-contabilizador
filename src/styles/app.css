@@ -4223,7 +4223,7 @@ body.floating-borderless .floating-bar {
 
 .pdv-product-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(144px, 1fr));
+  grid-template-columns: repeat(var(--pdv-grid-cols, 5), minmax(0, 1fr));
   align-content: start;
   gap: 8px;
   min-height: 0;
@@ -5547,7 +5547,8 @@ body.floating-borderless .floating-bar {
 }
 
 /* Alinhamento de Quantidade no modal de lote de transferência */
-.pdv-transfer-list-modal .pdv-transfer-list button {
+.pdv-transfer-list-modal .pdv-transfer-list button,
+.pdv-partial-items-modal .pdv-transfer-list button {
   grid-template-columns: 22px minmax(0, 1fr) auto auto !important;
   align-items: center;
 }
@@ -5583,5 +5584,24 @@ body.floating-borderless .floating-bar {
   text-align: right;
   min-width: 80px;
   color: #082942 !important;
+}
+
+/* Responsividade do Grid de Produtos */
+@media (max-width: 1200px) {
+  .pdv-product-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .pdv-product-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 600px) {
+  .pdv-product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
 }
 

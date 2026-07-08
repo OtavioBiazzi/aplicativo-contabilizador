@@ -120,6 +120,7 @@ export interface PdvSettings {
   subtablesEnabled: boolean;
   tablePeopleEnabled: boolean;
   activePreset: string;
+  gridColumns?: number;
 }
 
 export interface PdvProductImportResult {
