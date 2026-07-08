@@ -10,6 +10,15 @@
   --danger: #ff5d4d;
   --warning: #f2c14e;
   --shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  --pdv-bg: linear-gradient(180deg, #053d72 0, #045a91 56px, #0783b2 57px, #0990bf 100%);
+  --pdv-topbar: linear-gradient(180deg, #062f5c, #034d86);
+  --pdv-panel: rgba(3, 75, 124, 0.36);
+  --pdv-cart: #073766;
+  --pdv-action: #e36d36;
+  --pdv-action-strong: #ff8b5a;
+  --pdv-soft: #e7eef3;
+  --pdv-soft-2: #f4f6f7;
+  --pdv-ink: #09233a;
   --radius: 8px;
   --field-pad: 12px;
   --field-font-size: 1rem;
@@ -29,6 +38,12 @@
   --muted: #60798b;
   --accent-strong: color-mix(in srgb, var(--accent) 78%, #043d70);
   --shadow: 0 18px 45px rgba(9, 75, 124, 0.13);
+  --pdv-bg: linear-gradient(180deg, #d9edf8 0, #eaf6fc 56px, #c4e2f3 57px, #edf7fc 100%);
+  --pdv-topbar: linear-gradient(180deg, #f7fcff, #d9edf8);
+  --pdv-panel: #d9edf8;
+  --pdv-cart: #0a4674;
+  --pdv-action: #f0713b;
+  --pdv-action-strong: #ff8b5a;
 }
 
 :root[data-theme="contrast"] {
@@ -39,6 +54,12 @@
   --text: #fff;
   --muted: #d6d6d6;
   --accent: #00ff66;
+  --pdv-bg: #050505;
+  --pdv-topbar: #090909;
+  --pdv-panel: #111;
+  --pdv-cart: #000;
+  --pdv-action: #00ff66;
+  --pdv-action-strong: #00ff66;
 }
 
 :root[data-theme="datacaixa"] {
@@ -53,6 +74,12 @@
   --danger: #d90000;
   --warning: #ff8a4d;
   --shadow: 0 18px 46px rgba(2, 50, 91, 0.16);
+  --pdv-bg: linear-gradient(180deg, #edf8ff 0, #dff0fb 56px, #bae1f4 57px, #edf8ff 100%);
+  --pdv-topbar: linear-gradient(180deg, #075b9e, #034d86);
+  --pdv-panel: #9fc3d8;
+  --pdv-cart: #073f6f;
+  --pdv-action: #f0713b;
+  --pdv-action-strong: #ff8b5a;
 }
 
 :root[data-theme="datacaixa-dark"] {
@@ -67,6 +94,12 @@
   --danger: #ff6b5f;
   --warning: #ffb46b;
   --shadow: 0 18px 46px rgba(0, 12, 23, 0.34);
+  --pdv-bg: linear-gradient(180deg, #051d33 0, #062f5c 56px, #044b78 57px, #06334f 100%);
+  --pdv-topbar: linear-gradient(180deg, #061f39, #062f5c);
+  --pdv-panel: rgba(8, 62, 99, 0.72);
+  --pdv-cart: #031f39;
+  --pdv-action: #e36d36;
+  --pdv-action-strong: #ff8b5a;
 }
 
 :root[data-theme="italia"] {
@@ -81,6 +114,12 @@
   --danger: #b62f2f;
   --warning: #d99a34;
   --shadow: 0 18px 46px rgba(28, 91, 54, 0.13);
+  --pdv-bg: linear-gradient(180deg, #f7fbf4 0, #edf6ef 56px, #dcebe0 57px, #f8fbf5 100%);
+  --pdv-topbar: linear-gradient(90deg, #0f7a49 0 33%, #f7fbf4 33% 66%, #bd3030 66%);
+  --pdv-panel: #e5f1e8;
+  --pdv-cart: #0d5135;
+  --pdv-action: #bd3030;
+  --pdv-action-strong: #d44848;
 }
 
 :root[data-density="compact"] {
@@ -481,6 +520,12 @@ input[type="range"] {
   padding: 18px 22px 22px;
   gap: 16px;
   overflow: hidden;
+}
+
+.workspace.pdv-direct-workspace {
+  grid-template-rows: minmax(0, 1fr);
+  padding: 0;
+  gap: 0;
 }
 
 .workspace-header {
@@ -3738,11 +3783,36 @@ body.floating-borderless .floating-bar {
 .pdv-loading,
 .pdv-shell {
   min-height: 100vh;
-  background:
-    linear-gradient(180deg, #053d72 0, #045a91 56px, #0783b2 57px, #0990bf 100%),
-    #0783b2;
+  background: var(--pdv-bg), var(--bg);
   color: #f7fbff;
   font-family: Bahnschrift, "Segoe UI Variable Text", "Segoe UI", sans-serif;
+}
+
+:root[data-theme="light"] .pdv-products-area,
+:root[data-theme="datacaixa"] .pdv-products-area,
+:root[data-theme="italia"] .pdv-products-area {
+  color: var(--text);
+}
+
+:root[data-theme="light"] .pdv-products-area .pdv-section-head p,
+:root[data-theme="light"] .pdv-products-area .pdv-empty,
+:root[data-theme="datacaixa"] .pdv-products-area .pdv-section-head p,
+:root[data-theme="datacaixa"] .pdv-products-area .pdv-empty,
+:root[data-theme="italia"] .pdv-products-area .pdv-section-head p,
+:root[data-theme="italia"] .pdv-products-area .pdv-empty {
+  color: var(--muted);
+}
+
+:root[data-theme="light"] .pdv-products-area .pdv-section-head h1,
+:root[data-theme="light"] .pdv-products-area .pdv-quantity-box span,
+:root[data-theme="light"] .pdv-products-area .pdv-eyebrow,
+:root[data-theme="datacaixa"] .pdv-products-area .pdv-section-head h1,
+:root[data-theme="datacaixa"] .pdv-products-area .pdv-quantity-box span,
+:root[data-theme="datacaixa"] .pdv-products-area .pdv-eyebrow,
+:root[data-theme="italia"] .pdv-products-area .pdv-section-head h1,
+:root[data-theme="italia"] .pdv-products-area .pdv-quantity-box span,
+:root[data-theme="italia"] .pdv-products-area .pdv-eyebrow {
+  color: var(--text);
 }
 
 .pdv-module-panel {
@@ -3751,11 +3821,16 @@ body.floating-borderless .floating-bar {
   overflow: hidden;
 }
 
+.pdv-direct-panel {
+  height: 100%;
+  min-height: 0;
+}
+
 .pdv-shell.embedded {
   min-height: 0;
   height: 100%;
   border-radius: var(--radius-lg);
-  background: transparent;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
 }
 
 .pdv-shell.no-topbar {
@@ -3771,12 +3846,125 @@ body.floating-borderless .floating-bar {
 }
 
 .pdv-settings-panel {
-  min-height: 760px;
+  min-height: 0;
+  align-content: start;
+  overflow: hidden;
 }
 
-.pdv-settings-panel .pdv-shell.embedded {
-  height: 680px;
-  border: 1px solid var(--border);
+.pdv-settings-panel > .helper-text {
+  grid-column: 1 / -1;
+}
+
+.pdv-settings-panel > .pdv-shell.embedded {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.pdv-settings-panel .pdv-workspace {
+  padding: 0;
+  overflow: hidden;
+}
+
+.pdv-settings-panel .pdv-panel {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+}
+
+.pdv-settings-panel .pdv-section-head,
+.pdv-settings-panel .pdv-action-row,
+.pdv-settings-panel .pdv-bulk-toolbar,
+.pdv-settings-panel .pdv-category-manager {
+  color: var(--text);
+}
+
+.pdv-settings-panel .pdv-eyebrow,
+.pdv-settings-panel .pdv-section-head p,
+.pdv-settings-panel .pdv-empty,
+.pdv-settings-panel .pdv-panel span,
+.pdv-settings-panel .pdv-panel small {
+  color: var(--muted);
+}
+
+.pdv-settings-panel .pdv-section-head h1,
+.pdv-settings-panel .pdv-product-table strong,
+.pdv-settings-panel .pdv-product-table b,
+.pdv-settings-panel .pdv-advanced-grid strong {
+  color: var(--text);
+}
+
+.pdv-settings-panel .pdv-category-manager button,
+.pdv-settings-panel .pdv-product-table article,
+.pdv-settings-panel .pdv-advanced-grid article,
+.pdv-settings-panel .pdv-bulk-toolbar,
+.pdv-settings-panel .pdv-report-list,
+.pdv-settings-panel .pdv-metric {
+  border-color: var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.pdv-settings-panel .pdv-category-manager button {
+  min-width: 180px;
+}
+
+.pdv-settings-panel .pdv-product-table {
+  max-width: 100%;
+  max-height: min(62vh, 620px);
+  overflow: auto;
+}
+
+.pdv-settings-panel .pdv-product-table article {
+  grid-template-columns: 24px minmax(180px, 1fr) minmax(112px, 0.36fr) 92px 92px minmax(210px, 0.55fr) 84px;
+  min-width: 780px;
+}
+
+.pdv-settings-panel .pdv-section-head {
+  flex-wrap: wrap;
+}
+
+.pdv-settings-panel .pdv-section-head > div:first-child {
+  min-width: min(360px, 100%);
+}
+
+.pdv-settings-panel .pdv-action-row,
+.pdv-settings-panel .pdv-bulk-toolbar {
+  flex-wrap: wrap;
+}
+
+.pdv-settings-panel .pdv-action-row > button,
+.pdv-settings-panel .pdv-bulk-toolbar > button,
+.pdv-settings-panel .pdv-bulk-toolbar > select,
+.pdv-settings-panel .pdv-bulk-toolbar > input {
+  width: auto;
+}
+
+.pdv-settings-panel .pdv-ghost-button {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+
+.pdv-settings-panel .pdv-primary-button {
+  background: var(--accent);
+  color: #fff;
+}
+
+.pdv-settings-panel .pdv-switch-line,
+.pdv-settings-panel .pdv-setting-line,
+.pdv-settings-panel .pdv-price-edit {
+  color: var(--text);
 }
 
 .pdv-open-table-modal {
@@ -3803,7 +3991,7 @@ body.floating-borderless .floating-bar {
   gap: 18px;
   border-bottom: 2px solid rgba(255, 255, 255, 0.72);
   padding: 10px 20px;
-  background: linear-gradient(180deg, #062f5c, #034d86);
+  background: var(--pdv-topbar);
 }
 
 .pdv-brand,
@@ -3858,7 +4046,7 @@ body.floating-borderless .floating-bar {
 
 .pdv-tabs button.active {
   border-radius: 3px;
-  background: #e36d36;
+  background: var(--pdv-action);
   color: #fff;
 }
 
@@ -3866,15 +4054,16 @@ body.floating-borderless .floating-bar {
   min-height: 0;
   padding: 12px;
   overflow: hidden;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
 }
 
 .pdv-panel {
   min-width: 0;
   min-height: 0;
   border: 1px solid rgba(255, 255, 255, 0.42);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 14px;
-  background: rgba(3, 75, 124, 0.36);
+  background: color-mix(in srgb, var(--pdv-panel) 86%, var(--panel));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
@@ -3912,6 +4101,11 @@ body.floating-borderless .floating-bar {
   min-height: 0;
 }
 
+.pdv-table-open-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw);
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
 .pdv-products-area,
 .pdv-cart-area {
   display: grid;
@@ -3926,7 +4120,7 @@ body.floating-borderless .floating-bar {
 
 .pdv-table-details {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
 }
 
@@ -3945,7 +4139,11 @@ body.floating-borderless .floating-bar {
 
 .pdv-cart-area {
   grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
-  background: #073766;
+  background: var(--pdv-cart);
+}
+
+.pdv-table-open-grid .pdv-cart-area {
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .pdv-quantity-box {
@@ -4008,17 +4206,18 @@ body.floating-borderless .floating-bar {
 
 .pdv-category-grid button,
 .pdv-product-grid button {
-  min-height: 66px;
+  min-height: 64px;
   border: 1px solid #b9c9d4;
-  border-radius: 3px;
+  border-radius: 5px;
   background: #eef1f3;
   color: #071d30;
   font-weight: 900;
   cursor: pointer;
+  overflow: hidden;
 }
 
 .pdv-category-grid button.active {
-  background: #f0793d;
+  background: var(--pdv-action);
   color: #fff;
 }
 
@@ -4035,18 +4234,30 @@ body.floating-borderless .floating-bar {
 .pdv-product-grid button {
   display: grid;
   gap: 4px;
-  padding: 8px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: 8px 7px;
 }
 
 .pdv-product-grid strong {
-  align-self: end;
-  font-size: 0.9rem;
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  color: #071d30;
+  display: -webkit-box;
+  font-size: clamp(0.74rem, 0.82vw, 0.9rem);
+  line-height: 1.12;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .pdv-product-grid span {
   color: #071d30;
-  font-size: 0.95rem;
+  font-size: 0.88rem;
+  line-height: 1.05;
+  white-space: nowrap;
 }
 
 .pdv-cart-head {
@@ -4059,8 +4270,8 @@ body.floating-borderless .floating-bar {
   min-height: 0;
   overflow: auto;
   border: 1px solid rgba(255, 255, 255, 0.35);
-  background: #f4f6f7;
-  color: #09233a;
+  background: var(--pdv-soft-2);
+  color: var(--pdv-ink);
 }
 
 .pdv-cart-list article {
@@ -4073,15 +4284,17 @@ body.floating-borderless .floating-bar {
   cursor: context-menu;
 }
 
-.pdv-cart-list article:has(.pdv-item-check) {
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+.pdv-cart-list article.selected {
+  border-left: 5px solid var(--pdv-action-strong);
+  background: #dfeff8;
+  color: #071d30;
 }
 
-.pdv-item-check {
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  accent-color: #e36d36;
+.pdv-cart-list article.selected span,
+.pdv-cart-list article.selected small,
+.pdv-cart-list article.selected b,
+.pdv-cart-list article.selected strong {
+  color: #071d30;
 }
 
 .pdv-cart-list span {
@@ -4248,6 +4461,7 @@ body.floating-borderless .floating-bar {
 .pdv-subtable-panel {
   display: grid;
   align-items: stretch;
+  margin-bottom: 2px;
 }
 
 .pdv-subtable-picker button,
@@ -4258,11 +4472,12 @@ body.floating-borderless .floating-bar {
 }
 
 .pdv-subtable-picker button.active {
-  background: #e36d36;
+  background: var(--pdv-action);
   color: #fff;
 }
 
 .pdv-subtable-picker input,
+.pdv-bulk-toolbar input,
 .pdv-bulk-toolbar select {
   width: auto;
   min-width: 150px;
@@ -4271,6 +4486,15 @@ body.floating-borderless .floating-bar {
   border-radius: 5px;
   background: #f8fbfd;
   color: #082942;
+}
+
+.pdv-bulk-toolbar input {
+  flex: 1 1 180px;
+}
+
+.pdv-editor-modal {
+  max-height: min(92vh, 760px);
+  overflow: auto;
 }
 
 .pdv-table-card.has-subtables {
@@ -4283,6 +4507,153 @@ body.floating-borderless .floating-bar {
 
 .pdv-action-row > button {
   flex: 1 1 150px;
+}
+
+.pdv-table-action-dock {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  padding-top: 8px;
+}
+
+.pdv-table-action-dock button {
+  min-height: 42px;
+  flex: 1 1 130px;
+}
+
+.pdv-transfer-modal,
+.pdv-transfer-list-modal,
+.pdv-partial-items-modal {
+  width: min(720px, calc(100vw - 28px));
+}
+
+.pdv-table-bottom-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-start;
+  align-items: center;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--pdv-cart) 72%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.pdv-table-bottom-actions > button,
+.pdv-table-bottom-actions > .pdv-ghost-button,
+.pdv-table-bottom-actions > .pdv-danger-button,
+.pdv-table-bottom-actions > .pdv-primary-button {
+  flex: 1 1 130px;
+  min-height: 58px;
+  border: 1px solid #a8c6dc;
+  background: linear-gradient(#f8fbfd, #d9eaf5);
+  color: #0b2740;
+}
+
+.pdv-table-bottom-actions > .pdv-danger-button {
+  color: #8f2019;
+}
+
+.pdv-table-bottom-actions > .pdv-primary-button {
+  color: #0c4528;
+}
+
+.pdv-table-cart-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.pdv-table-cart-actions > button {
+  min-height: 58px;
+  font-size: 1rem;
+}
+
+.pdv-table-bottom-actions > button {
+  flex: 0 1 190px;
+  min-height: 48px;
+}
+
+.pdv-transfer-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(56vh, 430px);
+  overflow: auto;
+}
+
+.pdv-transfer-list button {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: center;
+  border: 1px solid #b8d4e5;
+  border-radius: 5px;
+  padding: 10px 12px;
+  background: #f8fbfd;
+  color: #082942;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pdv-transfer-list button:hover,
+.pdv-transfer-list button.selected {
+  background: #e0f0fa;
+}
+
+.pdv-transfer-list input[type="checkbox"] {
+  grid-row: 1 / span 2;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  accent-color: #e36d36;
+}
+
+.pdv-transfer-list span {
+  grid-column: 2;
+  font-weight: 900;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdv-transfer-list small {
+  grid-column: 2;
+  color: #43637a;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdv-transfer-list strong {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  font-size: 1.08rem;
+}
+
+.pdv-transfer-target {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(190px, 1fr) minmax(140px, auto);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.pdv-transfer-target label {
+  display: grid;
+  gap: 5px;
+  color: #1d5278;
+  font-weight: 900;
+}
+
+.pdv-transfer-target input,
+.pdv-transfer-target select {
+  min-height: 42px;
+  border: 1px solid #b8d4e5;
+  border-radius: 5px;
+  background: #f8fbfd;
+  color: #082942;
 }
 
 .pdv-filter-row {
@@ -4425,6 +4796,10 @@ body.floating-borderless .floating-bar {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.pdv-editor-grid .pdv-wide-field {
+  grid-column: 1 / -1;
 }
 
 .pdv-editor-grid label {
@@ -4612,7 +4987,7 @@ body.floating-borderless .floating-bar {
 }
 
 .pdv-complement-grid button.active {
-  background: #e36d36;
+  background: var(--pdv-action);
 }
 
 .pdv-complement-config {
@@ -4667,9 +5042,198 @@ body.floating-borderless .floating-bar {
   border: 1px solid rgba(255, 255, 255, 0.42);
   border-radius: 6px;
   padding: 16px;
-  background: #073766;
+  background: var(--pdv-cart);
   color: #fff;
   box-shadow: 0 26px 70px rgba(0, 0, 0, 0.4);
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) {
+  border-color: #7aa8c9;
+  background: #dcebf5;
+  color: #0b3151;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-section-head,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-editor-grid label,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-payment-inputs label,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-split-box label {
+  color: #1d5278;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-eyebrow,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-empty {
+  color: #426b8a;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-metric,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-payment-entry,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-split-box,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-payment-list article,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-split-preview {
+  border-color: #a9c8dc;
+  background: #edf6fb;
+  color: #0b3151;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-metric strong {
+  color: #001a31;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-payment-methods button {
+  border-color: #d5edf9;
+  background: #66acd0;
+  color: #041a2b;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-payment-methods button.active,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-payment-methods button:hover {
+  background: var(--pdv-action-strong);
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-primary-button,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-ghost-button,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-danger-button {
+  border: 1px solid #9fc4dc;
+  background: linear-gradient(#f8fbfd, #d3e7f4);
+  color: #0b3151;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-primary-button {
+  color: #0c4528;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) .pdv-danger-button {
+  color: #8f2019;
+}
+
+.pdv-window-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -16px -16px 10px;
+  padding: 6px 10px;
+  background: linear-gradient(180deg, #144b79, #0c345b);
+  color: #fff;
+}
+
+.pdv-quantity-modal {
+  width: min(560px, calc(100vw - 24px));
+  padding-bottom: 12px;
+}
+
+.pdv-quantity-product {
+  border: 1px solid #0c345b;
+  padding: 18px 14px;
+  background: #fff;
+  color: #1d5278;
+  font-size: 1.35rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.pdv-quantity-body {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px 6px 8px;
+}
+
+.pdv-question-mark {
+  display: grid;
+  place-items: center;
+  align-self: start;
+  width: 56px;
+  height: 56px;
+  border: 4px solid #98aec0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #eff8ff, #6ca2d4);
+  color: #fff;
+  font-size: 2.1rem;
+  font-weight: 900;
+  text-shadow: 0 1px 2px #123d66;
+}
+
+.pdv-quantity-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.pdv-quantity-fields label {
+  display: grid;
+  gap: 4px;
+  color: #245a82;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.pdv-quantity-fields input,
+.pdv-inline-stepper input {
+  min-height: 45px;
+  border: 1px solid #86b7d5;
+  background: #fff;
+  color: #071827;
+  font-size: 1.7rem;
+}
+
+.pdv-inline-stepper {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px 46px;
+  gap: 6px;
+}
+
+.pdv-inline-stepper button,
+.pdv-keypad button {
+  border: 1px solid #d7edf8;
+  background: linear-gradient(180deg, #d7edf8, #b7d6e8);
+  color: #000;
+  font-size: 1.5rem;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.pdv-divide-check {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-self: start;
+  border: 3px solid #ff2b2b;
+  padding: 5px 7px;
+  background: #fff;
+  font-size: 0.78rem !important;
+}
+
+.pdv-calculated-price {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid #a9c8dc;
+  padding: 8px 10px;
+  background: #edf6fb;
+}
+
+.pdv-calculated-price strong {
+  font-size: 1.5rem;
+}
+
+.pdv-calculated-price small {
+  grid-column: 1 / -1;
+  color: #426b8a;
+}
+
+.pdv-keypad {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(70px, 1fr));
+  margin: 6px auto 14px;
+  max-width: 395px;
+  border: 1px solid #d7edf8;
+}
+
+.pdv-keypad button {
+  min-height: 62px;
+}
+
+.pdv-keypad .enter {
+  grid-column: 4;
+  grid-row: 1 / span 4;
 }
 
 .pdv-payment-summary {
@@ -4678,10 +5242,26 @@ body.floating-borderless .floating-bar {
   gap: 10px;
 }
 
+.pdv-receive-modal {
+  width: min(1020px, calc(100vw - 24px));
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
+  align-items: start;
+}
+
+.pdv-receive-modal > .pdv-section-head,
+.pdv-receive-modal > .pdv-payment-summary,
+.pdv-receive-modal > .pdv-action-row {
+  grid-column: 1 / -1;
+}
+
 .pdv-payment-methods {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  grid-template-columns: repeat(2, minmax(130px, 1fr));
   gap: 8px;
+  align-content: start;
+  padding: 10px;
+  border: 1px solid #a9c8dc;
+  background: #edf6fb;
 }
 
 .pdv-payment-inputs {
@@ -4754,6 +5334,58 @@ body.floating-borderless .floating-bar {
   color: #082942;
 }
 
+.pdv-close-menu {
+  width: min(840px, calc(100vw - 24px));
+}
+
+.pdv-close-discounts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pdv-close-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: 10px;
+  border: 1px solid #a9c8dc;
+  border-radius: 7px;
+  padding: 12px;
+  background: #edf6fb;
+  color: #0b3151;
+}
+
+.pdv-close-split > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.pdv-close-split strong,
+.pdv-close-split span,
+.pdv-split-preview span,
+.pdv-split-preview b {
+  color: #0b3151;
+}
+
+.pdv-close-split .pdv-inline-stepper {
+  align-self: center;
+}
+
+.pdv-close-split .pdv-split-preview {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  background: #fff;
+  border-color: #a9c8dc;
+}
+
+.pdv-nested-backdrop {
+  z-index: 90;
+  background: rgba(0, 18, 34, 0.45);
+}
+
+.pdv-payment-amount-modal {
+  width: min(560px, calc(100vw - 24px));
+  padding-bottom: 12px;
+}
+
 .pdv-payment-inputs label {
   display: grid;
   gap: 5px;
@@ -4768,22 +5400,33 @@ body.floating-borderless .floating-bar {
 }
 
 .pdv-payment-methods button {
-  min-height: 54px;
-  border: 1px solid rgba(255, 255, 255, 0.38);
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  min-height: 64px;
+  border: 1px solid #d5edf9;
+  border-radius: 3px;
+  background: #66acd0;
+  color: #041a2b;
   font-weight: 900;
   cursor: pointer;
 }
 
+.pdv-payment-methods button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .pdv-payment-methods button.active {
-  background: #e36d36;
+  background: var(--pdv-action);
 }
 
 .pdv-payment-list {
   display: grid;
   gap: 8px;
+  align-content: start;
+  min-height: 210px;
+  border: 1px solid #a9c8dc;
+  background: #fff;
+  color: #082942;
+  padding: 8px;
 }
 
 .pdv-payment-list article {

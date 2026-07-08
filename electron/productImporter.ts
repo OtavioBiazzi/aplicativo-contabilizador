@@ -65,6 +65,7 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
   const categoryByName = new Map<string, PdvCategory>();
   const products: PdvProduct[] = [];
   const seenProducts = new Set<string>();
+  const categoryOrder = ["TODOS", "ARTESANATO", "FORNECEDORES", "PIMENTAS", "BEBIDAS", "DOCES", "EMPORIO", "CAFE", "SUCOS", "FRUTAS"];
 
   rows
     .sort((left, right) =>
@@ -80,7 +81,7 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
           name: row.categoryName,
           active: true,
           favorite: false,
-          sortOrder: categoryByName.size
+          sortOrder: categoryOrderIndex(row.categoryName, categoryOrder, categoryByName.size)
         };
         categoryByName.set(categoryKey, category);
       }
@@ -102,17 +103,30 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
         showOnPdv: row.showOnPdv,
         favorite: false,
         canBeComplement: isLikelyComplement(row.name),
-        hasComplements: false,
+        hasComplements: isLikelyComplementHost(row.name),
         complementProductIds: [],
         sortOrder: products.length
       });
     });
 
+  const complementIds = products.filter((product) => product.canBeComplement).map((product) => product.id);
+  products.forEach((product) => {
+    if (product.hasComplements && !product.canBeComplement) {
+      product.complementProductIds = complementIds.filter((id) => id !== product.id);
+    }
+  });
+
   return {
-    categories: [...categoryByName.values()],
+    categories: [...categoryByName.values()].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "pt-BR")),
     products,
     skippedRows: Math.max(0, rows.length - products.length)
   };
+}
+
+function categoryOrderIndex(name: string, order: string[], fallback: number): number {
+  const normalized = normalizeForMatch(name);
+  const index = order.findIndex((item) => normalizeForMatch(item) === normalized);
+  return index >= 0 ? index : order.length + fallback;
 }
 
 function relationshipTarget(xml: string, id: string): string {
@@ -161,16 +175,37 @@ function parseNumber(value: unknown): number {
   if (typeof value === "number") {
     return value;
   }
-  const normalized = cleanText(value).replace(/\./g, "").replace(",", ".");
+  const raw = cleanText(value).replace(/[^\d,.-]/g, "");
+  const hasComma = raw.includes(",");
+  const hasDot = raw.includes(".");
+  let normalized = raw;
+  if (hasComma) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (hasDot) {
+    const parts = raw.split(".");
+    const last = parts.at(-1) || "";
+    normalized = parts.length > 2 || last.length === 3
+      ? raw.replace(/\./g, "")
+      : raw;
+  }
   return Number(normalized) || 0;
 }
 
 function isLikelyComplement(name: string): boolean {
-  const normalized = name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase();
+  const normalized = normalizeForMatch(name);
   return (
     normalized.startsWith("ADICIONAL ") ||
-    /\b(TOMATE|CEBOLA|QUEIJO|BACON|OVO|MEL|GRANOLA|CAPPUCINO)\b/.test(normalized)
+    /\b(TOMATE|CEBOLA|QUEIJO|BACON|OVO|MEL|GRANOLA|CAPPUCINO|CAPPUCCINO)\b/.test(normalized)
   );
+}
+
+function isLikelyComplementHost(name: string): boolean {
+  const normalized = normalizeForMatch(name);
+  return /\b(CUSCUZ|OVO MEXIDO|TAPIOCA|PAO|SANDUICHE|MISTO|OMELETE|X TUDO|X-TUDO)\b/.test(normalized);
+}
+
+function normalizeForMatch(value: string): string {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase().trim();
 }
 
 function roundMoney(value: number): number {

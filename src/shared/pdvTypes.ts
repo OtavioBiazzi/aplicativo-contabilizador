@@ -118,6 +118,7 @@ export interface PdvSettings {
   tableCount: number;
   complementsEnabled: boolean;
   subtablesEnabled: boolean;
+  tablePeopleEnabled: boolean;
   activePreset: string;
 }
 

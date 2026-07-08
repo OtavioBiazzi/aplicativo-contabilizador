@@ -6,6 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
+import type { PdvCartItem, PdvPayment, PdvSale, PdvSnapshot, PdvTableStatus } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
@@ -17,7 +18,14 @@ interface LocalServerOptions {
   cancelEntry: (id: string) => Promise<LedgerEntry>;
   removeEntry: (id: string) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
+  getPdvSnapshot: () => Promise<PdvSnapshot>;
+  openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
+  setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
+  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
   onRemoteChange: () => void;
+  onRemotePdvChange: () => void;
 }
 
 interface ClientRecord extends ServerDevice {
@@ -148,6 +156,75 @@ export class LocalServer {
         response.json({ ok: true });
       } catch (error) {
         response.status(404).json({ error: error instanceof Error ? error.message : "Lancamento nao encontrado." });
+      }
+    });
+
+    app.get("/api/pdv/snapshot", this.authorize("view"), async (_request, response) => {
+      response.json(await this.options.getPdvSnapshot());
+    });
+
+    app.post("/api/pdv/tables/:number/open", this.authorize("create"), async (request, response) => {
+      try {
+        const tableNumber = Number(request.params.number);
+        await this.options.openPdvTable(tableNumber, Number(request.body?.people || 1), String(request.body?.note || ""));
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel abrir a mesa." });
+      }
+    });
+
+    app.patch("/api/pdv/tables/:number/status", this.authorize("edit"), async (request, response) => {
+      try {
+        const tableNumber = Number(request.params.number);
+        await this.options.setPdvTableStatus(tableNumber, request.body?.status);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel alterar a mesa." });
+      }
+    });
+
+    app.put("/api/pdv/tables/:number/items", this.authorize("edit"), async (request, response) => {
+      try {
+        const tableNumber = Number(request.params.number);
+        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : []);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar itens da mesa." });
+      }
+    });
+
+    app.post("/api/pdv/tables/:number/close", this.authorize("create"), async (request, response) => {
+      try {
+        const tableNumber = Number(request.params.number);
+        const sale = await this.options.closePdvTable(tableNumber, Array.isArray(request.body?.payments) ? request.body.payments : [], Number(request.body?.discount || 0));
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ sale });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel fechar a mesa." });
+      }
+    });
+
+    app.post("/api/pdv/tables/:number/partial", this.authorize("create"), async (request, response) => {
+      try {
+        const tableNumber = Number(request.params.number);
+        const sale = await this.options.savePdvTablePartial(
+          tableNumber,
+          Array.isArray(request.body?.items) ? request.body.items : [],
+          Array.isArray(request.body?.payments) ? request.body.payments : [],
+          Number(request.body?.discount || 0)
+        );
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ sale });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar fechamento parcial." });
       }
     });
 

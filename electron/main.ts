@@ -10,6 +10,7 @@ import { LocalServer } from "./localServer.js";
 import { PdvExporter } from "./pdvExporter.js";
 import { normalizeImportedProducts, readPdvProductsFromXlsx } from "./productImporter.js";
 import { PdvStore } from "./pdvStore.js";
+import { pdvSalesToLedgerEntries } from "../src/shared/pdvLedger.js";
 import { LedgerStore } from "./storage.js";
 import type {
   AppSettings,
@@ -407,7 +408,7 @@ async function bootstrap() {
   localServer = new LocalServer({
     permissions: (await store.getSettings()).server.permissions,
     getSettings: () => store.getSettings(),
-    getEntries: () => store.getEntries(),
+    getEntries: () => getIntegratedLedgerEntries(),
     addEntry: async (draft: EntryDraft) => {
       const entry = await store.addEntry(draft);
       await exporter.export(await store.getEntries(), await store.getSettings());
@@ -431,8 +432,28 @@ async function bootstrap() {
       await store.deleteEntry(id);
       await exporter.export(await store.getEntries(), await store.getSettings());
     },
+    getPdvSnapshot: () => pdvStore.getSnapshot(),
+    openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
+    setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
+    savePdvTableItems: (tableNumber, items) => pdvStore.saveTableItems(tableNumber, items),
+    closePdvTable: async (tableNumber, payments, discount) => {
+      const sale = await pdvStore.closeTable(tableNumber, payments, discount);
+      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      sendToAll("entries:changed");
+      return sale;
+    },
+    savePdvTablePartial: async (tableNumber, items, payments, discount) => {
+      const sale = await pdvStore.saveSale({ type: "Mesa", tableNumber, status: "Parcial", items, discount: discount || 0, payments });
+      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      sendToAll("entries:changed");
+      return sale;
+    },
     onRemoteChange: () => {
       sendToAll("entries:changed");
+      sendToAll("server:changed", localServer.getState());
+    },
+    onRemotePdvChange: () => {
+      sendToAll("pdv:changed");
       sendToAll("server:changed", localServer.getState());
     }
   });
@@ -476,9 +497,17 @@ async function logExportStatus(action: string, status: ExportStatus) {
   }
 }
 
+async function getIntegratedLedgerEntries() {
+  const pdvSnapshot = await pdvStore.getSnapshot();
+  return [
+    ...(await store.getEntries()),
+    ...pdvSalesToLedgerEntries(pdvSnapshot.recentSales)
+  ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+}
+
 function registerIpc() {
   ipcMain.handle("app:getSnapshot", async () => ({
-    entries: await store.getEntries(),
+    entries: await getIntegratedLedgerEntries(),
     settings: await store.getSettings(),
     server: localServer.getState(),
     exportStatus: await exporter.getStatus()
@@ -528,6 +557,8 @@ function registerIpc() {
 
   ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[] }): Promise<PdvSale> => {
     const sale = await pdvStore.saveSale({ type: "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
+    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    sendToAll("entries:changed");
     sendToAll("pdv:changed");
     return sale;
   });
@@ -549,23 +580,31 @@ function registerIpc() {
 
   ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number): Promise<PdvSale> => {
     const sale = await pdvStore.closeTable(tableNumber, payments, discount);
+    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    sendToAll("entries:changed");
     sendToAll("pdv:changed");
     return sale;
   });
 
   ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number): Promise<PdvSale> => {
     const sale = await pdvStore.saveSale({ type: "Mesa", tableNumber, status: "Parcial", items, discount: discount || 0, payments });
+    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    sendToAll("entries:changed");
     sendToAll("pdv:changed");
     return sale;
   });
 
   ipcMain.handle("pdv:cancelSale", async (_event, id: string) => {
     await pdvStore.cancelSale(id);
+    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    sendToAll("entries:changed");
     sendToAll("pdv:changed");
   });
 
   ipcMain.handle("pdv:updateSalePayments", async (_event, id: string, payments: PdvPayment[]): Promise<PdvSale> => {
     const sale = await pdvStore.updateSalePayments(id, payments);
+    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    sendToAll("entries:changed");
     sendToAll("pdv:changed");
     return sale;
   });
@@ -698,7 +737,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("export:now", async () => {
-    const status = await exporter.export(await store.getEntries(), await store.getSettings());
+    const status = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     await logExportStatus("exportacao manual", status);
     if (status.filePath) {
       shell.showItemInFolder(status.filePath);
@@ -707,7 +746,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("export:today", async () => {
-    const status = await exporter.exportTodayRecovery(await store.getEntries(), await store.getSettings());
+    const status = await exporter.exportTodayRecovery(await getIntegratedLedgerEntries(), await store.getSettings());
     await logExportStatus("arquivo de resgate de hoje", status);
     if (status.filePath) {
       shell.showItemInFolder(status.filePath);
@@ -717,7 +756,7 @@ function registerIpc() {
 
   ipcMain.handle("reports:exportFiltered", async (_event, ids: string[], label: string) => {
     const idSet = new Set(ids);
-    const entries = (await store.getEntries()).filter((entry) => idSet.has(entry.id));
+    const entries = (await getIntegratedLedgerEntries()).filter((entry) => idSet.has(entry.id));
     const status = await exporter.exportReport(entries, await store.getSettings(), label);
     await logExportStatus("relatorio filtrado", status);
     if (status.filePath) {

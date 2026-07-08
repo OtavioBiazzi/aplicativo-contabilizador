@@ -24,6 +24,7 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   tableCount: 47,
   complementsEnabled: true,
   subtablesEnabled: true,
+  tablePeopleEnabled: false,
   activePreset: "Cose Dell Abadia"
 };
 const PDV_BACKUP_DIRECTORY = "pdv-backups";
@@ -284,7 +285,30 @@ export class PdvStore {
 
   async saveTableItems(tableNumber: number, items: PdvCartItem[]): Promise<void> {
     const db = this.requireDb();
-    await this.openTable(tableNumber);
+    if (!items.length) {
+      db.run("BEGIN IMMEDIATE");
+      try {
+        db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
+        db.run("DELETE FROM table_sessions WHERE table_number = ? AND status != 'Reservada'", [tableNumber]);
+        db.run("COMMIT");
+      } catch (error) {
+        db.run("ROLLBACK");
+        throw error;
+      }
+      await this.persist();
+      return;
+    }
+    db.run(
+      `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
+       VALUES (?, ?, 'Ocupada', ?, 1, '')
+       ON CONFLICT(table_number) DO UPDATE SET
+         status=CASE
+           WHEN table_sessions.status IN ('Livre', 'Reservada') THEN 'Ocupada'
+           ELSE table_sessions.status
+         END,
+         opened_at=COALESCE(table_sessions.opened_at, excluded.opened_at)`,
+      [`mesa-${tableNumber}`, tableNumber, new Date().toISOString()]
+    );
     db.run("BEGIN IMMEDIATE");
     try {
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
@@ -366,10 +390,17 @@ export class PdvStore {
   }
 
   private getCategories(): PdvCategory[] {
+    const preferred = ["ARTESANATO", "FORNECEDORES", "PIMENTAS", "BEBIDAS", "DOCES", "EMPORIO", "CAFE", "SUCOS", "FRUTAS"];
     return selectAll<PdvCategory>(
       this.requireDb(),
       "SELECT id, name, active = 1 AS active, favorite = 1 AS favorite, sort_order AS sortOrder FROM categories ORDER BY favorite DESC, sort_order, name"
-    );
+    ).sort((left, right) => {
+      const leftIndex = preferred.indexOf(normalizeText(left.name));
+      const rightIndex = preferred.indexOf(normalizeText(right.name));
+      const leftOrder = leftIndex >= 0 ? leftIndex : preferred.length + left.sortOrder;
+      const rightOrder = rightIndex >= 0 ? rightIndex : preferred.length + right.sortOrder;
+      return Number(right.favorite) - Number(left.favorite) || leftOrder - rightOrder || left.name.localeCompare(right.name, "pt-BR");
+    });
   }
 
   private getProducts(): PdvProduct[] {
@@ -408,13 +439,18 @@ export class PdvStore {
       const number = index + 1;
       const session = byNumber.get(number);
       const items = this.getTableItems(number);
+      const visualStatus = items.length
+        ? (session?.status === "Fechamento" ? "Fechamento" : "Ocupada")
+        : session?.status === "Reservada"
+          ? "Reservada"
+          : "Livre";
       return {
         id: `mesa-${number}`,
         number,
-        status: session?.status || "Livre",
-        openedAt: session?.openedAt || null,
+        status: visualStatus,
+        openedAt: items.length ? session?.openedAt || null : null,
         people: session?.people || 1,
-        note: session?.note || "",
+        note: items.length || session?.status === "Reservada" ? session?.note || "" : "",
         total: roundMoney(items.reduce((total, item) => total + item.total, 0)),
         items
       };
@@ -575,6 +611,7 @@ export class PdvStore {
       tableCount: parseIntegerSetting(map.get("table_count"), DEFAULT_PDV_SETTINGS.tableCount),
       complementsEnabled: parseBooleanSetting(map.get("complements_enabled"), DEFAULT_PDV_SETTINGS.complementsEnabled),
       subtablesEnabled: parseBooleanSetting(map.get("subtables_enabled"), DEFAULT_PDV_SETTINGS.subtablesEnabled),
+      tablePeopleEnabled: parseBooleanSetting(map.get("table_people_enabled"), DEFAULT_PDV_SETTINGS.tablePeopleEnabled),
       activePreset: map.get("active_preset") || DEFAULT_PDV_SETTINGS.activePreset
     };
   }
@@ -732,6 +769,10 @@ function normalizeUnitMode(value?: string): "unidade" | "kg" | "grama" {
     return value;
   }
   return "unidade";
+}
+
+function normalizeText(value: string): string {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase().trim();
 }
 
 function parseComplements(raw?: string) {
