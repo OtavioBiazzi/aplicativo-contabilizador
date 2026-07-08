@@ -514,10 +514,10 @@ export function PdvApp({
       setActiveTable(null);
       setTableCart([]);
       setCheckoutTarget(null);
-      await load();
     } finally {
       setBusy(false);
     }
+    await load();
   };
 
   const confirmPartialTable = async (target: Extract<CheckoutTarget, { kind: "table-partial-items" | "table-partial-manual" }>, payments: PdvPayment[]) => {
@@ -532,10 +532,10 @@ export function PdvApp({
       }
       setCheckoutTarget(null);
       setToast(target.kind === "table-partial-items" ? "Parcial por itens registrada." : "Parcial manual registrada.");
-      await load();
     } finally {
       setBusy(false);
     }
+    await load();
   };
 
   const importCose = async () => {
@@ -1048,7 +1048,7 @@ function PdvSaleScreen(props: {
           <small>Subtotal {money(subtotal)}</small>
         </div>
         {!props.activeTableNumber && (
-          <div className="pdv-action-row">
+<div className="pdv-action-row">
             <button
               className="pdv-danger-button"
               onClick={() => {
@@ -1221,9 +1221,18 @@ function PaymentModal({
     }
   };
 
+  const handleReceiveKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Enter" && !paymentEntryMethod) {
+      if (!submitting && !busy && !(payments.length > 0 && remaining > 0.009)) {
+        event.preventDefault();
+        void finish();
+      }
+    }
+  };
+
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-receive-modal">
+      <section className="pdv-payment-modal pdv-receive-modal" onKeyDown={handleReceiveKeyDown} tabIndex={-1}>
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Fechar conta</span>
@@ -1263,6 +1272,7 @@ function PaymentModal({
         </div>
         {paymentEntryMethod && (
           <PaymentAmountModal
+            key={`${paymentEntryMethod}-${remaining}`}
             method={paymentEntryMethod}
             remaining={remaining}
             onCancel={() => setPaymentEntryMethod(null)}
@@ -1285,26 +1295,84 @@ function PaymentAmountModal({
   onCancel: () => void;
   onConfirm: (payment: PdvPayment) => void;
 }) {
-  const [amountText, setAmountText] = useState(String(remaining).replace(".", ","));
-  const [receivedText, setReceivedText] = useState(String(remaining).replace(".", ","));
+  const initialRemainingText = String(remaining).replace(".", ",");
+  const [amountText, setAmountText] = useState(initialRemainingText);
+  const [receivedText, setReceivedText] = useState(initialRemainingText);
+  const [amountTouched, setAmountTouched] = useState(false);
+  const [receivedTouched, setReceivedTouched] = useState(false);
+  const [activeField, setActiveField] = useState<"amount" | "received">(method === "Dinheiro" ? "received" : "amount");
+
+  const normalizeNumericText = (value: string) => value.replace(/[^0-9,.]/g, "").replace(".", ",");
   const typedAmount = Math.max(0, parseBrazilianNumber(amountText));
-  const amount = method === "Dinheiro" ? remaining : Math.min(remaining, typedAmount);
+  const amount = Math.min(remaining, typedAmount);
   const received = method === "Dinheiro" ? Math.max(0, parseBrazilianNumber(receivedText)) : amount;
-  const change = method === "Dinheiro" ? Math.max(0, roundMoney(received - remaining)) : 0;
-  const invalidNonCash = method !== "Dinheiro" && typedAmount - remaining > 0.009;
-  const invalidCash = method === "Dinheiro" && received + 0.009 < remaining;
+  const change = method === "Dinheiro" ? Math.max(0, roundMoney(received - amount)) : 0;
+
+  const invalidAmount = amount <= 0 || typedAmount - remaining > 0.009;
+  const invalidCash = method === "Dinheiro" && received + 0.009 < amount;
+
+  const amountTextFromReceived = (receivedValue: number) => {
+    const nextAmount = Math.min(remaining, Math.max(0, receivedValue));
+    return String(roundMoney(nextAmount)).replace(".", ",");
+  };
+
+  const updateAmount = (value: string) => {
+    const next = normalizeNumericText(value);
+    setAmountTouched(true);
+    setAmountText(next);
+    if (method === "Dinheiro" && !receivedTouched) {
+      setReceivedText(next);
+    }
+  };
+
+  const updateReceived = (value: string) => {
+    const next = normalizeNumericText(value);
+    setReceivedTouched(true);
+    setReceivedText(next);
+
+    // Dinheiro deve permitir pagamento parcial. Se o usuario ainda nao mexeu manualmente
+    // no campo "Valor que entra no pagamento", ele acompanha o recebido ate o limite do restante.
+    // Assim: recebeu 15 em conta de 20 => entra 15. Recebeu 50 em conta de 20 => entra 20 e troco 30.
+    if (method === "Dinheiro" && !amountTouched) {
+      setAmountText(amountTextFromReceived(parseBrazilianNumber(next)));
+    }
+  };
+
+  const setActiveText = (value: string) => {
+    if (method === "Dinheiro" && activeField === "received") {
+      updateReceived(value);
+      return;
+    }
+    updateAmount(value);
+  };
+
+  const getActiveText = () => method === "Dinheiro" && activeField === "received" ? receivedText : amountText;
+
+  const append = (value: string) => {
+    const current = getActiveText();
+    if (value === "," && (current.includes(",") || current.includes("."))) {
+      return;
+    }
+    const next = value === "," && !current
+      ? "0,"
+      : current === "0" && value !== ","
+        ? value
+        : `${current}${value}`;
+    setActiveText(next);
+  };
+
+  const erase = () => {
+    const current = getActiveText();
+    setActiveText(current.slice(0, -1) || "0");
+  };
 
   const confirm = () => {
-    if (invalidNonCash) {
+    if (invalidAmount) {
       window.alert(`O valor nao pode passar do restante (${money(remaining)}).`);
       return;
     }
     if (invalidCash) {
-      window.alert("Valor recebido em dinheiro precisa cobrir o restante.");
-      return;
-    }
-    if (amount <= 0) {
-      window.alert("Informe um valor maior que zero.");
+      window.alert("Valor recebido em dinheiro precisa cobrir o valor do pagamento.");
       return;
     }
     onConfirm({
@@ -1316,9 +1384,28 @@ function PaymentAmountModal({
     });
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (!invalidAmount && !invalidCash) {
+        confirm();
+      }
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+    if (event.key === ".") {
+      event.preventDefault();
+      append(",");
+    }
+  };
+
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
-      <section className="pdv-payment-modal pdv-payment-amount-modal">
+      <section className="pdv-payment-modal pdv-payment-amount-modal" onKeyDown={handleKeyDown} tabIndex={-1}>
         <div className="pdv-window-title">
           <strong>Informar pagamento</strong>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
@@ -1329,35 +1416,67 @@ function PaymentAmountModal({
           <div className="pdv-quantity-fields">
             <label>
               <span>Valor restante</span>
-              <input value={String(remaining).replace(".", ",")} readOnly />
+              <input value={initialRemainingText} readOnly />
             </label>
+
             {method === "Dinheiro" ? (
-              <label>
-                <span>Valor recebido</span>
-                <input autoFocus value={receivedText} onChange={(event) => setReceivedText(event.target.value)} />
-              </label>
+              <>
+                <label>
+                  <span>Valor que entra no pagamento</span>
+                  <input
+                    inputMode="decimal"
+                    value={amountText}
+                    onFocus={() => setActiveField("amount")}
+                    onChange={(event) => updateAmount(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Valor recebido do cliente</span>
+                  <input
+                    autoFocus
+                    inputMode="decimal"
+                    value={receivedText}
+                    onFocus={() => setActiveField("received")}
+                    onChange={(event) => updateReceived(event.target.value)}
+                  />
+                </label>
+              </>
             ) : (
               <label>
                 <span>Valor do pagamento</span>
-                <input autoFocus value={amountText} onChange={(event) => setAmountText(event.target.value)} />
+                <input
+                  autoFocus
+                  inputMode="decimal"
+                  value={amountText}
+                  onFocus={() => setActiveField("amount")}
+                  onChange={(event) => updateAmount(event.target.value)}
+                />
               </label>
             )}
+
             <div className="pdv-calculated-price">
               <span>{method === "Dinheiro" ? "Troco" : "Valor registrado"}</span>
               <strong>{method === "Dinheiro" ? money(change) : money(amount)}</strong>
-              <small>{method === "Dinheiro" ? `${money(remaining)} entra como pagamento` : "Nao pode ultrapassar o restante"}</small>
+              <small>{method === "Dinheiro" ? `${money(amount)} entra como pagamento` : "Nao pode ultrapassar o restante"}</small>
             </div>
           </div>
         </div>
+
+        <div className="pdv-keypad">
+          {["7", "8", "9", "4", "5", "6", "1", "2", "3", "0", ",", "del"].map((key) => (
+            <button key={key} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => key === "del" ? erase() : append(key)}>{key}</button>
+          ))}
+          <button className="enter" type="button" onMouseDown={(event) => event.preventDefault()} onClick={confirm}>Enter</button>
+        </div>
+
         <div className="pdv-action-row">
-          <button className="pdv-primary-button" disabled={invalidNonCash || invalidCash} onClick={confirm}><Check size={16} /> OK</button>
+          <button className="pdv-primary-button" disabled={invalidAmount || invalidCash} onClick={confirm}><Check size={16} /> OK</button>
           <button className="pdv-danger-button" onClick={onCancel}><X size={16} /> Cancelar</button>
         </div>
       </section>
     </div>
   );
 }
-
 function PartialValueModal({
   table,
   maxValue,
@@ -1578,25 +1697,25 @@ function ItemEditModal({
           {mode === "quantity" && (
             <label>
               <span>Quantidade</span>
-              <input autoFocus value={quantityText} onChange={(event) => setQuantityText(event.target.value)} />
+              <input autoFocus inputMode="decimal" value={quantityText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setQuantityText(event.target.value)} />
             </label>
           )}
           {mode === "discount" && (
             <>
               <label>
                 <span>Desconto em R$</span>
-                <input autoFocus value={discountValueText} onChange={(event) => setDiscountValueText(event.target.value)} />
+                <input autoFocus inputMode="decimal" value={discountValueText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDiscountValueText(event.target.value)} />
               </label>
               <label>
                 <span>Desconto em %</span>
-                <input value={discountPercentText} onChange={(event) => setDiscountPercentText(event.target.value)} placeholder="0" />
+                <input inputMode="decimal" value={discountPercentText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDiscountPercentText(event.target.value)} placeholder="0" />
               </label>
             </>
           )}
           {mode === "price" && (
             <label>
               <span>Preco apenas neste lancamento</span>
-              <input autoFocus value={priceText} onChange={(event) => setPriceText(event.target.value)} />
+              <input autoFocus inputMode="decimal" value={priceText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setPriceText(event.target.value)} />
             </label>
           )}
           {mode === "note" && (
