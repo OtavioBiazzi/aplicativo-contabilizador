@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -350,12 +350,28 @@ export class PdvStore {
     if (!table || !table.items.length) {
       throw new Error("Mesa sem itens para fechar.");
     }
-    const sale = await this.saveSale({ type: "Mesa", tableNumber, items: table.items, discount, payments });
+    let lastSale: PdvSale | null = null;
+    if (payments.length > 1) {
+      const subtotal = roundMoney(table.items.reduce((total, item) => total + item.total, 0));
+      for (const payment of payments) {
+        const paymentAmount = roundMoney(payment.amount);
+        const paymentDiscount = roundMoney(Math.max(0, subtotal - paymentAmount));
+        lastSale = await this.saveSale({
+          type: "Mesa",
+          tableNumber,
+          items: table.items,
+          discount: paymentDiscount,
+          payments: [{ ...payment, id: payment.id || randomUUID(), amount: paymentAmount }]
+        });
+      }
+    } else {
+      lastSale = await this.saveSale({ type: "Mesa", tableNumber, items: table.items, discount, payments });
+    }
     const db = this.requireDb();
     db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
     db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
     await this.persist();
-    return sale;
+    return lastSale as PdvSale;
   }
 
   async cancelSale(id: string): Promise<void> {
@@ -883,3 +899,4 @@ function snakeCase(value: string): string {
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
+

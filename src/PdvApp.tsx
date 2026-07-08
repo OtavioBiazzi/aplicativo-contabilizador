@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import {
   Banknote,
@@ -728,7 +728,7 @@ export function PdvApp({
           initialPayments={checkoutTarget.kind === "table" ? checkoutTarget.initialPayments || [] : []}
           onCancel={() => {
             if (checkoutTarget.kind === "table-partial-items") {
-              // Restaurar seleção anterior ao voltar do pagamento
+              // Restaurar seleÃ§Ã£o anterior ao voltar do pagamento
               setSelectedTableItemIds(checkoutTarget.items.map((i) => i.id));
               setCheckoutTarget(null);
               setPartialItemsModalOpen(true);
@@ -1743,6 +1743,7 @@ function PartialItemsModal({
   onConfirm: (items: PdvCartItem[]) => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultSelectedIds);
+  const lockedIds = useMemo(() => new Set(defaultSelectedIds), [defaultSelectedIds]);
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, String(item.quantity).replace(".", ",")])));
   
   const selectedItems = cart.filter((item) => selectedIds.includes(item.id)).map((item) => {
@@ -1761,6 +1762,9 @@ function PartialItemsModal({
   const remainingTotal = roundMoney(cart.reduce((total, item) => total + item.total, 0) - selectedTotal);
   
   const toggle = (id: string) => {
+    if (lockedIds.has(id)) {
+      return;
+    }
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
 
@@ -1783,18 +1787,29 @@ function PartialItemsModal({
         <div className="pdv-transfer-list">
           {cart.map((item, index) => {
             const isSelected = selectedIds.includes(item.id);
+            const isLocked = lockedIds.has(item.id);
             const qVal = quantities[item.id] ?? String(item.quantity).replace(".", ",");
             const parsedQ = parseBrazilianNumber(qVal);
             const currentItemTotal = isSelected ? roundMoney(parsedQ * item.unitPrice) : item.total;
             return (
-              <button className={isSelected ? "selected" : ""} key={item.id} onClick={() => toggle(item.id)}>
-                <input type="checkbox" checked={isSelected} onChange={() => toggle(item.id)} onClick={(event) => event.stopPropagation()} />
+              <button className={`${isSelected ? "selected" : ""} ${isLocked ? "locked" : ""}`.trim()} key={item.id} onClick={() => toggle(item.id)}>
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  disabled={isLocked}
+                  onChange={() => toggle(item.id)}
+                  onClick={(event) => event.stopPropagation()}
+                />
                 <span>{index + 1}. {item.productName}</span>
                 <small>{item.measureLabel || item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}</small>
                 {isSelected && (
                   <label className="pdv-transfer-qty" onClick={(event) => event.stopPropagation()}>
                     Qtde
-                    <input value={qVal} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} />
+                    <input
+                      value={qVal}
+                      disabled={isLocked}
+                      onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))}
+                    />
                   </label>
                 )}
                 <strong>{money(currentItemTotal)}</strong>
@@ -2993,3 +3008,5 @@ function parseBrazilianNumber(value: string): number {
   }
   return Number(raw) || 0;
 }
+
+

@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --accent: #2f8cff;
   --accent-strong: #8ac4ff;
   --bg: #0b121c;
@@ -4601,6 +4601,18 @@ body.floating-borderless .floating-bar {
   background: #e0f0fa;
 }
 
+.pdv-transfer-list button.locked {
+  background: #eef2f5;
+  color: #6d7b86;
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.pdv-transfer-list button.locked span,
+.pdv-transfer-list button.locked small {
+  text-decoration: line-through;
+}
+
 .pdv-transfer-list input[type="checkbox"] {
   grid-row: 1 / span 2;
   width: 18px;
@@ -5492,7 +5504,7 @@ body.floating-borderless .floating-bar {
   }
 }
 
-/* Modais de Transferência e Fechamento Parcial - Forçar Cores e Contrastes */
+/* Modais de TransferÃªncia e Fechamento Parcial - ForÃ§ar Cores e Contrastes */
 .pdv-transfer-modal,
 .pdv-transfer-list-modal,
 .pdv-partial-items-modal {
@@ -5533,7 +5545,7 @@ body.floating-borderless .floating-bar {
   color: #426b8a !important;
 }
 
-/* Forçar cores legíveis em inputs e selects */
+/* ForÃ§ar cores legÃ­veis em inputs e selects */
 .pdv-transfer-modal input,
 .pdv-transfer-list-modal input,
 .pdv-partial-items-modal input,
@@ -5546,7 +5558,7 @@ body.floating-borderless .floating-bar {
   opacity: 1 !important;
 }
 
-/* Alinhamento de Quantidade no modal de lote de transferência */
+/* Alinhamento de Quantidade no modal de lote de transferÃªncia */
 .pdv-transfer-list-modal .pdv-transfer-list button,
 .pdv-partial-items-modal .pdv-transfer-list button {
   grid-template-columns: 22px minmax(0, 1fr) auto auto !important;
@@ -5605,4 +5617,5 @@ body.floating-borderless .floating-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
+
 
