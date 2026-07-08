@@ -5492,22 +5492,58 @@ body.floating-borderless .floating-bar {
   }
 }
 
-/* Modais de Transferência e Fechamento Parcial - Cores e Contrastes */
-.pdv-transfer-modal .pdv-section-head h1,
-.pdv-transfer-list-modal .pdv-section-head h1,
-.pdv-partial-items-modal .pdv-section-head h1 {
+/* Modais de Transferência e Fechamento Parcial - Forçar Cores e Contrastes */
+.pdv-transfer-modal,
+.pdv-transfer-list-modal,
+.pdv-partial-items-modal {
+  background: #edf6fb !important;
   color: #0b3151 !important;
+  border: 1px solid #7aa8c9 !important;
 }
 
-.pdv-transfer-modal .pdv-section-head p,
-.pdv-transfer-list-modal .pdv-section-head p,
-.pdv-partial-items-modal .pdv-section-head p,
-.pdv-transfer-modal .pdv-eyebrow,
-.pdv-transfer-list-modal .pdv-eyebrow,
-.pdv-partial-items-modal .pdv-eyebrow,
+.pdv-transfer-modal h1,
+.pdv-transfer-list-modal h1,
+.pdv-partial-items-modal h1,
+.pdv-transfer-modal h2,
+.pdv-transfer-list-modal h2,
+.pdv-partial-items-modal h2,
+.pdv-transfer-modal p,
+.pdv-transfer-list-modal p,
+.pdv-partial-items-modal p,
+.pdv-transfer-modal label,
+.pdv-transfer-list-modal label,
+.pdv-partial-items-modal label,
+.pdv-transfer-modal span:not(.pdv-primary-button *):not(.pdv-danger-button *):not(.pdv-ghost-button *),
+.pdv-transfer-list-modal span:not(.pdv-primary-button *):not(.pdv-danger-button *):not(.pdv-ghost-button *),
+.pdv-partial-items-modal span:not(.pdv-primary-button *):not(.pdv-danger-button *):not(.pdv-ghost-button *),
+.pdv-transfer-modal small,
+.pdv-transfer-list-modal small,
+.pdv-partial-items-modal small,
+.pdv-transfer-modal strong,
+.pdv-transfer-list-modal strong,
+.pdv-partial-items-modal strong,
 .pdv-transfer-list-modal .pdv-empty,
 .pdv-partial-items-modal .pdv-empty {
+  color: #082942 !important;
+}
+
+.pdv-transfer-modal .pdv-eyebrow,
+.pdv-transfer-list-modal .pdv-eyebrow,
+.pdv-partial-items-modal .pdv-eyebrow {
   color: #426b8a !important;
+}
+
+/* Forçar cores legíveis em inputs e selects */
+.pdv-transfer-modal input,
+.pdv-transfer-list-modal input,
+.pdv-partial-items-modal input,
+.pdv-transfer-modal select,
+.pdv-transfer-list-modal select,
+.pdv-partial-items-modal select {
+  background: #ffffff !important;
+  color: #082942 !important;
+  border: 1px solid #b8d4e5 !important;
+  opacity: 1 !important;
 }
 
 /* Alinhamento de Quantidade no modal de lote de transferência */
@@ -5523,7 +5559,7 @@ body.floating-borderless .floating-bar {
   align-items: center;
   gap: 6px;
   font-size: 0.85rem;
-  color: #43637a;
+  color: #43637a !important;
   border-right: 1px solid #c8e0f0;
   padding-right: 12px;
   margin-right: 4px;
@@ -5546,6 +5582,6 @@ body.floating-borderless .floating-bar {
   grid-row: 1 / span 2 !important;
   text-align: right;
   min-width: 80px;
-  color: #082942;
+  color: #082942 !important;
 }
 

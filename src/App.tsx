@@ -2801,7 +2801,7 @@ function HistoryPanel({
                     <div className="row-actions">
                       <button title="Editar" onClick={() => setEditing(entry)}><Edit3 size={15} /></button>
                       <button title="Duplicar" onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
-                      {entry.status === "deleted" ? (
+                      {entry.status === "deleted" || entry.status === "cancelled" ? (
                         <button title="Restaurar" onClick={() => run(() => window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
                       ) : (
                         <>
