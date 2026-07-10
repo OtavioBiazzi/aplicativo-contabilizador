@@ -23,6 +23,7 @@ import { calculateSplit } from "./shared/calculations";
 
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; roundingStep?: number; roundingDirection?: RoundDirection };
+type PendingRemoteTable = { tableNumber: number; people: number; note: string; items: PdvCartItem[]; updatedAt: string };
 type CheckoutTarget =
   | { kind: "direct"; total: number }
   | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[] }
@@ -72,6 +73,27 @@ function reportPeriodRange(period: "today" | "yesterday" | "week" | "month"): { 
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function pendingRemoteTableKey(baseUrl: string): string {
+  return `contabilizador-pdv-pending-tables:${baseUrl}`;
+}
+
+function readPendingRemoteTables(baseUrl: string): PendingRemoteTable[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(pendingRemoteTableKey(baseUrl)) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePendingRemoteTables(baseUrl: string, tables: PendingRemoteTable[]) {
+  if (tables.length) {
+    localStorage.setItem(pendingRemoteTableKey(baseUrl), JSON.stringify(tables));
+  } else {
+    localStorage.removeItem(pendingRemoteTableKey(baseUrl));
+  }
 }
 
 function createCartItem(product: PdvProduct, quantity: number, complements: PdvCartItem["complements"] = [], customUnitPrice?: number, subtableName = "", measureLabel = ""): PdvCartItem {
@@ -171,12 +193,67 @@ export function PdvApp({
   const setPdvTableStatus = (tableNumber: number, status: PdvTableStatus) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/status`, { method: "PATCH", body: JSON.stringify({ status }) }).then(() => undefined)
     : window.caixa.setPdvTableStatus(tableNumber, status);
-  const savePdvTableItems = (tableNumber: number, items: PdvCartItem[]) => remoteTablesActive && remoteSession
-    ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items }) }).then(() => undefined)
-    : window.caixa.savePdvTableItems(tableNumber, items);
+  const savePdvTableItems = async (tableNumber: number, items: PdvCartItem[]) => {
+    if (!remoteTablesActive || !remoteSession) {
+      await window.caixa.savePdvTableItems(tableNumber, items);
+      return;
+    }
+    try {
+      await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items }) });
+      clearQueuedRemoteTable(tableNumber);
+    } catch (error) {
+      const current = snapshot?.tables.find((table) => table.number === tableNumber);
+      queueRemoteTable(tableNumber, current?.people || 1, current?.note || "", items);
+      throw error;
+    }
+  };
   const transferPdvTableItems = (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ ok: boolean; items: PdvCartItem[] }>(remoteSession, `/api/pdv/tables/${sourceTableNumber}/transfer`, { method: "POST", body: JSON.stringify({ targetTableNumber, selections }) }).then((result) => result.items)
     : window.caixa.transferPdvTableItems(sourceTableNumber, targetTableNumber, selections);
+  const queueRemoteTable = (tableNumber: number, people: number, note: string, items: PdvCartItem[]) => {
+    if (!remoteSession) {
+      return;
+    }
+    const queued = readPendingRemoteTables(remoteSession.baseUrl).filter((item) => item.tableNumber !== tableNumber);
+    queued.push({ tableNumber, people: Math.max(1, Math.floor(people || 1)), note: note || "", items, updatedAt: new Date().toISOString() });
+    writePendingRemoteTables(remoteSession.baseUrl, queued);
+  };
+  const clearQueuedRemoteTable = (tableNumber: number) => {
+    if (!remoteSession) {
+      return;
+    }
+    writePendingRemoteTables(remoteSession.baseUrl, readPendingRemoteTables(remoteSession.baseUrl).filter((item) => item.tableNumber !== tableNumber));
+  };
+
+  useEffect(() => {
+    if (!remoteTablesActive || !remoteSession) {
+      return;
+    }
+    const pending = readPendingRemoteTables(remoteSession.baseUrl);
+    if (!pending.length) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const remaining: PendingRemoteTable[] = [];
+      for (const table of pending.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))) {
+        try {
+          await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/open`, { method: "POST", body: JSON.stringify({ people: table.people, note: table.note }) });
+          await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items: table.items }) });
+        } catch {
+          remaining.push(table);
+        }
+      }
+      if (!cancelled) {
+        writePendingRemoteTables(remoteSession.baseUrl, remaining);
+        if (!remaining.length) {
+          setToast("Mesas pendentes foram sincronizadas.");
+          await load();
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [remoteSession?.baseUrl, remoteTablesActive, reloadToken]);
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount?: number) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
     : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, crypto.randomUUID());
@@ -232,6 +309,9 @@ export function PdvApp({
           setTableSaveState("saved");
           await load();
         } catch (error) {
+          if (remoteTablesActive) {
+            queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart);
+          }
           setTableSaveState("error");
           setToast(error instanceof Error ? error.message : "Nao foi possivel salvar a mesa no servidor.");
         }
@@ -404,8 +484,15 @@ export function PdvApp({
     if (!activeTable) {
       return;
     }
-    await openPdvTable(activeTable.number, tablePeople, tableNote);
-    await savePdvTableItems(activeTable.number, tableCart);
+    try {
+      await openPdvTable(activeTable.number, tablePeople, tableNote);
+      await savePdvTableItems(activeTable.number, tableCart);
+    } catch (error) {
+      if (remoteTablesActive) {
+        queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart);
+      }
+      throw error;
+    }
     setToast(`Mesa ${String(activeTable.number).padStart(3, "0")} salva.`);
     await load();
   };
@@ -414,8 +501,15 @@ export function PdvApp({
     if (!activeTable) {
       return false;
     }
-    await openPdvTable(activeTable.number, tablePeople, tableNote);
-    await savePdvTableItems(activeTable.number, tableCart);
+    try {
+      await openPdvTable(activeTable.number, tablePeople, tableNote);
+      await savePdvTableItems(activeTable.number, tableCart);
+    } catch (error) {
+      if (remoteTablesActive) {
+        queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart);
+      }
+      throw error;
+    }
     setTableSaveState("saved");
     await load();
     return true;
