@@ -92,6 +92,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     fieldSize: "medium",
     density: "normal",
     layout: "complete",
+    operationMode: "pdv",
     activeProfile: "Perfil PC",
     profiles: {
       "Perfil PC": { theme: "datacaixa", fieldSize: "medium", density: "normal", layout: "complete" },

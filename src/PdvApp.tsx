@@ -17,7 +17,7 @@ import {
   Utensils,
   X
 } from "lucide-react";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvSale, PdvSnapshot, PdvTableStatus } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus } from "./shared/pdvTypes";
 import type { RoundDirection } from "./shared/types";
 import { calculateSplit } from "./shared/calculations";
 
@@ -160,8 +160,10 @@ export function PdvApp({
   const [tableSaveState, setTableSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const tableAutosaveTimer = useRef<number | null>(null);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
+  const remoteProductsActive = Boolean(remoteSession && (tab === "products" || tab === "advanced"));
+  const remotePdvActive = remoteTablesActive || remoteProductsActive;
 
-  const getPdvSnapshot = () => remoteTablesActive && remoteSession
+  const getPdvSnapshot = () => remotePdvActive && remoteSession
     ? remotePdvRequest<PdvSnapshot>(remoteSession, "/api/pdv/snapshot")
     : window.caixa.getPdvSnapshot();
   const openPdvTable = (tableNumber: number, people?: number, note?: string) => remoteTablesActive && remoteSession
@@ -179,6 +181,21 @@ export function PdvApp({
   const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount?: number) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", body: JSON.stringify({ items, payments, discount: partialDiscount }) }).then((result) => result.sale)
     : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount);
+  const updatePdvProducts = (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => remoteProductsActive && remoteSession
+    ? remotePdvRequest<{ ok: boolean }>(remoteSession, "/api/pdv/products", { method: "PATCH", body: JSON.stringify({ ids, patch }) }).then(() => undefined)
+    : window.caixa.updatePdvProducts(ids, patch);
+  const savePdvCategory = (draft: PdvCategoryDraft) => remoteProductsActive && remoteSession
+    ? remotePdvRequest<{ category: PdvCategory }>(remoteSession, "/api/pdv/categories", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.category)
+    : window.caixa.savePdvCategory(draft);
+  const savePdvProduct = (draft: PdvProductDraft) => remoteProductsActive && remoteSession
+    ? remotePdvRequest<{ product: PdvProduct }>(remoteSession, "/api/pdv/products", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.product)
+    : window.caixa.savePdvProduct(draft);
+  const savePdvSettings = (patch: Partial<PdvSettings>) => remoteProductsActive && remoteSession
+    ? remotePdvRequest<{ settings: PdvSettings }>(remoteSession, "/api/pdv/settings", { method: "PATCH", body: JSON.stringify(patch) }).then((result) => result.settings)
+    : window.caixa.savePdvSettings(patch);
+  const importPdvPreset = () => remoteProductsActive && remoteSession
+    ? remotePdvRequest<PdvProductImportResult>(remoteSession, "/api/pdv/preset/cose", { method: "POST" })
+    : window.caixa.importCoseProducts();
 
   const load = async () => {
     setSnapshot(await getPdvSnapshot());
@@ -187,7 +204,7 @@ export function PdvApp({
   useEffect(() => {
     load();
     return window.caixa.onPdvChanged(load);
-  }, [remoteSession?.baseUrl, remoteTablesActive, reloadToken]);
+  }, [remoteSession?.baseUrl, remotePdvActive, reloadToken]);
 
   useEffect(() => {
     setTab(initialTab);
@@ -528,7 +545,6 @@ export function PdvApp({
         const remainingItems = target.items.reduce((acc, item) => subtractCartItemQuantity(acc, item.id, item.quantity), tableCart);
         setTableCart(remainingItems);
         setSelectedTableItemIds([]);
-        await savePdvTableItems(target.table.number, remainingItems);
       }
       setCheckoutTarget(null);
       setToast(target.kind === "table-partial-items" ? "Parcial por itens registrada." : "Parcial manual registrada.");
@@ -710,10 +726,10 @@ export function PdvApp({
           />
         )}
 
-        {tab === "products" && <ProductsScreen snapshot={snapshot} onImportCose={importCose} onImportFile={importFile} busy={busy} onProductsUpdated={load} />}
+        {tab === "products" && <ProductsScreen snapshot={snapshot} onImportCose={importPdvPreset} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} />}
         {tab === "history" && <HistoryScreen snapshot={snapshot} onChanged={load} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
-        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} onImportCose={importCose} onImportFile={importFile} busy={busy} onSettingsUpdated={load} />}
+        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} onImportCose={importPdvPreset} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
       </main>
 
       {toast && (
@@ -1183,6 +1199,8 @@ function PaymentModal({
   const [payments, setPayments] = useState<PdvPayment[]>(initialPayments);
   const [paymentEntryMethod, setPaymentEntryMethod] = useState<PdvPaymentMethod | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const paid = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
   const remaining = Math.max(0, roundMoney(total - paid));
 
@@ -1206,12 +1224,14 @@ function PaymentModal({
       return;
     }
     if (payments.length > 0 && remaining > 0.009) {
-      window.alert("Ainda existe valor restante para fechar a conta.");
+      setNotice("Ainda existe valor restante para fechar a conta.");
       return;
     }
-    if (!window.confirm(confirmLabel === "Finalizar conta" ? "Confirmar fechamento da conta?" : "Confirmar alteracao dos pagamentos?")) {
+    if (!confirming) {
+      setConfirming(true);
       return;
     }
+    setConfirming(false);
     setSubmitting(true);
     try {
       await onConfirm(payments.length ? payments : [{ id: crypto.randomUUID(), method: "Nao definido", amount: total }]);
@@ -1279,6 +1299,15 @@ function PaymentModal({
             onConfirm={addPayment}
           />
         )}
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
+        {confirming && (
+          <PdvConfirmModal
+            title={confirmLabel === "Finalizar conta" ? "Confirmar fechamento" : "Confirmar pagamentos"}
+            message={confirmLabel === "Finalizar conta" ? "Os pagamentos serao registrados e a conta sera encerrada." : "Deseja salvar a nova forma de pagamento?"}
+            onCancel={() => setConfirming(false)}
+            onConfirm={() => void finish()}
+          />
+        )}
       </section>
     </div>
   );
@@ -1301,6 +1330,7 @@ function PaymentAmountModal({
   const [amountTouched, setAmountTouched] = useState(false);
   const [receivedTouched, setReceivedTouched] = useState(false);
   const [activeField, setActiveField] = useState<"amount" | "received">(method === "Dinheiro" ? "received" : "amount");
+  const [notice, setNotice] = useState("");
 
   const normalizeNumericText = (value: string) => value.replace(/[^0-9,.]/g, "").replace(".", ",");
   const typedAmount = Math.max(0, parseBrazilianNumber(amountText));
@@ -1368,11 +1398,11 @@ function PaymentAmountModal({
 
   const confirm = () => {
     if (invalidAmount) {
-      window.alert(`O valor nao pode passar do restante (${money(remaining)}).`);
+      setNotice(`O valor nao pode passar do restante (${money(remaining)}).`);
       return;
     }
     if (invalidCash) {
-      window.alert("Valor recebido em dinheiro precisa cobrir o valor do pagamento.");
+      setNotice("Valor recebido em dinheiro precisa cobrir o valor do pagamento.");
       return;
     }
     onConfirm({
@@ -1473,6 +1503,7 @@ function PaymentAmountModal({
           <button className="pdv-primary-button" disabled={invalidAmount || invalidCash} onClick={confirm}><Check size={16} /> OK</button>
           <button className="pdv-danger-button" onClick={onCancel}><X size={16} /> Cancelar</button>
         </div>
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
     </div>
   );
@@ -1489,15 +1520,19 @@ function PartialValueModal({
   onConfirm: (value: number) => void;
 }) {
   const [valueText, setValueText] = useState(String(maxValue).replace(".", ","));
+  const [confirming, setConfirming] = useState(false);
+  const [notice, setNotice] = useState("");
   const value = Math.max(0, parseBrazilianNumber(valueText));
   const confirm = () => {
     if (value <= 0) {
-      window.alert("Informe um valor parcial maior que zero.");
+      setNotice("Informe um valor parcial maior que zero.");
       return;
     }
-    if (value > maxValue && !window.confirm("O valor parcial e maior que o total aberto. Continuar mesmo assim?")) {
+    if (value > maxValue && !confirming) {
+      setConfirming(true);
       return;
     }
+    setConfirming(false);
     onConfirm(roundMoney(value));
   };
 
@@ -1527,6 +1562,15 @@ function PartialValueModal({
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" onClick={confirm}>Continuar pagamento</button>
         </div>
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
+        {confirming && (
+          <PdvConfirmModal
+            title="Valor acima do total"
+            message="Esse valor ultrapassa o total aberto da mesa. Deseja continuar?"
+            onCancel={() => setConfirming(false)}
+            onConfirm={confirm}
+          />
+        )}
       </section>
     </div>
   );
@@ -2365,7 +2409,7 @@ function TableCloseMenu({
   );
 }
 
-function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProductsUpdated }: { snapshot: PdvSnapshot; onImportCose: () => void; onImportFile: () => void; busy: boolean; onProductsUpdated: () => void }) {
+function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct }: { snapshot: PdvSnapshot; onImportCose: () => void; onImportFile: () => void; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct> }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [targetCategoryId, setTargetCategoryId] = useState(snapshot.categories[0]?.id || "");
   const [filterCategoryId, setFilterCategoryId] = useState("todos");
@@ -2378,17 +2422,17 @@ function ProductsScreen({ snapshot, onImportCose, onImportFile, busy, onProducts
     return categoryMatch && queryMatch;
   });
   const updateSelected = async (patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => {
-    await window.caixa.updatePdvProducts(selectedIds, patch);
+    await updatePdvProducts(selectedIds, patch);
     setSelectedIds([]);
     onProductsUpdated();
   };
   const saveProduct = async (draft: PdvProductDraft) => {
-    await window.caixa.savePdvProduct(draft);
+    await savePdvProduct(draft);
     setEditingProduct(null);
     onProductsUpdated();
   };
   const saveCategory = async (draft: PdvCategoryDraft) => {
-    await window.caixa.savePdvCategory(draft);
+    await savePdvCategory(draft);
     setEditingCategory(null);
     onProductsUpdated();
   };
@@ -2607,6 +2651,57 @@ function ContextMenu({ x, y, children, onClose }: { x: number; y: number; childr
   );
 }
 
+function PdvNoticeModal({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+      <section className="pdv-payment-modal pdv-confirm-modal">
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Atencao</span>
+            <h1>Confira a informacao</h1>
+          </div>
+          <button className="pdv-icon-button" onClick={onClose}><X size={18} /></button>
+        </div>
+        <p className="pdv-confirm-message">{message}</p>
+        <div className="pdv-action-row">
+          <button className="pdv-primary-button" onClick={onClose}>Entendi</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PdvConfirmModal({
+  title,
+  message,
+  onCancel,
+  onConfirm
+}: {
+  title: string;
+  message: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+      <section className="pdv-payment-modal pdv-confirm-modal">
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Confirmacao</span>
+            <h1>{title}</h1>
+          </div>
+          <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
+        </div>
+        <p className="pdv-confirm-message">{message}</p>
+        <div className="pdv-action-row">
+          <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
+          <button className="pdv-primary-button" onClick={onConfirm}><Check size={16} /> Confirmar</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChanged: () => void }) {
   const [filters, setFilters] = useState({
     from: "",
@@ -2799,9 +2894,9 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
   );
 }
 
-function AdvancedScreen({ snapshot, onImportCose, onImportFile, busy, onSettingsUpdated }: { snapshot: PdvSnapshot; onImportCose: () => void; onImportFile: () => void; busy: boolean; onSettingsUpdated: () => void }) {
+function AdvancedScreen({ snapshot, onImportCose, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; onImportCose: () => void; onImportFile: () => void; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
   const saveSetting = async (patch: Partial<PdvSnapshot["settings"]>) => {
-    await window.caixa.savePdvSettings(patch);
+    await savePdvSettings(patch);
     onSettingsUpdated();
   };
   return (

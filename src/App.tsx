@@ -39,7 +39,7 @@ import {
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
 import { PdvApp } from "./PdvApp";
-import type { PdvSnapshot } from "./shared/pdvTypes";
+import type { PdvSale, PdvSnapshot } from "./shared/pdvTypes";
 import {
   calculateCash,
   calculateSplit,
@@ -74,6 +74,7 @@ import type {
 type TabKey = "sale" | "tables" | "history" | "reports" | "server" | "settings";
 type SettingsCategory =
   | "appearance"
+  | "operation"
   | "defaults"
   | "profiles"
   | "files"
@@ -156,7 +157,7 @@ const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floa
 const CDA_ICON_SRC = "/cda-icon.png";
 const REMOTE_SESSION_STORAGE_KEY = "caixaRemoteSession";
 const QUICK_ENTRY_MODE_STORAGE_PREFIX = "caixaQuickEntryMode";
-const REMOTE_ENTRY_LIMIT = 700;
+const REMOTE_ENTRY_LIMIT = 0;
 const HISTORY_PAGE_SIZE = 160;
 
 const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
@@ -985,6 +986,7 @@ export function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [server, setServer] = useState<ServerState | null>(null);
   const [pdvSnapshot, setPdvSnapshot] = useState<PdvSnapshot | null>(null);
+  const [remotePdvSales, setRemotePdvSales] = useState<PdvSale[]>([]);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sale");
   const [pdvViewNonce, setPdvViewNonce] = useState(0);
@@ -1321,7 +1323,9 @@ export function App() {
     if (!session || !settings) {
       return;
     }
-    const data = await remoteRequest<RemoteEntriesResponse>(session, `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`);
+    const data = await remoteRequest<RemoteEntriesResponse>(session, REMOTE_ENTRY_LIMIT ? `/api/entries?limit=${REMOTE_ENTRY_LIMIT}` : "/api/entries");
+    const pdv = await remoteRequest<PdvSnapshot>(session, "/api/pdv/snapshot");
+    setRemotePdvSales(pdv.recentSales);
     const nextSession = {
       ...session,
       entries: data.entries,
@@ -1379,6 +1383,8 @@ export function App() {
         connectedAt: new Date().toISOString()
       };
       const data = await remoteRequest<RemoteEntriesResponse>(pendingSession, `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`);
+      const remotePdv = await remoteRequest<PdvSnapshot>(pendingSession, "/api/pdv/snapshot");
+      setRemotePdvSales(remotePdv.recentSales);
       const connectedSession: RemoteClientSession = {
         ...pendingSession,
         entries: data.entries,
@@ -1523,9 +1529,6 @@ export function App() {
     if (!remoteSession?.permissions.delete) {
       return;
     }
-    if (!window.confirm(permanent ? "Apagar definitivamente no caixa principal?" : "Enviar para a lixeira no caixa principal?")) {
-      return;
-    }
     await remoteRequest<{ ok: boolean }>(remoteSession, `/api/entries/${entry.id}${permanent ? "?permanent=1" : ""}`, {
       method: "DELETE"
     });
@@ -1666,10 +1669,11 @@ export function App() {
   }
 
   const header = headerForTab(activeTab, displaySummary.count);
-  const pdvMainTab = activeTab === "sale"
-    ? "sale"
-    : activeTab === "tables"
-      ? "tables"
+  const legacyMode = settings.operationMode === "legacy";
+  const pdvMainTab = activeTab === "tables"
+    ? "tables"
+    : activeTab === "sale" && !legacyMode
+      ? "sale"
       : null;
 
   return (
@@ -1706,7 +1710,7 @@ export function App() {
           })}
         </nav>
 
-        {!pdvMainTab && <div className="total-menu-wrap">
+        <div className="total-menu-wrap">
           <button
             type="button"
             className="sidebar-card topbar-card topbar-card-button"
@@ -1762,7 +1766,7 @@ export function App() {
               </button>
             </div>
           )}
-        </div>}
+        </div>
 
       </aside>
 
@@ -1796,6 +1800,28 @@ export function App() {
           </div>
         )}
 
+        {activeTab === "sale" && legacyMode && (
+          <div className="legacy-workspace">
+            <QuickEntry
+              entries={displayEntries}
+              settings={entrySettings}
+              clientPolicy={effectiveRemotePolicy}
+              pinned={false}
+              modeCommand={modeCommand}
+              storageScope={quickEntryStorageScope}
+              onSubmit={submitEntry}
+            />
+            <TodayPanel
+              summary={displaySummary}
+              entries={displayEntries}
+              settings={settings}
+              canViewTotals={canViewRemoteTotals}
+              canViewEntryValues={canViewRemoteEntryValues}
+              onMode={(type) => setModeCommand({ type, nonce: Date.now() })}
+            />
+          </div>
+        )}
+
         {activeTab === "history" && !pdvMainTab && (
           <HistoryPanel
             entries={remoteSession ? displayEntries : combinedEntries}
@@ -1804,6 +1830,16 @@ export function App() {
               await reload();
             }}
             onToast={showToast}
+            pdvSales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []}
+            onEditRemote={remoteSession ? editRemoteEntry : undefined}
+            onCancelRemote={remoteSession ? cancelRemoteEntry : undefined}
+            onDeleteRemote={remoteSession ? deleteRemoteEntry : undefined}
+            onRestoreRemote={remoteSession ? async (entry) => {
+              if (!remoteSession.permissions.edit) return;
+              await remoteRequest<{ entry: LedgerEntry }>(remoteSession, `/api/entries/${entry.id}`, { method: "PATCH", body: JSON.stringify({ status: "active" }) });
+              await refreshRemote(remoteSession);
+              showToast("success", "Lancamento remoto restaurado.");
+            } : undefined}
           />
         )}
 
@@ -1850,6 +1886,7 @@ export function App() {
         {activeTab === "settings" && (
             <SettingsPanel
               settings={settings}
+              remoteSession={remoteSession}
               remoteClientActive={Boolean(remoteSession)}
               remoteClientPermissions={remoteSession?.permissions}
               focusCategory={settingsFocus}
@@ -2682,18 +2719,30 @@ function HistoryPanel({
   entries,
   focusDate,
   onChange,
-  onToast
+  onToast,
+  onEditRemote,
+  onCancelRemote,
+  onDeleteRemote,
+  onRestoreRemote,
+  pdvSales
 }: {
   entries: LedgerEntry[];
   focusDate?: HistoryFocusDate | null;
   onChange: () => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
+  onEditRemote?: (entry: LedgerEntry) => Promise<void>;
+  onCancelRemote?: (entry: LedgerEntry) => Promise<void>;
+  onDeleteRemote?: (entry: LedgerEntry, permanent?: boolean) => Promise<void>;
+  onRestoreRemote?: (entry: LedgerEntry) => Promise<void>;
+  pdvSales: PdvSale[];
 }) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState("Todos");
   const [statusFilter, setStatusFilter] = useState("visiveis");
   const [date, setDate] = useState("");
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
+  const [details, setDetails] = useState<PdvSale | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ entry: LedgerEntry; permanent: boolean } | null>(null);
   const [visibleCount, setVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const deferredQuery = useDeferredValue(query);
 
@@ -2799,17 +2848,18 @@ function HistoryPanel({
                   <td><span className={`status-dot ${entry.status}`}>{statusLabel(entry.status)}</span></td>
                   <td>
                     <div className="row-actions">
-                      <button title="Editar" onClick={() => setEditing(entry)}><Edit3 size={15} /></button>
+                      <button title="Editar" onClick={() => onEditRemote ? void onEditRemote(entry) : setEditing(entry)}><Edit3 size={15} /></button>
+                      {entry.sourceSaleId && <button title="Ver produtos e pagamentos" onClick={() => setDetails(pdvSales.find((sale) => sale.id === entry.sourceSaleId) || null)}><Eye size={15} /></button>}
                       <button title="Duplicar" onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
                       {entry.status === "deleted" || entry.status === "cancelled" ? (
-                        <button title="Restaurar" onClick={() => run(() => window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
+                         <button title="Restaurar" onClick={() => run(() => onRestoreRemote ? onRestoreRemote(entry) : window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
                       ) : (
                         <>
-                          <button title="Cancelar" onClick={() => run(() => window.caixa.cancelEntry(entry.id), "Lancamento cancelado.")}><MinusCircle size={15} /></button>
-                          <button title="Enviar para lixeira" onClick={() => window.confirm("Enviar este lancamento para a lixeira? Ele sai da planilha, mas ainda pode ser restaurado.") && run(() => window.caixa.removeEntry(entry.id), "Lancamento enviado para a lixeira.")}><Trash2 size={15} /></button>
+                           <button title="Cancelar" onClick={() => run(() => onCancelRemote ? onCancelRemote(entry) : window.caixa.cancelEntry(entry.id), "Lancamento cancelado.")}><MinusCircle size={15} /></button>
+                           <button title="Enviar para lixeira" onClick={() => setConfirmDelete({ entry, permanent: false })}><Trash2 size={15} /></button>
                         </>
                       )}
-                      <button title="Apagar definitivo" className="danger-icon" onClick={() => window.confirm("Apagar definitivamente? Isso remove do historico local e da proxima exportacao.") && run(() => window.caixa.deleteEntry(entry.id), "Lancamento apagado definitivamente.")}><X size={15} /></button>
+                       <button title="Apagar definitivo" className="danger-icon" onClick={() => setConfirmDelete({ entry, permanent: true })}><X size={15} /></button>
                     </div>
                   </td>
                 </tr>
@@ -2844,7 +2894,86 @@ function HistoryPanel({
           }}
         />
       )}
+      {details && <HistorySaleDetailModal sale={details} onClose={() => setDetails(null)} />}
+      {confirmDelete && (
+        <HistoryDeleteConfirmModal
+          permanent={confirmDelete.permanent}
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={async () => {
+            const { entry, permanent } = confirmDelete;
+            setConfirmDelete(null);
+            if (onDeleteRemote) {
+              await onDeleteRemote(entry, permanent);
+              return;
+            }
+            await run(() => permanent ? window.caixa.deleteEntry(entry.id) : window.caixa.removeEntry(entry.id), permanent ? "Lancamento apagado definitivamente." : "Lancamento enviado para a lixeira.");
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function HistoryDeleteConfirmModal({ permanent, onCancel, onConfirm }: { permanent: boolean; onCancel: () => void; onConfirm: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="modal-backdrop">
+      <div className="modal confirmation-modal">
+        <div className="modal-head">
+          <div>
+            <span className="settings-overline">Historico</span>
+            <strong>{permanent ? "Apagar lancamento definitivamente?" : "Enviar lancamento para a lixeira?"}</strong>
+          </div>
+          <button className="icon-button" onClick={onCancel} disabled={busy}><X size={18} /></button>
+        </div>
+        <p>{permanent ? "Essa acao remove o registro do historico e nao pode ser desfeita." : "O registro sai das visoes ativas e pode ser restaurado depois."}</p>
+        <div className="modal-actions">
+          <button className="ghost-button" onClick={onCancel} disabled={busy}>Cancelar</button>
+          <button className={permanent ? "danger-button" : "primary-button"} disabled={busy} onClick={async () => { setBusy(true); try { await onConfirm(); } finally { setBusy(false); } }}>
+            {busy ? "Processando..." : permanent ? "Apagar definitivamente" : "Enviar para lixeira"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HistorySaleDetailModal({ sale, onClose }: { sale: PdvSale; onClose: () => void }) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal history-sale-detail-modal">
+        <div className="modal-head">
+          <div>
+            <span className="settings-overline">Detalhes do PDV</span>
+            <strong>{sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta")}</strong>
+            <p>{new Date(sale.createdAt).toLocaleString("pt-BR")} | {sale.status}</p>
+          </div>
+          <button className="icon-button" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="history-detail-summary">
+          <Metric label="Subtotal" value={formatCurrency(sale.subtotal)} />
+          <Metric label="Desconto" value={formatCurrency(sale.discount)} />
+          <Metric label="Total" value={formatCurrency(sale.total)} />
+        </div>
+        <div className="history-detail-list">
+          <strong>Itens</strong>
+          {sale.items.map((item) => (
+            <div key={item.id}>
+              <span>{item.quantity}x {item.productName}{item.complements?.length ? ` + ${item.complements.map((part) => part.name).join(" + ")}` : ""}</span>
+              <b>{formatCurrency(item.total)}</b>
+            </div>
+          ))}
+          <strong>Pagamentos</strong>
+          {sale.payments.map((payment) => (
+            <div key={payment.id}>
+              <span>{payment.method}{payment.change ? ` | Troco ${formatCurrency(payment.change)}` : ""}</span>
+              <b>{formatCurrency(payment.amount)}</b>
+            </div>
+          ))}
+        </div>
+        <div className="submit-row"><button className="primary-button" onClick={onClose}>Fechar</button></div>
+      </div>
+    </div>
   );
 }
 
@@ -3094,7 +3223,7 @@ function ReportsPanel({
         (!from || date >= from) &&
         (!to || date <= to) &&
         (type === "Todos" || entry.type === type) &&
-        (payment === "Todos" || entry.paymentMethod === payment) &&
+        (payment === "Todos" || entryMatchesPayment(entry, payment)) &&
         (!table || entry.tableNumber === table) &&
         (!bus || entry.busNumber === bus) &&
         haystack.includes(search)
@@ -3941,6 +4070,7 @@ function normalizeRemoteBaseUrl(value: string, defaultPort = 4317, localIps: str
 
 function SettingsPanel({
   settings,
+  remoteSession,
   remoteClientActive,
   remoteClientPermissions,
   focusCategory,
@@ -3951,6 +4081,7 @@ function SettingsPanel({
   onImportLedgerFolder
 }: {
   settings: AppSettings;
+  remoteSession: RemoteClientSession | null;
   remoteClientActive: boolean;
   remoteClientPermissions?: ServerPermissions | null;
   focusCategory?: { category: SettingsCategory; nonce: number } | null;
@@ -4271,6 +4402,9 @@ function SettingsPanel({
           layout: defaults.layout
         };
       }
+      if (target === "operation") {
+        return { ...current, operationMode: defaults.operationMode };
+      }
       if (target === "defaults") {
         return {
           ...current,
@@ -4367,6 +4501,7 @@ function SettingsPanel({
 
   const settingsCategories: Array<{ key: SettingsCategory; label: string; description: string; icon: typeof Settings }> = [
     { key: "appearance", label: "Aparencia", description: "Tema, cor, densidade e formato geral da interface.", icon: Palette },
+    { key: "operation", label: "Modo de operacao", description: "Alterna entre o PDV novo e o caixa classico preservado.", icon: MonitorUp },
     { key: "defaults", label: "Vendas", description: "Tipo, pessoas e arredondamento usados por padrao.", icon: Send },
     { key: "profiles", label: "Perfis", description: "Perfis para alternar entre PC, notebook e tela pequena.", icon: MonitorUp },
     { key: "pdv", label: "Produtos", description: "Produtos, categorias, importacao, favoritos, unidade, kg, grama e adicionais.", icon: LayoutPanelTop },
@@ -4483,6 +4618,25 @@ function SettingsPanel({
               <option value="sidePanel">Painel lateral</option>
             </select>
           </label>
+        </section>
+
+        <section className={categoryClass("operation")}>
+          <h3>Modo de operacao</h3>
+          <label className="field"><span>Interface principal</span>
+            <select value={draft.operationMode} onChange={(event) => update("operationMode", event.target.value as AppSettings["operationMode"])}>
+              <option value="pdv">PDV novo integrado</option>
+              <option value="legacy">Caixa classico preservado</option>
+            </select>
+          </label>
+          <p className="settings-note">
+            O modo classico reativa o lancamento rapido e a barra fixa preservados. Ele continua dentro deste aplicativo e nao apaga, duplica ou troca o banco do PDV.
+          </p>
+          {draft.operationMode === "legacy" && (
+            <div className="settings-warning">
+              <strong>Modo de compatibilidade ativo</strong>
+              <span>Venda volta para o fluxo antigo. Mesas, historico, relatorios e produtos continuam acessiveis nas abas do mesmo sistema.</span>
+            </div>
+          )}
         </section>
 
         <section className={categoryClass("defaults")} {...remoteSectionProps("defaults")}>
@@ -4658,7 +4812,7 @@ function SettingsPanel({
           <p className="helper-text">
             Cadastre produtos e categorias, importe a planilha da Cose Dell Abadia, ajuste favoritos, unidades, produtos ocultos e adicionais permitidos.
           </p>
-          <PdvApp embedded initialTab="products" hideTopbar />
+          <PdvApp embedded initialTab="products" hideTopbar remoteSession={remoteSession} />
         </section>
 
         <section className={categoryClass("pdvTables", "settings-group wide pdv-settings-panel")}>
@@ -4666,7 +4820,7 @@ function SettingsPanel({
           <p className="helper-text">
             Configure quantidade de mesas, submesas/contas separadas, complementos e pasta de exportacao do PDV.
           </p>
-          <PdvApp embedded initialTab="advanced" hideTopbar />
+          <PdvApp embedded initialTab="advanced" hideTopbar remoteSession={remoteSession} />
         </section>
 
         <section className={categoryClass("privacy", "settings-group wide privacy-settings")}>
@@ -4894,7 +5048,7 @@ function SettingsPanel({
             <article>
               <span>Backups</span>
               <strong>{diagnostics?.backupCount ?? 0}</strong>
-              <small>Backups do historico interno</small>
+              <small>Historico, configuracoes e banco SQLite do PDV</small>
             </article>
           </div>
           <div className="made-by-card">
@@ -4919,7 +5073,7 @@ function SettingsPanel({
             <DatabaseBackup size={20} />
             <div>
               <strong>Backup local do caixa</strong>
-              <span>Salva historico e configuracoes em um JSON proprio do app. Antes de restaurar, o estado atual tambem recebe um backup de seguranca.</span>
+              <span>Salva historico, configuracoes e o banco SQLite do PDV em um backup unico. Antes de restaurar, o estado atual tambem recebe uma copia de seguranca.</span>
             </div>
             <button className="ghost-button" type="button" onClick={createDataBackup}>
               <Save size={16} /> Criar backup
@@ -5175,4 +5329,8 @@ function permissionLabel(key: keyof ServerPermissions): string {
     viewTotals: "Ver totais vendidos",
     allowClientCustomization: "Acesso local completo do cliente"
   }[key];
+}
+
+function entryMatchesPayment(entry: LedgerEntry, payment: string): boolean {
+  return entry.paymentMethod === payment || Boolean(entry.paymentBreakdown?.some((item) => item.method === payment));
 }

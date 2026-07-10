@@ -115,6 +115,21 @@ if (!tableSeven?.items.some((item) => item.subtableName === "Joao")) {
   throw new Error("Renomeacao/persistencia de submesa nao funcionou como esperado.");
 }
 
+const partialSource = tableSeven.items[0];
+const partialSale = await store.closeTablePartial(7, [{ ...partialSource, quantity: 1, total: 10 }], [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }]);
+if (partialSale.status !== "Parcial" || partialSale.total !== 10) {
+  throw new Error("Fechamento parcial nao calculou o item selecionado corretamente.");
+}
+const partialSnapshot = await store.getSnapshot();
+const remainingTable = partialSnapshot.tables.find((table) => table.number === 7);
+if (!remainingTable?.items.length || remainingTable.items[0].quantity !== 1 || remainingTable.total !== 10) {
+  throw new Error("Fechamento parcial nao preservou a quantidade restante da mesa.");
+}
+await store.closeTable(7, [{ id: crypto.randomUUID(), method: "Dinheiro", amount: 10, received: 20, change: 10 }]);
+if ((await store.getSnapshot()).tables.find((table) => table.number === 7)?.status !== "Livre") {
+  throw new Error("Fechamento total depois do parcial nao liberou a mesa.");
+}
+
 const snapshot = await store.getSnapshot();
 const savedSale = snapshot.recentSales.find((item) => item.id === sale.id);
 if (!savedSale || savedSale.items[0].complements?.[0]?.name !== complement.name) {
@@ -130,6 +145,13 @@ if (store.getSales({ status: "Cancelada" }).length !== 1 || store.getSales({ sta
 const updatedPaymentSale = await store.updateSalePayments(sale.id, [{ id: crypto.randomUUID(), method: "Pix", amount: 12 }]);
 if (updatedPaymentSale.payments[0]?.method !== "Pix" || updatedPaymentSale.payments[0]?.amount !== 12) {
   throw new Error("Alteracao de forma de pagamento nao foi persistida corretamente.");
+}
+
+const backupBase64 = await store.exportBackupBase64();
+await store.saveProduct({ ...baseProduct, name: "Produto alterado temporariamente" });
+await store.restoreBackupBase64(backupBase64);
+if (!(await store.getSnapshot()).products.some((product) => product.id === baseProduct.id && product.name === baseProduct.name)) {
+  throw new Error("Backup SQLite nao restaurou o cadastro original.");
 }
 
 await store.replaceProducts(snapshot.categories, snapshot.products, "smoke.xlsx");

@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
 import { DEFAULT_COLUMNS, SIMPLE_COLUMNS } from "../src/shared/defaults.js";
-import { filterEntriesByLocalDate, formatDateTime, getEntryAmount, getLocalDateKey, getLocalMonthKey, roundMoney } from "../src/shared/calculations.js";
+import { filterEntriesByLocalDate, formatCurrency, formatDateTime, getEntryAmount, getLocalDateKey, getLocalMonthKey, roundMoney } from "../src/shared/calculations.js";
 import type { AppSettings, ExportStatus, LedgerEntry } from "../src/shared/types.js";
 
 interface ExportState {
@@ -391,7 +391,9 @@ function toRow(entry: LedgerEntry, visibleColumns: string[]) {
     Descricao: entry.description,
     Mesa: entry.tableNumber,
     Onibus: entry.busNumber,
-    "Forma de pagamento": entry.paymentMethod,
+    "Forma de pagamento": entry.paymentBreakdown?.length
+      ? entry.paymentBreakdown.map((payment) => `${payment.method}: ${formatCurrency(payment.amount)}`).join(" | ")
+      : entry.paymentMethod,
     "Pago com": roundMoney(entry.paidWith),
     Troco: roundMoney(entry.change),
     Observacoes: entry.observations,

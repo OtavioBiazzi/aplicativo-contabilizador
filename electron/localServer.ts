@@ -6,7 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvPayment, PdvSale, PdvSnapshot, PdvTableStatus } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
@@ -24,6 +24,11 @@ interface LocalServerOptions {
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
+  updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
+  savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
+  savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
+  savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>;
+  importPdvPreset: () => Promise<PdvProductImportResult>;
   onRemoteChange: () => void;
   onRemotePdvChange: () => void;
 }
@@ -161,6 +166,62 @@ export class LocalServer {
 
     app.get("/api/pdv/snapshot", this.authorize("view"), async (_request, response) => {
       response.json(await this.options.getPdvSnapshot());
+    });
+
+    app.patch("/api/pdv/products", this.authorize("edit"), async (request, response) => {
+      try {
+        const ids = Array.isArray(request.body?.ids) ? request.body.ids.map(String) : [];
+        await this.options.updatePdvProducts(ids, request.body?.patch || {});
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel atualizar produtos." });
+      }
+    });
+
+    app.post("/api/pdv/categories", this.authorize("create"), async (request, response) => {
+      try {
+        const category = await this.options.savePdvCategory(request.body || {});
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ category });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar categoria." });
+      }
+    });
+
+    app.post("/api/pdv/products", this.authorize("create"), async (request, response) => {
+      try {
+        const product = await this.options.savePdvProduct(request.body || {});
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ product });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar produto." });
+      }
+    });
+
+    app.patch("/api/pdv/settings", this.authorize("edit"), async (request, response) => {
+      try {
+        const settings = await this.options.savePdvSettings(request.body || {});
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ settings });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar ajustes do PDV." });
+      }
+    });
+
+    app.post("/api/pdv/preset/cose", this.authorize("create"), async (_request, response) => {
+      try {
+        const result = await this.options.importPdvPreset();
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json(result);
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel importar o preset." });
+      }
     });
 
     app.post("/api/pdv/tables/:number/open", this.authorize("create"), async (request, response) => {
@@ -465,6 +526,9 @@ function buildRemotePatch(body: Record<string, unknown>, current: LedgerEntry, s
   const policy = buildClientPolicy(settings);
   const visibleFields = new Set(policy.visibleFields);
   const patch: Partial<LedgerEntry> = {};
+  if (body.status === "active" && current.status !== "active") {
+    patch.status = "active";
+  }
   const nextType = toAllowedEntryType(body.type, policy);
   const nextPeople = body.people !== undefined && visibleFields.has("people") ? Math.max(1, Math.floor(Number(body.people) || 1)) : current.people;
   const rawValue = body.value ?? body.finalValue;

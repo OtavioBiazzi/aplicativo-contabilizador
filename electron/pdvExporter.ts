@@ -86,6 +86,7 @@ function saleRow(sale: PdvSale): Record<string, unknown> {
     Data: date,
     Hora: time,
     Tipo: sale.type,
+    Descricao: sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta"),
     Mesa: sale.tableNumber || "",
     Status: sale.status,
     Subtotal: roundMoney(sale.subtotal),

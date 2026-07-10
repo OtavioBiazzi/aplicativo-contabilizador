@@ -1072,6 +1072,23 @@ th {
   box-shadow: var(--shadow);
 }
 
+.confirmation-modal {
+  width: min(500px, 100%);
+}
+
+.confirmation-modal > p {
+  margin: 0;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .modal-head {
   display: flex;
   align-items: center;
@@ -1992,6 +2009,70 @@ th {
 
 .hidden-category {
   display: none;
+}
+
+.legacy-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.75fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-warning {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 12%, var(--panel));
+  color: var(--text);
+}
+
+.settings-warning span {
+  color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .legacy-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.history-sale-detail-modal {
+  width: min(720px, calc(100vw - 28px));
+}
+
+.history-detail-summary,
+.history-detail-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-detail-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 14px 0;
+}
+
+.history-detail-list > strong {
+  margin-top: 8px;
+  color: var(--accent-strong);
+}
+
+.history-detail-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text);
+}
+
+@media (max-width: 680px) {
+  .history-detail-summary {
+    grid-template-columns: 1fr;
+  }
 }
 
 .quick-tab-grid,
@@ -4346,6 +4427,18 @@ body.floating-borderless .floating-bar {
   background: #f7fbff;
   color: #082942;
   box-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+}
+
+.pdv-confirm-modal {
+  width: min(520px, calc(100vw - 28px));
+}
+
+.pdv-confirm-message {
+  margin: 0;
+  padding: 18px 2px;
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1.5;
 }
 
 .pdv-context-menu button {

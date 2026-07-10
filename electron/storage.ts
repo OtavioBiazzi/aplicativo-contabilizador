@@ -197,7 +197,7 @@ export class LedgerStore {
     }
   }
 
-  async createDataBackup(reason = "manual"): Promise<DataBackupInfo> {
+  async createDataBackup(reason = "manual", pdvDatabaseBase64 = ""): Promise<DataBackupInfo> {
     const settings = await this.getSettings();
     const entries = await this.getEntries();
     const createdAt = new Date().toISOString();
@@ -210,7 +210,8 @@ export class LedgerStore {
       reason,
       entryCount: entries.length,
       settings,
-      entries
+      entries,
+      pdvDatabaseBase64: pdvDatabaseBase64 || undefined
     });
     const info = await backupInfoFromFile(filePath);
     if (!info) {
@@ -219,14 +220,14 @@ export class LedgerStore {
     return info;
   }
 
-  async restoreDataBackup(filePath: string): Promise<{ backup: DataBackupInfo; safetyBackup: DataBackupInfo }> {
+  async restoreDataBackup(filePath: string, currentPdvDatabaseBase64 = ""): Promise<{ backup: DataBackupInfo; safetyBackup: DataBackupInfo; pdvDatabaseBase64?: string }> {
     const raw = await fs.readFile(filePath, "utf8");
-    const parsed = JSON.parse(raw) as { entries?: LedgerEntry[]; settings?: AppSettings; createdAt?: string; reason?: string };
+    const parsed = JSON.parse(raw) as { entries?: LedgerEntry[]; settings?: AppSettings; createdAt?: string; reason?: string; pdvDatabaseBase64?: string };
     if (!Array.isArray(parsed.entries) || !parsed.settings) {
       throw new Error("Backup invalido. O arquivo precisa conter vendas e configuracoes.");
     }
 
-    const safetyBackup = await this.createDataBackup("antes-restauracao");
+    const safetyBackup = await this.createDataBackup("antes-restauracao", currentPdvDatabaseBase64);
     this.settings = mergeSettings(createDefaultSettings(this.paths.defaultOutputDirectory), parsed.settings);
     this.entries = parsed.entries;
     await writeJsonAtomic(this.settingsPath(), this.settings);
@@ -237,9 +238,10 @@ export class LedgerStore {
       createdAt: parsed.createdAt || new Date().toISOString(),
       reason: parsed.reason || "backup externo",
       size: raw.length,
-      entryCount: parsed.entries.length
+       entryCount: parsed.entries.length,
+       includesPdv: Boolean(parsed.pdvDatabaseBase64)
     };
-    return { backup, safetyBackup };
+    return { backup, safetyBackup, pdvDatabaseBase64: parsed.pdvDatabaseBase64 };
   }
 
   private async persistEntries() {
@@ -262,14 +264,15 @@ export class LedgerStore {
 async function backupInfoFromFile(filePath: string): Promise<DataBackupInfo | null> {
   try {
     const [raw, stat] = await Promise.all([fs.readFile(filePath, "utf8"), fs.stat(filePath)]);
-    const parsed = JSON.parse(raw) as { createdAt?: string; reason?: string; entryCount?: number; entries?: unknown[] };
+    const parsed = JSON.parse(raw) as { createdAt?: string; reason?: string; entryCount?: number; entries?: unknown[]; pdvDatabaseBase64?: string };
     return {
       filePath,
       fileName: path.basename(filePath),
       createdAt: parsed.createdAt || stat.mtime.toISOString(),
       reason: parsed.reason || "manual",
       size: stat.size,
-      entryCount: typeof parsed.entryCount === "number" ? parsed.entryCount : Array.isArray(parsed.entries) ? parsed.entries.length : 0
+      entryCount: typeof parsed.entryCount === "number" ? parsed.entryCount : Array.isArray(parsed.entries) ? parsed.entries.length : 0,
+      includesPdv: Boolean(parsed.pdvDatabaseBase64)
     };
   } catch {
     return null;

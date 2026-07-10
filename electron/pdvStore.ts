@@ -34,6 +34,7 @@ export class PdvStore {
   private sql: SqlJsStatic | null = null;
   private db: Database | null = null;
   private dbFilePath = "";
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly dataDirectory: string) {}
 
@@ -57,6 +58,26 @@ export class PdvStore {
     return this.dbFilePath;
   }
 
+  async exportBackupBase64(): Promise<string> {
+    return Buffer.from(this.requireDb().export()).toString("base64");
+  }
+
+  async restoreBackupBase64(value: string): Promise<void> {
+    if (!value) {
+      return;
+    }
+    const bytes = Buffer.from(value, "base64");
+    if (!bytes.length || !this.sql) {
+      throw new Error("Backup do PDV invalido.");
+    }
+    const previous = this.requireDb();
+    const restored = new this.sql.Database(bytes);
+    this.db = restored;
+    previous.close();
+    this.migrate();
+    await this.persist();
+  }
+
   async getSnapshot(): Promise<PdvSnapshot> {
     return {
       categories: this.getCategories(),
@@ -72,7 +93,7 @@ export class PdvStore {
     const limitSql = limit ? ` LIMIT ${Math.max(1, Math.floor(limit))}` : "";
     const sales = selectAll<Omit<PdvSale, "items" | "payments">>(
       this.requireDb(),
-      `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, COALESCE(status, 'Finalizada') AS status, subtotal, discount, total
+      `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations
        FROM sales ORDER BY created_at DESC${limitSql}`
     );
     return sales.map((sale) => this.hydrateSale(sale)).filter((sale) => matchesSaleFilters(sale, filters));
@@ -247,6 +268,7 @@ export class PdvStore {
   }
 
   async saveSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[] }): Promise<PdvSale> {
+    validateCartItems(input.items);
     const sale = createSale(input);
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
@@ -285,6 +307,7 @@ export class PdvStore {
   }
 
   async saveTableItems(tableNumber: number, items: PdvCartItem[]): Promise<void> {
+    validateCartItems(items);
     const db = this.requireDb();
     if (!items.length) {
       db.run("BEGIN IMMEDIATE");
@@ -350,21 +373,87 @@ export class PdvStore {
     if (!table || !table.items.length) {
       throw new Error("Mesa sem itens para fechar.");
     }
-    const sale = await this.saveSale({ type: "Mesa", tableNumber, items: table.items, discount, payments });
     const db = this.requireDb();
-    db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
-    db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
+    const sale = createSale({ type: "Mesa", tableNumber, items: table.items, discount, payments });
+    db.run("BEGIN IMMEDIATE");
+    try {
+      insertSale(db, sale);
+      db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
+      db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return sale;
+  }
+
+  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0): Promise<PdvSale> {
+    const table = this.getTables().find((item) => item.number === tableNumber);
+    if (!table || !table.items.length) {
+      throw new Error("Mesa sem itens para fechar parcialmente.");
+    }
+    if (!selectedItems.length) {
+      throw new Error("Selecione ao menos um item para o fechamento parcial.");
+    }
+    validateCartItems(selectedItems);
+    const selectedById = new Map(selectedItems.map((item) => [item.id, item]));
+    selectedItems.forEach((selected) => {
+      const source = table.items.find((item) => item.id === selected.id);
+      if (!source && selected.productId !== "manual-partial") {
+        throw new Error("O item selecionado nao pertence mais a esta mesa.");
+      }
+      if (source && selected.quantity > source.quantity + 0.009) {
+        throw new Error(`A quantidade selecionada de ${selected.productName} ultrapassa a mesa.`);
+      }
+    });
+    const remainingItems = table.items.flatMap((item) => {
+      const selected = selectedById.get(item.id);
+      if (!selected) {
+        return [item];
+      }
+      const remainingQuantity = roundMoney(Math.max(0, item.quantity - selected.quantity));
+      if (remainingQuantity <= 0.009) {
+        return [];
+      }
+      const unitTotal = item.quantity > 0 ? item.total / item.quantity : item.unitPrice;
+      return [{ ...item, quantity: remainingQuantity, total: roundMoney(unitTotal * remainingQuantity) }];
+    });
+    const sale = createSale({ type: "Mesa", tableNumber, status: "Parcial", items: selectedItems, discount, payments });
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      insertSale(db, sale);
+      db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
+      if (remainingItems.length) {
+        writeTableItems(db, tableNumber, remainingItems);
+      } else {
+        db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
+      }
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
     await this.persist();
     return sale;
   }
 
   async cancelSale(id: string): Promise<void> {
-    this.requireDb().run("UPDATE sales SET status = 'Cancelada' WHERE id = ?", [id]);
+    const db = this.requireDb();
+    if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
+      throw new Error("Venda nao encontrada.");
+    }
+    db.run("UPDATE sales SET status = 'Cancelada' WHERE id = ?", [id]);
     await this.persist();
   }
 
   async updateSale(id: string, patch: Record<string, any>): Promise<void> {
     const db = this.requireDb();
+    if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
+      throw new Error("Venda nao encontrada.");
+    }
     let status = patch.status;
     if (status === "cancelled") status = "Cancelada";
     if (status === "active") status = "Finalizada";
@@ -386,6 +475,12 @@ export class PdvStore {
       if (patch.difference !== undefined) {
         db.run("UPDATE sales SET discount = ? WHERE id = ?", [-patch.difference, id]);
       }
+      if (typeof patch.description === "string") {
+        db.run("UPDATE sales SET description = ? WHERE id = ?", [patch.description.trim(), id]);
+      }
+      if (typeof patch.observations === "string") {
+        db.run("UPDATE sales SET observations = ? WHERE id = ?", [patch.observations.trim(), id]);
+      }
       if (patch.paymentMethod) {
         db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
         const amt = patch.finalValue ?? (selectAll<{ total: number }>(db, "SELECT total FROM sales WHERE id = ?", [id])[0]?.total || 0);
@@ -402,7 +497,17 @@ export class PdvStore {
 
   async deleteSale(id: string): Promise<void> {
     const db = this.requireDb();
-    db.run("DELETE FROM sales WHERE id = ?", [id]);
+    if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
+      throw new Error("Venda nao encontrada.");
+    }
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run("DELETE FROM sales WHERE id = ?", [id]);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
     await this.persist();
   }
 
@@ -513,7 +618,7 @@ export class PdvStore {
   }
 
   private getRecentSales(): PdvSale[] {
-    return this.getSales({}, 300);
+    return this.getSales({});
   }
 
   private hydrateSale(sale: Omit<PdvSale, "items" | "payments">): PdvSale {
@@ -600,10 +705,12 @@ export class PdvStore {
         created_at TEXT NOT NULL,
         type TEXT NOT NULL,
         table_number INTEGER,
-        status TEXT NOT NULL DEFAULT 'Finalizada',
-        subtotal REAL NOT NULL,
-        discount REAL NOT NULL,
-        total REAL NOT NULL
+         status TEXT NOT NULL DEFAULT 'Finalizada',
+         subtotal REAL NOT NULL,
+         discount REAL NOT NULL,
+         total REAL NOT NULL,
+         description TEXT NOT NULL DEFAULT '',
+         observations TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS sale_items (
         id TEXT PRIMARY KEY,
@@ -642,6 +749,8 @@ export class PdvStore {
     addColumnIfMissing(db, "sale_items", "complements_json", "TEXT NOT NULL DEFAULT '[]'");
     addColumnIfMissing(db, "sale_items", "measure_label", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sales", "status", "TEXT NOT NULL DEFAULT 'Finalizada'");
+    addColumnIfMissing(db, "sales", "description", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "sales", "observations", "TEXT NOT NULL DEFAULT ''");
     const defaults = this.getSettings();
     const statement = db.prepare("INSERT INTO pdv_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING");
     Object.entries(defaults).forEach(([key, value]) => statement.run([snakeCase(key), String(value)]));
@@ -661,10 +770,19 @@ export class PdvStore {
   }
 
   private async persist() {
-    const db = this.requireDb();
-    const tempPath = `${this.dbFilePath}.tmp`;
-    await fs.writeFile(tempPath, Buffer.from(db.export()));
-    await fs.rename(tempPath, this.dbFilePath);
+    const write = this.persistQueue.catch(() => undefined).then(async () => {
+      const db = this.requireDb();
+      const tempPath = `${this.dbFilePath}.${process.pid}.${Date.now()}.tmp`;
+      await fs.writeFile(tempPath, Buffer.from(db.export()));
+      try {
+        await fs.rename(tempPath, this.dbFilePath);
+      } catch (error) {
+        await fs.rm(tempPath, { force: true }).catch(() => undefined);
+        throw error;
+      }
+    });
+    this.persistQueue = write;
+    await write;
   }
 
   private async backupSqlite(reason: string): Promise<void> {
@@ -706,7 +824,7 @@ export class PdvStore {
 }
 
 function insertSale(db: Database, sale: PdvSale) {
-  db.run("INSERT INTO sales (id, created_at, type, table_number, status, subtotal, discount, total) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
+  db.run("INSERT INTO sales (id, created_at, type, table_number, status, subtotal, discount, total, description, observations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
     sale.id,
     sale.createdAt,
     sale.type,
@@ -714,7 +832,9 @@ function insertSale(db: Database, sale: PdvSale) {
     sale.status,
     sale.subtotal,
     sale.discount,
-    sale.total
+    sale.total,
+    sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta"),
+    sale.observations || ""
   ]);
   const itemStatement = db.prepare(
     `INSERT INTO sale_items (id, sale_id, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json)
@@ -747,6 +867,33 @@ function insertSale(db: Database, sale: PdvSale) {
   paymentStatement.free();
 }
 
+function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]) {
+  const statement = db.prepare(
+    `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  items.forEach((item, index) => {
+    statement.run([
+      item.id,
+      tableNumber,
+      item.productId,
+      item.productName,
+      item.categoryName,
+      item.quantity,
+      item.measureLabel || "",
+      item.unitPrice,
+      item.baseUnitPrice ?? item.unitPrice,
+      item.discount,
+      item.total,
+      item.subtableName || "",
+      item.note || "",
+      JSON.stringify(item.complements || []),
+      index
+    ]);
+  });
+  statement.free();
+}
+
 function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[] }): PdvSale {
   const subtotal = roundMoney(input.items.reduce((total, item) => total + item.total, 0));
   const total = Math.max(0, roundMoney(subtotal - input.discount));
@@ -760,9 +907,31 @@ function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status
     subtotal,
     discount: roundMoney(input.discount),
     total,
+    description: input.tableNumber ? `Mesa ${input.tableNumber}` : "Venda direta",
+    observations: "",
     payments,
     items: input.items
   };
+}
+
+function validateCartItems(items: PdvCartItem[]) {
+  if (!Array.isArray(items)) {
+    throw new Error("Lista de itens invalida.");
+  }
+  items.forEach((item) => {
+    if (!item || !item.id || !item.productName) {
+      throw new Error("Item de produto invalido.");
+    }
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0 || item.quantity > 100000) {
+      throw new Error(`Quantidade invalida para ${item.productName}.`);
+    }
+    if (!Number.isFinite(item.unitPrice) || item.unitPrice < 0 || !Number.isFinite(item.total) || item.total < 0) {
+      throw new Error(`Preco invalido para ${item.productName}.`);
+    }
+    if (!Number.isFinite(item.discount) || item.discount < 0) {
+      throw new Error(`Desconto invalido para ${item.productName}.`);
+    }
+  });
 }
 
 function normalizePaymentsForTotal(payments: PdvPayment[], total: number): PdvPayment[] {

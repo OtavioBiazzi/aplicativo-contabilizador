@@ -411,31 +411,56 @@ async function bootstrap() {
     getEntries: () => getIntegratedLedgerEntries(),
     addEntry: async (draft: EntryDraft) => {
       const entry = await store.addEntry(draft);
-      await exporter.export(await store.getEntries(), await store.getSettings());
+      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       return entry;
     },
     updateEntry: async (id, patch) => {
+      if (id.startsWith("pdv-")) {
+        await pdvStore.updateSale(id.slice(4), patch);
+        await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+        return (await getIntegratedLedgerEntries()).find((entry) => entry.id === id) || (() => { throw new Error("Venda PDV nao encontrada."); })();
+      }
       const entry = await store.updateEntry(id, patch);
-      await exporter.export(await store.getEntries(), await store.getSettings());
+      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       return entry;
     },
     cancelEntry: async (id) => {
+      if (id.startsWith("pdv-")) {
+        await pdvStore.cancelSale(id.slice(4));
+        await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+        return (await getIntegratedLedgerEntries()).find((entry) => entry.id === id) || (() => { throw new Error("Venda PDV nao encontrada."); })();
+      }
       const entry = await store.cancelEntry(id);
-      await exporter.export(await store.getEntries(), await store.getSettings());
+      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       return entry;
     },
     removeEntry: async (id) => {
+      if (id.startsWith("pdv-")) {
+        await pdvStore.updateSale(id.slice(4), { status: "deleted" });
+        await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+        return;
+      }
       await store.removeEntry(id);
-      await exporter.export(await store.getEntries(), await store.getSettings());
+      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     },
     deleteEntry: async (id) => {
+      if (id.startsWith("pdv-")) {
+        await pdvStore.deleteSale(id.slice(4));
+        await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+        return;
+      }
       await store.deleteEntry(id);
-      await exporter.export(await store.getEntries(), await store.getSettings());
+      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     },
     getPdvSnapshot: () => pdvStore.getSnapshot(),
     openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
     savePdvTableItems: (tableNumber, items) => pdvStore.saveTableItems(tableNumber, items),
+    updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
+    savePdvCategory: (draft) => pdvStore.saveCategory(draft),
+    savePdvProduct: (draft) => pdvStore.saveProduct(draft),
+    savePdvSettings: (patch) => pdvStore.saveSettings(patch),
+    importPdvPreset: () => importPdvProducts(path.join(app.getPath("downloads"), "produtos.xlsx")),
     closePdvTable: async (tableNumber, payments, discount) => {
       const sale = await pdvStore.closeTable(tableNumber, payments, discount);
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
@@ -443,7 +468,7 @@ async function bootstrap() {
       return sale;
     },
     savePdvTablePartial: async (tableNumber, items, payments, discount) => {
-      const sale = await pdvStore.saveSale({ type: "Mesa", tableNumber, status: "Parcial", items, discount: discount || 0, payments });
+      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0);
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
       return sale;
@@ -587,7 +612,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number): Promise<PdvSale> => {
-    const sale = await pdvStore.saveSale({ type: "Mesa", tableNumber, status: "Parcial", items, discount: discount || 0, payments });
+    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0);
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
     sendToAll("pdv:changed");
@@ -618,7 +643,7 @@ function registerIpc() {
 
   ipcMain.handle("entries:add", async (_event, draft: EntryDraft) => {
     const entry = await store.addEntry(draft);
-    const exportStatus = await exporter.export(await store.getEntries(), await store.getSettings());
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     await logExportStatus("novo lancamento", exportStatus);
     localServer.broadcast({ type: "entry-added", entry });
     sendToAll("entries:changed");
@@ -716,7 +741,7 @@ function registerIpc() {
       opacity: saved.floating.opacity,
       lockPosition: saved.floating.lockPosition
     }, saved);
-    const exportStatus = await exporter.export(await store.getEntries(), saved);
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), saved);
     await logExportStatus("salvar configuracoes", exportStatus);
     sendToAll("settings:changed", saved);
     sendToAll("server:changed", localServer.getState());
@@ -870,7 +895,7 @@ function registerIpc() {
     const settings = await store.getSettings();
     const parsed = await readLedgerImport(filePath, settings);
     const imported = await store.importEntries(parsed.entries);
-    const exportStatus = await exporter.export(await store.getEntries(), settings);
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), settings);
     await logExportStatus("importacao de planilha", exportStatus);
     if (imported.imported) {
       await logger.info("Planilha importada", `${imported.imported} novo(s), ${imported.skipped + parsed.skippedRows} pulado(s): ${path.basename(filePath)}`);
@@ -928,7 +953,7 @@ function registerIpc() {
       }
     }
 
-    const exportStatus = await exporter.export(await store.getEntries(), settings);
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), settings);
     await logExportStatus("importacao de pasta", exportStatus);
     if (importedCount) {
       await logger.info("Pasta de planilhas importada", `${importedCount} novo(s), ${skippedCount} pulado(s), ${files.length} arquivo(s): ${folderPath}`);
@@ -955,7 +980,7 @@ function registerIpc() {
       dataDirectory: store.getDataDirectory(),
       outputDirectory: settings.outputDirectory,
       exportStatus: await exporter.getStatus(),
-      entryCount: (await store.getEntries()).length,
+      entryCount: (await getIntegratedLedgerEntries()).length,
       backupCount: backups.length,
       backups,
       logs: await logger.list()
@@ -963,7 +988,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("diagnostics:createBackup", async (_event, reason?: string): Promise<DataBackupInfo> => {
-    const backup = await store.createDataBackup(reason || "manual");
+    const backup = await store.createDataBackup(reason || "manual", await pdvStore.exportBackupBase64());
     await logger.info("Backup local criado", backup.fileName);
     return backup;
   });
@@ -982,10 +1007,13 @@ function registerIpc() {
       filePath = result.filePaths[0];
     }
 
-    const restored = await store.restoreDataBackup(filePath);
+    const restored = await store.restoreDataBackup(filePath, await pdvStore.exportBackupBase64());
+    if (restored.pdvDatabaseBase64) {
+      await pdvStore.restoreBackupBase64(restored.pdvDatabaseBase64);
+    }
     const settings = await store.getSettings();
     localServer.setPermissions(settings.server.permissions);
-    const exportStatus = await exporter.export(await store.getEntries(), settings);
+    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), settings);
     await logExportStatus("restauracao de backup", exportStatus);
     await logger.warn("Backup restaurado", `${restored.backup.fileName}; backup de seguranca: ${restored.safetyBackup.fileName}`);
     sendToAll("settings:changed", settings);

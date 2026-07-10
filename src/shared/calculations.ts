@@ -156,8 +156,20 @@ export function summarizeEntries(entries: LedgerEntry[]): DaySummary {
       acc.biggestSale = Math.max(acc.biggestSale, amount);
       acc.differenceTotal += entry.difference || 0;
       acc.byType[entry.type] = (acc.byType[entry.type] || 0) + amount;
-      acc.byPayment[entry.paymentMethod || "Nao informado"] =
-        (acc.byPayment[entry.paymentMethod || "Nao informado"] || 0) + amount;
+      if (entry.paymentBreakdown?.length) {
+        entry.paymentBreakdown.forEach((payment) => {
+          acc.byPayment[payment.method] = (acc.byPayment[payment.method] || 0) + payment.amount;
+          if (payment.method === "Dinheiro") {
+            acc.cashTotal += payment.amount;
+          }
+        });
+      } else {
+        acc.byPayment[entry.paymentMethod || "Nao informado"] =
+          (acc.byPayment[entry.paymentMethod || "Nao informado"] || 0) + amount;
+        if (entry.paymentMethod === "Dinheiro" || entry.type === "Dinheiro/Troco") {
+          acc.cashTotal += amount;
+        }
+      }
 
       if (entry.tableNumber) {
         acc.byTable[entry.tableNumber] = (acc.byTable[entry.tableNumber] || 0) + amount;
@@ -167,9 +179,6 @@ export function summarizeEntries(entries: LedgerEntry[]): DaySummary {
       }
       if (entry.type === "Onibus") {
         acc.busTotal += amount;
-      }
-      if (entry.paymentMethod === "Dinheiro" || entry.type === "Dinheiro/Troco") {
-        acc.cashTotal += amount;
       }
       return acc;
     },

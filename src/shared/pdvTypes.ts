@@ -101,6 +101,8 @@ export interface PdvSale {
   subtotal: number;
   discount: number;
   total: number;
+  description?: string;
+  observations?: string;
   payments: PdvPayment[];
   items: PdvCartItem[];
 }

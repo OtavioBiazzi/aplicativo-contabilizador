@@ -27,6 +27,7 @@ export type FloatingThemeMode = "follow" | ThemeMode;
 export type FloatingLayoutMode = "adaptive" | "compact" | "mini";
 export type DensityMode = "compact" | "normal" | "comfortable";
 export type LayoutMode = "complete" | "compact" | "pinnedBar" | "grid" | "sidePanel";
+export type OperationMode = "pdv" | "legacy";
 export type ServerAutoConnectionMode = "none" | "server" | "client";
 
 export interface QuickTabSettings {
@@ -86,6 +87,8 @@ export interface LedgerEntry {
   originDevice: string;
   status: "active" | "cancelled" | "deleted";
   customType?: string;
+  sourceSaleId?: string;
+  paymentBreakdown?: Array<{ method: PaymentMethod; amount: number }>;
   splitDetails?: SplitDetails;
   cashDetails?: CashDetails;
 }
@@ -170,6 +173,7 @@ export interface AppSettings {
   fieldSize: "small" | "medium" | "large";
   density: DensityMode;
   layout: LayoutMode;
+  operationMode: OperationMode;
   profiles: Record<string, Partial<AppSettings>>;
   activeProfile: string;
   privacy: {
@@ -279,6 +283,7 @@ export interface DataBackupInfo {
   reason: string;
   size: number;
   entryCount: number;
+  includesPdv?: boolean;
 }
 
 export interface DiagnosticLogItem {
