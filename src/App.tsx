@@ -1839,7 +1839,11 @@ export function App() {
               embedded
               initialTab={pdvMainTab}
               hideTopbar
-              remoteSession={pdvMainTab === "tables" ? remoteSession : null}
+              remoteSession={pdvMainTab === "tables" && remoteSession ? {
+                ...remoteSession,
+                roundingStep: effectiveRemotePolicy?.defaultRoundingStep,
+                roundingDirection: effectiveRemotePolicy?.defaultRoundingDirection
+              } : null}
               reloadToken={remotePdvNonce}
             />
           </div>

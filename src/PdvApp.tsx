@@ -22,7 +22,7 @@ import type { RoundDirection } from "./shared/types";
 import { calculateSplit } from "./shared/calculations";
 
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
-type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string };
+type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; roundingStep?: number; roundingDirection?: RoundDirection };
 type CheckoutTarget =
   | { kind: "direct"; total: number }
   | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[] }
@@ -799,6 +799,8 @@ export function PdvApp({
         <TableCloseMenu
           table={activeTable}
           subtotal={tableTotal}
+          roundingStep={remoteSession?.roundingStep}
+          roundingDirection={remoteSession?.roundingDirection}
           onCancel={() => setTableCloseMenuOpen(false)}
           onPartialItems={() => {
             setTableCloseMenuOpen(false);
@@ -2422,12 +2424,16 @@ function ComplementModal({
 function TableCloseMenu({
   table,
   subtotal,
+  roundingStep: configuredRoundingStep,
+  roundingDirection: configuredRoundingDirection,
   onCancel,
   onPartialItems,
   onCloseTotal
 }: {
   table: PdvOpenTable;
   subtotal: number;
+  roundingStep?: number;
+  roundingDirection?: RoundDirection;
   onCancel: () => void;
   onPartialItems: () => void;
   onCloseTotal: (total: number, discount: number, initialPayments?: PdvPayment[]) => void;
@@ -2435,8 +2441,8 @@ function TableCloseMenu({
   const [discountValue, setDiscountValue] = useState("");
   const [discountPercent, setDiscountPercent] = useState("");
   const [people, setPeople] = useState(Math.max(1, table.people || 1));
-  const [roundingStep, setRoundingStep] = useState(0.01);
-  const [roundingDirection, setRoundingDirection] = useState<RoundDirection>("nearest");
+  const [roundingStep, setRoundingStep] = useState(configuredRoundingStep || 0.01);
+  const [roundingDirection, setRoundingDirection] = useState<RoundDirection>(configuredRoundingDirection || "nearest");
   const discount = Math.min(subtotal, roundMoney(parseBrazilianNumber(discountValue) + subtotal * (parseBrazilianNumber(discountPercent) / 100)));
   const total = Math.max(0, roundMoney(subtotal - discount));
   const split = calculateSplit(total, people, roundingStep, roundingDirection, false);
@@ -2446,11 +2452,16 @@ function TableCloseMenu({
   }));
 
   useEffect(() => {
+    if (configuredRoundingStep || configuredRoundingDirection) {
+      setRoundingStep(configuredRoundingStep || 0.01);
+      setRoundingDirection(configuredRoundingDirection || "nearest");
+      return;
+    }
     void window.caixa.getSnapshot().then((snapshot) => {
       setRoundingStep(snapshot.settings.defaultRoundingStep || 0.01);
       setRoundingDirection(snapshot.settings.defaultRoundingDirection || "nearest");
     });
-  }, []);
+  }, [configuredRoundingStep, configuredRoundingDirection]);
 
   return (
     <div className="pdv-modal-backdrop">
