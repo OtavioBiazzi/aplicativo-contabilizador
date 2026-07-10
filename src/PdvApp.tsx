@@ -2890,14 +2890,21 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
   const [selectedSale, setSelectedSale] = useState<PdvSale | null>(null);
   const [saleMenu, setSaleMenu] = useState<{ x: number; y: number; sale: PdvSale } | null>(null);
   const [editingPaymentsSale, setEditingPaymentsSale] = useState<PdvSale | null>(null);
+  const [cancelRequest, setCancelRequest] = useState<PdvSale | null>(null);
+  const [notice, setNotice] = useState("");
   const sales = filterSales(snapshot.recentSales, filters);
 
-  const cancelSale = async (sale: PdvSale) => {
-    if (!window.confirm(`Cancelar a venda ${sale.id.slice(0, 8)}? Ela continua no historico como auditoria.`)) {
+  const cancelSale = (sale: PdvSale) => {
+    setCancelRequest(sale);
+  };
+
+  const confirmCancelSale = async () => {
+    if (!cancelRequest) {
       return;
     }
-    await window.caixa.cancelPdvSale(sale.id);
+    await window.caixa.cancelPdvSale(cancelRequest.id);
     setSelectedSale(null);
+    setCancelRequest(null);
     onChanged();
   };
 
@@ -2910,7 +2917,7 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
     if (action === "export") {
       const date = sale.createdAt.slice(0, 10);
       const status = await window.caixa.exportPdvSales({ from: date, to: date, type: "Todos", payment: "Todos", status: "Todos", table: sale.tableNumber ? String(sale.tableNumber) : "" });
-      window.alert(status.message || (status.ok ? "Exportacao concluida." : "Nao foi possivel exportar."));
+      setNotice(status.message || (status.ok ? "Exportacao concluida." : "Nao foi possivel exportar."));
       return;
     }
     if (action === "cancel" && sale.status !== "Cancelada") {
@@ -2978,6 +2985,15 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
         </ContextMenu>
       )}
       {selectedSale && <SaleDetailModal sale={selectedSale} onClose={() => setSelectedSale(null)} onCancel={() => cancelSale(selectedSale)} />}
+      {cancelRequest && (
+        <PdvConfirmModal
+          title="Cancelar venda?"
+          message={`A venda ${cancelRequest.id.slice(0, 8)} continuara no historico como cancelada. Deseja confirmar?`}
+          onCancel={() => setCancelRequest(null)}
+          onConfirm={() => { void confirmCancelSale(); }}
+        />
+      )}
+      {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       {editingPaymentsSale && (
         <PaymentModal
           total={editingPaymentsSale.total}
