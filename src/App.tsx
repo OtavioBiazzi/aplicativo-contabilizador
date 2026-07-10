@@ -1648,6 +1648,8 @@ export function App() {
     const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
     if (mode === "legacy" && activeTab === "tables") {
       setActiveTab("sale");
+    } else if (mode === "pdv" && remoteSession && activeTab === "sale") {
+      setActiveTab("tables");
     }
   }, [remoteSession?.clientPolicy.operationMode, settings?.operationMode, activeTab]);
 
@@ -1714,7 +1716,15 @@ export function App() {
   const header = headerForTab(activeTab, displaySummary.count);
   const effectiveOperationMode = remoteSession?.clientPolicy.operationMode || settings.operationMode;
   const legacyMode = effectiveOperationMode === "legacy";
-  const visibleTabItems = legacyMode ? TAB_ITEMS.filter((item) => item.key !== "tables") : TAB_ITEMS;
+  const visibleTabItems = TAB_ITEMS.filter((item) => {
+    if (legacyMode && item.key === "tables") {
+      return false;
+    }
+    if (remoteSession && !legacyMode && item.key === "sale") {
+      return false;
+    }
+    return true;
+  });
   const pdvMainTab = activeTab === "tables"
     ? (legacyMode ? null : "tables")
     : activeTab === "sale" && !legacyMode
