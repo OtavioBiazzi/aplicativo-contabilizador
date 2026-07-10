@@ -970,7 +970,8 @@ function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]
 
 function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string }): PdvSale {
   const subtotal = roundMoney(input.items.reduce((total, item) => total + item.total, 0));
-  const total = Math.max(0, roundMoney(subtotal - input.discount));
+  const discount = Math.min(subtotal, roundMoney(Math.max(0, input.discount)));
+  const total = Math.max(0, roundMoney(subtotal - discount));
   const payments = normalizePaymentsForTotal(input.payments, total);
   return {
     id: randomUUID(),
@@ -979,7 +980,7 @@ function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status
     tableNumber: input.tableNumber,
     status: input.status || "Finalizada",
     subtotal,
-    discount: roundMoney(input.discount),
+    discount,
     total,
     description: input.tableNumber ? `Mesa ${input.tableNumber}` : "Venda direta",
     observations: "",
@@ -1006,6 +1007,10 @@ function validateCartItems(items: PdvCartItem[]) {
     }
     if (!Number.isFinite(item.discount) || item.discount < 0) {
       throw new Error(`Desconto invalido para ${item.productName}.`);
+    }
+    const expectedTotal = roundMoney(Math.max(0, item.quantity * item.unitPrice - item.discount));
+    if (Math.abs(roundMoney(item.total) - expectedTotal) > 0.01) {
+      throw new Error(`Total invalido para ${item.productName}.`);
     }
   });
 }
