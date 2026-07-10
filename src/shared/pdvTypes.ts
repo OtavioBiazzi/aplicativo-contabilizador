@@ -131,6 +131,12 @@ export interface PdvSettings {
   tablePeopleEnabled: boolean;
   activePreset: string;
   gridColumns?: number;
+  categoryColumns?: number;
+  tableColumns?: number;
+  productCardHeight?: number;
+  categoryCardHeight?: number;
+  tableCardHeight?: number;
+  stackIdenticalItems?: boolean;
 }
 
 export interface PdvProductImportResult {

@@ -27,7 +27,13 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   subtablesEnabled: true,
   tablePeopleEnabled: false,
   activePreset: "Cose Dell Abadia",
-  gridColumns: 5
+  gridColumns: 5,
+  categoryColumns: 5,
+  tableColumns: 9,
+  productCardHeight: 74,
+  categoryCardHeight: 64,
+  tableCardHeight: 96,
+  stackIdenticalItems: false
 };
 const PDV_BACKUP_DIRECTORY = "pdv-backups";
 
@@ -920,7 +926,13 @@ export class PdvStore {
       subtablesEnabled: parseBooleanSetting(map.get("subtables_enabled"), DEFAULT_PDV_SETTINGS.subtablesEnabled),
       tablePeopleEnabled: parseBooleanSetting(map.get("table_people_enabled"), DEFAULT_PDV_SETTINGS.tablePeopleEnabled),
       activePreset: map.get("active_preset") || DEFAULT_PDV_SETTINGS.activePreset,
-      gridColumns: Math.max(4, Math.min(7, parseIntegerSetting(map.get("grid_columns"), DEFAULT_PDV_SETTINGS.gridColumns || 5)))
+      gridColumns: Math.max(4, Math.min(8, parseIntegerSetting(map.get("grid_columns"), DEFAULT_PDV_SETTINGS.gridColumns || 5))),
+      categoryColumns: Math.max(3, Math.min(8, parseIntegerSetting(map.get("category_columns"), DEFAULT_PDV_SETTINGS.categoryColumns || 5))),
+      tableColumns: Math.max(5, Math.min(12, parseIntegerSetting(map.get("table_columns"), DEFAULT_PDV_SETTINGS.tableColumns || 9))),
+      productCardHeight: Math.max(56, Math.min(110, parseIntegerSetting(map.get("product_card_height"), DEFAULT_PDV_SETTINGS.productCardHeight || 74))),
+      categoryCardHeight: Math.max(44, Math.min(90, parseIntegerSetting(map.get("category_card_height"), DEFAULT_PDV_SETTINGS.categoryCardHeight || 64))),
+      tableCardHeight: Math.max(74, Math.min(130, parseIntegerSetting(map.get("table_card_height"), DEFAULT_PDV_SETTINGS.tableCardHeight || 96))),
+      stackIdenticalItems: parseBooleanSetting(map.get("stack_identical_items"), DEFAULT_PDV_SETTINGS.stackIdenticalItems || false)
     };
   }
 

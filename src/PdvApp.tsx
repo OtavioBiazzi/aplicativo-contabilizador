@@ -354,11 +354,11 @@ export function PdvApp({
     }
     const item = createCartItem(product, resolvedQuantity.quantity, [], resolvedQuantity.unitPrice, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "", resolvedQuantity.measureLabel);
     if (activeTable) {
-      setTableCart((current) => mergeCartItem(current, item));
+      setTableCart((current) => mergeCartItem(current, item, snapshot?.settings.stackIdenticalItems));
       setQuantity(1);
       return;
     }
-    setCart((current) => mergeCartItem(current, item));
+    setCart((current) => mergeCartItem(current, item, snapshot?.settings.stackIdenticalItems));
     setQuantity(1);
   };
 
@@ -472,9 +472,9 @@ export function PdvApp({
     const resolvedQuantity = pendingProduct?.product.id === product.id ? pendingProduct : { quantity, measureLabel: undefined };
     const item = createCartItem(product, resolvedQuantity.quantity, complements || [], unitPrice ?? pendingProduct?.unitPrice, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "", resolvedQuantity.measureLabel);
     if (activeTable) {
-      setTableCart((current) => mergeCartItem(current, item));
+      setTableCart((current) => mergeCartItem(current, item, snapshot?.settings.stackIdenticalItems));
     } else {
-      setCart((current) => mergeCartItem(current, item));
+      setCart((current) => mergeCartItem(current, item, snapshot?.settings.stackIdenticalItems));
     }
     setQuantity(1);
     setPendingProduct(null);
@@ -770,7 +770,13 @@ export function PdvApp({
                 ))}
               </div>
             </div>
-            <div className="pdv-table-grid">
+            <div
+              className="pdv-table-grid"
+              style={{
+                "--pdv-table-cols": snapshot.settings.tableColumns || 9,
+                "--pdv-table-card-height": `${snapshot.settings.tableCardHeight || 96}px`
+              } as React.CSSProperties}
+            >
               {snapshot.tables
                 .filter((table) => tableFilter === "Todas" || table.status === tableFilter)
                 .map((table) => (
@@ -1043,7 +1049,7 @@ function PdvSaleScreen(props: {
     if (!last) {
       return;
     }
-    props.setCart((current) => mergeCartItem(current, { ...last, id: crypto.randomUUID(), quantity: 1, measureLabel: "", total: roundMoney(last.unitPrice) }));
+    props.setCart((current) => mergeCartItem(current, { ...last, id: crypto.randomUUID(), quantity: 1, measureLabel: "", total: roundMoney(last.unitPrice) }, props.snapshot.settings.stackIdenticalItems));
   };
   const runItemAction = async (action: string, item: PdvCartItem) => {
     setItemMenu(null);
@@ -1129,7 +1135,13 @@ function PdvSaleScreen(props: {
           <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="Pesquisar produto pelo nome" />
         </div>
 
-        <div className="pdv-category-grid">
+        <div
+          className="pdv-category-grid"
+          style={{
+            "--pdv-category-cols": props.snapshot.settings.categoryColumns || 5,
+            "--pdv-category-card-height": `${props.snapshot.settings.categoryCardHeight || 64}px`
+          } as React.CSSProperties}
+        >
           <button className={props.activeCategory === "todos" ? "active" : ""} onClick={() => props.setActiveCategory("todos")}>Todos</button>
           {props.snapshot.categories.filter((category) => category.active).map((category) => (
             <button className={props.activeCategory === category.id ? "active" : ""} key={category.id} onClick={() => props.setActiveCategory(category.id)}>
@@ -1138,7 +1150,13 @@ function PdvSaleScreen(props: {
           ))}
         </div>
 
-        <div className="pdv-product-grid" style={{ "--pdv-grid-cols": props.snapshot.settings.gridColumns || 5 } as React.CSSProperties}>
+        <div
+          className="pdv-product-grid"
+          style={{
+            "--pdv-grid-cols": props.snapshot.settings.gridColumns || 5,
+            "--pdv-product-card-height": `${props.snapshot.settings.productCardHeight || 74}px`
+          } as React.CSSProperties}
+        >
           {props.products.map((product) => (
             <button key={product.id} onClick={(event) => props.addProduct(product, event.shiftKey)}>
               <strong>{product.name}</strong>
@@ -1230,6 +1248,29 @@ function PdvSaleScreen(props: {
           <strong>{money(finalTotal)}</strong>
           <small>Subtotal {money(subtotal)}</small>
         </div>
+        {props.activeTableNumber && (
+          <div className="pdv-table-quick-actions">
+            <button
+              className="pdv-ghost-button"
+              onClick={() => {
+                const selected = props.cart.find((row) => row.id === props.selectedItemIds?.[0]) || props.cart[props.cart.length - 1];
+                if (selected) {
+                  setEditingItem({ item: selected, mode: "note" });
+                }
+              }}
+              disabled={!props.cart.length}
+            >
+              Observacao
+            </button>
+            <button
+              className="pdv-ghost-button"
+              disabled={!props.cart.length}
+              onClick={() => setTransferListOpen(true)}
+            >
+              Transferir
+            </button>
+          </div>
+        )}
         {!props.activeTableNumber && (
 <div className="pdv-action-row">
             <button
@@ -1348,29 +1389,6 @@ function PdvSaleScreen(props: {
           />
         )}
       </aside>
-      {props.activeTableNumber && (
-        <div className="pdv-table-bottom-actions">
-          <button
-            className="pdv-ghost-button"
-            onClick={() => {
-              const selected = props.cart.find((row) => row.id === props.selectedItemIds?.[0]) || props.cart[props.cart.length - 1];
-              if (selected) {
-                setEditingItem({ item: selected, mode: "note" });
-              }
-            }}
-            disabled={!props.cart.length}
-          >
-            Observacao
-          </button>
-          <button
-            className="pdv-ghost-button"
-            disabled={!props.cart.length}
-            onClick={() => setTransferListOpen(true)}
-          >
-            Transferir
-          </button>
-        </div>
-      )}
     </section>
   );
 }
@@ -2033,7 +2051,7 @@ function TransferListModal({
       } else {
         const movedItems = selectedItems.map((item) => splitCartItemForTransfer(item, transferQuantity(item, quantities[item.id]), targetSubtable.trim()));
         await (openPdvTable || window.caixa.openPdvTable)(targetTableNumber, targetTable.people || 1, targetTable.note || "");
-        await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, movedItems.reduce((items, item) => mergeCartItem(items, item), targetTable.items));
+        await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, [...targetTable.items, ...movedItems]);
         nextSource = selectedItems.reduce((items, item) => subtractCartItemQuantity(items, item.id, transferQuantity(item, quantities[item.id])), cart);
         await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
       }
@@ -2246,7 +2264,7 @@ function TransferItemModal({
       } else {
         const transferItem = splitCartItemForTransfer(item, quantity, targetSubtable.trim());
         await (openPdvTable || window.caixa.openPdvTable)(targetTableNumber, target.people || 1, target.note || "");
-        await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, mergeCartItem(target.items, transferItem));
+        await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, [...target.items, transferItem]);
         nextSource = subtractCartItemQuantity(cart, item.id, quantity);
         await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
       }
@@ -3215,7 +3233,48 @@ function AdvancedScreen({ snapshot, onImportCose, onImportFile, busy, onSettings
               <option value={5}>5 produtos por linha</option>
               <option value={6}>6 produtos por linha</option>
               <option value={7}>7 produtos por linha</option>
+              <option value={8}>8 produtos por linha</option>
             </select>
+          </label>
+          <label className="pdv-setting-line">
+            <span>Grid de categorias</span>
+            <select value={snapshot.settings.categoryColumns || 5} onChange={(event) => saveSetting({ categoryColumns: Number(event.target.value) })}>
+              <option value={3}>3 categorias por linha</option>
+              <option value={4}>4 categorias por linha</option>
+              <option value={5}>5 categorias por linha</option>
+              <option value={6}>6 categorias por linha</option>
+              <option value={7}>7 categorias por linha</option>
+              <option value={8}>8 categorias por linha</option>
+            </select>
+          </label>
+          <label className="pdv-setting-line">
+            <span>Grid de mesas</span>
+            <select value={snapshot.settings.tableColumns || 9} onChange={(event) => saveSetting({ tableColumns: Number(event.target.value) })}>
+              <option value={5}>5 mesas por linha</option>
+              <option value={6}>6 mesas por linha</option>
+              <option value={7}>7 mesas por linha</option>
+              <option value={8}>8 mesas por linha</option>
+              <option value={9}>9 mesas por linha</option>
+              <option value={10}>10 mesas por linha</option>
+              <option value={11}>11 mesas por linha</option>
+              <option value={12}>12 mesas por linha</option>
+            </select>
+          </label>
+          <label className="pdv-setting-line">
+            <span>Altura dos produtos</span>
+            <input type="number" min={56} max={110} value={snapshot.settings.productCardHeight || 74} onChange={(event) => saveSetting({ productCardHeight: Number(event.target.value || 74) })} />
+          </label>
+          <label className="pdv-setting-line">
+            <span>Altura das categorias</span>
+            <input type="number" min={44} max={90} value={snapshot.settings.categoryCardHeight || 64} onChange={(event) => saveSetting({ categoryCardHeight: Number(event.target.value || 64) })} />
+          </label>
+          <label className="pdv-setting-line">
+            <span>Altura das mesas</span>
+            <input type="number" min={74} max={130} value={snapshot.settings.tableCardHeight || 96} onChange={(event) => saveSetting({ tableCardHeight: Number(event.target.value || 96) })} />
+          </label>
+          <label className="pdv-switch-line">
+            <input type="checkbox" checked={Boolean(snapshot.settings.stackIdenticalItems)} onChange={(event) => saveSetting({ stackIdenticalItems: event.target.checked })} />
+            Juntar produtos iguais no carrinho
           </label>
           <label className="pdv-switch-line">
             <input type="checkbox" checked={snapshot.settings.subtablesEnabled} onChange={(event) => saveSetting({ subtablesEnabled: event.target.checked })} />
@@ -3375,7 +3434,10 @@ function TabButton({ icon: Icon, active, label, onClick }: { icon: typeof Shoppi
   );
 }
 
-function mergeCartItem(items: PdvCartItem[], incoming: PdvCartItem): PdvCartItem[] {
+function mergeCartItem(items: PdvCartItem[], incoming: PdvCartItem, stackIdenticalItems = false): PdvCartItem[] {
+  if (!stackIdenticalItems) {
+    return [...items, incoming];
+  }
   const hasCustomComposition = Boolean(incoming.discount || incoming.note || incoming.subtableName || incoming.complements?.length || incoming.unitPrice !== incoming.baseUnitPrice);
   const existing = items.find((item) =>
     item.productId === incoming.productId &&

@@ -4240,7 +4240,6 @@ body.floating-borderless .floating-bar {
 
 .pdv-table-open-grid {
   grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw);
-  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .pdv-products-area,
@@ -4277,10 +4276,6 @@ body.floating-borderless .floating-bar {
 .pdv-cart-area {
   grid-template-rows: auto minmax(0, 1fr) auto auto auto auto;
   background: var(--pdv-cart);
-}
-
-.pdv-table-open-grid .pdv-cart-area {
-  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .pdv-quantity-box {
@@ -4335,15 +4330,15 @@ body.floating-borderless .floating-bar {
 
 .pdv-category-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
+  grid-template-columns: repeat(var(--pdv-category-cols, 5), minmax(0, 1fr));
   gap: 8px;
-  max-height: 124px;
+  max-height: calc((var(--pdv-category-card-height, 64px) * 2) + 10px);
   overflow: auto;
 }
 
 .pdv-category-grid button,
 .pdv-product-grid button {
-  min-height: 64px;
+  min-height: var(--pdv-category-card-height, 64px);
   border: 1px solid #b9c9d4;
   border-radius: 5px;
   background: #eef1f3;
@@ -4372,6 +4367,7 @@ body.floating-borderless .floating-bar {
   display: grid;
   gap: 4px;
   grid-template-rows: minmax(0, 1fr) auto;
+  min-height: var(--pdv-product-card-height, 74px);
   padding: 8px 7px;
 }
 
@@ -4744,6 +4740,17 @@ body.floating-borderless .floating-bar {
   font-size: 1rem;
 }
 
+.pdv-table-quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pdv-table-quick-actions > button {
+  min-height: 42px;
+  font-size: 0.92rem;
+}
+
 .pdv-table-bottom-actions > button {
   flex: 0 1 190px;
   min-height: 48px;
@@ -4868,7 +4875,7 @@ body.floating-borderless .floating-bar {
 
 .pdv-table-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(var(--pdv-table-cols, 9), minmax(0, 1fr));
   align-content: start;
   gap: 8px;
   min-height: 0;
@@ -4878,7 +4885,7 @@ body.floating-borderless .floating-bar {
 .pdv-table-card {
   display: grid;
   gap: 4px;
-  min-height: 108px;
+  min-height: var(--pdv-table-card-height, 96px);
   border: 1px solid rgba(255, 255, 255, 0.42);
   border-radius: 3px;
   padding: 8px;
@@ -5775,20 +5782,41 @@ body.floating-borderless .floating-bar {
 
 /* Responsividade do Grid de Produtos */
 @media (max-width: 1200px) {
+  .pdv-category-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .pdv-product-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .pdv-table-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 900px) {
+  .pdv-category-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .pdv-product-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .pdv-table-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 600px) {
+  .pdv-category-grid,
   .pdv-product-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .pdv-table-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

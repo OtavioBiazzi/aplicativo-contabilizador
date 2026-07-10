@@ -969,7 +969,6 @@ function remoteLockedSettingsSnapshot(settings: AppSettings, allowClientCustomiz
     snapshot.profiles = settings.profiles;
     snapshot.activeProfile = settings.activeProfile;
     snapshot.quickTabs = settings.quickTabs;
-    snapshot.floating = settings.floating;
   }
   return snapshot;
 }
@@ -4699,6 +4698,7 @@ function SettingsPanel({
               <option value="sidePanel">Painel lateral</option>
             </select>
           </label>
+          {draft.operationMode === "legacy" && (
           <div className="settings-subsection">
             <h4>Barra fixa do Modo Classico</h4>
             <label className="field"><span>Tema da barra</span>
@@ -4727,6 +4727,7 @@ function SettingsPanel({
               Permitir arrastar por toda a barra
             </label>
           </div>
+          )}
         </section>
 
         <section className={categoryClass("operation")}>
@@ -4743,7 +4744,7 @@ function SettingsPanel({
           {draft.operationMode === "legacy" && (
             <div className="settings-warning">
               <strong>Modo de compatibilidade ativo</strong>
-              <span>Venda volta para o fluxo antigo. Mesas, historico, relatorios e produtos continuam acessiveis nas abas do mesmo sistema.</span>
+              <span>Venda volta para o fluxo antigo e a barra fixa preservada. A aba Mesas fica oculta para nao misturar o fluxo classico com o PDV.</span>
             </div>
           )}
         </section>
