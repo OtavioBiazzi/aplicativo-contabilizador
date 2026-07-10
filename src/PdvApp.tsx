@@ -172,6 +172,7 @@ export function PdvApp({
   const [pendingMeasureProduct, setPendingMeasureProduct] = useState<PendingMeasureProduct | null>(null);
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number; table: PdvOpenTable } | null>(null);
   const [toast, setToast] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
   const [tableCloseMenuOpen, setTableCloseMenuOpen] = useState(false);
@@ -448,7 +449,7 @@ export function PdvApp({
     }
     if (action === "details") {
       const peopleLine = snapshot?.settings.tablePeopleEnabled ? `\nPessoas: ${table.people || "-"}` : "";
-      window.alert(`Mesa ${String(table.number).padStart(3, "0")}\nStatus: ${table.status}\nAbertura: ${shortTime(table.openedAt) || "-"}${peopleLine}\nTotal: ${money(table.total)}\nObservacao: ${table.note || "-"}`);
+      setNotice(`Mesa ${String(table.number).padStart(3, "0")}\nStatus: ${table.status}\nAbertura: ${shortTime(table.openedAt) || "-"}${peopleLine}\nTotal: ${money(table.total)}\nObservacao: ${table.note || "-"}`);
       return;
     }
     if (action === "history") {
@@ -946,6 +947,7 @@ export function PdvApp({
           }}
         />
       )}
+      {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       {pendingProduct && snapshot.settings.complementsEnabled && (
         <ComplementModal
           product={pendingProduct.product}
@@ -1808,10 +1810,11 @@ function MoveItemModal({
     .map((row, index) => ({ row, index }))
     .filter((entry) => entry.row.id !== item.id);
   const [referenceId, setReferenceId] = useState(candidates[0]?.row.id || "");
+  const [notice, setNotice] = useState("");
   const confirm = () => {
     const referenceIndex = cart.findIndex((row) => row.id === referenceId);
     if (referenceIndex < 0) {
-      window.alert("Escolha um item de referencia.");
+      setNotice("Escolha um item de referencia.");
       return;
     }
     onConfirm(referenceIndex);
@@ -1844,6 +1847,7 @@ function MoveItemModal({
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" disabled={!candidates.length} onClick={confirm}>Aplicar</button>
         </div>
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
     </div>
   );
@@ -1859,10 +1863,11 @@ function RenameSubtableModal({
   onConfirm: (nextName: string) => void;
 }) {
   const [name, setName] = useState(currentName);
+  const [notice, setNotice] = useState("");
   const confirm = () => {
     const next = name.trim();
     if (!next) {
-      window.alert("Informe um nome para a submesa.");
+      setNotice("Informe um nome para a submesa.");
       return;
     }
     onConfirm(next);
@@ -1889,6 +1894,7 @@ function RenameSubtableModal({
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" onClick={confirm}>Salvar nome</button>
         </div>
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
     </div>
   );
@@ -2021,6 +2027,7 @@ function TransferListModal({
   const [targetTableNumber, setTargetTableNumber] = useState(sourceTableNumber);
   const [targetSubtable, setTargetSubtable] = useState("");
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
   const selectedItems = cart.filter((item) => selectedIds.includes(item.id));
   const selectedTotal = roundMoney(selectedItems.reduce((total, item) => total + transferQuantity(item, quantities[item.id]) * item.unitPrice, 0));
   const targetTable = tables.find((table) => table.number === targetTableNumber);
@@ -2035,7 +2042,7 @@ function TransferListModal({
       return;
     }
     if (targetTableNumber === sourceTableNumber && !targetSubtable.trim()) {
-      window.alert("Escolha outra mesa ou informe uma submesa destino.");
+      setNotice("Escolha outra mesa ou informe uma submesa destino.");
       return;
     }
     setBusy(true);
@@ -2114,6 +2121,7 @@ function TransferListModal({
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
           <button className="pdv-primary-button" disabled={busy || !selectedItems.length} onClick={confirm}>{busy ? "Transferindo..." : "Transferir selecionados"}</button>
         </div>
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
     </div>
   );
@@ -2240,6 +2248,7 @@ function TransferItemModal({
   const [targetSubtable, setTargetSubtable] = useState(item.subtableName || "");
   const [quantityText, setQuantityText] = useState(String(item.quantity).replace(".", ","));
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
   const existingSubtables = [...new Set(tables.find((table) => table.number === targetTableNumber)?.items.map((row) => row.subtableName || "").filter(Boolean) || [])];
   const quantity = Math.min(item.quantity, Math.max(0.01, parseBrazilianNumber(quantityText)));
 
@@ -2249,11 +2258,11 @@ function TransferItemModal({
     }
     const target = tables.find((table) => table.number === targetTableNumber);
     if (!target) {
-      window.alert("Mesa destino nao encontrada.");
+      setNotice("Mesa destino nao encontrada.");
       return;
     }
     if (targetTableNumber === sourceTableNumber && (targetSubtable || "") === (item.subtableName || "")) {
-      window.alert("Escolha outra mesa ou outra submesa.");
+      setNotice("Escolha outra mesa ou outra submesa.");
       return;
     }
     setBusy(true);
@@ -2316,6 +2325,7 @@ function TransferItemModal({
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" disabled={busy} onClick={confirm}>{busy ? "Transferindo..." : "Transferir"}</button>
         </div>
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
     </div>
   );
@@ -2337,6 +2347,7 @@ function QuantityPriceModal({
   const [activeField, setActiveField] = useState<"quantity" | "value">(isKg ? "value" : "quantity");
   const [quantityText, setQuantityText] = useState(isKg ? "1000" : String(defaultQuantity || 1).replace(".", ","));
   const [valueText, setValueText] = useState(isKg ? money(roundMoney(product.price * 1.0)).replace("R$", "").trim() : String(product.price || 0).replace(".", ","));
+  const [notice, setNotice] = useState("");
   const rawQuantity = Math.max(0, parseBrazilianNumber(quantityText));
   const typedValue = Math.max(0, parseBrazilianNumber(valueText));
   const saleQuantity = isKg
@@ -2380,7 +2391,7 @@ function QuantityPriceModal({
   };
   const confirm = () => {
     if (saleQuantity <= 0 || finalPrice <= 0) {
-      window.alert("Informe quantidade e valor maiores que zero.");
+      setNotice("Informe quantidade e valor maiores que zero.");
       return;
     }
     onConfirm({
@@ -2431,6 +2442,7 @@ function QuantityPriceModal({
           <button className="pdv-primary-button" onClick={confirm}><Check size={16} /> OK</button>
           <button className="pdv-danger-button" onClick={onCancel}><X size={16} /> Cancelar</button>
         </div>
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
     </div>
   );
@@ -2948,7 +2960,7 @@ function PdvNoticeModal({ message, onClose }: { message: string; onClose: () => 
           </div>
           <button className="pdv-icon-button" onClick={onClose}><X size={18} /></button>
         </div>
-        <p className="pdv-confirm-message">{message}</p>
+        <p className="pdv-confirm-message pdv-preserve-lines">{message}</p>
         <div className="pdv-action-row">
           <button className="pdv-primary-button" onClick={onClose}>Entendi</button>
         </div>
@@ -3125,6 +3137,7 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
   const today = localDateInputValue();
   const [filters, setFilters] = useState<PdvExportFilters>({ from: today, to: today, payment: "Todos", type: "Todos", status: "Finalizada", table: "" });
   const [exporting, setExporting] = useState(false);
+  const [notice, setNotice] = useState("");
   const sales = filterSales(snapshot.recentSales, { ...filters, query: "" });
   const total = sales.reduce((sum, sale) => sum + sale.total, 0);
   const byPayment = new Map<string, number>();
@@ -3145,7 +3158,7 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
     setExporting(true);
     try {
       const status = await window.caixa.exportPdvSales(filters);
-      window.alert(status.ok ? status.message || "Relatorio PDV exportado." : status.message || "Nao foi possivel exportar.");
+      setNotice(status.ok ? status.message || "Relatorio PDV exportado." : status.message || "Nao foi possivel exportar.");
     } finally {
       setExporting(false);
     }
@@ -3194,6 +3207,7 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
         <ReportList title="Categorias" rows={[...byCategory.entries()].sort((a, b) => b[1] - a[1])} format={money} />
         <ReportList title="Horarios de pico" rows={[...byHour.entries()].sort((a, b) => a[0].localeCompare(b[0]))} format={money} />
       </div>
+      {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
     </section>
   );
 }

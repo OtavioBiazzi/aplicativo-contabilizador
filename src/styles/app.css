@@ -1138,6 +1138,10 @@ th {
   line-height: 1.5;
 }
 
+.pdv-preserve-lines {
+  white-space: pre-line;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

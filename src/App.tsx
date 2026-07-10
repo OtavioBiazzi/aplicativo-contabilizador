@@ -4180,6 +4180,7 @@ function SettingsPanel({
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [capturingShortcut, setCapturingShortcut] = useState<ShortcutAction | null>(null);
   const [newProfileName, setNewProfileName] = useState("");
+  const [settingsConfirm, setSettingsConfirm] = useState<{ title: string; message: string; action: () => void | Promise<void>; confirmLabel?: string; danger?: boolean } | null>(null);
   const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
   const remoteLockedCategoryList: SettingsCategory[] = remoteCustomizationAllowed
     ? ["files", "server", "advanced"]
@@ -4356,15 +4357,7 @@ function SettingsPanel({
     onToast("success", `Perfil ${name} atualizado. Salve as configuracoes para gravar.`);
   };
 
-  const createProfile = () => {
-    const name = newProfileName.trim();
-    if (!name) {
-      onToast("error", "Digite um nome para o novo perfil.");
-      return;
-    }
-    if (draft.profiles[name] && !window.confirm(`O perfil ${name} ja existe. Atualizar com o estado atual?`)) {
-      return;
-    }
+  const commitProfile = (name: string) => {
     setDraft((current) => ({
       ...current,
       activeProfile: name,
@@ -4377,21 +4370,44 @@ function SettingsPanel({
     onToast("success", `Perfil ${name} criado. Salve as configuracoes para gravar.`);
   };
 
+  const createProfile = () => {
+    const name = newProfileName.trim();
+    if (!name) {
+      onToast("error", "Digite um nome para o novo perfil.");
+      return;
+    }
+    if (draft.profiles[name]) {
+      setSettingsConfirm({
+        title: `Atualizar perfil ${name}?`,
+        message: "Ja existe um perfil com esse nome. Ele sera substituido pelos ajustes atuais do rascunho.",
+        confirmLabel: "Atualizar perfil",
+        action: () => commitProfile(name)
+      });
+      return;
+    }
+    commitProfile(name);
+  };
+
   const deleteProfile = (name: string) => {
     if (Object.keys(draft.profiles).length <= 1) {
       onToast("error", "Mantenha pelo menos um perfil.");
       return;
     }
-    if (!window.confirm(`Apagar o perfil ${name}?`)) {
-      return;
-    }
-    setDraft((current) => {
-      const nextProfiles = { ...current.profiles };
-      delete nextProfiles[name];
-      const nextActive = current.activeProfile === name ? Object.keys(nextProfiles)[0] : current.activeProfile;
-      return { ...current, profiles: nextProfiles, activeProfile: nextActive };
+    setSettingsConfirm({
+      title: `Apagar perfil ${name}?`,
+      message: "Esse perfil sera removido do rascunho. As vendas e arquivos nao serao alterados.",
+      confirmLabel: "Apagar perfil",
+      danger: true,
+      action: () => {
+        setDraft((current) => {
+          const nextProfiles = { ...current.profiles };
+          delete nextProfiles[name];
+          const nextActive = current.activeProfile === name ? Object.keys(nextProfiles)[0] : current.activeProfile;
+          return { ...current, profiles: nextProfiles, activeProfile: nextActive };
+        });
+        onToast("info", `Perfil ${name} removido do rascunho.`);
+      }
     });
-    onToast("info", `Perfil ${name} removido do rascunho.`);
   };
 
   const exportSettings = async () => {
@@ -4436,9 +4452,12 @@ function SettingsPanel({
   };
 
   const restoreDataBackup = async (filePath?: string) => {
-    if (!window.confirm("Restaurar este backup? O estado atual sera salvo antes da restauracao.")) {
-      return;
-    }
+    setSettingsConfirm({
+      title: "Restaurar backup?",
+      message: "O estado atual sera salvo antes da restauracao. Depois disso o app volta para os dados do backup escolhido.",
+      confirmLabel: "Restaurar backup",
+      danger: true,
+      action: async () => {
     try {
       const result = await window.caixa.restoreDataBackup(filePath);
       if (!result) {
@@ -4450,6 +4469,8 @@ function SettingsPanel({
     } catch (error) {
       onToast("error", error instanceof Error ? error.message : "Nao foi possivel restaurar backup.");
     }
+      }
+    });
   };
 
   const openDirectory = async (target: "data" | "output") => {
@@ -4569,11 +4590,13 @@ function SettingsPanel({
       return;
     }
     const warnings = settingsChangeWarnings(settings, draft);
-    if (
-      warnings.length &&
-      !window.confirm(`Essas configuracoes alteram ${warnings.join(", ")}. Deseja continuar e salvar?`)
-    ) {
-      onToast("info", "Salvamento cancelado. Revise o rascunho antes de aplicar.");
+    if (warnings.length) {
+      setSettingsConfirm({
+        title: "Salvar configuracoes sensiveis?",
+        message: `Essas configuracoes alteram ${warnings.join(", ")}. Confira antes de aplicar.`,
+        confirmLabel: "Salvar mesmo assim",
+        action: () => onSave(draft)
+      });
       return;
     }
     await onSave(draft);
@@ -5296,7 +5319,70 @@ function SettingsPanel({
           onToast("info", "Alteracoes descartadas.");
         }}>Descartar</button>
       </div>
+      {settingsConfirm && (
+        <SettingsConfirmModal
+          title={settingsConfirm.title}
+          message={settingsConfirm.message}
+          confirmLabel={settingsConfirm.confirmLabel}
+          danger={settingsConfirm.danger}
+          onCancel={() => setSettingsConfirm(null)}
+          onConfirm={async () => {
+            const request = settingsConfirm;
+            setSettingsConfirm(null);
+            await request.action();
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function SettingsConfirmModal({
+  title,
+  message,
+  confirmLabel = "Confirmar",
+  danger = false,
+  onCancel,
+  onConfirm
+}: {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  danger?: boolean;
+  onCancel: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="modal-backdrop">
+      <div className="modal confirmation-modal">
+        <div className="modal-head">
+          <div>
+            <span className="settings-overline">Confirmacao</span>
+            <strong>{title}</strong>
+          </div>
+          <button className="icon-button" onClick={onCancel} disabled={busy}><X size={18} /></button>
+        </div>
+        <p>{message}</p>
+        <div className="modal-actions">
+          <button className="ghost-button" onClick={onCancel} disabled={busy}>Cancelar</button>
+          <button
+            className={danger ? "danger-button" : "primary-button"}
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirm();
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Processando..." : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
