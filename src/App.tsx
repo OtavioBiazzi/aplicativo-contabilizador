@@ -1011,6 +1011,7 @@ export function App() {
   const remoteSessionRef = useRef<RemoteClientSession | null>(null);
   const remoteManualDisconnect = useRef(false);
   const remoteReconnectTimer = useRef<number | null>(null);
+  const remoteReconnectAttempt = useRef(0);
   const autoConnectionAttemptKey = useRef<string | null>(null);
   const combinedEntries = useMemo(() => [...entries].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()), [entries]);
   const todayEntries = useMemo(() => filterEntriesByLocalDate(combinedEntries, currentDateKey), [combinedEntries, currentDateKey]);
@@ -1269,6 +1270,28 @@ export function App() {
     return (text ? JSON.parse(text) : {}) as T;
   };
 
+  const scheduleRemoteReconnect = () => {
+    if (remoteReconnectTimer.current !== null || remoteManualDisconnect.current) {
+      return;
+    }
+    const stored = readStoredRemoteSession();
+    if (!stored) {
+      return;
+    }
+    remoteReconnectAttempt.current += 1;
+    const delay = Math.min(15000, 1000 * 2 ** Math.min(4, remoteReconnectAttempt.current - 1));
+    setRemoteMessage(`Servidor desconectado. Tentando reconectar em ${Math.ceil(delay / 1000)}s...`);
+    remoteReconnectTimer.current = window.setTimeout(() => {
+      remoteReconnectTimer.current = null;
+      void connectRemoteClient(stored.baseUrl, stored.password, stored.deviceName, { quiet: true, auto: true })
+        .then((connected) => {
+          if (!connected) {
+            scheduleRemoteReconnect();
+          }
+        });
+    }, delay);
+  };
+
   const openRemoteSocket = (session: RemoteClientSession) => {
     if (remoteReconnectTimer.current !== null) {
       window.clearTimeout(remoteReconnectTimer.current);
@@ -1280,7 +1303,10 @@ export function App() {
     }
     const wsUrl = `${session.baseUrl.replace(/^http/i, "ws")}/sync?password=${encodeURIComponent(session.password)}&device=${encodeURIComponent(session.deviceName)}`;
     remoteSocket.current = new WebSocket(wsUrl);
-    remoteSocket.current.onopen = () => setRemoteMessage("Tempo real ativo.");
+    remoteSocket.current.onopen = () => {
+      remoteReconnectAttempt.current = 0;
+      setRemoteMessage("Tempo real ativo.");
+    };
     remoteSocket.current.onmessage = (event) => {
       try {
         const message = JSON.parse(String(event.data || "{}")) as { type?: string };
@@ -1303,22 +1329,8 @@ export function App() {
         return;
       }
       remoteSocket.current = null;
-      remoteSessionRef.current = null;
-      setRemoteSession(null);
-      setRemoteMessage("Servidor desconectado. Este app voltou para o modo local.");
-      showToast("info", "O servidor foi desligado ou ficou indisponivel. Cliente voltou ao modo local.");
-      if (IS_FLOATING_WINDOW && readStoredRemoteSession()) {
-        remoteReconnectTimer.current = window.setTimeout(() => {
-          remoteReconnectTimer.current = null;
-          const stored = readStoredRemoteSession();
-          if (!stored || remoteSocket.current || remoteManualDisconnect.current) {
-            return;
-          }
-          void ensureRemoteSession().catch((error) => {
-            setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel reconectar.");
-          });
-        }, 1200);
-      }
+      setRemoteMessage("Servidor desconectado. As mesas permanecem vinculadas ao servidor enquanto reconecta.");
+      scheduleRemoteReconnect();
     };
   };
 
@@ -1377,6 +1389,7 @@ export function App() {
           view: false,
           create: false,
           manageTables: false,
+          manageProducts: false,
           edit: false,
           delete: false,
           viewEntryValues: false,
@@ -1401,6 +1414,7 @@ export function App() {
       };
       setRemoteSession(connectedSession);
       remoteSessionRef.current = connectedSession;
+      remoteReconnectAttempt.current = 0;
       writeStoredRemoteSession({ baseUrl, password, deviceName: connectedSession.deviceName });
       openRemoteSocket(connectedSession);
       if (!options.quiet) {
@@ -1434,6 +1448,7 @@ export function App() {
     remoteSocket.current = null;
     remoteSessionRef.current = null;
     setRemoteSession(null);
+    remoteReconnectAttempt.current = 0;
     setRemoteMessage("");
     writeStoredRemoteSession(null);
     showToast("info", "Cliente remoto desconectado.");
@@ -3913,7 +3928,7 @@ function ServerPanel({
             <span>Controla o que a pagina remota pode fazer</span>
           </div>
           <div className="permission-box permission-grid">
-            {(["view", "create", "manageTables", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
+            {(["view", "create", "manageTables", "manageProducts", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -3985,6 +4000,7 @@ function RemoteClientWorkspace({
     session.permissions.view ? "Visualizar" : "",
     session.permissions.create ? "Registrar" : "",
     session.permissions.manageTables ? "Gerenciar mesas" : "Mesas bloqueadas",
+    session.permissions.manageProducts ? "Gerenciar produtos" : "Produtos bloqueados",
     session.permissions.edit ? "Editar" : "",
     session.permissions.delete ? "Apagar" : "",
     session.permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
@@ -5048,7 +5064,7 @@ function SettingsPanel({
           <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
           <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
           <div className="permission-box permission-grid">
-            {(["view", "create", "manageTables", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
+            {(["view", "create", "manageTables", "manageProducts", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -5403,6 +5419,7 @@ function permissionLabel(key: keyof ServerPermissions): string {
     view: "Somente visualizar",
     create: "Registrar vendas",
     manageTables: "Gerenciar mesas e fechamentos",
+    manageProducts: "Gerenciar produtos e ajustes do PDV",
     edit: "Editar lancamentos",
     delete: "Apagar lancamentos",
     viewEntryValues: "Ver valores das vendas",

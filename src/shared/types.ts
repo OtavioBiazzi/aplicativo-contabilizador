@@ -113,6 +113,7 @@ export interface ServerPermissions {
   view: boolean;
   create: boolean;
   manageTables: boolean;
+  manageProducts: boolean;
   edit: boolean;
   delete: boolean;
   viewEntryValues: boolean;

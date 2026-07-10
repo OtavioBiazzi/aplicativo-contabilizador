@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
 import { PdvExporter } from "../dist-electron/electron/pdvExporter.js";
@@ -146,6 +146,14 @@ const updatedPaymentSale = await store.updateSalePayments(sale.id, [{ id: crypto
 if (updatedPaymentSale.payments[0]?.method !== "Pix" || updatedPaymentSale.payments[0]?.amount !== 12) {
   throw new Error("Alteracao de forma de pagamento nao foi persistida corretamente.");
 }
+try {
+  await store.updateSalePayments(sale.id, [{ id: crypto.randomUUID(), method: "Pix", amount: 13 }]);
+  throw new Error("Pagamento acima do total foi aceito indevidamente.");
+} catch (error) {
+  if (!String(error?.message || error).includes("Pagamentos precisam somar")) {
+    throw error;
+  }
+}
 
 const backupBase64 = await store.exportBackupBase64();
 await store.saveProduct({ ...baseProduct, name: "Produto alterado temporariamente" });
@@ -206,6 +214,21 @@ const integratedZip = await JSZip.loadAsync(readFileSync(integratedExportStatus.
 const integratedSalesSheet = await integratedZip.file("xl/worksheets/sheet2.xml").async("string");
 if (!integratedSalesSheet.includes("Venda antiga smoke")) {
   throw new Error("Exportacao do PDV nao incluiu o lancamento antigo integrado.");
+}
+
+const corruptDir = path.join(tmp, "corrupt");
+mkdirSync(corruptDir, { recursive: true });
+writeFileSync(path.join(corruptDir, "pdv.sqlite"), "arquivo invalido");
+try {
+  await new PdvStore(corruptDir).initialize();
+  throw new Error("Banco corrompido foi aberto como banco novo.");
+} catch (error) {
+  if (!String(error?.message || error).includes("backup foi preservado")) {
+    throw error;
+  }
+}
+if (!readdirSync(corruptDir).some((file) => file.startsWith("pdv-corrompido-"))) {
+  throw new Error("Backup do banco corrompido nao foi preservado.");
 }
 
 rmSync(tmp, { recursive: true, force: true });

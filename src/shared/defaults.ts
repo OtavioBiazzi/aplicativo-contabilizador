@@ -160,6 +160,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
         view: true,
         create: true,
         manageTables: true,
+        manageProducts: true,
         edit: false,
         delete: false,
         viewEntryValues: true,

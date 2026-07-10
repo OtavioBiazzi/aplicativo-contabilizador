@@ -913,8 +913,10 @@ function PdvSaleScreen(props: {
   const [movingItem, setMovingItem] = useState<{ item: PdvCartItem; after: boolean } | null>(null);
   const [removeRequest, setRemoveRequest] = useState<PdvCartItem | null>(null);
   const [cancelTableRequest, setCancelTableRequest] = useState(false);
+  const [newSubtableName, setNewSubtableName] = useState("");
   const activeItemId = props.selectedItemIds?.[0] || props.cart.at(-1)?.id || "";
   const activeItem = props.cart.find((item) => item.id === activeItemId) || props.cart.at(-1) || null;
+  const subtableNames = [...new Set(props.cart.map((item) => item.subtableName || "").filter(Boolean))];
 
   useEffect(() => {
     if (!props.setSelectedItemIds || !props.cart.length) {
@@ -998,6 +1000,30 @@ function PdvSaleScreen(props: {
             <button title="Repetir ultimo produto" disabled={!props.cart.length} onClick={repeatLastItem}>Repetir</button>
           </div>
         </div>
+
+        {props.activeTableNumber && props.settings.subtablesEnabled && (
+          <div className="pdv-subtable-bar">
+            <span>Conta atual</span>
+            <button className={!props.currentSubtable ? "active" : ""} onClick={() => props.setCurrentSubtable?.("")}>Mesa principal</button>
+            {subtableNames.map((name) => (
+              <button className={props.currentSubtable === name ? "active" : ""} key={name} onClick={() => props.setCurrentSubtable?.(name)}>{name}</button>
+            ))}
+            <input
+              value={newSubtableName}
+              onChange={(event) => setNewSubtableName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && newSubtableName.trim()) {
+                  props.setCurrentSubtable?.(newSubtableName.trim());
+                  setNewSubtableName("");
+                }
+              }}
+              placeholder="Nova submesa"
+            />
+            <button className="pdv-ghost-button" disabled={!newSubtableName.trim()} onClick={() => { props.setCurrentSubtable?.(newSubtableName.trim()); setNewSubtableName(""); }}>Criar</button>
+            {props.currentSubtable && props.onCloseSubtable && <button className="pdv-ghost-button" onClick={() => props.onCloseSubtable?.(props.currentSubtable || "")}>Fechar submesa</button>}
+            {props.currentSubtable && props.onDeleteSubtable && <button className="pdv-ghost-button danger" onClick={() => props.onDeleteSubtable?.(props.currentSubtable || "")}>Apagar</button>}
+          </div>
+        )}
 
         <div className="pdv-search">
           <Search size={18} />
@@ -1191,13 +1217,19 @@ function PdvSaleScreen(props: {
           />
         )}
         {cancelTableRequest && (
-          <PdvConfirmModal
-            title={props.activeTableNumber ? "Cancelar itens da mesa?" : "Limpar carrinho?"}
-            message={props.activeTableNumber ? "Todos os itens ainda abertos serao removidos da mesa." : "Todos os itens do carrinho serao removidos."}
+          <CancelItemsModal
+            isTable={Boolean(props.activeTableNumber)}
+            cart={props.cart}
             onCancel={() => setCancelTableRequest(false)}
-            onConfirm={() => {
+            onClear={() => {
               props.setCart([]);
               props.setSelectedItemIds?.([]);
+              setCancelTableRequest(false);
+            }}
+            onRemove={(item) => {
+              const fallback = props.cart.filter((row) => row.id !== item.id).at(-1);
+              props.setCart((current) => current.filter((row) => row.id !== item.id));
+              props.setSelectedItemIds?.(fallback ? [fallback.id] : []);
               setCancelTableRequest(false);
             }}
           />
@@ -2710,6 +2742,50 @@ function ContextMenu({ x, y, children, onClose }: { x: number; y: number; childr
   return (
     <div className="pdv-context-menu" style={{ left: safeX, top: safeY }} onClick={(event) => event.stopPropagation()}>
       {children}
+    </div>
+  );
+}
+
+function CancelItemsModal({
+  isTable,
+  cart,
+  onCancel,
+  onClear,
+  onRemove
+}: {
+  isTable: boolean;
+  cart: PdvCartItem[];
+  onCancel: () => void;
+  onClear: () => void;
+  onRemove: (item: PdvCartItem) => void;
+}) {
+  const [selectedId, setSelectedId] = useState(cart[0]?.id || "");
+  const selected = cart.find((item) => item.id === selectedId) || null;
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+      <section className="pdv-payment-modal pdv-confirm-modal pdv-cancel-items-modal">
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Cancelar</span>
+            <h1>{isTable ? "O que deseja cancelar?" : "Limpar carrinho?"}</h1>
+            <p>{isTable ? "Cancele a mesa inteira ou remova somente um item da conta." : "Todos os itens do carrinho serao removidos."}</p>
+          </div>
+          <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
+        </div>
+        {isTable && (
+          <label className="pdv-wide-field">
+            <span>Item especifico</span>
+            <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
+              {cart.map((item, index) => <option key={item.id} value={item.id}>{index + 1}. {item.productName} - {money(item.total)}</option>)}
+            </select>
+          </label>
+        )}
+        <div className="pdv-action-row pdv-cancel-choice-row">
+          <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
+          {isTable && <button className="pdv-ghost-button" disabled={!selected} onClick={() => selected && onRemove(selected)}>Remover item</button>}
+          <button className="pdv-primary-button" onClick={onClear}>{isTable ? "Cancelar mesa inteira" : "Limpar carrinho"}</button>
+        </div>
+      </section>
     </div>
   );
 }

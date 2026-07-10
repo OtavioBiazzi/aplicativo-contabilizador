@@ -168,7 +168,7 @@ export class LocalServer {
       response.json(await this.options.getPdvSnapshot());
     });
 
-    app.patch("/api/pdv/products", this.authorize("edit"), async (request, response) => {
+    app.patch("/api/pdv/products", this.authorize("manageProducts"), async (request, response) => {
       try {
         const ids = Array.isArray(request.body?.ids) ? request.body.ids.map(String) : [];
         await this.options.updatePdvProducts(ids, request.body?.patch || {});
@@ -180,7 +180,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/categories", this.authorize("create"), async (request, response) => {
+    app.post("/api/pdv/categories", this.authorize("manageProducts"), async (request, response) => {
       try {
         const category = await this.options.savePdvCategory(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -191,7 +191,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/products", this.authorize("create"), async (request, response) => {
+    app.post("/api/pdv/products", this.authorize("manageProducts"), async (request, response) => {
       try {
         const product = await this.options.savePdvProduct(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -202,7 +202,7 @@ export class LocalServer {
       }
     });
 
-    app.patch("/api/pdv/settings", this.authorize("edit"), async (request, response) => {
+    app.patch("/api/pdv/settings", this.authorize("manageProducts"), async (request, response) => {
       try {
         const settings = await this.options.savePdvSettings(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -213,7 +213,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/preset/cose", this.authorize("create"), async (_request, response) => {
+    app.post("/api/pdv/preset/cose", this.authorize("manageProducts"), async (_request, response) => {
       try {
         const result = await this.options.importPdvPreset();
         this.broadcast({ type: "pdv-changed" });
@@ -790,6 +790,8 @@ function remoteClientHtml(port: number): string {
       const rows = [
         permissions.view ? "Visualizar" : "",
         permissions.create ? "Registrar" : "",
+        permissions.manageTables ? "Gerenciar mesas" : "Mesas bloqueadas",
+        permissions.manageProducts ? "Gerenciar produtos" : "Produtos bloqueados",
         permissions.edit ? "Editar" : "",
         permissions.delete ? "Apagar" : "",
         permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
@@ -873,6 +875,8 @@ function remoteClientHtml(port: number): string {
       applyClientPolicy();
       qs("#permissionBadge").textContent =
         (permissions.create ? "Registra" : "So visualiza") +
+        (permissions.manageTables ? " + mesas" : " | sem mesas") +
+        (permissions.manageProducts ? " + produtos" : " | sem produtos") +
         (permissions.edit ? " + edita" : "") +
         (permissions.delete ? " + apaga" : "") +
         (permissions.viewEntryValues ? "" : " | sem valores") +

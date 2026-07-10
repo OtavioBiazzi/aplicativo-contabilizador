@@ -19,6 +19,7 @@ settings.server.permissions = {
   view: true,
   create: true,
   manageTables: true,
+  manageProducts: true,
   edit: true,
   delete: true,
   viewEntryValues: true,
@@ -89,6 +90,12 @@ const item = {
   discount: 0,
   total: 12
 };
+
+const productUpdate = await fetch("http://127.0.0.1:43991/api/pdv/products", { method: "PATCH", headers, body: JSON.stringify({ ids: [product.id], patch: { favorite: true } }) });
+if (!productUpdate.ok) throw new Error(`Cliente nao conseguiu atualizar produto no servidor: ${await productUpdate.text()}`);
+if (!(await pdvStore.getSnapshot()).products.find((entry) => entry.id === product.id)?.favorite) {
+  throw new Error("Alteracao remota de produto nao foi persistida no servidor.");
+}
 
 const open = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });
 if (!open.ok) throw new Error(`Cliente nao conseguiu abrir mesa no servidor: ${await open.text()}`);

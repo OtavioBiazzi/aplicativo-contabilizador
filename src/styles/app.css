@@ -884,6 +884,48 @@ h3 {
   font-size: 0.95rem;
 }
 
+.pdv-subtable-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 82%, transparent);
+}
+
+.pdv-subtable-bar > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.pdv-subtable-bar > button:not(.pdv-ghost-button) {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel);
+}
+
+.pdv-subtable-bar > button.active {
+  color: var(--on-accent);
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.pdv-subtable-bar input {
+  width: 132px;
+  min-height: 32px;
+  padding: 5px 8px;
+}
+
+.pdv-cancel-choice-row {
+  flex-wrap: wrap;
+}
+
 .cash-result {
   display: grid;
   gap: 10px;

@@ -43,13 +43,41 @@ export class PdvStore {
     this.dbFilePath = path.join(this.dataDirectory, "pdv.sqlite");
     const wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
     this.sql = await initSqlJs({ locateFile: () => wasmPath });
+    let existingDatabase = false;
     try {
+      await fs.access(this.dbFilePath);
+      existingDatabase = true;
+    } catch {
+      existingDatabase = false;
+    }
+    try {
+      if (!existingDatabase) {
+        throw new Error("Banco PDV ainda nao existe.");
+      }
       this.db = new this.sql.Database(await fs.readFile(this.dbFilePath));
       await this.backupSqlite("antes-migracao");
-    } catch {
+    } catch (error) {
+      if (existingDatabase) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const corruptPath = path.join(this.dataDirectory, `pdv-corrompido-${timestamp}.sqlite.bak`);
+        await fs.copyFile(this.dbFilePath, corruptPath).catch(() => undefined);
+        throw new Error(`O banco PDV nao pode ser aberto. Um backup foi preservado em ${corruptPath}.`);
+      }
       this.db = new this.sql.Database();
     }
-    this.migrate();
+    try {
+      this.migrate();
+    } catch (error) {
+      if (existingDatabase) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const corruptPath = path.join(this.dataDirectory, `pdv-corrompido-${timestamp}.sqlite.bak`);
+        await fs.copyFile(this.dbFilePath, corruptPath).catch(() => undefined);
+        this.db?.close();
+        this.db = null;
+        throw new Error(`O banco PDV nao pode ser migrado. Um backup foi preservado em ${corruptPath}.`);
+      }
+      throw error;
+    }
     await this.persist();
     await this.backupSqliteDaily("automatico");
   }
@@ -70,12 +98,14 @@ export class PdvStore {
     if (!bytes.length || !this.sql) {
       throw new Error("Backup do PDV invalido.");
     }
+    await this.backupSqlite("antes-restauracao");
     const previous = this.requireDb();
     const restored = new this.sql.Database(bytes);
     this.db = restored;
     previous.close();
     this.migrate();
     await this.persist();
+    await this.backupSqliteDaily("pos-restauracao");
   }
 
   async getSnapshot(): Promise<PdvSnapshot> {
@@ -284,18 +314,24 @@ export class PdvStore {
   }
 
   async openTable(tableNumber: number, people = 1, note = ""): Promise<void> {
+    tableNumber = this.normalizeTableNumber(tableNumber);
+    const safePeople = Number.isFinite(people) ? Math.max(1, Math.floor(people)) : 1;
     const db = this.requireDb();
     const id = `mesa-${tableNumber}`;
     db.run(
       `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
        VALUES (?, ?, 'Ocupada', ?, ?, ?)
        ON CONFLICT(table_number) DO UPDATE SET status='Ocupada', opened_at=COALESCE(opened_at, excluded.opened_at), people=excluded.people, note=excluded.note`,
-      [id, tableNumber, new Date().toISOString(), Math.max(1, people), note]
+      [id, tableNumber, new Date().toISOString(), safePeople, String(note || "").trim()]
     );
     await this.persist();
   }
 
   async setTableStatus(tableNumber: number, status: PdvTableStatus): Promise<void> {
+    tableNumber = this.normalizeTableNumber(tableNumber);
+    if (!["Livre", "Ocupada", "Fechamento", "Reservada"].includes(status)) {
+      throw new Error("Status de mesa invalido.");
+    }
     const db = this.requireDb();
     db.run(
       `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
@@ -307,6 +343,7 @@ export class PdvStore {
   }
 
   async saveTableItems(tableNumber: number, items: PdvCartItem[]): Promise<void> {
+    tableNumber = this.normalizeTableNumber(tableNumber);
     validateCartItems(items);
     const db = this.requireDb();
     if (!items.length) {
@@ -369,6 +406,7 @@ export class PdvStore {
   }
 
   async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Este computador"): Promise<PdvSale> {
+    tableNumber = this.normalizeTableNumber(tableNumber);
     const table = this.getTables().find((item) => item.number === tableNumber);
     if (!table || !table.items.length) {
       throw new Error("Mesa sem itens para fechar.");
@@ -390,6 +428,7 @@ export class PdvStore {
   }
 
   async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Este computador"): Promise<PdvSale> {
+    tableNumber = this.normalizeTableNumber(tableNumber);
     const table = this.getTables().find((item) => item.number === tableNumber);
     if (!table || !table.items.length) {
       throw new Error("Mesa sem itens para fechar parcialmente.");
@@ -767,7 +806,8 @@ export class PdvStore {
       complementsEnabled: parseBooleanSetting(map.get("complements_enabled"), DEFAULT_PDV_SETTINGS.complementsEnabled),
       subtablesEnabled: parseBooleanSetting(map.get("subtables_enabled"), DEFAULT_PDV_SETTINGS.subtablesEnabled),
       tablePeopleEnabled: parseBooleanSetting(map.get("table_people_enabled"), DEFAULT_PDV_SETTINGS.tablePeopleEnabled),
-      activePreset: map.get("active_preset") || DEFAULT_PDV_SETTINGS.activePreset
+      activePreset: map.get("active_preset") || DEFAULT_PDV_SETTINGS.activePreset,
+      gridColumns: Math.max(4, Math.min(7, parseIntegerSetting(map.get("grid_columns"), DEFAULT_PDV_SETTINGS.gridColumns || 5)))
     };
   }
 
@@ -822,6 +862,15 @@ export class PdvStore {
       throw new Error("Banco PDV ainda nao foi inicializado.");
     }
     return this.db;
+  }
+
+  private normalizeTableNumber(value: number): number {
+    const tableNumber = Number(value);
+    const maxTables = Math.max(1, Math.min(300, this.getSettings().tableCount || DEFAULT_PDV_SETTINGS.tableCount));
+    if (!Number.isInteger(tableNumber) || tableNumber < 1 || tableNumber > maxTables) {
+      throw new Error(`Mesa invalida. Informe um numero entre 1 e ${maxTables}.`);
+    }
+    return tableNumber;
   }
 }
 
@@ -940,13 +989,26 @@ function validateCartItems(items: PdvCartItem[]) {
 
 function normalizePaymentsForTotal(payments: PdvPayment[], total: number): PdvPayment[] {
   const normalized = payments.length
-    ? payments.map((payment) => ({
-        ...payment,
-        id: payment.id || randomUUID(),
-        amount: roundMoney(payment.amount),
-        received: payment.received === undefined ? undefined : roundMoney(payment.received),
-        change: roundMoney(payment.change || 0)
-      }))
+    ? payments.map((payment) => {
+        const amount = roundMoney(Number(payment.amount));
+        const received = payment.received === undefined ? undefined : roundMoney(Number(payment.received));
+        if (!Number.isFinite(amount) || amount < 0) {
+          throw new Error(`Valor de pagamento invalido em ${payment.method || "metodo"}.`);
+        }
+        if (received !== undefined && (!Number.isFinite(received) || received < 0)) {
+          throw new Error("Valor recebido invalido.");
+        }
+        if (payment.method === "Dinheiro" && received !== undefined && received < amount - 0.01) {
+          throw new Error("O valor recebido em dinheiro nao pode ser menor que o pagamento.");
+        }
+        return {
+          ...payment,
+          id: payment.id || randomUUID(),
+          amount,
+          received,
+          change: payment.method === "Dinheiro" && received !== undefined ? roundMoney(Math.max(0, received - amount)) : 0
+        };
+      })
     : [{ id: randomUUID(), method: "Nao definido" as const, amount: roundMoney(total) }];
   const sum = roundMoney(normalized.reduce((value, payment) => value + payment.amount, 0));
   if (Math.abs(sum - roundMoney(total)) > 0.01) {
