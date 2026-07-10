@@ -112,6 +112,7 @@ export interface EntryDraft {
 export interface ServerPermissions {
   view: boolean;
   create: boolean;
+  manageTables: boolean;
   edit: boolean;
   delete: boolean;
   viewEntryValues: boolean;

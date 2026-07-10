@@ -1376,6 +1376,7 @@ export function App() {
         permissions: {
           view: false,
           create: false,
+          manageTables: false,
           edit: false,
           delete: false,
           viewEntryValues: false,
@@ -3912,7 +3913,7 @@ function ServerPanel({
             <span>Controla o que a pagina remota pode fazer</span>
           </div>
           <div className="permission-box permission-grid">
-            {(["view", "create", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
+            {(["view", "create", "manageTables", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -3983,6 +3984,7 @@ function RemoteClientWorkspace({
   const permissionBadges = [
     session.permissions.view ? "Visualizar" : "",
     session.permissions.create ? "Registrar" : "",
+    session.permissions.manageTables ? "Gerenciar mesas" : "Mesas bloqueadas",
     session.permissions.edit ? "Editar" : "",
     session.permissions.delete ? "Apagar" : "",
     session.permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
@@ -5018,7 +5020,7 @@ function SettingsPanel({
           <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
           <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
           <div className="permission-box permission-grid">
-            {(["view", "create", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
+            {(["view", "create", "manageTables", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -5372,6 +5374,7 @@ function permissionLabel(key: keyof ServerPermissions): string {
   return {
     view: "Somente visualizar",
     create: "Registrar vendas",
+    manageTables: "Gerenciar mesas e fechamentos",
     edit: "Editar lancamentos",
     delete: "Apagar lancamentos",
     viewEntryValues: "Ver valores das vendas",

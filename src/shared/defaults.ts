@@ -156,6 +156,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
       permissions: {
         view: true,
         create: true,
+        manageTables: true,
         edit: false,
         delete: false,
         viewEntryValues: true,

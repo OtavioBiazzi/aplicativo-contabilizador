@@ -224,7 +224,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/tables/:number/open", this.authorize("create"), async (request, response) => {
+    app.post("/api/pdv/tables/:number/open", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
         await this.options.openPdvTable(tableNumber, Number(request.body?.people || 1), String(request.body?.note || ""));
@@ -236,7 +236,7 @@ export class LocalServer {
       }
     });
 
-    app.patch("/api/pdv/tables/:number/status", this.authorize("edit"), async (request, response) => {
+    app.patch("/api/pdv/tables/:number/status", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
         await this.options.setPdvTableStatus(tableNumber, request.body?.status);
@@ -248,7 +248,7 @@ export class LocalServer {
       }
     });
 
-    app.put("/api/pdv/tables/:number/items", this.authorize("edit"), async (request, response) => {
+    app.put("/api/pdv/tables/:number/items", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
         await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : []);
@@ -260,7 +260,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/tables/:number/close", this.authorize("create"), async (request, response) => {
+    app.post("/api/pdv/tables/:number/close", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
         const device = String(request.header("x-device-name") || "Cliente remoto");
@@ -273,7 +273,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/tables/:number/partial", this.authorize("create"), async (request, response) => {
+    app.post("/api/pdv/tables/:number/partial", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
         const sale = await this.options.savePdvTablePartial(

@@ -115,7 +115,7 @@ async function remotePdvRequest<T>(session: PdvRemoteSession, path: string, opti
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data?.error || "Nao foi possivel sincronizar com o servidor.");
+    throw new Error(`${data?.error || "Nao foi possivel sincronizar com o servidor."} (HTTP ${response.status})`);
   }
   return data as T;
 }
@@ -230,8 +230,9 @@ export function PdvApp({
           await savePdvTableItems(activeTable.number, tableCart);
           setTableSaveState("saved");
           await load();
-        } catch {
+        } catch (error) {
           setTableSaveState("error");
+          setToast(error instanceof Error ? error.message : "Nao foi possivel salvar a mesa no servidor.");
         }
       })();
     }, 180);
@@ -303,26 +304,31 @@ export function PdvApp({
   };
 
   const openTable = async (table: PdvOpenTable) => {
-    if (table.status === "Livre") {
-      await openPdvTable(table.number, 1, "");
-      const fresh = (await getPdvSnapshot()).tables.find((item) => item.number === table.number);
-      const opened = fresh || { ...table, status: "Ocupada" as PdvTableStatus, openedAt: new Date().toISOString(), people: 1, note: "", items: [] };
-      setActiveTable(opened);
-      setTableCart(opened.items);
-      setTablePeople(opened.people || 1);
-      setTableNote(opened.note || "");
+    try {
+      if (table.status === "Livre") {
+        await openPdvTable(table.number, 1, "");
+        const fresh = (await getPdvSnapshot()).tables.find((item) => item.number === table.number);
+        const opened = fresh || { ...table, status: "Ocupada" as PdvTableStatus, openedAt: new Date().toISOString(), people: 1, note: "", items: [] };
+        setActiveTable(opened);
+        setTableCart(opened.items);
+        setTablePeople(opened.people || 1);
+        setTableNote(opened.note || "");
+        setTableSaveState("idle");
+        setSelectedTableItemIds([]);
+        setCurrentSubtable("");
+        return;
+      }
+      setActiveTable(table);
+      setTableCart(table.items);
+      setTablePeople(table.people || 1);
+      setTableNote(table.note || "");
       setTableSaveState("idle");
       setSelectedTableItemIds([]);
       setCurrentSubtable("");
-      return;
+    } catch (error) {
+      setTableSaveState("error");
+      setToast(error instanceof Error ? error.message : "Nao foi possivel abrir a mesa no servidor.");
     }
-    setActiveTable(table);
-    setTableCart(table.items);
-    setTablePeople(table.people || 1);
-    setTableNote(table.note || "");
-    setTableSaveState("idle");
-    setSelectedTableItemIds([]);
-    setCurrentSubtable("");
   };
 
   const runTableAction = async (action: string, table: PdvOpenTable) => {
