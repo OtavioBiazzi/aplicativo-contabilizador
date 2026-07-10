@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Eye,
   FileSpreadsheet,
+  FolderOpen,
   History,
   KeyRound,
   Laptop,
@@ -1634,6 +1635,23 @@ export function App() {
     }
   }, [remoteSession?.clientPolicy.operationMode, settings?.operationMode, activeTab]);
 
+  useEffect(() => {
+    if (IS_FLOATING_WINDOW || !settings) {
+      return;
+    }
+    const mode = remoteSession?.clientPolicy.operationMode || settings.operationMode;
+    if (mode === "legacy" && !pinned) {
+      void window.caixa.setPinned(true, {
+        opacity: settings.floating.opacity,
+        borderless: settings.floating.borderless,
+        lockPosition: settings.floating.lockPosition
+      }).then(setPinnedState);
+    }
+    if (mode === "pdv" && pinned) {
+      void window.caixa.setPinned(false).then(setPinnedState);
+    }
+  }, [settings?.operationMode, remoteSession?.clientPolicy.operationMode]);
+
   if (!settings || !server) {
     return (
       <div className="boot-screen">
@@ -1855,7 +1873,13 @@ export function App() {
         )}
 
         {activeTab === "reports" && (
-            <ReportsPanel entries={remoteSession ? displayEntries : combinedEntries} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onExport={async () => {
+            <ReportsPanel entries={remoteSession ? displayEntries : combinedEntries} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
+              if (remoteSession) {
+                showToast("info", "A pasta de Excel deve ser aberta no computador servidor.");
+                return;
+              }
+              await window.caixa.openOutputDirectory();
+            }} onExport={async () => {
             if (remoteSession) {
               showToast("info", "Exportacao de relatorio remoto fica no computador servidor.");
               return;
@@ -2751,11 +2775,13 @@ function HistoryPanel({
   const [type, setType] = useState("Todos");
   const [statusFilter, setStatusFilter] = useState("visiveis");
   const [date, setDate] = useState("");
+  const [originFilter, setOriginFilter] = useState("Todos");
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const [details, setDetails] = useState<PdvSale | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ entry: LedgerEntry; permanent: boolean } | null>(null);
   const [visibleCount, setVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const deferredQuery = useDeferredValue(query);
+  const originOptions = useMemo(() => ["Todos", ...new Set(entries.map((entry) => entry.originDevice).filter(Boolean))], [entries]);
 
   useEffect(() => {
     if (!focusDate) {
@@ -2780,9 +2806,10 @@ function HistoryPanel({
         (statusFilter === "cancelled" && entry.status === "cancelled") ||
         (statusFilter === "deleted" && entry.status === "deleted");
       const sameDate = !date || getLocalDateKey(entry.createdAt) === date;
-      return sameType && sameStatus && sameDate && haystack.includes(search);
+      const sameOrigin = originFilter === "Todos" || entry.originDevice === originFilter;
+      return sameType && sameStatus && sameDate && sameOrigin && haystack.includes(search);
     });
-  }, [entries, deferredQuery, type, statusFilter, date]);
+  }, [entries, deferredQuery, type, statusFilter, date, originFilter]);
   const visibleRows = filtered.slice(0, visibleCount);
 
   useEffect(() => {
@@ -2827,12 +2854,19 @@ function HistoryPanel({
           <span>Data</span>
           <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
         </label>
+        <label className="field">
+          <span>Origem</span>
+          <select value={originFilter} onChange={(event) => setOriginFilter(event.target.value)}>
+            {originOptions.map((origin) => <option key={origin}>{origin}</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
+              <th>Data</th>
               <th>Hora</th>
               <th>Tipo</th>
               <th>Descricao</th>
@@ -2849,6 +2883,7 @@ function HistoryPanel({
               const { time } = formatDateTime(entry.createdAt);
               return (
                 <tr key={entry.id} className={entry.status !== "active" ? "muted-row" : ""}>
+                  <td>{formatDateTime(entry.createdAt).date}</td>
                   <td>{time}</td>
                   <td>{entry.customType || entry.type}</td>
                   <td>{entry.description}</td>
@@ -3181,6 +3216,7 @@ function ReportsPanel({
   canViewEntryValues = true,
   focusPeriod,
   onFocusConsumed,
+  onOpenOutputDirectory,
   onExport,
   onExportFiltered
 }: {
@@ -3193,6 +3229,7 @@ function ReportsPanel({
   canViewEntryValues?: boolean;
   focusPeriod?: ReportFocusPeriod | null;
   onFocusConsumed?: () => void;
+  onOpenOutputDirectory: () => Promise<void>;
   onExport: () => Promise<void>;
   onExportFiltered: (ids: string[], label: string) => Promise<void>;
 }) {
@@ -3309,6 +3346,7 @@ function ReportsPanel({
             <input type="checkbox" checked={showReportTotals} disabled={!canViewTotals} onChange={(event) => setShowSensitive(event.target.checked)} />
             {canViewTotals ? "Mostrar totais sensiveis" : "Totais bloqueados pelo servidor"}
           </label>
+          <button className="ghost-button" onClick={onOpenOutputDirectory} disabled={remoteClientActive}><FolderOpen size={18} /> Pasta do Excel</button>
           <button className="ghost-button" onClick={onExport} disabled={remoteClientActive}><FileSpreadsheet size={18} /> Planilha geral</button>
           <button className="primary-button" onClick={() => onExportFiltered(periodEntries.map((entry) => entry.id), exportLabel)} disabled={remoteClientActive}><Download size={18} /> Exportar filtrado</button>
         </div>

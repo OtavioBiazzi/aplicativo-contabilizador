@@ -49,7 +49,7 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
     paidWith: sale.payments.reduce((total, payment) => total + (payment.received || payment.amount), 0),
     change: sale.payments.reduce((total, payment) => total + (payment.change || 0), 0),
     observations: `${sale.observations ? `${sale.observations} ` : ""}${sale.status === "Parcial" ? "Fechamento parcial de mesa. " : ""}${itemNames ? `Itens: ${itemNames}. ` : ""}${paymentsDescription}`,
-    originDevice: "PDV local",
+    originDevice: sale.originDevice || "PDV local",
     status: sale.status === "Cancelada" ? "cancelled" : sale.status === "deleted" ? "deleted" : "active",
     customType: sale.status === "Parcial" ? "Mesa parcial" : sale.type,
     sourceSaleId: sale.id,

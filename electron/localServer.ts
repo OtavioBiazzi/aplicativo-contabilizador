@@ -22,8 +22,8 @@ interface LocalServerOptions {
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
-  closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
-  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number) => Promise<PdvSale>;
+  closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string) => Promise<PdvSale>;
+  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string) => Promise<PdvSale>;
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
@@ -263,7 +263,8 @@ export class LocalServer {
     app.post("/api/pdv/tables/:number/close", this.authorize("create"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
-        const sale = await this.options.closePdvTable(tableNumber, Array.isArray(request.body?.payments) ? request.body.payments : [], Number(request.body?.discount || 0));
+        const device = String(request.header("x-device-name") || "Cliente remoto");
+        const sale = await this.options.closePdvTable(tableNumber, Array.isArray(request.body?.payments) ? request.body.payments : [], Number(request.body?.discount || 0), device);
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
         response.json({ sale });
@@ -279,7 +280,8 @@ export class LocalServer {
           tableNumber,
           Array.isArray(request.body?.items) ? request.body.items : [],
           Array.isArray(request.body?.payments) ? request.body.payments : [],
-          Number(request.body?.discount || 0)
+          Number(request.body?.discount || 0),
+          String(request.header("x-device-name") || "Cliente remoto")
         );
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();

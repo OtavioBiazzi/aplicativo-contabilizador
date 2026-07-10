@@ -46,7 +46,8 @@ export class LedgerExporter {
         }
         writtenFiles.push(target.filePath);
       }
-      await this.cleanupObsoleteGeneratedFiles(settings, writtenFiles);
+      // Arquivos antigos ficam preservados. A troca de estrategia ou uma nova
+      // exportacao nao pode apagar silenciosamente historicos ja conferidos.
 
       const filePath = writtenFiles.length === 1 ? writtenFiles[0] : settings.outputDirectory;
       const status: ExportStatus = {

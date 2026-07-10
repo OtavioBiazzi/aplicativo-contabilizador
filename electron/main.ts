@@ -461,14 +461,14 @@ async function bootstrap() {
     savePdvProduct: (draft) => pdvStore.saveProduct(draft),
     savePdvSettings: (patch) => pdvStore.saveSettings(patch),
     importPdvPreset: () => importPdvProducts(path.join(app.getPath("downloads"), "produtos.xlsx")),
-    closePdvTable: async (tableNumber, payments, discount) => {
-      const sale = await pdvStore.closeTable(tableNumber, payments, discount);
+    closePdvTable: async (tableNumber, payments, discount, originDevice) => {
+      const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice);
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
       return sale;
     },
-    savePdvTablePartial: async (tableNumber, items, payments, discount) => {
-      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0);
+    savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice) => {
+      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice);
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
       return sale;

@@ -103,6 +103,7 @@ export interface PdvSale {
   total: number;
   description?: string;
   observations?: string;
+  originDevice?: string;
   payments: PdvPayment[];
   items: PdvCartItem[];
 }

@@ -4341,6 +4341,31 @@ body.floating-borderless .floating-bar {
   white-space: nowrap;
 }
 
+@media (min-width: 1600px) and (min-height: 850px) {
+  .pdv-direct-panel .pdv-sale-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 31vw);
+    gap: 10px;
+  }
+
+  .pdv-direct-panel .pdv-panel {
+    padding: 12px;
+  }
+
+  .pdv-direct-panel .pdv-category-grid {
+    max-height: 108px;
+    gap: 6px;
+  }
+
+  .pdv-direct-panel .pdv-category-grid button,
+  .pdv-direct-panel .pdv-product-grid button {
+    min-height: 58px;
+  }
+
+  .pdv-direct-panel .pdv-product-grid {
+    gap: 6px;
+  }
+}
+
 .pdv-cart-head {
   display: flex;
   justify-content: space-between;

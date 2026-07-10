@@ -2767,7 +2767,8 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
     type: "Todos",
     payment: "Todos",
     status: "Todos",
-    table: ""
+    table: "",
+    origin: "Todos"
   });
   const [selectedSale, setSelectedSale] = useState<PdvSale | null>(null);
   const [saleMenu, setSaleMenu] = useState<{ x: number; y: number; sale: PdvSale } | null>(null);
@@ -2826,6 +2827,7 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
         <label><span>Pagamento</span><select value={filters.payment} onChange={(event) => setFilters({ ...filters, payment: event.target.value })}><option>Todos</option>{PAYMENT_METHODS.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label><span>Status</span><select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}><option>Todos</option><option>Finalizada</option><option>Parcial</option><option>Cancelada</option></select></label>
         <label><span>Mesa</span><input value={filters.table} onChange={(event) => setFilters({ ...filters, table: event.target.value })} placeholder="001" /></label>
+        <label><span>Origem</span><select value={filters.origin} onChange={(event) => setFilters({ ...filters, origin: event.target.value })}><option>Todos</option>{[...new Set(snapshot.recentSales.map((sale) => sale.originDevice || "Este computador"))].map((origin) => <option key={origin}>{origin}</option>)}</select></label>
       </div>
       <div className="pdv-history-list">
         {sales.map((sale) => (
@@ -3097,7 +3099,7 @@ function SaleDetailModal({ sale, onClose, onCancel }: { sale: PdvSale; onClose: 
 
 function filterSales(
   sales: PdvSale[],
-  filters: { from?: string; to?: string; query?: string; type?: string; payment?: string; status?: string; table?: string }
+  filters: { from?: string; to?: string; query?: string; type?: string; payment?: string; status?: string; table?: string; origin?: string }
 ): PdvSale[] {
   const query = (filters.query || "").trim().toLocaleLowerCase("pt-BR");
   const table = (filters.table || "").replace(/^0+/, "");
@@ -3119,6 +3121,9 @@ function filterSales(
       return false;
     }
     if (table && String(sale.tableNumber || "") !== table) {
+      return false;
+    }
+    if (filters.origin && filters.origin !== "Todos" && (sale.originDevice || "Este computador") !== filters.origin) {
       return false;
     }
     if (!query) {
