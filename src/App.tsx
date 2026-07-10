@@ -777,6 +777,7 @@ function clientPolicyFromSettings(settings: AppSettings): RemoteClientPolicy {
   const visibleFields = filteredFields.includes("submit") ? filteredFields : [...filteredFields, "submit"];
 
   return {
+    operationMode: settings.operationMode,
     defaultType,
     defaultPeople: Math.max(1, Math.floor(settings.defaultPeople || 1)),
     defaultRoundingStep: settings.defaultRoundingStep,
@@ -802,6 +803,7 @@ function normalizeRemotePolicy(policy: RemoteClientPolicy | undefined, settings:
   return {
     ...fallback,
     ...policy,
+    operationMode: policy.operationMode === "legacy" ? "legacy" : "pdv",
     defaultType: safeAllowedTypes.includes(policy.defaultType) ? policy.defaultType : safeAllowedTypes[0],
     defaultPeople: Math.max(1, Math.floor(policy.defaultPeople || fallback.defaultPeople)),
     allowedTypes: safeAllowedTypes,
@@ -1625,6 +1627,13 @@ export function App() {
     setPinnedState(result);
   };
 
+  useEffect(() => {
+    const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
+    if (mode === "legacy" && activeTab === "tables") {
+      setActiveTab("sale");
+    }
+  }, [remoteSession?.clientPolicy.operationMode, settings?.operationMode, activeTab]);
+
   if (!settings || !server) {
     return (
       <div className="boot-screen">
@@ -1669,9 +1678,11 @@ export function App() {
   }
 
   const header = headerForTab(activeTab, displaySummary.count);
-  const legacyMode = settings.operationMode === "legacy";
+  const effectiveOperationMode = remoteSession?.clientPolicy.operationMode || settings.operationMode;
+  const legacyMode = effectiveOperationMode === "legacy";
+  const visibleTabItems = legacyMode ? TAB_ITEMS.filter((item) => item.key !== "tables") : TAB_ITEMS;
   const pdvMainTab = activeTab === "tables"
-    ? "tables"
+    ? (legacyMode ? null : "tables")
     : activeTab === "sale" && !legacyMode
       ? "sale"
       : null;
@@ -1690,7 +1701,7 @@ export function App() {
         </div>
 
         <nav className="tabs">
-          {TAB_ITEMS.map((item) => {
+          {visibleTabItems.map((item) => {
             const Icon = item.icon;
             return (
               <button

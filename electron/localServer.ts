@@ -426,6 +426,7 @@ function buildClientPolicy(settings: AppSettings): RemoteClientPolicy {
   const visibleFields = normalizeRemoteFields(settings.floating.visibleFields, settings);
 
   return {
+    operationMode: settings.operationMode || "pdv",
     defaultType,
     defaultPeople: Math.max(1, Math.floor(settings.defaultPeople || 1)),
     defaultRoundingStep: settings.defaultRoundingStep,

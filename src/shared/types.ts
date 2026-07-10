@@ -127,6 +127,7 @@ export interface ServerAutoConnectionSettings {
 }
 
 export interface RemoteClientPolicy {
+  operationMode: OperationMode;
   defaultType: EntryType;
   defaultPeople: number;
   defaultRoundingStep: number;
