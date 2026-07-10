@@ -57,6 +57,10 @@ if (!bulkProduct || bulkProduct.favorite || bulkProduct.showOnPdv) {
   throw new Error("Atualizacao em massa de favorito/visibilidade nao funcionou.");
 }
 await store.updateProducts([baseProduct.id], { favorite: true, showOnPdv: true });
+const linkedSnapshot = await store.getSnapshot();
+if (linkedSnapshot.products.find((product) => product.id === baseProduct.id)?.complementProductIds.join() !== complement.id) {
+  throw new Error("Vinculo individual de adicional nao foi preservado.");
+}
 
 const sale = await store.saveSale({
   type: "Venda direta",

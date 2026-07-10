@@ -191,6 +191,10 @@ export class PdvStore {
   }
 
   async saveProduct(draft: PdvProductDraft): Promise<PdvProduct> {
+    const price = Number(draft.price);
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error("Informe um preco de venda maior que zero.");
+    }
     const categories = this.getCategories();
     const fallbackCategoryId = categories[0]?.id || (await this.saveCategory({ name: "Geral", active: true, favorite: false, sortOrder: 0 })).id;
     const categoryId = categories.some((category) => category.id === draft.categoryId) ? draft.categoryId : fallbackCategoryId;
@@ -217,7 +221,7 @@ export class PdvStore {
           id,
           draft.name.trim() || "Produto sem nome",
           categoryId,
-          roundMoney(draft.price),
+          roundMoney(price),
           draft.unit.trim() || "UNID",
           normalizeUnitMode(draft.unitMode),
           draft.active ? 1 : 0,

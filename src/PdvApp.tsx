@@ -95,10 +95,8 @@ function createCartItem(product: PdvProduct, quantity: number, complements: PdvC
 }
 
 function complementsForProduct(product: PdvProduct, products: PdvProduct[]): PdvProduct[] {
-  const linked = product.complementProductIds?.length
-    ? products.filter((item) => product.complementProductIds.includes(item.id))
-    : products.filter((item) => item.canBeComplement);
-  return linked
+  return products
+    .filter((item) => product.complementProductIds?.includes(item.id))
     .filter((item) => item.id !== product.id && item.active && item.canBeComplement)
     .sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "pt-BR"));
 }
