@@ -177,11 +177,11 @@ export function PdvApp({
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items }) }).then(() => undefined)
     : window.caixa.savePdvTableItems(tableNumber, items);
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount?: number) => remoteTablesActive && remoteSession
-    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
-    : window.caixa.closePdvTable(tableNumber, payments, closeDiscount);
+    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
+    : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, crypto.randomUUID());
   const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount?: number) => remoteTablesActive && remoteSession
-    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", body: JSON.stringify({ items, payments, discount: partialDiscount }) }).then((result) => result.sale)
-    : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount);
+    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ items, payments, discount: partialDiscount }) }).then((result) => result.sale)
+    : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount, crypto.randomUUID());
   const updatePdvProducts = (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => remoteProductsActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, "/api/pdv/products", { method: "PATCH", body: JSON.stringify({ ids, patch }) }).then(() => undefined)
     : window.caixa.updatePdvProducts(ids, patch);

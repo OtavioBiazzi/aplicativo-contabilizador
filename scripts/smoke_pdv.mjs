@@ -130,6 +130,25 @@ if ((await store.getSnapshot()).tables.find((table) => table.number === 7)?.stat
   throw new Error("Fechamento total depois do parcial nao liberou a mesa.");
 }
 
+await store.openTable(8);
+await store.saveTableItems(8, [{
+  id: crypto.randomUUID(),
+  productId: baseProduct.id,
+  productName: baseProduct.name,
+  categoryName: category.name,
+  quantity: 1,
+  baseUnitPrice: 10,
+  unitPrice: 10,
+  discount: 0,
+  total: 10
+}]);
+const operationId = crypto.randomUUID();
+const firstClose = await store.closeTable(8, [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }], 0, "smoke", operationId);
+const repeatedClose = await store.closeTable(8, [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }], 0, "smoke", operationId);
+if (firstClose.id !== repeatedClose.id || store.getSales({}).filter((item) => item.operationId === operationId).length !== 1) {
+  throw new Error("Fechamento repetido nao foi protegido por chave de operacao.");
+}
+
 const snapshot = await store.getSnapshot();
 const savedSale = snapshot.recentSales.find((item) => item.id === sale.id);
 if (!savedSale || savedSale.items[0].complements?.[0]?.name !== complement.name) {

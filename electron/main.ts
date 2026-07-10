@@ -1,5 +1,6 @@
 ﻿import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -521,14 +522,14 @@ async function bootstrap() {
     savePdvProduct: (draft) => pdvStore.saveProduct(draft),
     savePdvSettings: (patch) => pdvStore.saveSettings(patch),
     importPdvPreset: () => importPdvProducts(path.join(app.getPath("downloads"), "produtos.xlsx")),
-    closePdvTable: async (tableNumber, payments, discount, originDevice) => {
-      const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice);
+    closePdvTable: async (tableNumber, payments, discount, originDevice, operationId) => {
+      const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice, operationId);
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
       return sale;
     },
-    savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice) => {
-      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice);
+    savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId) => {
+      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId);
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
       return sale;
@@ -663,16 +664,16 @@ function registerIpc() {
     sendToAll("pdv:changed");
   });
 
-  ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number): Promise<PdvSale> => {
-    const sale = await pdvStore.closeTable(tableNumber, payments, discount);
+  ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
+    const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Este computador", operationId || randomUUID());
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
     sendToAll("pdv:changed");
     return sale;
   });
 
-  ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number): Promise<PdvSale> => {
-    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0);
+  ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
+    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Este computador", operationId || randomUUID());
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
     sendToAll("pdv:changed");

@@ -123,7 +123,7 @@ export class PdvStore {
     const limitSql = limit ? ` LIMIT ${Math.max(1, Math.floor(limit))}` : "";
     const sales = selectAll<Omit<PdvSale, "items" | "payments">>(
       this.requireDb(),
-      `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations, origin_device AS originDevice
+      `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations, origin_device AS originDevice, operation_id AS operationId
        FROM sales ORDER BY created_at DESC${limitSql}`
     );
     return sales.map((sale) => this.hydrateSale(sale)).filter((sale) => matchesSaleFilters(sale, filters));
@@ -297,8 +297,14 @@ export class PdvStore {
     };
   }
 
-  async saveSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string }): Promise<PdvSale> {
+  async saveSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string }): Promise<PdvSale> {
     validateCartItems(input.items);
+    if (input.operationId) {
+      const existing = this.getSales({}).find((sale) => sale.operationId === input.operationId);
+      if (existing) {
+        return existing;
+      }
+    }
     const sale = createSale(input);
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
@@ -405,14 +411,20 @@ export class PdvStore {
     await this.persist();
   }
 
-  async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Este computador"): Promise<PdvSale> {
+  async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
+    if (operationId) {
+      const existing = this.getSales({}).find((sale) => sale.operationId === operationId);
+      if (existing) {
+        return existing;
+      }
+    }
     const table = this.getTables().find((item) => item.number === tableNumber);
     if (!table || !table.items.length) {
       throw new Error("Mesa sem itens para fechar.");
     }
     const db = this.requireDb();
-    const sale = createSale({ type: "Mesa", tableNumber, items: table.items, discount, payments, originDevice });
+    const sale = createSale({ type: "Mesa", tableNumber, items: table.items, discount, payments, originDevice, operationId });
     db.run("BEGIN IMMEDIATE");
     try {
       insertSale(db, sale);
@@ -427,8 +439,14 @@ export class PdvStore {
     return sale;
   }
 
-  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Este computador"): Promise<PdvSale> {
+  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
+    if (operationId) {
+      const existing = this.getSales({}).find((sale) => sale.operationId === operationId);
+      if (existing) {
+        return existing;
+      }
+    }
     const table = this.getTables().find((item) => item.number === tableNumber);
     if (!table || !table.items.length) {
       throw new Error("Mesa sem itens para fechar parcialmente.");
@@ -459,7 +477,7 @@ export class PdvStore {
       const unitTotal = item.quantity > 0 ? item.total / item.quantity : item.unitPrice;
       return [{ ...item, quantity: remainingQuantity, total: roundMoney(unitTotal * remainingQuantity) }];
     });
-    const sale = createSale({ type: "Mesa", tableNumber, status: "Parcial", items: selectedItems, discount, payments, originDevice });
+    const sale = createSale({ type: "Mesa", tableNumber, status: "Parcial", items: selectedItems, discount, payments, originDevice, operationId });
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
@@ -750,7 +768,8 @@ export class PdvStore {
          total REAL NOT NULL,
          description TEXT NOT NULL DEFAULT '',
          observations TEXT NOT NULL DEFAULT '',
-         origin_device TEXT NOT NULL DEFAULT 'Este computador'
+         origin_device TEXT NOT NULL DEFAULT 'Este computador',
+         operation_id TEXT UNIQUE
       );
       CREATE TABLE IF NOT EXISTS sale_items (
         id TEXT PRIMARY KEY,
@@ -792,6 +811,8 @@ export class PdvStore {
     addColumnIfMissing(db, "sales", "description", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sales", "observations", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sales", "origin_device", "TEXT NOT NULL DEFAULT 'Este computador'");
+    addColumnIfMissing(db, "sales", "operation_id", "TEXT");
+    db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_operation_id ON sales(operation_id) WHERE operation_id IS NOT NULL");
     const defaults = this.getSettings();
     const statement = db.prepare("INSERT INTO pdv_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING");
     Object.entries(defaults).forEach(([key, value]) => statement.run([snakeCase(key), String(value)]));
@@ -875,7 +896,7 @@ export class PdvStore {
 }
 
 function insertSale(db: Database, sale: PdvSale) {
-  db.run("INSERT INTO sales (id, created_at, type, table_number, status, subtotal, discount, total, description, observations, origin_device) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+  db.run("INSERT INTO sales (id, created_at, type, table_number, status, subtotal, discount, total, description, observations, origin_device, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
     sale.id,
     sale.createdAt,
     sale.type,
@@ -886,7 +907,8 @@ function insertSale(db: Database, sale: PdvSale) {
     sale.total,
     sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta"),
     sale.observations || "",
-    sale.originDevice || "Este computador"
+    sale.originDevice || "Este computador",
+    sale.operationId || null
   ]);
   const itemStatement = db.prepare(
     `INSERT INTO sale_items (id, sale_id, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json)
@@ -946,7 +968,7 @@ function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]
   statement.free();
 }
 
-function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string }): PdvSale {
+function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string }): PdvSale {
   const subtotal = roundMoney(input.items.reduce((total, item) => total + item.total, 0));
   const total = Math.max(0, roundMoney(subtotal - input.discount));
   const payments = normalizePaymentsForTotal(input.payments, total);
@@ -962,6 +984,7 @@ function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status
     description: input.tableNumber ? `Mesa ${input.tableNumber}` : "Venda direta",
     observations: "",
     originDevice: input.originDevice || "Este computador",
+    operationId: input.operationId,
     payments,
     items: input.items
   };
