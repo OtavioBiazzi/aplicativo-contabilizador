@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings, EntryDraft, LedgerEntry, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProductDraft, PdvSettings, PdvTableStatus } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProductDraft, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 contextBridge.exposeInMainWorld("caixa", {
   getSnapshot: () => ipcRenderer.invoke("app:getSnapshot"),
@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("caixa", {
   openPdvTable: (tableNumber: number, people?: number, note?: string) => ipcRenderer.invoke("pdv:openTable", tableNumber, people, note),
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => ipcRenderer.invoke("pdv:setTableStatus", tableNumber, status),
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => ipcRenderer.invoke("pdv:saveTableItems", tableNumber, items),
+  transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) =>
+    ipcRenderer.invoke("pdv:transferTableItems", sourceTableNumber, targetTableNumber, selections),
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => ipcRenderer.invoke("pdv:closeTable", tableNumber, payments, discount, operationId),
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string) =>
     ipcRenderer.invoke("pdv:saveTablePartial", tableNumber, items, payments, discount, operationId),

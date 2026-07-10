@@ -16,7 +16,8 @@ import type {
   PdvSettings,
   PdvSale,
   PdvSnapshot,
-  PdvTableStatus
+  PdvTableStatus,
+  PdvTransferSelection
 } from "../src/shared/pdvTypes.js";
 
 const require = createRequire(import.meta.url);
@@ -409,6 +410,80 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
+  }
+
+  async transferTableItems(sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]): Promise<PdvCartItem[]> {
+    sourceTableNumber = this.normalizeTableNumber(sourceTableNumber);
+    targetTableNumber = this.normalizeTableNumber(targetTableNumber);
+    if (!Array.isArray(selections) || !selections.length) {
+      throw new Error("Selecione ao menos um item para transferir.");
+    }
+    const sourceItems = this.getTableItems(sourceTableNumber);
+    const targetItems = targetTableNumber === sourceTableNumber ? sourceItems : this.getTableItems(targetTableNumber);
+    const selectedById = new Map(selections.map((selection) => [selection.itemId, selection]));
+    const movedItems: PdvCartItem[] = [];
+    for (const selection of selections) {
+      const source = sourceItems.find((item) => item.id === selection.itemId);
+      const quantity = Number(selection.quantity);
+      if (!source || !Number.isFinite(quantity) || quantity <= 0 || quantity > source.quantity + 0.009) {
+        throw new Error("Quantidade de transferencia invalida.");
+      }
+      if (sourceTableNumber === targetTableNumber && (selection.subtableName || "") === (source.subtableName || "")) {
+        throw new Error("Escolha outra mesa ou outra submesa.");
+      }
+      const ratio = source.quantity > 0 ? quantity / source.quantity : 1;
+      const discount = roundMoney(source.discount * ratio);
+      movedItems.push({
+        ...source,
+        id: randomUUID(),
+        quantity: roundMoney(quantity),
+        subtableName: String(selection.subtableName || "").trim(),
+        discount,
+        total: roundMoney(Math.max(0, quantity * source.unitPrice - discount))
+      });
+    }
+    const remainingItems = sourceItems.flatMap((item) => {
+      const selection = selectedById.get(item.id);
+      if (!selection) {
+        return [item];
+      }
+      const remainingQuantity = roundMoney(item.quantity - selection.quantity);
+      if (remainingQuantity <= 0.009) {
+        return [];
+      }
+      const ratio = item.quantity > 0 ? remainingQuantity / item.quantity : 1;
+      return [{ ...item, quantity: remainingQuantity, discount: roundMoney(item.discount * ratio), total: roundMoney(Math.max(0, remainingQuantity * item.unitPrice - item.discount * ratio)) }];
+    });
+    const nextTargetItems = targetTableNumber === sourceTableNumber
+      ? [...remainingItems, ...movedItems]
+      : [...targetItems, ...movedItems];
+    validateCartItems(nextTargetItems);
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run("DELETE FROM table_items WHERE table_number IN (?, ?)", [sourceTableNumber, targetTableNumber]);
+      if (sourceTableNumber !== targetTableNumber && remainingItems.length) {
+        writeTableItems(db, sourceTableNumber, remainingItems);
+      }
+      if (nextTargetItems.length) {
+        writeTableItems(db, targetTableNumber, nextTargetItems);
+        db.run(
+          `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
+           VALUES (?, ?, 'Ocupada', ?, 1, '')
+           ON CONFLICT(table_number) DO UPDATE SET status='Ocupada', opened_at=COALESCE(table_sessions.opened_at, excluded.opened_at)`,
+          [`mesa-${targetTableNumber}`, targetTableNumber, new Date().toISOString()]
+        );
+      }
+      if (!remainingItems.length && sourceTableNumber !== targetTableNumber) {
+        db.run("DELETE FROM table_sessions WHERE table_number = ? AND status != 'Reservada'", [sourceTableNumber]);
+      }
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return remainingItems;
   }
 
   async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string): Promise<PdvSale> {

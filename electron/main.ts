@@ -26,7 +26,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvTableStatus } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -517,6 +517,7 @@ async function bootstrap() {
     openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
     savePdvTableItems: (tableNumber, items) => pdvStore.saveTableItems(tableNumber, items),
+    transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections),
     updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
     savePdvCategory: (draft) => pdvStore.saveCategory(draft),
     savePdvProduct: (draft) => pdvStore.saveProduct(draft),
@@ -662,6 +663,12 @@ function registerIpc() {
   ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[]) => {
     await pdvStore.saveTableItems(tableNumber, items);
     sendToAll("pdv:changed");
+  });
+
+  ipcMain.handle("pdv:transferTableItems", async (_event, sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]): Promise<PdvCartItem[]> => {
+    const items = await pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections);
+    sendToAll("pdv:changed");
+    return items;
   });
 
   ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {

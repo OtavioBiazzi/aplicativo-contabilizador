@@ -17,7 +17,7 @@ import {
   Utensils,
   X
 } from "lucide-react";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 import type { RoundDirection } from "./shared/types";
 import { calculateSplit } from "./shared/calculations";
 
@@ -176,6 +176,9 @@ export function PdvApp({
   const savePdvTableItems = (tableNumber: number, items: PdvCartItem[]) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items }) }).then(() => undefined)
     : window.caixa.savePdvTableItems(tableNumber, items);
+  const transferPdvTableItems = (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => remoteTablesActive && remoteSession
+    ? remotePdvRequest<{ ok: boolean; items: PdvCartItem[] }>(remoteSession, `/api/pdv/tables/${sourceTableNumber}/transfer`, { method: "POST", body: JSON.stringify({ targetTableNumber, selections }) }).then((result) => result.items)
+    : window.caixa.transferPdvTableItems(sourceTableNumber, targetTableNumber, selections);
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount?: number) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
     : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, crypto.randomUUID());
@@ -755,6 +758,7 @@ export function PdvApp({
             onRenameSubtable={renameSubtable}
             openPdvTable={openPdvTable}
             savePdvTableItems={savePdvTableItems}
+            transferPdvTableItems={transferPdvTableItems}
           />
         )}
 
@@ -905,6 +909,7 @@ function PdvSaleScreen(props: {
   onRenameSubtable?: (oldName: string, newName: string) => void;
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
 }) {
   const subtotal = roundMoney(props.cart.reduce((total, item) => total + item.total, 0));
   const finalTotal = Math.max(0, roundMoney(subtotal - props.discount));
@@ -1170,6 +1175,7 @@ function PdvSaleScreen(props: {
             sourceTableNumber={props.activeTableNumber}
             openPdvTable={props.openPdvTable}
             savePdvTableItems={props.savePdvTableItems}
+            transferPdvTableItems={props.transferPdvTableItems}
             onCancel={() => setTransferListOpen(false)}
             onTransferred={(nextSource) => {
               props.setCart(nextSource);
@@ -1186,6 +1192,7 @@ function PdvSaleScreen(props: {
             cart={props.cart}
             openPdvTable={props.openPdvTable}
             savePdvTableItems={props.savePdvTableItems}
+            transferPdvTableItems={props.transferPdvTableItems}
             onCancel={() => setTransferItem(null)}
             onTransferred={(nextSource) => {
               props.setCart(nextSource);
@@ -1886,6 +1893,7 @@ function TransferListModal({
   sourceTableNumber,
   openPdvTable,
   savePdvTableItems,
+  transferPdvTableItems,
   onCancel,
   onTransferred
 }: {
@@ -1894,6 +1902,7 @@ function TransferListModal({
   sourceTableNumber: number;
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   onCancel: () => void;
   onTransferred: (nextSource: PdvCartItem[]) => void;
 }) {
@@ -1921,11 +1930,21 @@ function TransferListModal({
     }
     setBusy(true);
     try {
-      const movedItems = selectedItems.map((item) => splitCartItemForTransfer(item, transferQuantity(item, quantities[item.id]), targetSubtable.trim()));
-      await (openPdvTable || window.caixa.openPdvTable)(targetTableNumber, targetTable.people || 1, targetTable.note || "");
-      await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, movedItems.reduce((items, item) => mergeCartItem(items, item), targetTable.items));
-      const nextSource = selectedItems.reduce((items, item) => subtractCartItemQuantity(items, item.id, transferQuantity(item, quantities[item.id])), cart);
-      await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
+      const selections: PdvTransferSelection[] = selectedItems.map((item) => ({
+        itemId: item.id,
+        quantity: transferQuantity(item, quantities[item.id]),
+        subtableName: targetSubtable.trim() || undefined
+      }));
+      let nextSource: PdvCartItem[];
+      if (transferPdvTableItems) {
+        nextSource = await transferPdvTableItems(sourceTableNumber, targetTableNumber, selections);
+      } else {
+        const movedItems = selectedItems.map((item) => splitCartItemForTransfer(item, transferQuantity(item, quantities[item.id]), targetSubtable.trim()));
+        await (openPdvTable || window.caixa.openPdvTable)(targetTableNumber, targetTable.people || 1, targetTable.note || "");
+        await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, movedItems.reduce((items, item) => mergeCartItem(items, item), targetTable.items));
+        nextSource = selectedItems.reduce((items, item) => subtractCartItemQuantity(items, item.id, transferQuantity(item, quantities[item.id])), cart);
+        await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
+      }
       onTransferred(nextSource);
     } catch (error) {
       setBusy(false);
@@ -2093,6 +2112,7 @@ function TransferItemModal({
   cart,
   openPdvTable,
   savePdvTableItems,
+  transferPdvTableItems,
   onCancel,
   onTransferred
 }: {
@@ -2102,6 +2122,7 @@ function TransferItemModal({
   cart: PdvCartItem[];
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   onCancel: () => void;
   onTransferred: (nextSource: PdvCartItem[]) => void;
 }) {
@@ -2127,11 +2148,16 @@ function TransferItemModal({
     }
     setBusy(true);
     try {
-      const transferItem = splitCartItemForTransfer(item, quantity, targetSubtable.trim());
-      await (openPdvTable || window.caixa.openPdvTable)(targetTableNumber, target.people || 1, target.note || "");
-      await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, mergeCartItem(target.items, transferItem));
-      const nextSource = subtractCartItemQuantity(cart, item.id, quantity);
-      await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
+      let nextSource: PdvCartItem[];
+      if (transferPdvTableItems) {
+        nextSource = await transferPdvTableItems(sourceTableNumber, targetTableNumber, [{ itemId: item.id, quantity, subtableName: targetSubtable.trim() || undefined }]);
+      } else {
+        const transferItem = splitCartItemForTransfer(item, quantity, targetSubtable.trim());
+        await (openPdvTable || window.caixa.openPdvTable)(targetTableNumber, target.people || 1, target.note || "");
+        await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, mergeCartItem(target.items, transferItem));
+        nextSource = subtractCartItemQuantity(cart, item.id, quantity);
+        await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
+      }
       onTransferred(nextSource);
     } catch (error) {
       setBusy(false);

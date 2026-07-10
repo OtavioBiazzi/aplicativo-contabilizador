@@ -6,7 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
@@ -22,6 +22,7 @@ interface LocalServerOptions {
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
@@ -257,6 +258,20 @@ export class LocalServer {
         response.json({ ok: true });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar itens da mesa." });
+      }
+    });
+
+    app.post("/api/pdv/tables/:number/transfer", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const sourceTableNumber = Number(request.params.number);
+        const targetTableNumber = Number(request.body?.targetTableNumber);
+        const selections = Array.isArray(request.body?.selections) ? request.body.selections as PdvTransferSelection[] : [];
+        const items = await this.options.transferPdvTableItems(sourceTableNumber, targetTableNumber, selections);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true, items });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel transferir os itens da mesa." });
       }
     });
 

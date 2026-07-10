@@ -81,6 +81,12 @@ export interface PdvPayment {
   change?: number;
 }
 
+export interface PdvTransferSelection {
+  itemId: string;
+  quantity: number;
+  subtableName?: string;
+}
+
 export interface PdvOpenTable {
   id: string;
   number: number;

@@ -115,6 +115,28 @@ if (!tableSeven?.items.some((item) => item.subtableName === "Joao")) {
   throw new Error("Renomeacao/persistencia de submesa nao funcionou como esperado.");
 }
 
+await store.openTable(9);
+const transferItem = {
+  id: crypto.randomUUID(),
+  productId: baseProduct.id,
+  productName: baseProduct.name,
+  categoryName: category.name,
+  quantity: 3,
+  baseUnitPrice: 10,
+  unitPrice: 10,
+  discount: 0,
+  total: 30
+};
+await store.saveTableItems(9, [transferItem]);
+await store.openTable(10);
+const transferRemaining = await store.transferTableItems(9, 10, [{ itemId: transferItem.id, quantity: 1, subtableName: "Grupo 1" }]);
+const transferSnapshot = await store.getSnapshot();
+const transferSource = transferSnapshot.tables.find((table) => table.number === 9);
+const transferTarget = transferSnapshot.tables.find((table) => table.number === 10);
+if (transferRemaining[0]?.quantity !== 2 || transferSource?.items[0]?.quantity !== 2 || transferTarget?.items[0]?.quantity !== 1 || transferTarget.items[0]?.subtableName !== "Grupo 1") {
+  throw new Error("Transferencia atomica parcial entre mesas nao preservou as quantidades.");
+}
+
 const partialSource = tableSeven.items[0];
 const partialSale = await store.closeTablePartial(7, [{ ...partialSource, quantity: 1, total: 10 }], [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }]);
 if (partialSale.status !== "Parcial" || partialSale.total !== 10) {

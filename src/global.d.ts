@@ -13,7 +13,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "./shared/types";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
@@ -28,6 +28,7 @@ export interface CaixaApi {
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => Promise<PdvSale>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string) => Promise<PdvSale>;
   cancelPdvSale: (id: string) => Promise<void>;
