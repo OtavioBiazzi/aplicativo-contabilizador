@@ -157,6 +157,7 @@ export function PdvApp({
   const [tableCloseMenuOpen, setTableCloseMenuOpen] = useState(false);
   const [partialItemsModalOpen, setPartialItemsModalOpen] = useState(false);
   const [partialValueModalOpen, setPartialValueModalOpen] = useState(false);
+  const [confirmRequest, setConfirmRequest] = useState<{ title: string; message: string; action: () => Promise<void> } | null>(null);
   const [tableSaveState, setTableSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const tableAutosaveTimer = useRef<number | null>(null);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
@@ -336,7 +337,16 @@ export function PdvApp({
       return;
     }
     if (action === "free") {
-      if (table.items.length && !window.confirm(`A mesa ${table.number} tem itens. Cancelar tudo e liberar?`)) {
+      if (table.items.length) {
+        setConfirmRequest({
+          title: `Liberar mesa ${table.number}?`,
+          message: "Os itens em aberto serao cancelados e a mesa voltara a ficar livre.",
+          action: async () => {
+            await savePdvTableItems(table.number, []);
+            await setPdvTableStatus(table.number, "Livre");
+            await load();
+          }
+        });
         return;
       }
       await savePdvTableItems(table.number, []);
@@ -358,10 +368,16 @@ export function PdvApp({
       setTab("history");
       return;
     }
-    if (action === "cancel" && window.confirm(`Cancelar a mesa ${String(table.number).padStart(3, "0")} e remover itens em aberto?`)) {
-      await savePdvTableItems(table.number, []);
-      await setPdvTableStatus(table.number, "Livre");
-      await load();
+    if (action === "cancel") {
+      setConfirmRequest({
+        title: `Cancelar mesa ${String(table.number).padStart(3, "0")}?`,
+        message: "A mesa sera liberada e todos os itens ainda nao fechados serao removidos.",
+        action: async () => {
+          await savePdvTableItems(table.number, []);
+          await setPdvTableStatus(table.number, "Livre");
+          await load();
+        }
+      });
     }
   };
 
@@ -436,32 +452,38 @@ export function PdvApp({
     if (!activeTable || !name) {
       return;
     }
-    if (!window.confirm(`Apagar a submesa "${name}" e cancelar seus itens?`)) {
-      return;
-    }
-    const remainingItems = tableCart.filter((item) => (item.subtableName || "") !== name);
-    setTableCart(remainingItems);
-    setSelectedTableItemIds((current) => current.filter((id) => remainingItems.some((item) => item.id === id)));
-    setCurrentSubtable("");
-    await savePdvTableItems(activeTable.number, remainingItems);
-    setToast(`Submesa ${name} apagada.`);
-    await load();
+    setConfirmRequest({
+      title: `Apagar submesa ${name}?`,
+      message: "Os itens dessa submesa serao cancelados. A mesa principal sera mantida.",
+      action: async () => {
+        const remainingItems = tableCart.filter((item) => (item.subtableName || "") !== name);
+        setTableCart(remainingItems);
+        setSelectedTableItemIds((current) => current.filter((id) => remainingItems.some((item) => item.id === id)));
+        setCurrentSubtable("");
+        await savePdvTableItems(activeTable.number, remainingItems);
+        setToast(`Submesa ${name} apagada.`);
+        await load();
+      }
+    });
   };
 
   const deleteAllSubtables = async () => {
     if (!activeTable) {
       return;
     }
-    if (!window.confirm("Apagar todas as submesas e cancelar todos os itens delas? A mesa principal sera mantida.")) {
-      return;
-    }
-    const remainingItems = tableCart.filter((item) => !item.subtableName);
-    setTableCart(remainingItems);
-    setSelectedTableItemIds([]);
-    setCurrentSubtable("");
-    await savePdvTableItems(activeTable.number, remainingItems);
-    setToast("Todas as submesas foram apagadas.");
-    await load();
+    setConfirmRequest({
+      title: "Apagar todas as submesas?",
+      message: "Os itens das submesas serao cancelados. Os itens da mesa principal serao mantidos.",
+      action: async () => {
+        const remainingItems = tableCart.filter((item) => !item.subtableName);
+        setTableCart(remainingItems);
+        setSelectedTableItemIds([]);
+        setCurrentSubtable("");
+        await savePdvTableItems(activeTable.number, remainingItems);
+        setToast("Todas as submesas foram apagadas.");
+        await load();
+      }
+    });
   };
 
   const moveSelectedItemsToSubtable = async (name: string) => {
@@ -483,15 +505,19 @@ export function PdvApp({
     if (!activeTable || !oldName || !nextName || oldName === nextName) {
       return;
     }
-    if (tableCart.some((item) => (item.subtableName || "") === nextName) && !window.confirm(`Ja existe uma submesa chamada "${nextName}". Juntar os itens nela?`)) {
+    const rename = async () => {
+      const renamedItems = tableCart.map((item) => (item.subtableName || "") === oldName ? { ...item, subtableName: nextName } : item);
+      setTableCart(renamedItems);
+      setCurrentSubtable(nextName);
+      await savePdvTableItems(activeTable.number, renamedItems);
+      setToast(`Submesa ${oldName} renomeada para ${nextName}.`);
+      await load();
+    };
+    if (tableCart.some((item) => (item.subtableName || "") === nextName)) {
+      setConfirmRequest({ title: `Juntar submesas em ${nextName}?`, message: "Ja existe uma submesa com esse nome. Os itens serao reunidos nela.", action: rename });
       return;
     }
-    const renamedItems = tableCart.map((item) => (item.subtableName || "") === oldName ? { ...item, subtableName: nextName } : item);
-    setTableCart(renamedItems);
-    setCurrentSubtable(nextName);
-    await savePdvTableItems(activeTable.number, renamedItems);
-    setToast(`Submesa ${oldName} renomeada para ${nextName}.`);
-    await load();
+    await rename();
   };
 
   const requestPartialByValue = (manualValue?: number) => {
@@ -798,6 +824,18 @@ export function PdvApp({
           onConfirm={(value) => requestPartialByValue(value)}
         />
       )}
+      {confirmRequest && (
+        <PdvConfirmModal
+          title={confirmRequest.title}
+          message={confirmRequest.message}
+          onCancel={() => setConfirmRequest(null)}
+          onConfirm={() => {
+            const request = confirmRequest;
+            setConfirmRequest(null);
+            void request.action().catch((error) => setToast(error instanceof Error ? error.message : "Nao foi possivel concluir a acao."));
+          }}
+        />
+      )}
       {pendingProduct && snapshot.settings.complementsEnabled && (
         <ComplementModal
           product={pendingProduct.product}
@@ -867,6 +905,8 @@ function PdvSaleScreen(props: {
   const [transferListOpen, setTransferListOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<{ item: PdvCartItem; mode: "quantity" | "discount" | "price" | "note" } | null>(null);
   const [movingItem, setMovingItem] = useState<{ item: PdvCartItem; after: boolean } | null>(null);
+  const [removeRequest, setRemoveRequest] = useState<PdvCartItem | null>(null);
+  const [cancelTableRequest, setCancelTableRequest] = useState(false);
   const activeItemId = props.selectedItemIds?.[0] || props.cart.at(-1)?.id || "";
   const activeItem = props.cart.find((item) => item.id === activeItemId) || props.cart.at(-1) || null;
 
@@ -915,10 +955,8 @@ function PdvSaleScreen(props: {
     if (action === "note") {
       setEditingItem({ item, mode: "note" });
     }
-    if (action === "remove" && window.confirm(`Remover ${item.productName}?`)) {
-      const fallback = props.cart.filter((row) => row.id !== item.id).at(-1);
-      props.setCart((current) => current.filter((row) => row.id !== item.id));
-      props.setSelectedItemIds?.(fallback ? [fallback.id] : []);
+    if (action === "remove") {
+      setRemoveRequest(item);
     }
     if (action === "up") {
       props.setCart((current) => moveCartItem(current, item.id, -1));
@@ -986,9 +1024,7 @@ function PdvSaleScreen(props: {
           <button
             className="pdv-icon-button"
             onClick={() => {
-              if (props.cart.length && window.confirm("Cancelar todos os itens do carrinho?")) {
-                props.setCart([]);
-              }
+              if (props.cart.length) setCancelTableRequest(true);
             }}
           >
             <Trash2 size={18} />
@@ -1068,9 +1104,7 @@ function PdvSaleScreen(props: {
             <button
               className="pdv-danger-button"
               onClick={() => {
-                if (props.cart.length && window.confirm("Cancelar todos os itens?")) {
-                  props.setCart([]);
-                }
+                if (props.cart.length) setCancelTableRequest(true);
               }}
             >
               Cancelar
@@ -1085,9 +1119,7 @@ function PdvSaleScreen(props: {
             <button
               className="pdv-danger-button"
               onClick={() => {
-                if (props.cart.length && window.confirm("Cancelar todos os itens da mesa?")) {
-                  props.setCart([]);
-                }
+                if (props.cart.length) setCancelTableRequest(true);
               }}
             >
               Cancelar
@@ -1136,6 +1168,31 @@ function PdvSaleScreen(props: {
             onConfirm={(patch) => {
               props.setCart((current) => updateCartItem(current, editingItem.item.id, patch));
               setEditingItem(null);
+            }}
+          />
+        )}
+        {removeRequest && (
+          <PdvConfirmModal
+            title="Remover produto da conta?"
+            message={`${removeRequest.productName} sera removido desta conta.`}
+            onCancel={() => setRemoveRequest(null)}
+            onConfirm={() => {
+              const fallback = props.cart.filter((row) => row.id !== removeRequest.id).at(-1);
+              props.setCart((current) => current.filter((row) => row.id !== removeRequest.id));
+              props.setSelectedItemIds?.(fallback ? [fallback.id] : []);
+              setRemoveRequest(null);
+            }}
+          />
+        )}
+        {cancelTableRequest && (
+          <PdvConfirmModal
+            title={props.activeTableNumber ? "Cancelar itens da mesa?" : "Limpar carrinho?"}
+            message={props.activeTableNumber ? "Todos os itens ainda abertos serao removidos da mesa." : "Todos os itens do carrinho serao removidos."}
+            onCancel={() => setCancelTableRequest(false)}
+            onConfirm={() => {
+              props.setCart([]);
+              props.setSelectedItemIds?.([]);
+              setCancelTableRequest(false);
             }}
           />
         )}
