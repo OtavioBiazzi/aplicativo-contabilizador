@@ -177,5 +177,36 @@ if (!paymentsSheet.includes("Pix") || !paymentsSheet.includes("<v>12</v>")) {
   throw new Error("XLSX PDV nao registrou pagamento/recebido/troco como esperado.");
 }
 
+const integratedExportStatus = await new PdvExporter(exportDir).exportSales(store.getSales({}), {}, [{
+  id: "legacy-smoke",
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  type: "Venda",
+  originalValue: 7,
+  finalValue: 7,
+  people: 1,
+  perPerson: 7,
+  roundingStep: 0,
+  roundingDirection: "nearest",
+  difference: 0,
+  description: "Venda antiga smoke",
+  tableNumber: "",
+  busNumber: "",
+  paymentMethod: "Dinheiro",
+  paidWith: 10,
+  change: 3,
+  observations: "",
+  originDevice: "smoke",
+  status: "active"
+}]);
+if (!integratedExportStatus.ok || !integratedExportStatus.filePath) {
+  throw new Error(integratedExportStatus.message || "Exportacao integrada falhou.");
+}
+const integratedZip = await JSZip.loadAsync(readFileSync(integratedExportStatus.filePath));
+const integratedSalesSheet = await integratedZip.file("xl/worksheets/sheet2.xml").async("string");
+if (!integratedSalesSheet.includes("Venda antiga smoke")) {
+  throw new Error("Exportacao do PDV nao incluiu o lancamento antigo integrado.");
+}
+
 rmSync(tmp, { recursive: true, force: true });
 console.log("PDV smoke passed");

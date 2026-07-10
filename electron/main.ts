@@ -636,7 +636,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:exportSales", async (_event, filters: PdvExportFilters = {}) => {
     const settings = await store.getSettings();
-    const status = await new PdvExporter(settings.outputDirectory).exportSales(pdvStore.getSales(filters), filters);
+    const status = await new PdvExporter(settings.outputDirectory).exportSales(pdvStore.getSales(filters), filters, await store.getEntries());
     await logExportStatus("exportacao PDV", status);
     return status;
   });

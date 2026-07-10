@@ -1,8 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
-import type { PdvExportFilters, PdvSale } from "../src/shared/pdvTypes.js";
-import type { ExportStatus } from "../src/shared/types.js";
+import type { PdvExportFilters, PdvPaymentMethod, PdvSale } from "../src/shared/pdvTypes.js";
+import type { ExportStatus, LedgerEntry } from "../src/shared/types.js";
 
 interface Sheet {
   name: string;
@@ -27,11 +27,12 @@ const MONEY_COLUMNS = new Set([
 export class PdvExporter {
   constructor(private readonly outputDirectory: string) {}
 
-  async exportSales(sales: PdvSale[], filters: PdvExportFilters = {}): Promise<ExportStatus> {
+  async exportSales(sales: PdvSale[], filters: PdvExportFilters = {}, legacyEntries: LedgerEntry[] = []): Promise<ExportStatus> {
     try {
       await fs.mkdir(this.outputDirectory, { recursive: true });
       const filePath = path.join(this.outputDirectory, `pdv-relatorio-${periodToken(filters)}-${timestampToken()}.xlsx`);
-      await writeXlsx(filePath, buildSheets(sales, filters));
+      const integratedSales = [...sales, ...legacyEntries.filter((entry) => matchesLegacyFilters(entry, filters)).map(legacyEntryToSale)];
+      await writeXlsx(filePath, buildSheets(integratedSales, filters));
       return {
         ok: true,
         filePath,
@@ -46,6 +47,68 @@ export class PdvExporter {
       };
     }
   }
+}
+
+function legacyEntryToSale(entry: LedgerEntry): PdvSale {
+  const type = entry.tableNumber ? "Mesa" : "Venda direta";
+  const status = entry.status === "cancelled" ? "Cancelada" : entry.status === "deleted" ? "deleted" : "Finalizada";
+  const method = normalizePaymentMethod(entry.paymentMethod);
+  const payments = entry.paymentBreakdown?.length
+    ? entry.paymentBreakdown.map((payment) => ({ id: `${entry.id}-${payment.method}`, method: normalizePaymentMethod(payment.method), amount: roundMoney(payment.amount) }))
+    : [{ id: `${entry.id}-payment`, method, amount: roundMoney(entry.finalValue), received: roundMoney(entry.paidWith || entry.finalValue), change: roundMoney(entry.change || 0) }];
+  return {
+    id: `legacy-${entry.id}`,
+    createdAt: entry.createdAt,
+    type,
+    tableNumber: entry.tableNumber ? Number(entry.tableNumber) || undefined : undefined,
+    status,
+    subtotal: roundMoney(entry.originalValue),
+    discount: roundMoney(Math.max(0, entry.originalValue - entry.finalValue)),
+    total: roundMoney(entry.finalValue),
+    description: entry.description || (entry.tableNumber ? `Mesa ${entry.tableNumber}` : "Venda direta"),
+    observations: entry.observations,
+    payments,
+    items: [{
+      id: `legacy-item-${entry.id}`,
+      productId: "legacy",
+      productName: entry.description || "Lancamento antigo",
+      categoryName: "Historico antigo",
+      quantity: 1,
+      baseUnitPrice: roundMoney(entry.originalValue),
+      unitPrice: roundMoney(entry.finalValue),
+      discount: 0,
+      total: roundMoney(entry.finalValue),
+      note: entry.observations
+    }]
+  };
+}
+
+function normalizePaymentMethod(value: string): PdvPaymentMethod {
+  const normalized = String(value || "").toLocaleLowerCase("pt-BR");
+  if (normalized.includes("dinheiro")) return "Dinheiro";
+  if (normalized.includes("debito")) return "Debito";
+  if (normalized.includes("credito")) return "Credito";
+  if (normalized.includes("pix") || normalized.includes("instant")) return "Pix";
+  if (!normalized || normalized.includes("nao definido")) return "Nao definido";
+  return "Outros";
+}
+
+function matchesLegacyFilters(entry: LedgerEntry, filters: PdvExportFilters): boolean {
+  const date = entry.createdAt.slice(0, 10);
+  if (filters.from && date < filters.from) return false;
+  if (filters.to && date > filters.to) return false;
+  if (filters.type === "Mesa" && !entry.tableNumber) return false;
+  if (filters.type === "Venda direta" && entry.tableNumber) return false;
+  if (filters.table && entry.tableNumber !== filters.table) return false;
+  if (filters.payment && filters.payment !== "Todos") {
+    const methods = entry.paymentBreakdown?.map((payment) => normalizePaymentMethod(payment.method)) || [normalizePaymentMethod(entry.paymentMethod)];
+    if (!methods.includes(filters.payment)) return false;
+  }
+  if (filters.status && filters.status !== "Todos") {
+    const status = entry.status === "cancelled" ? "Cancelada" : entry.status === "deleted" ? "deleted" : "Finalizada";
+    if (status !== filters.status) return false;
+  }
+  return true;
 }
 
 function buildSheets(sales: PdvSale[], filters: PdvExportFilters): Sheet[] {
