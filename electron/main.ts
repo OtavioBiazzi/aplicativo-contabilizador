@@ -36,12 +36,21 @@ let pdvStore: PdvStore;
 let exporter: LedgerExporter;
 let localServer: LocalServer;
 let logger: DiagnosticLogger;
+let floatingBoundsSaveTimer: NodeJS.Timeout | null = null;
+let floatingRememberBounds = true;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
 const FLOATING_MIN_WIDTH = 520;
 const FLOATING_MAX_WIDTH = 1240;
 const FLOATING_MIN_HEIGHT = 56;
+
+interface FloatingWindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 interface GitHubReleaseAsset {
   name?: string;
@@ -100,8 +109,56 @@ async function createWindow() {
   }
 }
 
+function floatingBoundsPath() {
+  return path.join(store.getDataDirectory(), "floating-window.json");
+}
+
+function validFloatingBounds(value: unknown): value is FloatingWindowBounds {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const bounds = value as Partial<FloatingWindowBounds>;
+  const numbers = [bounds.x, bounds.y, bounds.width, bounds.height];
+  return numbers.every((item) => typeof item === "number" && Number.isFinite(item))
+    && Number(bounds.width) >= FLOATING_MIN_WIDTH
+    && Number(bounds.height) >= FLOATING_MIN_HEIGHT;
+}
+
+async function readFloatingBounds(settings?: AppSettings): Promise<FloatingWindowBounds | null> {
+  if (!settings?.floating.rememberBounds) {
+    return null;
+  }
+  try {
+    const value = JSON.parse(await fs.readFile(floatingBoundsPath(), "utf8")) as unknown;
+    return validFloatingBounds(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveFloatingBounds(settings?: AppSettings) {
+  if (!floatingWindow || floatingWindow.isDestroyed() || !floatingRememberBounds || (settings && !settings.floating.rememberBounds)) {
+    return;
+  }
+  const [x, y] = floatingWindow.getPosition();
+  const [width, height] = floatingWindow.getSize();
+  await fs.writeFile(floatingBoundsPath(), JSON.stringify({ x, y, width, height }, null, 2), "utf8");
+}
+
+function scheduleFloatingBoundsSave(settings?: AppSettings) {
+  if (floatingBoundsSaveTimer) {
+    clearTimeout(floatingBoundsSaveTimer);
+  }
+  floatingBoundsSaveTimer = setTimeout(() => {
+    floatingBoundsSaveTimer = null;
+    void saveFloatingBounds(settings);
+  }, 250);
+}
+
 async function createFloatingWindow(options?: { opacity?: number; lockPosition?: boolean }, settings?: AppSettings) {
+  floatingRememberBounds = settings?.floating.rememberBounds ?? true;
   const size = settings ? floatingWindowSize(settings) : { width: FLOATING_MAX_WIDTH, minWidth: FLOATING_MIN_WIDTH, height: 118, minHeight: FLOATING_MIN_HEIGHT };
+  const savedBounds = await readFloatingBounds(settings);
   if (floatingWindow && !floatingWindow.isDestroyed()) {
     applyFloatingWindowOptions(options, settings);
     floatingWindow.showInactive();
@@ -127,6 +184,7 @@ async function createFloatingWindow(options?: { opacity?: number; lockPosition?:
     alwaysOnTop: true,
     backgroundColor: "#00000000",
     title: "Contabilizador Fixado",
+    ...(savedBounds || {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -147,10 +205,16 @@ async function createFloatingWindow(options?: { opacity?: number; lockPosition?:
     floatingWindow?.showInactive();
     floatingWindow?.moveTop();
   });
+  floatingWindow.on("close", () => {
+    void saveFloatingBounds(settings);
+  });
   floatingWindow.on("closed", () => {
+    void saveFloatingBounds(settings);
     floatingWindow = null;
     sendToMain("window:pinnedChanged", false);
   });
+  floatingWindow.on("moved", () => scheduleFloatingBoundsSave(settings));
+  floatingWindow.on("resized", () => scheduleFloatingBoundsSave(settings));
 
   if (isDev) {
     await floatingWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}?floating=1`);
@@ -200,17 +264,13 @@ function applyFloatingWindowOptions(options?: { opacity?: number; lockPosition?:
     return;
   }
   const size = settings ? floatingWindowSize(settings) : { width: FLOATING_MAX_WIDTH, minWidth: FLOATING_MIN_WIDTH, height: 118, minHeight: FLOATING_MIN_HEIGHT };
-  floatingWindow.setMinimumSize(size.minWidth, size.minHeight);
-  const [width, height] = floatingWindow.getSize();
-  const shouldResizeWidth = settings && Math.abs(width - size.width) > 80;
-  if (shouldResizeWidth || width < size.minWidth || height < size.minHeight) {
-    floatingWindow.setSize(
-      Math.max(shouldResizeWidth ? size.width : width, size.minWidth),
-      Math.max(height < size.minHeight ? size.height : height, size.minHeight)
-    );
+  if (settings) {
+    floatingRememberBounds = settings.floating.rememberBounds;
   }
+  floatingWindow.setMinimumSize(size.minWidth, size.minHeight);
   floatingWindow.setOpacity(options?.opacity ?? 1);
   floatingWindow.setMovable(!options?.lockPosition);
+  scheduleFloatingBoundsSave(settings);
 }
 
 async function fetchLatestRelease(): Promise<GitHubReleaseResponse> {

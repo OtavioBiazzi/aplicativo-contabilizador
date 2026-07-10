@@ -870,6 +870,20 @@ h3 {
   accent-color: var(--accent);
 }
 
+.settings-subsection {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-subsection h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
 .cash-result {
   display: grid;
   gap: 10px;

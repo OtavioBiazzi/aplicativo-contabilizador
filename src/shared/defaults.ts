@@ -108,6 +108,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
           opacity: 1,
           borderless: true,
           lockPosition: false,
+          rememberBounds: true,
           dragWholeBar: true,
           theme: "follow",
           syncMoneyWithEntryType: true
@@ -123,6 +124,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
           opacity: 1,
           borderless: true,
           lockPosition: false,
+          rememberBounds: true,
           dragWholeBar: false,
           theme: "follow",
           syncMoneyWithEntryType: true
@@ -140,6 +142,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
       opacity: 1,
       borderless: true,
       lockPosition: false,
+      rememberBounds: true,
       dragWholeBar: false,
       theme: "follow",
       syncMoneyWithEntryType: true

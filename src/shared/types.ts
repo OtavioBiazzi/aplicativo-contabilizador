@@ -149,6 +149,7 @@ export interface FloatingSettings {
   opacity: number;
   borderless: boolean;
   lockPosition: boolean;
+  rememberBounds: boolean;
   dragWholeBar: boolean;
   theme: FloatingThemeMode;
   syncMoneyWithEntryType: boolean;

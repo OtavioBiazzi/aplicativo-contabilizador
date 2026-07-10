@@ -4669,6 +4669,34 @@ function SettingsPanel({
               <option value="sidePanel">Painel lateral</option>
             </select>
           </label>
+          <div className="settings-subsection">
+            <h4>Barra fixa do Modo Classico</h4>
+            <label className="field"><span>Tema da barra</span>
+              <select
+                value={draft.floating.theme}
+                onChange={(event) => update("floating", { ...draft.floating, theme: event.target.value as AppSettings["floating"]["theme"] })}
+              >
+                <option value="follow">Seguir tema do aplicativo</option>
+                <option value="light">Claro</option>
+                <option value="dark">Escuro</option>
+                <option value="datacaixa">DataCaixa</option>
+                <option value="datacaixa-dark">DataCaixa escuro</option>
+                <option value="italia">Italia</option>
+              </select>
+            </label>
+            <label className="switch-line">
+              <input type="checkbox" checked={draft.floating.rememberBounds} onChange={(event) => update("floating", { ...draft.floating, rememberBounds: event.target.checked })} />
+              Salvar tamanho e posicao da barra
+            </label>
+            <label className="switch-line">
+              <input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} />
+              Travar a barra no lugar
+            </label>
+            <label className="switch-line">
+              <input type="checkbox" checked={draft.floating.dragWholeBar} onChange={(event) => update("floating", { ...draft.floating, dragWholeBar: event.target.checked })} />
+              Permitir arrastar por toda a barra
+            </label>
+          </div>
         </section>
 
         <section className={categoryClass("operation")}>
