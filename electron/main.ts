@@ -801,7 +801,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("export:now", async () => {
-    const status = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    const status = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings(), { rewriteHistorical: true });
     await logExportStatus("exportacao manual", status);
     if (status.filePath) {
       shell.showItemInFolder(status.filePath);

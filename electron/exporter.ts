@@ -31,13 +31,17 @@ export class LedgerExporter {
     };
   }
 
-  async export(entries: LedgerEntry[], settings: AppSettings): Promise<ExportStatus> {
+  async export(entries: LedgerEntry[], settings: AppSettings, options: { rewriteHistorical?: boolean } = {}): Promise<ExportStatus> {
     try {
       await fs.mkdir(settings.outputDirectory, { recursive: true });
       const exportTargets = this.buildTargets(entries, settings);
       const writtenFiles: string[] = [];
 
       for (const target of exportTargets) {
+        if (!options.rewriteHistorical && await this.shouldPreserveHistoricalFile(target.filePath, settings)) {
+          writtenFiles.push(target.filePath);
+          continue;
+        }
         await this.backupIfNeeded(target.filePath, settings.backupEnabled);
         if (settings.fileFormat === "xlsx") {
           await this.writeXlsx(target.filePath, target.sheets);
@@ -95,6 +99,30 @@ export class LedgerExporter {
         message
       };
     }
+  }
+
+  private async shouldPreserveHistoricalFile(filePath: string, settings: AppSettings): Promise<boolean> {
+    try {
+      await fs.access(filePath);
+    } catch {
+      return false;
+    }
+    const fileName = path.basename(filePath);
+    const currentDate = formatDateToken(new Date(), settings);
+    if (settings.fileStrategy === "daily") {
+      const match = fileName.match(/^vendas-(.+)\.[^.]+$/i);
+      return Boolean(match && match[1] !== currentDate);
+    }
+    if (settings.fileStrategy === "byType") {
+      const match = fileName.match(new RegExp(`-(\\d{4}-\\d{2}-\\d{2}|\\d{2}-\\d{2}-\\d{4}|\\d{8})\\.${escapeRegExp(settings.fileFormat)}$`, "i"));
+      return Boolean(match && match[1] !== currentDate);
+    }
+    if (settings.fileStrategy === "monthlyTabs" && settings.fileFormat === "xlsx") {
+      const currentMonth = getLocalMonthKey(new Date());
+      const match = fileName.match(/^caixa-(\d{4}-\d{2})\.xlsx$/i);
+      return Boolean(match && match[1] !== currentMonth);
+    }
+    return false;
   }
 
   async exportTodayRecovery(entries: LedgerEntry[], settings: AppSettings): Promise<ExportStatus> {
