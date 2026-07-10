@@ -590,6 +590,19 @@ export class PdvStore {
     if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
       throw new Error("Venda nao encontrada.");
     }
+    const currentSale = this.getSales().find((sale) => sale.id === id);
+    if (!currentSale) {
+      throw new Error("Venda nao encontrada.");
+    }
+    const nextTotal = patch.finalValue === undefined ? currentSale.total : roundMoney(Number(patch.finalValue));
+    if (!Number.isFinite(nextTotal) || nextTotal < 0) {
+      throw new Error("Total final invalido.");
+    }
+    const nextPayments = patch.paymentMethod
+      ? normalizePaymentsForTotal([{ id: randomUUID(), method: normalizePdvPaymentMethod(patch.paymentMethod), amount: nextTotal, received: nextTotal }], nextTotal)
+      : patch.finalValue !== undefined
+        ? normalizePaymentsForTotal(currentSale.payments, nextTotal)
+        : null;
     let status = patch.status;
     if (status === "cancelled") status = "Cancelada";
     if (status === "active") status = "Finalizada";
@@ -617,11 +630,11 @@ export class PdvStore {
       if (typeof patch.observations === "string") {
         db.run("UPDATE sales SET observations = ? WHERE id = ?", [patch.observations.trim(), id]);
       }
-      if (patch.paymentMethod) {
+      if (nextPayments) {
         db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
-        const amt = patch.finalValue ?? (selectAll<{ total: number }>(db, "SELECT total FROM sales WHERE id = ?", [id])[0]?.total || 0);
-        db.run("INSERT INTO sale_payments (id, sale_id, method, amount, received, change) VALUES (?, ?, ?, ?, ?, ?)",
-          [randomUUID(), id, patch.paymentMethod, amt, amt, 0]);
+        const statement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change) VALUES (?, ?, ?, ?, ?, ?)");
+        nextPayments.forEach((payment) => statement.run([payment.id || randomUUID(), id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null]));
+        statement.free();
       }
       db.run("COMMIT");
     } catch (error) {
@@ -1124,6 +1137,16 @@ function normalizePaymentsForTotal(payments: PdvPayment[], total: number): PdvPa
   return normalized;
 }
 
+function normalizePdvPaymentMethod(value: unknown): PdvPayment["method"] {
+  const normalized = String(value || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("pt-BR");
+  if (normalized.includes("dinheiro")) return "Dinheiro";
+  if (normalized.includes("debito")) return "Debito";
+  if (normalized.includes("credito")) return "Credito";
+  if (normalized.includes("pix")) return "Pix";
+  if (!normalized || normalized.includes("nao informado") || normalized.includes("nao definido")) return "Nao definido";
+  return "Outros";
+}
+
 function selectAll<T>(db: Database, sql: string, params: SqlValue[] = []): T[] {
   const statement = db.prepare(sql);
   statement.bind(params);
@@ -1183,7 +1206,10 @@ function slugId(prefix: string, name: string): string {
 }
 
 function matchesSaleFilters(sale: PdvSale, filters: PdvExportFilters): boolean {
-  const dateKey = sale.createdAt.slice(0, 10);
+  const date = new Date(sale.createdAt);
+  const dateKey = Number.isNaN(date.getTime())
+    ? sale.createdAt.slice(0, 10)
+    : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   const table = (filters.table || "").replace(/^0+/, "");
   if (filters.from && dateKey < filters.from) {
     return false;

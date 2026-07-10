@@ -3221,7 +3221,7 @@ function filterSales(
   const query = (filters.query || "").trim().toLocaleLowerCase("pt-BR");
   const table = (filters.table || "").replace(/^0+/, "");
   return sales.filter((sale) => {
-    const dateKey = sale.createdAt.slice(0, 10);
+    const dateKey = localDateInputValue(new Date(sale.createdAt));
     if (filters.from && dateKey < filters.from) {
       return false;
     }
