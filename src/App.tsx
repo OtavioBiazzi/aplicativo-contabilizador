@@ -1165,6 +1165,7 @@ export function App() {
       document.documentElement.dataset.density = settings.density;
       document.documentElement.dataset.fieldSize = settings.fieldSize;
       document.documentElement.dataset.floatingBorderless = settings.floating.borderless ? "true" : "false";
+      document.documentElement.dataset.floatingCornerStyle = settings.floating.cornerStyle || "rounded";
       document.documentElement.style.setProperty("--accent", settings.accentColor);
       document.documentElement.classList.toggle("is-floating-root", IS_FLOATING_WINDOW);
       document.body.classList.toggle("is-pinned", pinned || IS_FLOATING_WINDOW);
@@ -1840,11 +1841,6 @@ export function App() {
           <div className="module-status">
             <span>{header.status}</span>
             <strong>{header.detail}</strong>
-          </div>
-          <div className="status-strip">
-            <StatusPill label="Excel/CSV" ok={exportStatus?.ok ?? true} text={exportStatus?.pendingCount ? `${exportStatus.pendingCount} pendente` : "sincronizado"} />
-            <StatusPill label="Servidor" ok={server.running} text={server.running ? `:${server.port}` : "off"} />
-            {remoteSession && <StatusPill label="Cliente" ok text="remoto" />}
           </div>
         </header>}
 
@@ -2810,6 +2806,7 @@ function HistoryPanel({
   const [query, setQuery] = useState("");
   const [type, setType] = useState("Todos");
   const [statusFilter, setStatusFilter] = useState("visiveis");
+  const [paymentFilter, setPaymentFilter] = useState("Todos");
   const [date, setDate] = useState("");
   const [originFilter, setOriginFilter] = useState("Todos");
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
@@ -2825,6 +2822,7 @@ function HistoryPanel({
     }
     setDate(focusDate.date);
     setStatusFilter("visiveis");
+    setPaymentFilter("Todos");
     setType("Todos");
     setQuery("");
     setVisibleCount(HISTORY_PAGE_SIZE);
@@ -2843,14 +2841,15 @@ function HistoryPanel({
         (statusFilter === "deleted" && entry.status === "deleted");
       const sameDate = !date || getLocalDateKey(entry.createdAt) === date;
       const sameOrigin = originFilter === "Todos" || entry.originDevice === originFilter;
-      return sameType && sameStatus && sameDate && sameOrigin && haystack.includes(search);
+      const samePayment = paymentFilter === "Todos" || entry.paymentMethod === paymentFilter || Boolean(entry.paymentBreakdown?.some((item) => item.method === paymentFilter));
+      return sameType && sameStatus && sameDate && sameOrigin && samePayment && haystack.includes(search);
     });
-  }, [entries, deferredQuery, type, statusFilter, date, originFilter]);
+  }, [entries, deferredQuery, type, statusFilter, date, originFilter, paymentFilter]);
   const visibleRows = filtered.slice(0, visibleCount);
 
   useEffect(() => {
     setVisibleCount(HISTORY_PAGE_SIZE);
-  }, [deferredQuery, type, statusFilter, date]);
+  }, [deferredQuery, type, statusFilter, date, paymentFilter]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     try {
@@ -2905,6 +2904,12 @@ function HistoryPanel({
             {originOptions.map((origin) => <option key={origin}>{origin}</option>)}
           </select>
         </label>
+        <label className="field">
+          <span>Pagamento</span>
+          <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)}>
+            {['Todos', 'Dinheiro', 'Debito', 'Credito', 'Pix', 'Outros', 'Nao informado'].map((method) => <option key={method}>{method}</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="table-wrap">
@@ -2940,7 +2945,7 @@ function HistoryPanel({
                   <td>
                     <div className="row-actions">
                       <button title="Editar" onClick={() => onEditRemote ? void onEditRemote(entry) : setEditing(entry)}><Edit3 size={15} /></button>
-                      {entry.sourceSaleId && <button className="history-sale-details-button" title="Ver produtos e pagamentos" onClick={() => openSaleDetails(entry)}><Eye size={15} /><span>Itens</span></button>}
+                      {entry.sourceSaleId && <button className="history-sale-details-button" title="Ver produtos e pagamentos" aria-label="Ver produtos e pagamentos" onClick={() => openSaleDetails(entry)}><Eye size={15} /></button>}
                       <button title="Duplicar" onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
                       {entry.status === "deleted" || entry.status === "cancelled" ? (
                          <button title="Restaurar" onClick={() => run(() => onRestoreRemote ? onRestoreRemote(entry) : window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
@@ -4805,6 +4810,12 @@ function SettingsPanel({
           <label className="switch-line"><input type="checkbox" checked={draft.floating.rememberBounds} onChange={(event) => update("floating", { ...draft.floating, rememberBounds: event.target.checked })} /> Salvar tamanho e posicao</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar a barra no lugar</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.borderless} onChange={(event) => update("floating", { ...draft.floating, borderless: event.target.checked })} /> Visual sem borda de janela</label>
+          <label className="field"><span>Cantos da barra fixa</span>
+            <select value={draft.floating.cornerStyle || "rounded"} onChange={(event) => update("floating", { ...draft.floating, cornerStyle: event.target.value as AppSettings["floating"]["cornerStyle"] })}>
+              <option value="rounded">Bordas arredondadas</option>
+              <option value="square">Bordas quadradas</option>
+            </select>
+          </label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.dragWholeBar} onChange={(event) => update("floating", { ...draft.floating, dragWholeBar: event.target.checked })} /> Arrastar pela barra inteira</label>
           <label className="switch-line"><input type="checkbox" checked={draft.floating.syncMoneyWithEntryType} onChange={(event) => update("floating", { ...draft.floating, syncMoneyWithEntryType: event.target.checked })} /> Manter Mesa ou Onibus ao trocar Conta/Dinheiro</label>
           <div className="floating-field-picker">
@@ -4957,22 +4968,23 @@ function SettingsPanel({
                       : "Todos os lancamentos ativos ficam em um arquivo geral."}
               </small>
             </div>
-            <button className="primary-button" type="button" onClick={onImportLedger}>
-              <Upload size={18} />
-              Importar Excel/CSV
-            </button>
-            <button className="ghost-button" type="button" onClick={onImportLedgerFolder}>
-              <Upload size={18} />
-              Importar pasta
-            </button>
-            <button className="ghost-button" type="button" onClick={openTodayRecoveryFile}>
-              <ExternalLink size={18} />
-              Gerar/abrir arquivo de hoje
-            </button>
-            <button className="ghost-button" type="button" onClick={openCurrentExport}>
-              <ExternalLink size={18} />
-              Gerar/abrir arquivo
-            </button>
+            <div className="file-preview-actions">
+              <button className="primary-button" type="button" onClick={onImportLedger}>
+                <Upload size={18} /> Importar Excel/CSV
+              </button>
+              <button className="ghost-button" type="button" onClick={onImportLedgerFolder}>
+                <Upload size={18} /> Importar pasta
+              </button>
+              <button className="ghost-button" type="button" onClick={() => openDirectory("output")}>
+                <FolderOpen size={18} /> Abrir pasta dos arquivos
+              </button>
+              <button className="ghost-button" type="button" onClick={openTodayRecoveryFile}>
+                <ExternalLink size={18} /> Gerar/abrir arquivo de hoje
+              </button>
+              <button className="ghost-button" type="button" onClick={openCurrentExport}>
+                <ExternalLink size={18} /> Gerar/abrir arquivo
+              </button>
+            </div>
           </div>
           <label className="field path-field"><span>Pasta padrao</span><input value={draft.outputDirectory} onChange={(event) => update("outputDirectory", event.target.value)} /><button onClick={chooseFolder} type="button">Escolher</button><button onClick={useSafeOutputFolder} type="button">Usar pasta segura</button></label>
           <label className="field"><span>Formato</span>
@@ -5361,10 +5373,15 @@ function SettingsPanel({
               <strong>Restauracoes seguras</strong>
               <span>Restaurar categorias nao apaga vendas. Para apagar dados de venda, use o Historico com confirmacao.</span>
             </div>
-            <button className="ghost-button" type="button" onClick={() => {
-              setDraft(createSettingsFallback(draft));
-              onToast("info", "Configuracoes restauradas. Salve para aplicar.");
-            }}>
+            <button className="ghost-button" type="button" onClick={() => setSettingsConfirm({
+              title: "Restaurar configuracoes de fabrica?",
+              message: "Tema, visual, atalhos, barra fixa e preferencias serao restaurados. Historico, vendas, mesas, produtos, pagamentos, relatorios e arquivos exportados serao preservados.",
+              confirmLabel: "Restaurar configuracoes",
+              action: () => {
+                setDraft(createSettingsFallback(draft));
+                onToast("info", "Configuracoes restauradas. Salve para aplicar.");
+              }
+            })}>
               <RotateCcw size={16} /> Restaurar tudo
             </button>
           </div>

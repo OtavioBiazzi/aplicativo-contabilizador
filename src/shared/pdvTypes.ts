@@ -25,6 +25,7 @@ export interface PdvProduct {
   hasComplements: boolean;
   complementProductIds: string[];
   sortOrder: number;
+  importSource?: string;
 }
 
 export interface PdvProductDraft {
@@ -68,6 +69,7 @@ export interface PdvCartItem {
   baseUnitPrice?: number;
   discount: number;
   total: number;
+  paidQuantity?: number;
   subtableName?: string;
   note?: string;
   complements?: PdvItemComplement[];
@@ -79,6 +81,7 @@ export interface PdvPayment {
   amount: number;
   received?: number;
   change?: number;
+  description?: string;
 }
 
 export interface PdvTransferSelection {
@@ -96,6 +99,7 @@ export interface PdvOpenTable {
   note: string;
   total: number;
   items: PdvCartItem[];
+  subtables?: string[];
 }
 
 export interface PdvSale {
@@ -137,6 +141,9 @@ export interface PdvSettings {
   categoryCardHeight?: number;
   tableCardHeight?: number;
   stackIdenticalItems?: boolean;
+  partialPaymentDescriptionEnabled?: boolean;
+  individualUnitItems?: boolean;
+  groupComplementsWithProduct?: boolean;
 }
 
 export interface PdvProductImportResult {
@@ -144,6 +151,8 @@ export interface PdvProductImportResult {
   importedProducts: number;
   importedCategories: number;
   skippedRows: number;
+  updatedProducts?: number;
+  removedProducts?: number;
 }
 
 export interface PdvExportFilters {

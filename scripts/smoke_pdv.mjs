@@ -149,8 +149,8 @@ if (partialSale.status !== "Parcial" || partialSale.total !== 10) {
 }
 const partialSnapshot = await store.getSnapshot();
 const remainingTable = partialSnapshot.tables.find((table) => table.number === 7);
-if (!remainingTable?.items.length || remainingTable.items[0].quantity !== 1 || remainingTable.total !== 10) {
-  throw new Error("Fechamento parcial nao preservou a quantidade restante da mesa.");
+if (!remainingTable?.items.length || remainingTable.items[0].quantity !== 2 || remainingTable.items[0].paidQuantity !== 1 || remainingTable.total !== 10) {
+  throw new Error("Fechamento parcial nao preservou o item pago e o saldo restante da mesa.");
 }
 await store.closeTable(7, [{ id: crypto.randomUUID(), method: "Dinheiro", amount: 10, received: 20, change: 10 }]);
 if ((await store.getSnapshot()).tables.find((table) => table.number === 7)?.status !== "Livre") {
@@ -188,8 +188,8 @@ if (store.getSales({ status: "Cancelada" }).length !== 1 || store.getSales({ sta
   throw new Error("Filtro de status das vendas PDV nao funcionou corretamente.");
 }
 
-const updatedPaymentSale = await store.updateSalePayments(sale.id, [{ id: crypto.randomUUID(), method: "Pix", amount: 12 }]);
-if (updatedPaymentSale.payments[0]?.method !== "Pix" || updatedPaymentSale.payments[0]?.amount !== 12) {
+const updatedPaymentSale = await store.updateSalePayments(sale.id, [{ id: crypto.randomUUID(), method: "Pix", amount: 12, description: "Pessoa smoke" }]);
+if (updatedPaymentSale.payments[0]?.method !== "Pix" || updatedPaymentSale.payments[0]?.amount !== 12 || updatedPaymentSale.payments[0]?.description !== "Pessoa smoke") {
   throw new Error("Alteracao de forma de pagamento nao foi persistida corretamente.");
 }
 const separatedPaymentsEntry = pdvSaleToLedgerEntry({
@@ -222,6 +222,11 @@ if (!(await store.getSnapshot()).products.some((product) => product.id === baseP
 }
 
 await store.replaceProducts(snapshot.categories, snapshot.products, "smoke.xlsx");
+const productsAfterFirstImport = (await store.getSnapshot()).products.length;
+await store.replaceProducts(snapshot.categories, snapshot.products, "smoke.xlsx");
+if ((await store.getSnapshot()).products.length !== productsAfterFirstImport) {
+  throw new Error("Reimportacao de produtos duplicou o cadastro.");
+}
 const backupDir = path.join(dataDir, "pdv-backups");
 if (!existsSync(backupDir) || !readdirSync(backupDir).some((file) => file.includes("antes-importacao-produtos"))) {
   throw new Error("Backup automatico do SQLite nao foi criado antes da importacao.");

@@ -406,10 +406,10 @@ async function listImportableLedgerFiles(directory: string): Promise<string[]> {
   return files.sort((left, right) => left.localeCompare(right, "pt-BR", { numeric: true }));
 }
 
-async function importPdvProducts(filePath: string): Promise<PdvProductImportResult> {
+async function importPdvProducts(filePath: string, importSource = "Importacao externa"): Promise<PdvProductImportResult> {
   const rows = await readPdvProductsFromXlsx(filePath);
   const normalized = normalizeImportedProducts(rows);
-  const result = await pdvStore.replaceProducts(normalized.categories, normalized.products, filePath);
+  const result = await pdvStore.replaceProducts(normalized.categories, normalized.products, filePath, importSource);
   await logger.info(
     "Produtos PDV importados",
     `${result.importedProducts} produto(s), ${result.importedCategories} categoria(s): ${path.basename(filePath)}`
@@ -516,21 +516,22 @@ async function bootstrap() {
     getPdvSnapshot: () => pdvStore.getSnapshot(),
     openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
-    savePdvTableItems: (tableNumber, items) => pdvStore.saveTableItems(tableNumber, items),
+    savePdvTableItems: (tableNumber, items, subtables) => pdvStore.saveTableItems(tableNumber, items, subtables),
     transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections),
     updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
     savePdvCategory: (draft) => pdvStore.saveCategory(draft),
     savePdvProduct: (draft) => pdvStore.saveProduct(draft),
     savePdvSettings: (patch) => pdvStore.saveSettings(patch),
-    importPdvPreset: () => importPdvProducts(path.join(app.getPath("downloads"), "produtos.xlsx")),
+    importPdvPreset: () => importPdvProducts(path.join(app.getPath("downloads"), "produtos.xlsx"), "Cose Dell Abadia"),
+    removePdvPreset: () => pdvStore.removeImportedProducts("Cose Dell Abadia"),
     closePdvTable: async (tableNumber, payments, discount, originDevice, operationId) => {
       const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice, operationId);
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
       return sale;
     },
-    savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId) => {
-      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId);
+    savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId, observations) => {
+      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId, observations);
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
       return sale;
@@ -627,7 +628,13 @@ function registerIpc() {
 
   ipcMain.handle("pdv:importCoseProducts", async (): Promise<PdvProductImportResult> => {
     const defaultPath = path.join(app.getPath("downloads"), "produtos.xlsx");
-    return importPdvProducts(defaultPath);
+    return importPdvProducts(defaultPath, "Cose Dell Abadia");
+  });
+
+  ipcMain.handle("pdv:removeCoseProducts", async (): Promise<number> => {
+    const removed = await pdvStore.removeImportedProducts("Cose Dell Abadia");
+    sendToAll("pdv:changed");
+    return removed;
   });
 
   ipcMain.handle("pdv:importProductsFile", async (): Promise<PdvProductImportResult | null> => {
@@ -660,8 +667,8 @@ function registerIpc() {
     sendToAll("pdv:changed");
   });
 
-  ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[]) => {
-    await pdvStore.saveTableItems(tableNumber, items);
+  ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[], subtables?: string[]) => {
+    await pdvStore.saveTableItems(tableNumber, items, subtables);
     sendToAll("pdv:changed");
   });
 
@@ -679,8 +686,8 @@ function registerIpc() {
     return sale;
   });
 
-  ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
-    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Este computador", operationId || randomUUID());
+  ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string): Promise<PdvSale> => {
+    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Este computador", operationId || randomUUID(), observations);
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
     sendToAll("pdv:changed");

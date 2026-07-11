@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import JSZip from "jszip";
 import type { PdvCategory, PdvProduct } from "../src/shared/pdvTypes.js";
@@ -77,7 +77,7 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
       let category = categoryByName.get(categoryKey);
       if (!category) {
         category = {
-          id: randomUUID(),
+          id: stableImportId("category", categoryKey),
           name: row.categoryName,
           active: true,
           favorite: false,
@@ -92,7 +92,7 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
       }
       seenProducts.add(productKey);
       products.push({
-        id: randomUUID(),
+        id: stableImportId("product", productKey),
         name: row.name,
         categoryId: category.id,
         categoryName: category.name,
@@ -210,6 +210,13 @@ function normalizeForMatch(value: string): string {
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+// Os IDs estaveis permitem reimportar a mesma planilha sem criar uma segunda
+// copia do produto ou da categoria no SQLite.
+function stableImportId(kind: "category" | "product", value: string): string {
+  const hash = createHash("sha256").update(`cose-dell-abadia:${kind}:${value}`).digest("hex");
+  return `${kind}-${hash.slice(0, 24)}`;
 }
 
 function inferUnitMode(unit: string): PdvProduct["unitMode"] {

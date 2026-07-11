@@ -2253,6 +2253,18 @@ th {
   font-size: 1.12rem;
 }
 
+.file-preview-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-left: 32px;
+}
+
+.file-preview-actions button {
+  min-height: 40px;
+}
+
 .floating-field-picker {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -2917,6 +2929,11 @@ body.floating-borderless .floating-bar {
   border-color: transparent;
   border-radius: 8px;
   box-shadow: 0 8px 22px color-mix(in srgb, var(--bar-accent) 10%, transparent);
+}
+
+:root[data-floating-corner-style="square"] .floating-bar,
+:root[data-floating-corner-style="square"] body.floating-borderless .floating-bar {
+  border-radius: 0;
 }
 
 .floating-bar.money {
@@ -4289,6 +4306,21 @@ body.floating-borderless .floating-bar {
   gap: 8px;
 }
 
+.pdv-quantity-box.has-subtable {
+  grid-template-columns: minmax(132px, auto) 46px 72px 46px repeat(2, minmax(72px, auto));
+}
+
+.pdv-quantity-box.has-subtable > span {
+  grid-column: 2 / -1;
+}
+
+.pdv-quantity-box.has-subtable .pdv-subtable-trigger {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: end;
+  min-height: 40px;
+}
+
 .pdv-quantity-box span {
   grid-column: 1 / -1;
   font-size: 1.35rem;
@@ -4450,6 +4482,34 @@ body.floating-borderless .floating-bar {
   border-left: 5px solid var(--pdv-action-strong);
   background: #dfeff8;
   color: #071d30;
+}
+
+.pdv-cart-list article.paid,
+.pdv-transfer-list button.paid {
+  opacity: 0.62;
+  background: color-mix(in srgb, #1e8d4c 18%, var(--pdv-panel));
+}
+
+.pdv-transfer-list button.paid small::after {
+  content: " ✓";
+  color: #0c6b35;
+  font-weight: 900;
+}
+
+.pdv-payment-description {
+  display: grid;
+  gap: 5px;
+  color: #0b3151;
+  font-weight: 800;
+}
+
+.pdv-payment-description input {
+  min-height: 42px;
+  border: 1px solid #a9c8dc;
+  border-radius: 5px;
+  padding: 0 11px;
+  background: #fff;
+  color: #071827;
 }
 
 .pdv-cart-list article.selected span,
@@ -5366,6 +5426,7 @@ body.floating-borderless .floating-bar {
   position: fixed;
   right: 18px;
   bottom: 18px;
+  z-index: 220;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -5375,6 +5436,104 @@ body.floating-borderless .floating-bar {
   color: #063a62;
   font-weight: 900;
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.25);
+}
+
+/* A area operacional usa superficies claras nos modais para manter leitura
+   consistente mesmo quando o tema geral esta escuro. */
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal),
+.pdv-quantity-modal,
+.pdv-payment-amount-modal,
+.pdv-transfer-modal,
+.pdv-transfer-list-modal,
+.pdv-partial-items-modal,
+.pdv-subtable-manager-modal,
+.pdv-rename-subtable-modal {
+  background: #dcebf5 !important;
+  color: #0b3151 !important;
+}
+
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) p,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) label,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) span,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) small,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) strong,
+.pdv-payment-modal:not(.pdv-complement-modal):not(.pdv-editor-modal):not(.pdv-sale-detail-modal) b,
+.pdv-quantity-modal label,
+.pdv-quantity-modal span,
+.pdv-quantity-modal small,
+.pdv-payment-amount-modal label,
+.pdv-payment-amount-modal span,
+.pdv-payment-amount-modal small,
+.pdv-transfer-modal p,
+.pdv-transfer-modal label,
+.pdv-transfer-modal span,
+.pdv-transfer-modal small,
+.pdv-transfer-modal strong,
+.pdv-transfer-list-modal p,
+.pdv-transfer-list-modal label,
+.pdv-transfer-list-modal span,
+.pdv-transfer-list-modal small,
+.pdv-transfer-list-modal strong,
+.pdv-partial-items-modal p,
+.pdv-partial-items-modal label,
+.pdv-partial-items-modal span,
+.pdv-partial-items-modal small,
+.pdv-partial-items-modal strong,
+.pdv-subtable-manager-modal p,
+.pdv-subtable-manager-modal label,
+.pdv-subtable-manager-modal span,
+.pdv-subtable-manager-modal small,
+.pdv-subtable-manager-modal strong,
+.pdv-rename-subtable-modal p,
+.pdv-rename-subtable-modal label,
+.pdv-rename-subtable-modal span,
+.pdv-rename-subtable-modal small,
+.pdv-rename-subtable-modal strong {
+  color: #0b3151 !important;
+}
+
+.pdv-window-title,
+.pdv-window-title * {
+  color: #fff !important;
+}
+
+.pdv-quantity-modal input,
+.pdv-payment-amount-modal input,
+.pdv-subtable-manager-modal input,
+.pdv-rename-subtable-modal input {
+  background: #fff !important;
+  color: #071827 !important;
+}
+
+.pdv-cart-area .pdv-empty {
+  color: #082942 !important;
+  background: #fff;
+  border-radius: 5px;
+  padding: 14px;
+}
+
+input[type="date"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] input[type="date"],
+:root[data-theme="datacaixa-dark"] input[type="date"] {
+  color-scheme: dark;
+}
+
+.pdv-advanced-grid article:first-child {
+  align-content: start;
+}
+
+@media (max-width: 900px) {
+  .file-preview-card {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .file-preview-actions {
+    padding-left: 0;
+  }
 }
 
 .pdv-modal-backdrop {

@@ -33,9 +33,29 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   productCardHeight: 74,
   categoryCardHeight: 64,
   tableCardHeight: 96,
-  stackIdenticalItems: false
+  stackIdenticalItems: false,
+  partialPaymentDescriptionEnabled: false,
+  individualUnitItems: false,
+  groupComplementsWithProduct: true
 };
 const PDV_BACKUP_DIRECTORY = "pdv-backups";
+
+function normalizeSubtableNames(value: unknown): string[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))]
+    : [];
+}
+
+function parseSubtableNames(value: unknown): string[] {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+  try {
+    return normalizeSubtableNames(JSON.parse(value));
+  } catch {
+    return [];
+  }
+}
 
 export class PdvStore {
   private sql: SqlJsStatic | null = null;
@@ -253,24 +273,46 @@ export class PdvStore {
     return this.getProducts().find((product) => product.id === id) || this.getProducts()[0];
   }
 
-  async replaceProducts(categories: PdvCategory[], products: PdvProduct[], filePath: string): Promise<PdvProductImportResult> {
+  async replaceProducts(categories: PdvCategory[], products: PdvProduct[], filePath: string, importSource = ""): Promise<PdvProductImportResult> {
     await this.backupSqlite("antes-importacao-produtos");
     const db = this.requireDb();
+    let importedCategories = 0;
+    let importedProducts = 0;
+    let updatedProducts = 0;
     db.run("BEGIN IMMEDIATE");
     try {
-      db.run("DELETE FROM product_complements");
-      db.run("DELETE FROM products");
-      db.run("DELETE FROM categories");
-      const categoryStatement = db.prepare("INSERT INTO categories (id, name, active, favorite, sort_order) VALUES (?, ?, ?, ?, ?)");
-      for (const category of categories) {
+      const existingCategories = selectAll<{ id: string; name: string }>(db, "SELECT id, name FROM categories");
+      const existingCategoryByName = new Map(existingCategories.map((category) => [catalogKey(category.name), category.id]));
+      const categoryIdMap = new Map<string, string>();
+      const normalizedCategories = categories.map((category) => {
+        const id = existingCategoryByName.get(catalogKey(category.name)) || category.id;
+        categoryIdMap.set(category.id, id);
+        return { ...category, id };
+      });
+      const existingProducts = selectAll<{ id: string; name: string; category_name: string; import_source: string }>(db, "SELECT products.id, products.name, categories.name AS category_name, COALESCE(products.import_source, '') AS import_source FROM products LEFT JOIN categories ON categories.id = products.category_id");
+      const existingProductByKey = new Map(existingProducts.map((product) => [catalogKey(`${product.category_name}|${product.name}`), product]));
+      const productIdMap = new Map<string, string>();
+      const normalizedProducts = products.map((product) => {
+        const category = normalizedCategories.find((item) => item.id === categoryIdMap.get(product.categoryId));
+        const key = catalogKey(`${category?.name || product.categoryName}|${product.name}`);
+        const existing = existingProductByKey.get(key);
+        const id = existing?.id || product.id;
+        if (existing) updatedProducts += 1;
+        productIdMap.set(product.id, id);
+        return { ...product, id, categoryId: categoryIdMap.get(product.categoryId) || product.categoryId };
+      });
+      const categoryStatement = db.prepare("INSERT INTO categories (id, name, active, favorite, sort_order) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, active=excluded.active, favorite=excluded.favorite, sort_order=excluded.sort_order");
+      for (const category of normalizedCategories) {
         categoryStatement.run([category.id, category.name, category.active ? 1 : 0, category.favorite ? 1 : 0, category.sortOrder]);
       }
       categoryStatement.free();
 
       const productStatement = db.prepare(
-        "INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, favorite, can_be_complement, has_complements, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        `INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, favorite, can_be_complement, has_complements, sort_order, import_source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET name=excluded.name, category_id=excluded.category_id, price=excluded.price, unit=excluded.unit, unit_mode=excluded.unit_mode, active=excluded.active, show_on_pdv=excluded.show_on_pdv, favorite=excluded.favorite, can_be_complement=excluded.can_be_complement, has_complements=excluded.has_complements, sort_order=excluded.sort_order, import_source=CASE WHEN excluded.import_source <> '' THEN excluded.import_source ELSE products.import_source END`
       );
-      for (const product of products) {
+      for (const product of normalizedProducts) {
         productStatement.run([
           product.id,
           product.name,
@@ -283,17 +325,21 @@ export class PdvStore {
           product.favorite ? 1 : 0,
           product.canBeComplement ? 1 : 0,
           product.hasComplements ? 1 : 0,
-          product.sortOrder
+          product.sortOrder,
+          importSource
         ]);
       }
       productStatement.free();
       const complementStatement = db.prepare("INSERT INTO product_complements (product_id, complement_product_id, sort_order) VALUES (?, ?, ?)");
-      for (const product of products) {
+      for (const product of normalizedProducts) {
+        db.run("DELETE FROM product_complements WHERE product_id = ?", [product.id]);
         (product.complementProductIds || []).forEach((complementId, index) => {
-          complementStatement.run([product.id, complementId, index]);
+          complementStatement.run([product.id, productIdMap.get(complementId) || complementId, index]);
         });
       }
       complementStatement.free();
+      importedCategories = normalizedCategories.length;
+      importedProducts = normalizedProducts.length;
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -302,10 +348,33 @@ export class PdvStore {
     await this.persist();
     return {
       filePath,
-      importedCategories: categories.length,
-      importedProducts: products.length,
-      skippedRows: 0
+      importedCategories,
+      importedProducts,
+      skippedRows: 0,
+      updatedProducts
     };
+  }
+
+  async removeImportedProducts(importSource: string): Promise<number> {
+    const source = importSource.trim();
+    if (!source) return 0;
+    await this.backupSqlite("antes-remover-importacao");
+    const db = this.requireDb();
+    const ids = selectAll<{ id: string }>(db, "SELECT id FROM products WHERE import_source = ?", [source]).map((row) => row.id);
+    if (!ids.length) return 0;
+    db.run("BEGIN IMMEDIATE");
+    try {
+      const placeholders = ids.map(() => "?").join(", ");
+      db.run(`DELETE FROM product_complements WHERE product_id IN (${placeholders}) OR complement_product_id IN (${placeholders})`, [...ids, ...ids]);
+      db.run(`DELETE FROM products WHERE id IN (${placeholders})`, ids);
+      db.run("DELETE FROM categories WHERE id NOT IN (SELECT DISTINCT category_id FROM products)");
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return ids.length;
   }
 
   async saveSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string }): Promise<PdvSale> {
@@ -359,11 +428,11 @@ export class PdvStore {
     await this.persist();
   }
 
-  async saveTableItems(tableNumber: number, items: PdvCartItem[]): Promise<void> {
+  async saveTableItems(tableNumber: number, items: PdvCartItem[], subtables?: string[]): Promise<void> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     validateCartItems(items);
     const db = this.requireDb();
-    if (!items.length) {
+    if (!items.length && !subtables?.length) {
       db.run("BEGIN IMMEDIATE");
       try {
         db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
@@ -387,12 +456,15 @@ export class PdvStore {
          opened_at=COALESCE(table_sessions.opened_at, excluded.opened_at)`,
       [`mesa-${tableNumber}`, tableNumber, new Date().toISOString()]
     );
+    if (subtables !== undefined) {
+      db.run("UPDATE table_sessions SET subtables_json = ? WHERE table_number = ?", [JSON.stringify(normalizeSubtableNames(subtables)), tableNumber]);
+    }
     db.run("BEGIN IMMEDIATE");
     try {
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       const statement = db.prepare(
-        `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, paid_quantity, subtable_name, note, complements_json, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       items.forEach((item, index) => {
         statement.run([
@@ -407,6 +479,7 @@ export class PdvStore {
           item.baseUnitPrice ?? item.unitPrice,
           item.discount,
           item.total,
+          Math.min(item.quantity, Math.max(0, item.paidQuantity || 0)),
           item.subtableName || "",
           item.note || "",
           JSON.stringify(item.complements || []),
@@ -435,7 +508,7 @@ export class PdvStore {
     for (const selection of selections) {
       const source = sourceItems.find((item) => item.id === selection.itemId);
       const quantity = Number(selection.quantity);
-      if (!source || !Number.isFinite(quantity) || quantity <= 0 || quantity > source.quantity + 0.009) {
+      if (!source || !Number.isFinite(quantity) || quantity <= 0 || quantity > unpaidQuantity(source) + 0.009) {
         throw new Error("Quantidade de transferencia invalida.");
       }
       if (sourceTableNumber === targetTableNumber && (selection.subtableName || "") === (source.subtableName || "")) {
@@ -447,6 +520,7 @@ export class PdvStore {
         ...source,
         id: randomUUID(),
         quantity: roundMoney(quantity),
+        paidQuantity: 0,
         subtableName: String(selection.subtableName || "").trim(),
         discount,
         total: roundMoney(Math.max(0, quantity * source.unitPrice - discount))
@@ -505,11 +579,17 @@ export class PdvStore {
       }
     }
     const table = this.getTables().find((item) => item.number === tableNumber);
-    if (!table || !table.items.length) {
+    const pendingItems = table?.items.flatMap((item) => {
+      const quantity = unpaidQuantity(item);
+      if (quantity <= 0.009) return [];
+      const ratio = item.quantity ? quantity / item.quantity : 1;
+      return [{ ...item, quantity, paidQuantity: 0, discount: roundMoney(item.discount * ratio), total: unpaidItemTotal(item) }];
+    }) || [];
+    if (!table || !pendingItems.length) {
       throw new Error("Mesa sem itens para fechar.");
     }
     const db = this.requireDb();
-    const sale = createSale({ type: "Mesa", tableNumber, items: table.items, discount, payments, originDevice, operationId });
+    const sale = createSale({ type: "Mesa", tableNumber, items: pendingItems, discount, payments, originDevice, operationId });
     db.run("BEGIN IMMEDIATE");
     try {
       insertSale(db, sale);
@@ -524,7 +604,7 @@ export class PdvStore {
     return sale;
   }
 
-  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string): Promise<PdvSale> {
+  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string, observations = ""): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     if (operationId) {
       const existing = this.getSales({}).find((sale) => sale.operationId === operationId);
@@ -546,33 +626,25 @@ export class PdvStore {
       if (!source && selected.productId !== "manual-partial") {
         throw new Error("O item selecionado nao pertence mais a esta mesa.");
       }
-      if (source && selected.quantity > source.quantity + 0.009) {
+      if (source && selected.quantity > unpaidQuantity(source) + 0.009) {
         throw new Error(`A quantidade selecionada de ${selected.productName} ultrapassa a mesa.`);
       }
     });
-    const remainingItems = table.items.flatMap((item) => {
+    const nextItems = table.items.map((item) => {
       const selected = selectedById.get(item.id);
       if (!selected) {
-        return [item];
+        return item;
       }
-      const remainingQuantity = roundMoney(Math.max(0, item.quantity - selected.quantity));
-      if (remainingQuantity <= 0.009) {
-        return [];
-      }
-      const unitTotal = item.quantity > 0 ? item.total / item.quantity : item.unitPrice;
-      return [{ ...item, quantity: remainingQuantity, total: roundMoney(unitTotal * remainingQuantity) }];
+      return { ...item, paidQuantity: roundMoney(Math.min(item.quantity, (item.paidQuantity || 0) + selected.quantity)) };
     });
-    const sale = createSale({ type: "Mesa", tableNumber, status: "Parcial", items: selectedItems, discount, payments, originDevice, operationId });
+    const sale = createSale({ type: "Mesa", tableNumber, status: "Parcial", items: selectedItems, discount, payments, originDevice, operationId, observations });
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
       insertSale(db, sale);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
-      if (remainingItems.length) {
-        writeTableItems(db, tableNumber, remainingItems);
-      } else {
-        db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
-      }
+      writeTableItems(db, tableNumber, nextItems);
+      db.run("UPDATE table_sessions SET status = 'Fechamento' WHERE table_number = ?", [tableNumber]);
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -638,8 +710,8 @@ export class PdvStore {
       }
       if (nextPayments) {
         db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
-        const statement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change) VALUES (?, ?, ?, ?, ?, ?)");
-        nextPayments.forEach((payment) => statement.run([payment.id || randomUUID(), id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null]));
+        const statement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        nextPayments.forEach((payment) => statement.run([payment.id || randomUUID(), id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null, payment.description?.trim() || ""]));
         statement.free();
       }
       db.run("COMMIT");
@@ -679,9 +751,9 @@ export class PdvStore {
     db.run("BEGIN IMMEDIATE");
     try {
       db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
-      const statement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change) VALUES (?, ?, ?, ?, ?, ?)");
+      const statement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
       normalizedPayments.forEach((payment) => {
-        statement.run([payment.id || randomUUID(), id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null]);
+        statement.run([payment.id || randomUUID(), id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null, payment.description?.trim() || ""]);
       });
       statement.free();
       db.run("COMMIT");
@@ -714,7 +786,7 @@ export class PdvStore {
         COALESCE(p.unit_mode, 'unidade') AS unitMode,
         p.active = 1 AS active, p.show_on_pdv = 1 AS showOnPdv, p.favorite = 1 AS favorite,
        p.can_be_complement = 1 AS canBeComplement, p.has_complements = 1 AS hasComplements,
-        p.sort_order AS sortOrder
+       p.sort_order AS sortOrder, COALESCE(p.import_source, '') AS importSource
        FROM products p
        LEFT JOIN categories c ON c.id = p.category_id
        ORDER BY c.favorite DESC, c.sort_order, c.name, p.favorite DESC, p.sort_order, p.name`
@@ -734,17 +806,18 @@ export class PdvStore {
 
   private getTables(): PdvOpenTable[] {
     const tableCount = Math.max(1, Math.min(300, this.getSettings().tableCount || DEFAULT_PDV_SETTINGS.tableCount));
-    const sessions = selectAll<{ tableNumber: number; status: PdvTableStatus; openedAt: string | null; people: number; note: string }>(
+    const sessions = selectAll<{ tableNumber: number; status: PdvTableStatus; openedAt: string | null; people: number; note: string; subtablesJson: string }>(
       this.requireDb(),
-      "SELECT table_number AS tableNumber, status, opened_at AS openedAt, people, note FROM table_sessions"
+      "SELECT table_number AS tableNumber, status, opened_at AS openedAt, people, note, subtables_json AS subtablesJson FROM table_sessions"
     );
     const byNumber = new Map(sessions.map((session) => [session.tableNumber, session]));
     return Array.from({ length: tableCount }, (_, index) => {
       const number = index + 1;
       const session = byNumber.get(number);
       const items = this.getTableItems(number);
+      const remainingTotal = roundMoney(items.reduce((total, item) => total + unpaidItemTotal(item), 0));
       const visualStatus = items.length
-        ? (session?.status === "Fechamento" ? "Fechamento" : "Ocupada")
+        ? (remainingTotal <= 0.009 || session?.status === "Fechamento" ? "Fechamento" : "Ocupada")
         : session?.status === "Reservada"
           ? "Reservada"
           : "Livre";
@@ -755,8 +828,9 @@ export class PdvStore {
         openedAt: items.length ? session?.openedAt || null : null,
         people: session?.people || 1,
         note: items.length || session?.status === "Reservada" ? session?.note || "" : "",
-        total: roundMoney(items.reduce((total, item) => total + item.total, 0)),
-        items
+        total: remainingTotal,
+        items,
+        subtables: parseSubtableNames(session?.subtablesJson)
       };
     });
   }
@@ -765,7 +839,7 @@ export class PdvStore {
     return selectAll<PdvCartItem>(
       this.requireDb(),
       `SELECT id, product_id AS productId, product_name AS productName, category_name AS categoryName,
-        quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total, subtable_name AS subtableName, note,
+        quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total, paid_quantity AS paidQuantity, subtable_name AS subtableName, note,
         complements_json AS complementsJson
        FROM table_items WHERE table_number = ? ORDER BY sort_order, rowid`,
       [tableNumber]
@@ -789,7 +863,7 @@ export class PdvStore {
       ).map(normalizeCartItem),
       payments: selectAll<PdvPayment>(
         this.requireDb(),
-        "SELECT id, method, amount, received, change FROM sale_payments WHERE sale_id = ? ORDER BY rowid",
+        "SELECT id, method, amount, received, change, description FROM sale_payments WHERE sale_id = ? ORDER BY rowid",
         [sale.id]
       )
     };
@@ -818,7 +892,8 @@ export class PdvStore {
         can_be_complement INTEGER NOT NULL DEFAULT 0,
         has_complements INTEGER NOT NULL DEFAULT 0,
         unit_mode TEXT NOT NULL DEFAULT 'unidade',
-        sort_order INTEGER NOT NULL DEFAULT 0
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        import_source TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS product_complements (
         product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
@@ -836,7 +911,8 @@ export class PdvStore {
         status TEXT NOT NULL,
         opened_at TEXT,
         people INTEGER NOT NULL DEFAULT 1,
-        note TEXT NOT NULL DEFAULT ''
+        note TEXT NOT NULL DEFAULT '',
+        subtables_json TEXT NOT NULL DEFAULT '[]'
       );
       CREATE TABLE IF NOT EXISTS table_items (
         id TEXT PRIMARY KEY,
@@ -850,6 +926,7 @@ export class PdvStore {
         base_unit_price REAL,
         discount REAL NOT NULL DEFAULT 0,
         total REAL NOT NULL,
+        paid_quantity REAL NOT NULL DEFAULT 0,
         subtable_name TEXT NOT NULL DEFAULT '',
         note TEXT NOT NULL DEFAULT '',
         complements_json TEXT NOT NULL DEFAULT '[]',
@@ -891,17 +968,21 @@ export class PdvStore {
         method TEXT NOT NULL,
         amount REAL NOT NULL,
         received REAL,
-        change REAL
+        change REAL,
+        description TEXT NOT NULL DEFAULT ''
       );
     `);
     addColumnIfMissing(db, "products", "can_be_complement", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "has_complements", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "unit_mode", "TEXT NOT NULL DEFAULT 'unidade'");
     addColumnIfMissing(db, "products", "favorite", "INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "products", "import_source", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "categories", "favorite", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "table_items", "base_unit_price", "REAL");
     addColumnIfMissing(db, "table_items", "complements_json", "TEXT NOT NULL DEFAULT '[]'");
     addColumnIfMissing(db, "table_items", "measure_label", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "table_items", "paid_quantity", "REAL NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "table_sessions", "subtables_json", "TEXT NOT NULL DEFAULT '[]'");
     addColumnIfMissing(db, "sale_items", "base_unit_price", "REAL");
     addColumnIfMissing(db, "sale_items", "complements_json", "TEXT NOT NULL DEFAULT '[]'");
     addColumnIfMissing(db, "sale_items", "measure_label", "TEXT NOT NULL DEFAULT ''");
@@ -910,6 +991,7 @@ export class PdvStore {
     addColumnIfMissing(db, "sales", "observations", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sales", "origin_device", "TEXT NOT NULL DEFAULT 'Este computador'");
     addColumnIfMissing(db, "sales", "operation_id", "TEXT");
+    addColumnIfMissing(db, "sale_payments", "description", "TEXT NOT NULL DEFAULT ''");
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_operation_id ON sales(operation_id) WHERE operation_id IS NOT NULL");
     const defaults = this.getSettings();
     const statement = db.prepare("INSERT INTO pdv_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING");
@@ -932,7 +1014,10 @@ export class PdvStore {
       productCardHeight: Math.max(56, Math.min(110, parseIntegerSetting(map.get("product_card_height"), DEFAULT_PDV_SETTINGS.productCardHeight || 74))),
       categoryCardHeight: Math.max(44, Math.min(90, parseIntegerSetting(map.get("category_card_height"), DEFAULT_PDV_SETTINGS.categoryCardHeight || 64))),
       tableCardHeight: Math.max(74, Math.min(130, parseIntegerSetting(map.get("table_card_height"), DEFAULT_PDV_SETTINGS.tableCardHeight || 96))),
-      stackIdenticalItems: parseBooleanSetting(map.get("stack_identical_items"), DEFAULT_PDV_SETTINGS.stackIdenticalItems || false)
+      stackIdenticalItems: parseBooleanSetting(map.get("stack_identical_items"), DEFAULT_PDV_SETTINGS.stackIdenticalItems || false),
+      partialPaymentDescriptionEnabled: parseBooleanSetting(map.get("partial_payment_description_enabled"), DEFAULT_PDV_SETTINGS.partialPaymentDescriptionEnabled || false),
+      individualUnitItems: parseBooleanSetting(map.get("individual_unit_items"), DEFAULT_PDV_SETTINGS.individualUnitItems || false),
+      groupComplementsWithProduct: parseBooleanSetting(map.get("group_complements_with_product"), DEFAULT_PDV_SETTINGS.groupComplementsWithProduct ?? true)
     };
   }
 
@@ -1038,17 +1123,17 @@ function insertSale(db: Database, sale: PdvSale) {
   );
   itemStatement.free();
 
-  const paymentStatement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change) VALUES (?, ?, ?, ?, ?, ?)");
+  const paymentStatement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
   sale.payments.forEach((payment) =>
-    paymentStatement.run([payment.id, sale.id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null])
+    paymentStatement.run([payment.id, sale.id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null, payment.description?.trim() || ""])
   );
   paymentStatement.free();
 }
 
 function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]) {
   const statement = db.prepare(
-    `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json, sort_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, paid_quantity, subtable_name, note, complements_json, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   items.forEach((item, index) => {
     statement.run([
@@ -1063,6 +1148,7 @@ function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]
       item.baseUnitPrice ?? item.unitPrice,
       item.discount,
       item.total,
+      Math.min(item.quantity, Math.max(0, item.paidQuantity || 0)),
       item.subtableName || "",
       item.note || "",
       JSON.stringify(item.complements || []),
@@ -1072,7 +1158,7 @@ function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]
   statement.free();
 }
 
-function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string }): PdvSale {
+function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string; observations?: string }): PdvSale {
   const subtotal = roundMoney(input.items.reduce((total, item) => total + item.total, 0));
   const discount = Math.min(subtotal, roundMoney(Math.max(0, input.discount)));
   const total = Math.max(0, roundMoney(subtotal - discount));
@@ -1087,7 +1173,7 @@ function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status
     discount,
     total,
     description: input.tableNumber ? `Mesa ${input.tableNumber}` : "Venda direta",
-    observations: "",
+    observations: input.observations?.trim() || "",
     originDevice: input.originDevice || "Este computador",
     operationId: input.operationId,
     payments,
@@ -1112,11 +1198,25 @@ function validateCartItems(items: PdvCartItem[]) {
     if (!Number.isFinite(item.discount) || item.discount < 0) {
       throw new Error(`Desconto invalido para ${item.productName}.`);
     }
+    if (item.paidQuantity !== undefined && (!Number.isFinite(item.paidQuantity) || item.paidQuantity < 0 || item.paidQuantity > item.quantity + 0.009)) {
+      throw new Error(`Estado de pagamento invalido para ${item.productName}.`);
+    }
     const expectedTotal = roundMoney(Math.max(0, item.quantity * item.unitPrice - item.discount));
     if (Math.abs(roundMoney(item.total) - expectedTotal) > 0.01) {
       throw new Error(`Total invalido para ${item.productName}.`);
     }
   });
+}
+
+function unpaidQuantity(item: PdvCartItem): number {
+  return roundMoney(Math.max(0, item.quantity - Math.min(item.quantity, Math.max(0, item.paidQuantity || 0))));
+}
+
+function unpaidItemTotal(item: PdvCartItem): number {
+  if (!item.quantity) {
+    return 0;
+  }
+  return roundMoney(item.total * (unpaidQuantity(item) / item.quantity));
 }
 
 function normalizePaymentsForTotal(payments: PdvPayment[], total: number): PdvPayment[] {
@@ -1181,6 +1281,7 @@ function normalizeCartItem(row: PdvCartItem & { complementsJson?: string }): Pdv
   const { complementsJson, ...item } = row;
   return {
     ...item,
+    paidQuantity: Math.min(Number(item.quantity) || 0, Math.max(0, Number(item.paidQuantity) || 0)),
     complements: parseComplements(complementsJson)
   };
 }
@@ -1194,6 +1295,10 @@ function normalizeUnitMode(value?: string): "unidade" | "kg" | "grama" {
 
 function normalizeText(value: string): string {
   return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase().trim();
+}
+
+function catalogKey(value: string): string {
+  return normalizeText(value).replace(/\s+/g, " ");
 }
 
 function parseComplements(raw?: string) {

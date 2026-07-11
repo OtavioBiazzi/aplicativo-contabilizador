@@ -21,15 +21,16 @@ interface LocalServerOptions {
   getPdvSnapshot: () => Promise<PdvSnapshot>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
-  savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
-  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
+  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string, observations?: string) => Promise<PdvSale>;
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
   savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>;
   importPdvPreset: () => Promise<PdvProductImportResult>;
+  removePdvPreset: () => Promise<number>;
   onRemoteChange: () => void;
   onRemotePdvChange: () => void;
 }
@@ -225,6 +226,17 @@ export class LocalServer {
       }
     });
 
+    app.delete("/api/pdv/preset/cose", this.authorize("manageProducts"), async (_request, response) => {
+      try {
+        const removed = await this.options.removePdvPreset();
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ removed });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel remover a importacao." });
+      }
+    });
+
     app.post("/api/pdv/tables/:number/open", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
@@ -252,7 +264,7 @@ export class LocalServer {
     app.put("/api/pdv/tables/:number/items", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
-        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : []);
+        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : [], Array.isArray(request.body?.subtables) ? request.body.subtables : undefined);
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
         response.json({ ok: true });
@@ -298,7 +310,8 @@ export class LocalServer {
           Array.isArray(request.body?.payments) ? request.body.payments : [],
           Number(request.body?.discount || 0),
           String(request.header("x-device-name") || "Cliente remoto"),
-          String(request.header("x-idempotency-key") || "").trim() || undefined
+          String(request.header("x-idempotency-key") || "").trim() || undefined,
+          String(request.body?.observations || "")
         );
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();

@@ -146,6 +146,7 @@ function saleRow(sale: PdvSale): Record<string, unknown> {
   const { date, time } = splitDateTime(sale.createdAt);
   return {
     "ID venda": sale.id,
+    "ID operacao": sale.operationId || sale.id,
     Data: date,
     Hora: time,
     Tipo: sale.type,
@@ -167,6 +168,7 @@ function itemRows(sale: PdvSale): Record<string, unknown>[] {
     const complements = item.complements || [];
     return {
       "ID venda": sale.id,
+      "ID operacao": sale.operationId || sale.id,
       Data: date,
       Hora: time,
       Tipo: sale.type,
@@ -192,6 +194,7 @@ function paymentRows(sale: PdvSale): Record<string, unknown>[] {
   const { date, time } = splitDateTime(sale.createdAt);
   return sale.payments.map((payment) => ({
     "ID venda": sale.id,
+    "ID operacao": sale.operationId || sale.id,
     Data: date,
     Hora: time,
     Tipo: sale.type,
@@ -200,7 +203,8 @@ function paymentRows(sale: PdvSale): Record<string, unknown>[] {
     Forma: payment.method,
     Valor: roundMoney(payment.amount),
     Recebido: payment.received ? roundMoney(payment.received) : "",
-    Troco: payment.change ? roundMoney(payment.change) : ""
+    Troco: payment.change ? roundMoney(payment.change) : "",
+    Descricao: payment.description || sale.observations || ""
   }));
 }
 

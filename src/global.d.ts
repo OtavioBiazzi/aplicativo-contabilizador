@@ -23,14 +23,15 @@ export interface CaixaApi {
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
   importCoseProducts: () => Promise<PdvProductImportResult>;
+  removeCoseProducts: () => Promise<number>;
   importPdvProductsFile: () => Promise<PdvProductImportResult | null>;
   saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[]) => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
-  savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => Promise<PdvSale>;
-  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string) => Promise<PdvSale>;
+  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string) => Promise<PdvSale>;
   cancelPdvSale: (id: string) => Promise<void>;
   updatePdvSalePayments: (id: string, payments: PdvPayment[]) => Promise<PdvSale>;
   exportPdvSales: (filters?: PdvExportFilters) => Promise<ExportStatus>;

@@ -149,6 +149,7 @@ export interface FloatingSettings {
   layoutMode: FloatingLayoutMode;
   opacity: number;
   borderless: boolean;
+  cornerStyle: "rounded" | "square";
   lockPosition: boolean;
   rememberBounds: boolean;
   dragWholeBar: boolean;

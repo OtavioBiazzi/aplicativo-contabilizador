@@ -11,17 +11,18 @@ contextBridge.exposeInMainWorld("caixa", {
   savePdvCategory: (draft: PdvCategoryDraft) => ipcRenderer.invoke("pdv:saveCategory", draft),
   savePdvProduct: (draft: PdvProductDraft) => ipcRenderer.invoke("pdv:saveProduct", draft),
   importCoseProducts: () => ipcRenderer.invoke("pdv:importCoseProducts"),
+  removeCoseProducts: () => ipcRenderer.invoke("pdv:removeCoseProducts"),
   importPdvProductsFile: () => ipcRenderer.invoke("pdv:importProductsFile"),
   saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[]) =>
     ipcRenderer.invoke("pdv:saveDirectSale", { items, discount, payments }),
   openPdvTable: (tableNumber: number, people?: number, note?: string) => ipcRenderer.invoke("pdv:openTable", tableNumber, people, note),
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => ipcRenderer.invoke("pdv:setTableStatus", tableNumber, status),
-  savePdvTableItems: (tableNumber: number, items: PdvCartItem[]) => ipcRenderer.invoke("pdv:saveTableItems", tableNumber, items),
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => ipcRenderer.invoke("pdv:saveTableItems", tableNumber, items, subtables),
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) =>
     ipcRenderer.invoke("pdv:transferTableItems", sourceTableNumber, targetTableNumber, selections),
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => ipcRenderer.invoke("pdv:closeTable", tableNumber, payments, discount, operationId),
-  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string) =>
-    ipcRenderer.invoke("pdv:saveTablePartial", tableNumber, items, payments, discount, operationId),
+  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string) =>
+    ipcRenderer.invoke("pdv:saveTablePartial", tableNumber, items, payments, discount, operationId, observations),
   cancelPdvSale: (id: string) => ipcRenderer.invoke("pdv:cancelSale", id),
   updatePdvSalePayments: (id: string, payments: PdvPayment[]) => ipcRenderer.invoke("pdv:updateSalePayments", id, payments),
   exportPdvSales: (filters?: PdvExportFilters) => ipcRenderer.invoke("pdv:exportSales", filters),
