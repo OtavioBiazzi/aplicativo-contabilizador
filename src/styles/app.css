@@ -4254,42 +4254,14 @@ body.floating-borderless .floating-bar {
 
 .pdv-sale-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 10px minmax(300px, var(--pdv-cart-pane-width, 420px));
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw);
+  gap: 12px;
   height: 100%;
   min-height: 0;
 }
 
 .pdv-table-open-grid {
-  grid-template-columns: minmax(0, 1fr) 10px minmax(300px, var(--pdv-cart-pane-width, 420px));
-}
-
-.pdv-cart-resizer {
-  position: relative;
-  z-index: 3;
-  width: 10px;
-  margin: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.pdv-cart-resizer::after {
-  position: absolute;
-  top: 18%;
-  right: 4px;
-  bottom: 18%;
-  width: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--line) 72%, transparent);
-  content: "";
-}
-
-.pdv-cart-resizer:hover::after,
-.pdv-cart-resizer:focus-visible::after {
-  background: var(--pdv-action);
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw);
 }
 
 .pdv-products-area,
@@ -4301,7 +4273,7 @@ body.floating-borderless .floating-bar {
 }
 
 .pdv-products-area {
-  grid-template-rows: auto auto auto 10px minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
 .pdv-table-details {
@@ -4399,37 +4371,8 @@ body.floating-borderless .floating-bar {
   display: grid;
   grid-template-columns: repeat(var(--pdv-category-cols, 5), minmax(0, 1fr));
   gap: 8px;
-  height: var(--pdv-category-pane-height, calc((var(--pdv-category-card-height, 64px) * 2) + 10px));
-  max-height: min(42vh, var(--pdv-category-pane-height, calc((var(--pdv-category-card-height, 64px) * 2) + 10px)));
+  max-height: min(42vh, calc((var(--pdv-category-card-height, 64px) * 2) + 10px));
   overflow: auto;
-}
-
-.pdv-category-resizer {
-  position: relative;
-  z-index: 2;
-  width: 100%;
-  height: 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  cursor: row-resize;
-  touch-action: none;
-}
-
-.pdv-category-resizer::after {
-  position: absolute;
-  right: 18%;
-  bottom: 4px;
-  left: 18%;
-  height: 3px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--line) 72%, transparent);
-  content: "";
-}
-
-.pdv-category-resizer:hover::after,
-.pdv-category-resizer:focus-visible::after {
-  background: var(--pdv-action);
 }
 
 .pdv-category-grid button,
@@ -4503,8 +4446,8 @@ body.floating-borderless .floating-bar {
 
 @media (min-width: 1600px) and (min-height: 850px) {
   .pdv-direct-panel .pdv-sale-grid {
-    grid-template-columns: minmax(0, 1fr) 10px minmax(300px, var(--pdv-cart-pane-width, 420px));
-    gap: 6px;
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 31vw);
+    gap: 10px;
   }
 
   .pdv-direct-panel .pdv-panel {
@@ -4643,6 +4586,15 @@ body.floating-borderless .floating-bar {
 .pdv-discount {
   display: grid;
   gap: 6px;
+}
+
+.pdv-direct-discount-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.pdv-direct-discount-modal {
+  width: min(620px, calc(100vw - 28px));
 }
 
 .pdv-item-tools {
@@ -6181,18 +6133,6 @@ input[type="date"] {
   .pdv-advanced-grid,
   .pdv-detail-columns {
     grid-template-columns: 1fr;
-  }
-
-  .pdv-cart-resizer {
-    display: none;
-  }
-
-  .pdv-products-area {
-    grid-template-rows: auto auto auto 0 minmax(0, 1fr);
-  }
-
-  .pdv-category-resizer {
-    display: none;
   }
 
   .pdv-report-grid {

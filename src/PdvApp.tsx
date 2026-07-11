@@ -1177,17 +1177,7 @@ function PdvSaleScreen(props: {
 }) {
   const subtotal = roundMoney(props.cart.reduce((total, item) => total + (props.activeTableNumber ? unpaidItemTotal(item) : item.total), 0));
   const finalTotal = Math.max(0, roundMoney(subtotal - props.discount));
-  const saleGridRef = useRef<HTMLElement | null>(null);
-  const productsAreaRef = useRef<HTMLDivElement | null>(null);
   const cartListRef = useRef<HTMLDivElement | null>(null);
-  const [cartPaneWidth, setCartPaneWidth] = useState(() => {
-    const saved = Number(window.localStorage.getItem("caixa.pdv.cart-pane-width"));
-    return Number.isFinite(saved) && saved >= 300 && saved <= 900 ? saved : 420;
-  });
-  const [categoryPaneHeight, setCategoryPaneHeight] = useState(() => {
-    const saved = Number(window.localStorage.getItem("caixa.pdv.category-pane-height"));
-    return Number.isFinite(saved) && saved >= 74 && saved <= 420 ? saved : 138;
-  });
   const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: PdvCartItem } | null>(null);
   const [transferItem, setTransferItem] = useState<PdvCartItem | null>(null);
   const [transferListOpen, setTransferListOpen] = useState(false);
@@ -1196,57 +1186,10 @@ function PdvSaleScreen(props: {
   const [removeRequest, setRemoveRequest] = useState<PdvCartItem | null>(null);
   const [cancelTableRequest, setCancelTableRequest] = useState(false);
   const [subtableManagerOpen, setSubtableManagerOpen] = useState(false);
+  const [directDiscountOpen, setDirectDiscountOpen] = useState(false);
   const activeItemId = props.selectedItemIds?.[0] || props.cart.at(-1)?.id || "";
   const activeItem = props.cart.find((item) => item.id === activeItemId) || props.cart.at(-1) || null;
   const subtableNames = [...new Set([...(props.subtableNames || []), ...props.cart.map((item) => item.subtableName || "").filter(Boolean)])];
-
-  const beginCartResize = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const grid = saleGridRef.current;
-    if (!grid) return;
-    event.preventDefault();
-    const startX = event.clientX;
-    const startWidth = cartPaneWidth;
-    const maxWidth = Math.max(300, Math.floor(grid.getBoundingClientRect().width * 0.58));
-    const onMove = (moveEvent: PointerEvent) => {
-      setCartPaneWidth(Math.max(300, Math.min(maxWidth, Math.round(startWidth + startX - moveEvent.clientX))));
-    };
-    const onEnd = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onEnd);
-      window.removeEventListener("pointercancel", onEnd);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onEnd, { once: true });
-    window.addEventListener("pointercancel", onEnd, { once: true });
-  };
-
-  const beginCategoryResize = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const area = productsAreaRef.current;
-    if (!area) return;
-    event.preventDefault();
-    const startY = event.clientY;
-    const startHeight = categoryPaneHeight;
-    const maxHeight = Math.max(86, Math.floor(area.getBoundingClientRect().height - 230));
-    const onMove = (moveEvent: PointerEvent) => {
-      setCategoryPaneHeight(Math.max(74, Math.min(maxHeight, Math.round(startHeight + moveEvent.clientY - startY))));
-    };
-    const onEnd = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onEnd);
-      window.removeEventListener("pointercancel", onEnd);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onEnd, { once: true });
-    window.addEventListener("pointercancel", onEnd, { once: true });
-  };
-
-  useEffect(() => {
-    window.localStorage.setItem("caixa.pdv.cart-pane-width", String(cartPaneWidth));
-  }, [cartPaneWidth]);
-
-  useEffect(() => {
-    window.localStorage.setItem("caixa.pdv.category-pane-height", String(categoryPaneHeight));
-  }, [categoryPaneHeight]);
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
@@ -1256,11 +1199,12 @@ function PdvSaleScreen(props: {
       if (transferListOpen) { event.preventDefault(); setTransferListOpen(false); return; }
       if (editingItem) { event.preventDefault(); setEditingItem(null); return; }
       if (movingItem) { event.preventDefault(); setMovingItem(null); return; }
+      if (directDiscountOpen) { event.preventDefault(); setDirectDiscountOpen(false); return; }
       if (subtableManagerOpen) { event.preventDefault(); setSubtableManagerOpen(false); }
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [itemMenu, transferItem, transferListOpen, editingItem, movingItem, subtableManagerOpen]);
+  }, [itemMenu, transferItem, transferListOpen, editingItem, movingItem, directDiscountOpen, subtableManagerOpen]);
 
   useEffect(() => {
     if (!props.setSelectedItemIds || !props.cart.length) {
@@ -1333,12 +1277,8 @@ function PdvSaleScreen(props: {
     }
   };
   return (
-    <section
-      ref={saleGridRef}
-      className={`pdv-sale-grid ${props.activeTableNumber ? "pdv-table-open-grid" : ""}`}
-      style={{ "--pdv-cart-pane-width": `${cartPaneWidth}px` } as React.CSSProperties}
-    >
-      <div ref={productsAreaRef} className="pdv-panel pdv-products-area">
+    <section className={`pdv-sale-grid ${props.activeTableNumber ? "pdv-table-open-grid" : ""}`}>
+      <div className="pdv-panel pdv-products-area">
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Lancamento rapido</span>
@@ -1369,8 +1309,7 @@ function PdvSaleScreen(props: {
           className="pdv-category-grid"
           style={{
             "--pdv-category-cols": props.snapshot.settings.categoryColumns || 5,
-            "--pdv-category-card-height": `${props.snapshot.settings.categoryCardHeight || 64}px`,
-            "--pdv-category-pane-height": `${categoryPaneHeight}px`
+            "--pdv-category-card-height": `${props.snapshot.settings.categoryCardHeight || 64}px`
           } as React.CSSProperties}
         >
           <button className={props.activeCategory === "todos" ? "active" : ""} onClick={() => props.setActiveCategory("todos")}>Todos</button>
@@ -1380,14 +1319,6 @@ function PdvSaleScreen(props: {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="pdv-category-resizer"
-          aria-label="Redimensionar categorias"
-          title="Arraste para aumentar ou diminuir a area de categorias"
-          onPointerDown={beginCategoryResize}
-        />
-
         <div
           className="pdv-product-grid"
           style={{
@@ -1405,13 +1336,6 @@ function PdvSaleScreen(props: {
         </div>
       </div>
 
-      <button
-        type="button"
-        className="pdv-cart-resizer"
-        aria-label="Redimensionar carrinho"
-        title="Arraste para aumentar ou diminuir o carrinho"
-        onPointerDown={beginCartResize}
-      />
       <aside className="pdv-panel pdv-cart-area">
         <div className="pdv-cart-head">
           <h2>Carrinho</h2>
@@ -1477,10 +1401,9 @@ function PdvSaleScreen(props: {
           </ContextMenu>
         )}
         {!props.activeTableNumber && (
-          <label className="pdv-discount">
-            <span>Desconto da conta</span>
-            <input type="number" min={0} step="0.01" value={props.discount} onChange={(event) => props.setDiscount(Number(event.target.value || 0))} />
-          </label>
+          <button className="pdv-ghost-button pdv-direct-discount-button" disabled={!props.cart.length} onClick={() => setDirectDiscountOpen(true)}>
+            Desconto da venda{props.discount > 0 ? `: ${money(props.discount)}` : ""}
+          </button>
         )}
         <div className="pdv-total-box">
           <span>Valor Total</span>
@@ -1649,6 +1572,17 @@ function PdvSaleScreen(props: {
             onConfirm={(referenceIndex) => {
               props.setCart((current) => moveCartItemNear(current, movingItem.item.id, referenceIndex, movingItem.after));
               setMovingItem(null);
+            }}
+          />
+        )}
+        {directDiscountOpen && !props.activeTableNumber && (
+          <DirectDiscountModal
+            subtotal={subtotal}
+            discount={props.discount}
+            onCancel={() => setDirectDiscountOpen(false)}
+            onConfirm={(value) => {
+              props.setDiscount(value);
+              setDirectDiscountOpen(false);
             }}
           />
         )}
@@ -3044,6 +2978,70 @@ function ComplementModal({
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
           <button className="pdv-ghost-button" onClick={() => onConfirm(product, unitPrice, [])}>Sem adicionais</button>
           <button className="pdv-primary-button" onClick={() => onConfirm(product, unitPrice, selectedComplements)}>Adicionar item</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DirectDiscountModal({
+  subtotal,
+  discount,
+  onCancel,
+  onConfirm
+}: {
+  subtotal: number;
+  discount: number;
+  onCancel: () => void;
+  onConfirm: (discount: number) => void;
+}) {
+  const [discountValue, setDiscountValue] = useState(String(discount || "").replace(".", ","));
+  const [discountPercent, setDiscountPercent] = useState("");
+  const calculatedDiscount = Math.min(
+    subtotal,
+    roundMoney(parseBrazilianNumber(discountValue) + subtotal * (parseBrazilianNumber(discountPercent) / 100))
+  );
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      onConfirm(calculatedDiscount);
+    }
+  };
+
+  return (
+    <div className="pdv-modal-backdrop">
+      <section className="pdv-modal pdv-direct-discount-modal" tabIndex={-1} autoFocus onKeyDown={handleKeyDown}>
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Venda direta</span>
+            <h1>Aplicar desconto</h1>
+            <p>O desconto vale somente para esta venda.</p>
+          </div>
+          <button className="pdv-icon-button" onClick={onCancel} aria-label="Fechar"><X size={18} /></button>
+        </div>
+        <div className="pdv-payment-summary">
+          <Metric title="Subtotal" value={money(subtotal)} />
+          <Metric title="Desconto" value={money(calculatedDiscount)} />
+          <Metric title="Total final" value={money(Math.max(0, roundMoney(subtotal - calculatedDiscount)))} />
+        </div>
+        <div className="pdv-editor-grid pdv-close-discounts">
+          <label>
+            <span>Desconto em R$</span>
+            <input autoFocus inputMode="decimal" value={discountValue} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDiscountValue(event.target.value)} placeholder="0,00" />
+          </label>
+          <label>
+            <span>Desconto em %</span>
+            <input inputMode="decimal" value={discountPercent} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDiscountPercent(event.target.value)} placeholder="0" />
+          </label>
+        </div>
+        <div className="pdv-action-row">
+          <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
+          <button className="pdv-primary-button" onClick={() => onConfirm(calculatedDiscount)}>Aplicar desconto</button>
         </div>
       </section>
     </div>
