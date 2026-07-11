@@ -6,6 +6,42 @@ Este documento define o objetivo atual do projeto. A ideia principal nao mudou: 
 
 Este bloco e a referencia para concluir as correcoes solicitadas depois das fases iniciais do remake. Uma funcionalidade somente deve ser marcada como concluida quando o fluxo real estiver consistente, e nao apenas quando a tela ou o botao existir.
 
+### Regra de execucao
+
+- Trabalhar uma fase por vez.
+- Antes de implementar, conferir se a funcao ja existe e testar o fluxo atual.
+- Nao recriar telas, bancos ou fluxos que ja estejam funcionando.
+- Corrigir primeiro problemas financeiros e de dados; polimento visual vem depois.
+- Ao terminar uma fase, registrar o que foi concluido, o que ficou parcial e o que ainda depende de validacao manual.
+- Nao publicar release enquanto a fase atual tiver regressao conhecida.
+
+### Mapa de estado atual
+
+Itens abaixo ja possuem base implementada no projeto e devem ser preservados. Eles ainda podem receber correcoes, mas nao devem ser substituidos por outra implementacao:
+
+- Banco SQLite do PDV, backups e integracao basica com vendas.
+- Fluxo principal de Venda, Mesas, Historico, Relatorios, Rede e Ajuste.
+- Venda direta e mesa usando a mesma base de vendas.
+- Pagamentos multiplos e exportacao Excel integrada.
+- Cliente remoto com bloqueio de alteracoes operacionais do servidor.
+- Importacao Cose com Coca Mini, previa e protecao de produtos manuais.
+- Complementos vinculados por produto.
+- Transferencia parcial de itens.
+- Fechamento parcial com estados de itens pagos, ainda sujeito a validacao do fluxo completo.
+- Notificacoes com duracao configuravel no aplicativo principal.
+- Navegacao com protecao para sair de Venda com carrinho aberto.
+
+Esses itens sao considerados parciais ate serem verificados no uso real:
+
+- Produtos por peso e edicao do valor final.
+- Foco inicial, Enter, Esc, setas, Tab e atalhos dos modais.
+- Submesas e separacao entre mesa principal e submesa.
+- Sincronizacao de mesa aberta entre cliente e servidor.
+- Responsividade dos modais e dos cards de produtos.
+- Historico, relatorios e Excel para mesas, parciais e pagamentos mistos.
+- Temas escuro/claro e contraste de todos os estados.
+- Redimensionamento persistente de categorias, produtos e carrinho.
+
 ### Fase A - Venda, peso e carrinho
 
 - Manter a Venda pronta para novos lancamentos depois de finalizar uma venda.
