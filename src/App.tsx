@@ -995,6 +995,8 @@ export function App() {
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sale");
   const [pdvViewNonce, setPdvViewNonce] = useState(0);
+  const [pdvDirectCartActive, setPdvDirectCartActive] = useState(false);
+  const [pdvNavigationRequest, setPdvNavigationRequest] = useState<TabKey | null>(null);
   const [pinned, setPinnedState] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [modeCommand, setModeCommand] = useState<ModeCommand | null>(null);
@@ -1656,6 +1658,18 @@ export function App() {
     setPinnedState(result);
   };
 
+  const requestNavigation = (nextTab: TabKey) => {
+    const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
+    if (mode === "pdv" && activeTab === "sale" && nextTab !== "sale" && pdvDirectCartActive) {
+      setPdvNavigationRequest(nextTab);
+      return;
+    }
+    if (activeTab === nextTab && (nextTab === "tables" || nextTab === "sale")) {
+      setPdvViewNonce((nonce) => nonce + 1);
+    }
+    setActiveTab(nextTab);
+  };
+
   useEffect(() => {
     const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
     if (mode === "legacy" && activeTab === "tables") {
@@ -1751,12 +1765,7 @@ export function App() {
               <button
                 key={item.key}
                 className={activeTab === item.key ? "active" : ""}
-                onClick={() => {
-                  if (activeTab === item.key && (item.key === "tables" || item.key === "sale")) {
-                    setPdvViewNonce((nonce) => nonce + 1);
-                  }
-                  setActiveTab(item.key);
-                }}
+                onClick={() => requestNavigation(item.key)}
               >
                 <Icon size={18} />
                 {item.label}
@@ -1858,6 +1867,7 @@ export function App() {
               roundingStep={settings.defaultRoundingStep}
               roundingDirection={settings.defaultRoundingDirection}
               toastDuration={settings.notificationDurationMs}
+              onDirectCartChange={setPdvDirectCartActive}
               reloadToken={remotePdvNonce}
             />
           </div>
@@ -1977,6 +1987,22 @@ export function App() {
         />
       )}
       {toast && <Toast toast={toast} />}
+      {pdvNavigationRequest && (
+        <SettingsConfirmModal
+          title="Cancelar venda em andamento?"
+          message="Existem produtos ainda nao finalizados na Venda. Ao sair, o carrinho atual sera cancelado."
+          confirmLabel="Sair e cancelar venda"
+          danger
+          onCancel={() => setPdvNavigationRequest(null)}
+          onConfirm={async () => {
+            const nextTab = pdvNavigationRequest;
+            setPdvNavigationRequest(null);
+            setPdvDirectCartActive(false);
+            setPdvViewNonce((nonce) => nonce + 1);
+            setActiveTab(nextTab);
+          }}
+        />
+      )}
     </div>
   );
 }

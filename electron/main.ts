@@ -422,6 +422,37 @@ async function listImportableLedgerFiles(directory: string): Promise<string[]> {
 async function importPdvProducts(filePath: string, importSource = "Importacao externa"): Promise<PdvProductImportResult> {
   const rows = await readPdvProductsFromXlsx(filePath);
   const normalized = normalizeImportedProducts(rows);
+  if (importSource === "Cose Dell Abadia") {
+    const beverageCategory = normalized.categories.find((category) => category.name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase() === "BEBIDAS");
+    const category = beverageCategory || {
+      id: "category-cose-bebidas",
+      name: "BEBIDAS",
+      active: true,
+      favorite: false,
+      sortOrder: normalized.categories.length
+    };
+    if (!beverageCategory) {
+      normalized.categories.push(category);
+    }
+    if (!normalized.products.some((product) => product.name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase() === "COCA MINI")) {
+      normalized.products.push({
+        id: "product-cose-coca-mini",
+        name: "COCA MINI",
+        categoryId: category.id,
+        categoryName: category.name,
+        price: 5,
+        unit: "UNID",
+        unitMode: "unidade",
+        active: true,
+        showOnPdv: true,
+        favorite: false,
+        canBeComplement: false,
+        hasComplements: false,
+        complementProductIds: [],
+        sortOrder: normalized.products.length
+      });
+    }
+  }
   const result = await pdvStore.replaceProducts(normalized.categories, normalized.products, filePath, importSource);
   await logger.info(
     "Produtos PDV importados",

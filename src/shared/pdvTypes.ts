@@ -137,6 +137,8 @@ export interface PdvSettings {
   gridColumns?: number;
   categoryColumns?: number;
   tableColumns?: number;
+  productSortDirection?: "az" | "za";
+  allowOfflineTables?: boolean;
   productCardHeight?: number;
   categoryCardHeight?: number;
   tableCardHeight?: number;
