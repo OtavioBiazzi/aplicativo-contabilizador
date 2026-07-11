@@ -9,7 +9,7 @@ import { LedgerExporter } from "./exporter.js";
 import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
 import { PdvExporter } from "./pdvExporter.js";
-import { normalizeImportedProducts, readPdvProductsFromXlsx } from "./productImporter.js";
+import { configureCoseDellAbadiaComplements, normalizeImportedProducts, readPdvProductsFromXlsx } from "./productImporter.js";
 import { PdvStore } from "./pdvStore.js";
 import { pdvSalesToLedgerEntries } from "../src/shared/pdvLedger.js";
 import { LedgerStore } from "./storage.js";
@@ -452,6 +452,7 @@ async function importPdvProducts(filePath: string, importSource = "Importacao ex
         sortOrder: normalized.products.length
       });
     }
+    configureCoseDellAbadiaComplements(normalized.products);
   }
   const result = await pdvStore.replaceProducts(normalized.categories, normalized.products, filePath, importSource);
   await logger.info(

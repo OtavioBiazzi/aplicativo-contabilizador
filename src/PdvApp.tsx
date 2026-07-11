@@ -2509,7 +2509,7 @@ function TransferListModal({
       onTransferred(nextSource, targetTableNumber);
     } catch (error) {
       setBusy(false);
-      throw error;
+      setNotice(error instanceof Error ? error.message : "Nao foi possivel transferir os produtos. Tente novamente.");
     }
   };
 
@@ -2768,7 +2768,7 @@ function TransferItemModal({
       onTransferred(nextSource, targetTableNumber);
     } catch (error) {
       setBusy(false);
-      throw error;
+      setNotice(error instanceof Error ? error.message : "Nao foi possivel transferir o produto. Tente novamente.");
     }
   };
 
@@ -3108,7 +3108,7 @@ function DirectDiscountModal({
 
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-modal pdv-direct-discount-modal" tabIndex={-1} autoFocus onKeyDown={handleKeyDown}>
+      <section className="pdv-payment-modal pdv-direct-discount-modal" tabIndex={-1} autoFocus onKeyDown={handleKeyDown}>
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Venda direta</span>

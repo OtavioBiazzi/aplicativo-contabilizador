@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, readdirSync, writeFileSync
 import path from "node:path";
 import JSZip from "jszip";
 import { PdvExporter } from "../dist-electron/electron/pdvExporter.js";
+import { configureCoseDellAbadiaComplements, normalizeImportedProducts } from "../dist-electron/electron/productImporter.js";
 import { PdvStore } from "../dist-electron/electron/pdvStore.js";
 import { pdvSaleToLedgerEntry } from "../dist-electron/src/shared/pdvLedger.js";
 
@@ -16,6 +17,27 @@ mkdirSync(exportDir, { recursive: true });
 
 const store = new PdvStore(dataDir);
 await store.initialize();
+
+const cosePreset = normalizeImportedProducts([
+  { name: "CUSCUZ NORDESTINO", categoryName: "CAFE", price: 10, unit: "UNID", active: true, showOnPdv: true },
+  { name: "OVO MEXIDO", categoryName: "CAFE", price: 6, unit: "UNID", active: true, showOnPdv: true },
+  { name: "MANGA", categoryName: "FRUTAS", price: 11, unit: "UNID", active: true, showOnPdv: true },
+  { name: "GATORADE", categoryName: "BEBIDAS", price: 9, unit: "UNID", active: true, showOnPdv: true },
+  { name: "ADICIONAL OVO", categoryName: "CAFE", price: 4, unit: "UNID", active: true, showOnPdv: true },
+  { name: "ADICIONAL QUEIJO", categoryName: "CAFE", price: 4, unit: "UNID", active: true, showOnPdv: true },
+  { name: "ADICIONAL TOMATE", categoryName: "CAFE", price: 3, unit: "UNID", active: true, showOnPdv: true },
+  { name: "ADICIONAL CEBOLA/TOMATE", categoryName: "CAFE", price: 3, unit: "UNID", active: true, showOnPdv: true },
+  { name: "ADICIONAL BACON", categoryName: "CAFE", price: 4, unit: "UNID", active: true, showOnPdv: true },
+  { name: "ADICIONAL MEL", categoryName: "FRUTAS", price: 2, unit: "UNID", active: true, showOnPdv: true },
+  { name: "ADICIONAL MEL/GRANOLA", categoryName: "FRUTAS", price: 5, unit: "UNID", active: true, showOnPdv: true }
+]);
+configureCoseDellAbadiaComplements(cosePreset.products);
+const cuscuzPreset = cosePreset.products.find((product) => product.name === "CUSCUZ NORDESTINO");
+const eggPreset = cosePreset.products.find((product) => product.name === "OVO MEXIDO");
+const gatoradePreset = cosePreset.products.find((product) => product.name === "GATORADE");
+if (!cuscuzPreset?.hasComplements || cuscuzPreset.complementProductIds.length !== 5 || eggPreset?.canBeComplement || gatoradePreset?.hasComplements) {
+  throw new Error("Preset Cose vinculou adicionais fora das regras esperadas.");
+}
 
 const category = await store.saveCategory({ name: "Smoke PDV", active: true, favorite: true, sortOrder: 1 });
 const baseProduct = await store.saveProduct({

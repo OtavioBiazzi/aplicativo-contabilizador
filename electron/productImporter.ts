@@ -109,18 +109,40 @@ export function normalizeImportedProducts(rows: ParsedProductRow[]): { categorie
       });
     });
 
-  const complementIds = products.filter((product) => product.canBeComplement).map((product) => product.id);
-  products.forEach((product) => {
-    if (product.hasComplements && !product.canBeComplement) {
-      product.complementProductIds = complementIds.filter((id) => id !== product.id);
-    }
-  });
-
   return {
     categories: [...categoryByName.values()].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "pt-BR")),
     products,
     skippedRows: Math.max(0, rows.length - products.length)
   };
+}
+
+/** Aplica os vinculos prontos da planilha Cose sem liberar adicionais aleatorios. */
+export function configureCoseDellAbadiaComplements(products: PdvProduct[]): void {
+  const productByName = new Map(products.map((product) => [normalizeForMatch(product.name), product]));
+  const addonIds = (names: string[]) => names
+    .map((name) => productByName.get(normalizeForMatch(name))?.id)
+    .filter((id): id is string => Boolean(id));
+  const savory = addonIds(["ADICIONAL OVO", "ADICIONAL QUEIJO", "ADICIONAL TOMATE", "ADICIONAL CEBOLA/TOMATE", "ADICIONAL BACON"]);
+  const fruit = addonIds(["ADICIONAL MEL", "ADICIONAL MEL/GRANOLA"]);
+  const cappuccino = addonIds(["ADICIONAL CAPPUCINO(PÓ)"]);
+
+  products.forEach((product) => {
+    product.canBeComplement = normalizeForMatch(product.name).startsWith("ADICIONAL ");
+    product.hasComplements = false;
+    product.complementProductIds = [];
+
+    const name = normalizeForMatch(product.name);
+    if (/\bCUSCUZ\b/.test(name)) {
+      product.complementProductIds = savory;
+    } else if (/\bOVO MEXIDO\b|\bPAO\b|\bMISTO\b|\bTAPIOCA\b|\bOMELETE\b|\bSANDUICHE\b|\bX TUDO\b|\bX-TUDO\b/.test(name)) {
+      product.complementProductIds = savory;
+    } else if (/\bMAMAO\b|\bMANGA\b/.test(name)) {
+      product.complementProductIds = fruit;
+    } else if (/\bCAFE\b/.test(name)) {
+      product.complementProductIds = cappuccino;
+    }
+    product.hasComplements = product.complementProductIds.length > 0;
+  });
 }
 
 function categoryOrderIndex(name: string, order: string[], fallback: number): number {
@@ -193,10 +215,7 @@ function parseNumber(value: unknown): number {
 
 function isLikelyComplement(name: string): boolean {
   const normalized = normalizeForMatch(name);
-  return (
-    normalized.startsWith("ADICIONAL ") ||
-    /\b(TOMATE|CEBOLA|QUEIJO|BACON|OVO|MEL|GRANOLA|CAPPUCINO|CAPPUCCINO)\b/.test(normalized)
-  );
+  return normalized.startsWith("ADICIONAL ");
 }
 
 function isLikelyComplementHost(name: string): boolean {
