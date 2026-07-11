@@ -3,6 +3,7 @@ import path from "node:path";
 import JSZip from "jszip";
 import { PdvExporter } from "../dist-electron/electron/pdvExporter.js";
 import { PdvStore } from "../dist-electron/electron/pdvStore.js";
+import { pdvSaleToLedgerEntry } from "../dist-electron/src/shared/pdvLedger.js";
 
 const root = process.cwd();
 const tmp = path.join(root, ".tmp-pdv-smoke");
@@ -190,6 +191,19 @@ if (store.getSales({ status: "Cancelada" }).length !== 1 || store.getSales({ sta
 const updatedPaymentSale = await store.updateSalePayments(sale.id, [{ id: crypto.randomUUID(), method: "Pix", amount: 12 }]);
 if (updatedPaymentSale.payments[0]?.method !== "Pix" || updatedPaymentSale.payments[0]?.amount !== 12) {
   throw new Error("Alteracao de forma de pagamento nao foi persistida corretamente.");
+}
+const separatedPaymentsEntry = pdvSaleToLedgerEntry({
+  ...updatedPaymentSale,
+  payments: [
+    { id: crypto.randomUUID(), method: "Debito", amount: 7 },
+    { id: crypto.randomUUID(), method: "Credito", amount: 5 }
+  ]
+});
+if (
+  separatedPaymentsEntry.paymentMethod !== "Debito"
+  || separatedPaymentsEntry.paymentBreakdown?.map((item) => item.method).join("|") !== "Debito|Credito"
+) {
+  throw new Error("Pagamento misto do PDV nao foi separado para historico e relatorios.");
 }
 try {
   await store.updateSalePayments(sale.id, [{ id: crypto.randomUUID(), method: "Pix", amount: 13 }]);

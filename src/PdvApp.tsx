@@ -1020,7 +1020,7 @@ function PdvSaleScreen(props: {
   const [movingItem, setMovingItem] = useState<{ item: PdvCartItem; after: boolean } | null>(null);
   const [removeRequest, setRemoveRequest] = useState<PdvCartItem | null>(null);
   const [cancelTableRequest, setCancelTableRequest] = useState(false);
-  const [newSubtableName, setNewSubtableName] = useState("");
+  const [subtableManagerOpen, setSubtableManagerOpen] = useState(false);
   const activeItemId = props.selectedItemIds?.[0] || props.cart.at(-1)?.id || "";
   const activeItem = props.cart.find((item) => item.id === activeItemId) || props.cart.at(-1) || null;
   const subtableNames = [...new Set(props.cart.map((item) => item.subtableName || "").filter(Boolean))];
@@ -1105,32 +1105,13 @@ function PdvSaleScreen(props: {
             <button onClick={() => props.setQuantity(props.quantity + 1)}><Plus size={18} /></button>
             <button title="Limpar quantidade" onClick={() => props.setQuantity(1)}>Limpar</button>
             <button title="Repetir ultimo produto" disabled={!props.cart.length} onClick={repeatLastItem}>Repetir</button>
+            {props.activeTableNumber && props.settings.subtablesEnabled && (
+              <button className="pdv-subtable-trigger" type="button" onClick={() => setSubtableManagerOpen(true)}>
+                Submesa: {props.currentSubtable || "Principal"}
+              </button>
+            )}
           </div>
         </div>
-
-        {props.activeTableNumber && props.settings.subtablesEnabled && (
-          <div className="pdv-subtable-bar">
-            <span>Conta atual</span>
-            <button className={!props.currentSubtable ? "active" : ""} onClick={() => props.setCurrentSubtable?.("")}>Mesa principal</button>
-            {subtableNames.map((name) => (
-              <button className={props.currentSubtable === name ? "active" : ""} key={name} onClick={() => props.setCurrentSubtable?.(name)}>{name}</button>
-            ))}
-            <input
-              value={newSubtableName}
-              onChange={(event) => setNewSubtableName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && newSubtableName.trim()) {
-                  props.setCurrentSubtable?.(newSubtableName.trim());
-                  setNewSubtableName("");
-                }
-              }}
-              placeholder="Nova submesa"
-            />
-            <button className="pdv-ghost-button" disabled={!newSubtableName.trim()} onClick={() => { props.setCurrentSubtable?.(newSubtableName.trim()); setNewSubtableName(""); }}>Criar</button>
-            {props.currentSubtable && props.onCloseSubtable && <button className="pdv-ghost-button" onClick={() => props.onCloseSubtable?.(props.currentSubtable || "")}>Fechar submesa</button>}
-            {props.currentSubtable && props.onDeleteSubtable && <button className="pdv-ghost-button danger" onClick={() => props.onDeleteSubtable?.(props.currentSubtable || "")}>Apagar</button>}
-          </div>
-        )}
 
         <div className="pdv-search">
           <Search size={18} />
@@ -1319,6 +1300,26 @@ function PdvSaleScreen(props: {
             }}
           />
         )}
+        {subtableManagerOpen && props.activeTableNumber && (
+          <SubtableManagerModal
+            cart={props.cart}
+            currentSubtable={props.currentSubtable || ""}
+            names={subtableNames}
+            onClose={() => setSubtableManagerOpen(false)}
+            onSelect={(name) => {
+              props.setCurrentSubtable?.(name);
+              setSubtableManagerOpen(false);
+            }}
+            onCreate={(name) => {
+              props.setCurrentSubtable?.(name);
+              setSubtableManagerOpen(false);
+            }}
+            onRename={props.onRenameSubtable}
+            onDelete={props.onDeleteSubtable}
+            onCloseSubtable={props.onCloseSubtable}
+            onDeleteAll={props.onDeleteAllSubtables}
+          />
+        )}
         {transferItem && props.activeTableNumber && (
           <TransferItemModal
             item={transferItem}
@@ -1392,6 +1393,84 @@ function PdvSaleScreen(props: {
         )}
       </aside>
     </section>
+  );
+}
+
+function SubtableManagerModal({
+  cart,
+  currentSubtable,
+  names,
+  onClose,
+  onSelect,
+  onCreate,
+  onRename,
+  onDelete,
+  onCloseSubtable,
+  onDeleteAll
+}: {
+  cart: PdvCartItem[];
+  currentSubtable: string;
+  names: string[];
+  onClose: () => void;
+  onSelect: (name: string) => void;
+  onCreate: (name: string) => void;
+  onRename?: (oldName: string, newName: string) => void;
+  onDelete?: (name: string) => void;
+  onCloseSubtable?: (name: string) => void;
+  onDeleteAll?: () => void;
+}) {
+  const [newName, setNewName] = useState("");
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const totalFor = (name: string) => roundMoney(cart.filter((item) => (item.subtableName || "") === name).reduce((total, item) => total + item.total, 0));
+  const create = () => {
+    const name = newName.trim();
+    if (!name) return;
+    onCreate(name);
+  };
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+      <section className="pdv-payment-modal pdv-subtable-manager-modal">
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Mesa dividida</span>
+            <h1>Submesas</h1>
+            <p>Escolha a conta que vai receber os proximos produtos.</p>
+          </div>
+          <button className="pdv-icon-button" type="button" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="pdv-subtable-create">
+          <input value={newName} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") create(); }} placeholder="Nome da nova submesa" />
+          <button className="pdv-primary-button" type="button" disabled={!newName.trim()} onClick={create}>Criar submesa</button>
+        </div>
+        <div className="pdv-subtable-list">
+          <article className={!currentSubtable ? "active" : ""}>
+            <button type="button" onClick={() => onSelect("")}><strong>Mesa principal</strong><span>{cart.filter((item) => !item.subtableName).length} item(ns) | {money(totalFor(""))}</span></button>
+          </article>
+          {names.map((name) => (
+            <article className={currentSubtable === name ? "active" : ""} key={name}>
+              <button type="button" onClick={() => onSelect(name)}><strong>{name}</strong><span>{cart.filter((item) => item.subtableName === name).length} item(ns) | {money(totalFor(name))}</span></button>
+              <div className="pdv-subtable-row-actions">
+                <button type="button" className="pdv-ghost-button" onClick={() => { setRenameTarget(name); setRenameValue(name); }}>Renomear</button>
+                {onCloseSubtable && <button type="button" className="pdv-ghost-button" onClick={() => { onCloseSubtable(name); onClose(); }}>Fechar</button>}
+                {onDelete && <button type="button" className="pdv-danger-button" onClick={() => { onDelete(name); onClose(); }}>Apagar</button>}
+              </div>
+              {renameTarget === name && (
+                <div className="pdv-subtable-rename">
+                  <input autoFocus value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
+                  <button type="button" className="pdv-primary-button" disabled={!renameValue.trim()} onClick={() => { onRename?.(name, renameValue.trim()); setRenameTarget(null); }}>Salvar nome</button>
+                  <button type="button" className="pdv-ghost-button" onClick={() => setRenameTarget(null)}>Cancelar</button>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+        <div className="pdv-action-row">
+          {names.length > 0 && onDeleteAll && <button type="button" className="pdv-danger-button" onClick={() => { onDeleteAll(); onClose(); }}>Apagar todas as submesas</button>}
+          <button type="button" className="pdv-ghost-button" onClick={onClose}>Voltar para a mesa</button>
+        </div>
+      </section>
+    </div>
   );
 }
 

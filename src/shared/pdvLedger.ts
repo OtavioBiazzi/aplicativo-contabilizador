@@ -24,9 +24,9 @@ function buildPaymentsDescription(payments: PdvPayment[]): string {
 }
 
 export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
-  const paymentMethod = sale.payments.length > 1
-    ? "Misto"
-    : pdvPaymentToLegacyMethod(sale.payments[0]?.method || "Nao definido");
+  // O resumo geral usa a primeira forma apenas como compatibilidade. A divisao
+  // real fica em paymentBreakdown e e a fonte dos filtros, relatorios e Excel.
+  const paymentMethod = pdvPaymentToLegacyMethod(sale.payments[0]?.method || "Nao definido");
   const itemNames = buildItemNames(sale);
   const paymentsDescription = buildPaymentsDescription(sale.payments);
 

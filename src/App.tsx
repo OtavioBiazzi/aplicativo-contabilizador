@@ -20,6 +20,7 @@ import {
   MinusCircle,
   MonitorUp,
   Palette,
+  Pin,
   PlugZap,
   Plus,
   RadioTower,
@@ -78,6 +79,8 @@ type SettingsCategory =
   | "operation"
   | "defaults"
   | "profiles"
+  | "floating"
+  | "quick"
   | "files"
   | "pdv"
   | "pdvTables"
@@ -1634,6 +1637,11 @@ export function App() {
     if (!settings) {
       return;
     }
+    const mode = remoteSession?.clientPolicy.operationMode || settings.operationMode;
+    if (mode !== "legacy") {
+      showToast("info", "A barra fixa pertence ao Modo Classico. Ative esse modo em Ajuste para usa-la.");
+      return;
+    }
     const next = !pinned;
     const result = await window.caixa.setPinned(next, {
       opacity: settings.floating.opacity,
@@ -1657,17 +1665,10 @@ export function App() {
       return;
     }
     const mode = remoteSession?.clientPolicy.operationMode || settings.operationMode;
-    if (mode === "legacy" && !pinned) {
-      void window.caixa.setPinned(true, {
-        opacity: settings.floating.opacity,
-        borderless: settings.floating.borderless,
-        lockPosition: settings.floating.lockPosition
-      }).then(setPinnedState);
-    }
     if (mode === "pdv" && pinned) {
       void window.caixa.setPinned(false).then(setPinnedState);
     }
-  }, [settings?.operationMode, remoteSession?.clientPolicy.operationMode]);
+  }, [settings?.operationMode, remoteSession?.clientPolicy.operationMode, pinned]);
 
   if (!settings || !server) {
     return (
@@ -1739,7 +1740,7 @@ export function App() {
           </div>
           <div>
             <strong>Contabilizador</strong>
-            <span>{remoteSession ? "Cliente do caixa principal" : "PDV local rapido"}</span>
+            <span>{legacyMode ? "Caixa classico" : remoteSession ? "Cliente do caixa principal" : "PDV local rapido"}</span>
           </div>
         </div>
 
@@ -1821,6 +1822,12 @@ export function App() {
             </div>
           )}
         </div>
+        {legacyMode && (
+          <button className="pin-button" type="button" onClick={togglePinned}>
+            <Pin size={18} />
+            {pinned ? "Fechar barra fixa" : "Abrir barra fixa"}
+          </button>
+        )}
 
       </aside>
 
@@ -2826,7 +2833,7 @@ function HistoryPanel({
   const filtered = useMemo(() => {
     const search = deferredQuery.toLowerCase();
     return entries.filter((entry) => {
-      const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${entry.paymentMethod}`.toLowerCase();
+      const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${paymentLabelForEntry(entry)}`.toLowerCase();
       const sameType = type === "Todos" || entry.type === type;
       const sameStatus =
         statusFilter === "todos" ||
@@ -2853,6 +2860,15 @@ function HistoryPanel({
     } catch (error) {
       onToast("error", error instanceof Error ? error.message : "Nao foi possivel concluir.");
     }
+  };
+
+  const openSaleDetails = (entry: LedgerEntry) => {
+    const sale = pdvSales.find((item) => item.id === entry.sourceSaleId);
+    if (!sale) {
+      onToast("info", "Os detalhes dessa venda ainda nao foram carregados. Atualize o Historico e tente novamente.");
+      return;
+    }
+    setDetails(sale);
   };
 
   return (
@@ -2918,13 +2934,13 @@ function HistoryPanel({
                   <td>{entry.description}</td>
                   <td>{entry.tableNumber || "-"}</td>
                   <td>{entry.busNumber || "-"}</td>
-                  <td>{entry.paymentMethod}</td>
+                  <td>{paymentLabelForEntry(entry)}</td>
                   <td>{formatCurrency(entry.finalValue)}</td>
                   <td><span className={`status-dot ${entry.status}`}>{statusLabel(entry.status)}</span></td>
                   <td>
                     <div className="row-actions">
                       <button title="Editar" onClick={() => onEditRemote ? void onEditRemote(entry) : setEditing(entry)}><Edit3 size={15} /></button>
-                      {entry.sourceSaleId && <button title="Ver produtos e pagamentos" onClick={() => setDetails(pdvSales.find((sale) => sale.id === entry.sourceSaleId) || null)}><Eye size={15} /></button>}
+                      {entry.sourceSaleId && <button className="history-sale-details-button" title="Ver produtos e pagamentos" onClick={() => openSaleDetails(entry)}><Eye size={15} /><span>Itens</span></button>}
                       <button title="Duplicar" onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
                       {entry.status === "deleted" || entry.status === "cancelled" ? (
                          <button title="Restaurar" onClick={() => run(() => onRestoreRemote ? onRestoreRemote(entry) : window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
@@ -3507,7 +3523,7 @@ function ReportsPanel({
               <div key={entry.id}>
                 <span>{date} {time}</span>
                 <strong>{entry.description}</strong>
-                <small>{entry.customType || entry.type} | {entry.paymentMethod}</small>
+                <small>{entry.customType || entry.type} | {paymentLabelForEntry(entry)}</small>
                 <b>{canViewEntryValues ? formatCurrency(entry.finalValue) : "Restrito"}</b>
               </div>
             );
@@ -3608,7 +3624,7 @@ function TopEntriesCard({ entries, showSensitive }: { entries: LedgerEntry[]; sh
               <span>{index + 1}</span>
               <div>
                 <strong>{entry.description || "Venda"}</strong>
-                <small>{date} {time} | {entry.customType || entry.type} | {entry.paymentMethod}</small>
+                <small>{date} {time} | {entry.customType || entry.type} | {paymentLabelForEntry(entry)}</small>
               </div>
               <b>{showSensitive ? formatCurrency(getEntryAmount(entry)) : "Restrito"}</b>
             </article>
@@ -4182,9 +4198,10 @@ function SettingsPanel({
   const [newProfileName, setNewProfileName] = useState("");
   const [settingsConfirm, setSettingsConfirm] = useState<{ title: string; message: string; action: () => void | Promise<void>; confirmLabel?: string; danger?: boolean } | null>(null);
   const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
+  const effectiveSettingsOperationMode = remoteSession?.clientPolicy.operationMode || draft.operationMode;
   const remoteLockedCategoryList: SettingsCategory[] = remoteCustomizationAllowed
-    ? ["files", "server", "advanced"]
-    : ["defaults", "profiles", "files", "server", "advanced"];
+    ? ["operation", "files", "server", "advanced"]
+    : ["operation", "defaults", "profiles", "files", "server", "advanced"];
   const remoteLockedCategories = new Set<SettingsCategory>(remoteLockedCategoryList);
   const remoteLockMessage = "So o computador servidor pode editar essa parte enquanto este app esta conectado como cliente. Desconecte do servidor para editar as configuracoes locais deste PC.";
 
@@ -4524,6 +4541,12 @@ function SettingsPanel({
           activeProfile: defaults.activeProfile
         };
       }
+      if (target === "floating") {
+        return { ...current, floating: defaults.floating };
+      }
+      if (target === "quick") {
+        return { ...current, quickTabs: defaults.quickTabs };
+      }
       if (target === "files") {
         return {
           ...current,
@@ -4607,6 +4630,8 @@ function SettingsPanel({
     { key: "operation", label: "Modo de operacao", description: "Alterna entre o PDV novo e o caixa classico preservado.", icon: MonitorUp },
     { key: "defaults", label: "Vendas", description: "Tipo, pessoas e arredondamento usados por padrao.", icon: Send },
     { key: "profiles", label: "Perfis", description: "Perfis para alternar entre PC, notebook e tela pequena.", icon: MonitorUp },
+    { key: "floating", label: "Barra fixa", description: "Janela flutuante, tamanho, posicao, campos e tema do Caixa Classico.", icon: Pin },
+    { key: "quick", label: "Barra rapida", description: "Abas e atalhos visuais usados dentro da barra fixa classica.", icon: LayoutPanelTop },
     { key: "pdv", label: "Produtos", description: "Produtos, categorias, importacao, favoritos, unidade, kg, grama e adicionais.", icon: LayoutPanelTop },
     { key: "pdvTables", label: "Mesas", description: "Quantidade de mesas, submesas, complementos e comportamento do fechamento.", icon: Utensils },
     { key: "files", label: "Planilha e backup", description: "Exportacao Excel/CSV, pasta, colunas e backups gerados a partir do banco local.", icon: FileSpreadsheet },
@@ -4616,8 +4641,20 @@ function SettingsPanel({
     { key: "updates", label: "Atualizacoes", description: "Checagem de versoes publicadas no GitHub.", icon: Download },
     { key: "advanced", label: "Avancado", description: "Restauracao, backup e acoes administrativas.", icon: DatabaseBackup }
   ];
-  const activeCategory = settingsCategories.find((item) => item.key === category) || settingsCategories[0];
+  const visibleSettingsCategories = settingsCategories.filter((item) => {
+    if (effectiveSettingsOperationMode === "legacy") {
+      return item.key !== "pdv" && item.key !== "pdvTables";
+    }
+    return !["defaults", "profiles", "floating", "quick", "shortcuts"].includes(item.key);
+  });
+  const activeCategory = visibleSettingsCategories.find((item) => item.key === category) || visibleSettingsCategories[0];
   const filePreview = filePreviewForSettings(draft);
+
+  useEffect(() => {
+    if (!visibleSettingsCategories.some((item) => item.key === category)) {
+      setCategory("operation");
+    }
+  }, [category, effectiveSettingsOperationMode]);
 
   const categoryClass = (target: SettingsCategory, extra = "") =>
     `${extra || "settings-group"} ${category === target ? "active-category" : "hidden-category"} ${isRemoteLockedCategory(target) ? "remote-locked-section" : ""}`;
@@ -4640,7 +4677,7 @@ function SettingsPanel({
     <section className="panel settings-panel">
       <div className="settings-layout">
         <aside className="settings-nav">
-          {settingsCategories.map((item) => {
+          {visibleSettingsCategories.map((item) => {
             const Icon = item.icon;
             const locked = isRemoteLockedCategory(item.key);
             return (
@@ -4668,8 +4705,8 @@ function SettingsPanel({
                   {isRemoteLockedCategory(category)
                     ? "Esta area esta travada no cliente. O servidor controla campos, modos, planilha e permissoes em tempo real."
                     : remoteCustomizationAllowed
-                      ? "Modo cliente remoto ativo: o servidor liberou acesso local a aparencia, vendas e perfis deste PC."
-                      : "Modo cliente remoto ativo: voce pode ajustar apenas aparencia, privacidade local, atalhos e atualizacoes deste PC."}
+                      ? "Modo cliente remoto ativo: o servidor define o modo, e este PC pode personalizar a aparencia e a barra classica local."
+                      : "Modo cliente remoto ativo: voce pode ajustar aparencia, privacidade local, barra classica e atualizacoes deste PC."}
                 </p>
               )}
             </div>
@@ -4721,53 +4758,93 @@ function SettingsPanel({
               <option value="sidePanel">Painel lateral</option>
             </select>
           </label>
-          {draft.operationMode === "legacy" && (
-          <div className="settings-subsection">
-            <h4>Barra fixa do Modo Classico</h4>
-            <label className="field"><span>Tema da barra</span>
-              <select
-                value={draft.floating.theme}
-                onChange={(event) => update("floating", { ...draft.floating, theme: event.target.value as AppSettings["floating"]["theme"] })}
-              >
-                <option value="follow">Seguir tema do aplicativo</option>
-                <option value="light">Claro</option>
-                <option value="dark">Escuro</option>
-                <option value="datacaixa">DataCaixa</option>
-                <option value="datacaixa-dark">DataCaixa escuro</option>
-                <option value="italia">Italia</option>
-              </select>
-            </label>
-            <label className="switch-line">
-              <input type="checkbox" checked={draft.floating.rememberBounds} onChange={(event) => update("floating", { ...draft.floating, rememberBounds: event.target.checked })} />
-              Salvar tamanho e posicao da barra
-            </label>
-            <label className="switch-line">
-              <input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} />
-              Travar a barra no lugar
-            </label>
-            <label className="switch-line">
-              <input type="checkbox" checked={draft.floating.dragWholeBar} onChange={(event) => update("floating", { ...draft.floating, dragWholeBar: event.target.checked })} />
-              Permitir arrastar por toda a barra
-            </label>
+        </section>
+
+        <section className={categoryClass("floating", "settings-group wide")} {...remoteSectionProps("floating")}>
+          <h3>Barra fixa classica</h3>
+          <p className="settings-note">Esta janela so fica disponivel no Modo Classico. Abra-a pelo botao ao lado do Total hoje e personalize-a aqui.</p>
+          <div className="floating-preset-grid">
+            {FLOATING_PRESETS.map((preset) => {
+              const active = draft.defaultType === preset.defaultType
+                && normalizeFloatingFields(draft.floating.visibleFields).join("|") === normalizeFloatingFields(preset.fields).join("|")
+                && (draft.floating.layoutMode || "adaptive") === (preset.layoutMode || "adaptive");
+              return (
+                <button key={preset.id} className={`floating-preset-card ${active ? "active" : ""}`} type="button" onClick={() => applyFloatingPreset(preset)}>
+                  <strong>{preset.title}</strong>
+                  <span>{preset.description}</span>
+                  <small>{normalizeFloatingFields(preset.fields).length} elementos na barra</small>
+                </button>
+              );
+            })}
           </div>
-          )}
+          <label className="field"><span>Tema da barra</span>
+            <select value={draft.floating.theme || "follow"} onChange={(event) => update("floating", { ...draft.floating, theme: event.target.value as AppSettings["floating"]["theme"] })}>
+              <option value="follow">Seguir tema do app</option>
+              <option value="light">Claro</option>
+              <option value="dark">Escuro</option>
+              <option value="datacaixa">DataCaixa</option>
+              <option value="datacaixa-dark">DataCaixa escuro</option>
+              <option value="italia">Italia</option>
+            </select>
+          </label>
+          <label className="field"><span>Modo visual</span>
+            <select value={draft.floating.layoutMode || "adaptive"} onChange={(event) => update("floating", { ...draft.floating, layoutMode: event.target.value as AppSettings["floating"]["layoutMode"] })}>
+              <option value="adaptive">Adaptavel</option>
+              <option value="compact">Compacto</option>
+              <option value="mini">Mini</option>
+            </select>
+          </label>
+          <label className="field"><span>Opacidade ({Math.round(draft.floating.opacity * 100)}%)</span>
+            <input aria-label={`Opacidade (${Math.round(draft.floating.opacity * 100)}%)`} type="range" min={0.35} max={1} step={0.01} value={draft.floating.opacity} onChange={(event) => update("floating", { ...draft.floating, opacity: Number(event.target.value) })} />
+          </label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.rememberBounds} onChange={(event) => update("floating", { ...draft.floating, rememberBounds: event.target.checked })} /> Salvar tamanho e posicao</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.lockPosition} onChange={(event) => update("floating", { ...draft.floating, lockPosition: event.target.checked })} /> Travar a barra no lugar</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.borderless} onChange={(event) => update("floating", { ...draft.floating, borderless: event.target.checked })} /> Visual sem borda de janela</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.dragWholeBar} onChange={(event) => update("floating", { ...draft.floating, dragWholeBar: event.target.checked })} /> Arrastar pela barra inteira</label>
+          <label className="switch-line"><input type="checkbox" checked={draft.floating.syncMoneyWithEntryType} onChange={(event) => update("floating", { ...draft.floating, syncMoneyWithEntryType: event.target.checked })} /> Manter Mesa ou Onibus ao trocar Conta/Dinheiro</label>
+          <div className="floating-field-picker">
+            <div className="section-title"><strong>Elementos da barra</strong><span>Desmarque o que nao precisa aparecer.</span></div>
+            {FLOATING_FIELD_OPTIONS.filter((field) => field.id !== "value").map((field) => (
+              <label key={field.id} className="toggle-card">
+                <input type="checkbox" checked={normalizeFloatingFields(draft.floating.visibleFields).includes(field.id)} onChange={() => toggleFloatingField(field.id)} />
+                <span><strong>{field.label}</strong><small>{field.helper}</small></span>
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className={categoryClass("quick", "settings-group wide")} {...remoteSectionProps("quick")}>
+          <h3>Barra rapida classica</h3>
+          <p className="settings-note">Defina as abas que aparecem na barra fixa e a ordem em que elas ficam disponiveis.</p>
+          <div className="quick-tab-editor">
+            {draft.quickTabs.map((tab, index) => (
+              <article key={tab.id} className={`quick-tab-row ${tab.enabled ? "enabled" : ""} ${tab.type === "Dinheiro/Troco" ? "has-money-link" : ""}`}>
+                <label className="switch-line quick-switch"><input type="checkbox" checked={tab.enabled} onChange={(event) => updateQuickTab(tab.id, { enabled: event.target.checked })} /> Ativa</label>
+                <label className="field"><span>Nome da aba</span><input value={tab.label} onChange={(event) => updateQuickTab(tab.id, { label: event.target.value })} /></label>
+                <label className="field"><span>Modo ao clicar</span><select value={tab.type} onChange={(event) => updateQuickTab(tab.id, { type: event.target.value as EntryType })}>{ENTRY_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label>
+                {tab.type === "Dinheiro/Troco" && <label className="field"><span>Dinheiro vinculado a</span><select value={tab.cashLinkedType || "Mesa"} onChange={(event) => updateQuickTab(tab.id, { cashLinkedType: event.target.value as EntryType })}>{CASH_LINKED_TYPES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>}
+                <label className="switch-line quick-switch"><input type="checkbox" checked={Boolean(tab.compact)} onChange={(event) => updateQuickTab(tab.id, { compact: event.target.checked })} /> Compacta</label>
+                <div className="quick-order"><button type="button" disabled={index === 0} onClick={() => moveQuickTab(tab.id, -1)} title="Subir"><ArrowUp size={15} /></button><button type="button" disabled={index === draft.quickTabs.length - 1} onClick={() => moveQuickTab(tab.id, 1)} title="Descer"><ArrowDown size={15} /></button></div>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section className={categoryClass("operation")}>
           <h3>Modo de operacao</h3>
           <label className="field"><span>Interface principal</span>
-            <select value={draft.operationMode} onChange={(event) => update("operationMode", event.target.value as AppSettings["operationMode"])}>
+            <select value={effectiveSettingsOperationMode} disabled={remoteClientActive} onChange={(event) => update("operationMode", event.target.value as AppSettings["operationMode"])}>
               <option value="pdv">PDV novo integrado</option>
               <option value="legacy">Caixa classico preservado</option>
             </select>
           </label>
           <p className="settings-note">
-            O modo classico reativa o lancamento rapido e a barra fixa preservados. Ele continua dentro deste aplicativo e nao apaga, duplica ou troca o banco do PDV.
+            Cada modo mostra apenas as configuracoes e telas do seu proprio fluxo. O modo Classico preserva lancamento rapido e barra fixa; o PDV concentra venda, mesas, produtos e fechamento.
           </p>
-          {draft.operationMode === "legacy" && (
+          {effectiveSettingsOperationMode === "legacy" && (
             <div className="settings-warning">
               <strong>Modo de compatibilidade ativo</strong>
-              <span>Venda volta para o fluxo antigo e a barra fixa preservada. A aba Mesas fica oculta para nao misturar o fluxo classico com o PDV.</span>
+              <span>Venda volta para o fluxo antigo. Abra a barra fixa pelo topo; Mesas e Produtos ficam ocultos para nao misturar os fluxos.</span>
             </div>
           )}
         </section>
@@ -5531,4 +5608,9 @@ function permissionLabel(key: keyof ServerPermissions): string {
 
 function entryMatchesPayment(entry: LedgerEntry, payment: string): boolean {
   return entry.paymentMethod === payment || Boolean(entry.paymentBreakdown?.some((item) => item.method === payment));
+}
+
+function paymentLabelForEntry(entry: LedgerEntry): string {
+  const methods = entry.paymentBreakdown?.map((item) => item.method).filter(Boolean) || [];
+  return methods.length ? [...new Set(methods)].join(" + ") : entry.paymentMethod;
 }

@@ -4662,6 +4662,163 @@ body.floating-borderless .floating-bar {
   color: #082942;
 }
 
+.pdv-subtable-trigger {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+  min-width: 0;
+  padding: 0 12px;
+  border-color: #0a5b8d !important;
+  background: #0b5f96 !important;
+  color: #fff !important;
+  font-weight: 900;
+  text-align: left;
+}
+
+.pdv-subtable-trigger:hover {
+  background: #0c78b8 !important;
+}
+
+.pdv-subtable-manager-modal {
+  width: min(760px, calc(100vw - 28px));
+}
+
+.pdv-subtable-create,
+.pdv-subtable-rename {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.pdv-subtable-create input,
+.pdv-subtable-rename input {
+  min-height: 46px;
+  border: 1px solid #8fb6cf;
+  border-radius: 5px;
+  padding: 0 12px;
+  background: #fff;
+  color: #082942;
+  font-weight: 800;
+}
+
+.pdv-subtable-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+}
+
+.pdv-subtable-list > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #a9c8dc;
+  border-radius: 6px;
+  padding: 8px;
+  background: #edf6fb;
+  color: #082942;
+}
+
+.pdv-subtable-list > article.active {
+  border-color: #0b5f96;
+  box-shadow: inset 0 0 0 1px #0b5f96;
+  background: #dceef9;
+}
+
+.pdv-subtable-list > article > button {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border: 0;
+  padding: 5px 6px;
+  background: transparent;
+  color: #082942;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pdv-subtable-list strong,
+.pdv-subtable-list span {
+  color: inherit;
+}
+
+.pdv-subtable-list span {
+  font-size: 0.86rem;
+  opacity: 0.78;
+}
+
+.pdv-subtable-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.pdv-subtable-row-actions .pdv-ghost-button,
+.pdv-subtable-list .pdv-ghost-button {
+  min-height: 36px;
+  border-color: #8fb6cf;
+  background: #f7fbff;
+  color: #0b3151;
+}
+
+.pdv-subtable-row-actions .pdv-danger-button {
+  min-height: 36px;
+  border: 1px solid #d7a19a;
+  background: #fff6f4;
+}
+
+.pdv-subtable-rename {
+  grid-column: 1 / -1;
+}
+
+.pdv-products-area .pdv-product-grid button,
+.pdv-products-area .pdv-category-grid button:not(.active),
+.pdv-products-area .pdv-search input,
+.pdv-products-area .pdv-quantity-box input {
+  color: #071d30;
+}
+
+.pdv-products-area .pdv-product-grid button strong,
+.pdv-products-area .pdv-product-grid button span {
+  color: inherit;
+}
+
+.history-sale-details-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 5px;
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.history-sale-details-button:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+
+@media (max-width: 640px) {
+  .pdv-subtable-create,
+  .pdv-subtable-rename,
+  .pdv-subtable-list > article {
+    grid-template-columns: 1fr;
+  }
+
+  .pdv-subtable-row-actions {
+    justify-content: stretch;
+  }
+
+  .pdv-subtable-row-actions > button {
+    flex: 1 1 110px;
+  }
+}
+
 .pdv-bulk-toolbar input {
   flex: 1 1 180px;
 }
