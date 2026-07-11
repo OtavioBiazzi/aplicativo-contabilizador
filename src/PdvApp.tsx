@@ -1821,7 +1821,7 @@ function PaymentModal({
       await onConfirm(resolvedPayments.map((payment) => ({ ...payment, description: observations.trim() || payment.description })), observations);
     } catch (error) {
       setSubmitting(false);
-      throw error;
+      setNotice(error instanceof Error ? error.message : "Nao foi possivel registrar o pagamento. Confira a conexao e tente novamente.");
     }
   };
 
