@@ -4643,7 +4643,12 @@ function SettingsPanel({
   ];
   const visibleSettingsCategories = settingsCategories.filter((item) => {
     if (effectiveSettingsOperationMode === "legacy") {
-      return item.key !== "pdv" && item.key !== "pdvTables";
+      if (item.key === "pdv" || item.key === "pdvTables") {
+        return false;
+      }
+      // Em cliente remoto restrito, a ordem das abas vem do servidor. A
+      // posicao, tamanho e tema da barra continuam locais em Barra fixa.
+      return !(remoteClientActive && !remoteCustomizationAllowed && item.key === "quick");
     }
     return !["defaults", "profiles", "floating", "quick", "shortcuts"].includes(item.key);
   });
