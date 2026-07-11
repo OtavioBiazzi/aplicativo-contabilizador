@@ -165,6 +165,7 @@ export interface PdvProductImportPreview {
   updatedProducts: number;
   removedProducts: number;
   manualProductsPreserved: number;
+  manualConflicts: number;
   ignoredRows: number;
 }
 

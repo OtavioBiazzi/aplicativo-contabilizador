@@ -462,7 +462,7 @@ async function importPdvProducts(filePath: string, importSource = "Importacao ex
   sendToAll("pdv:changed");
   return {
     ...result,
-    skippedRows: normalized.skippedRows
+    skippedRows: result.skippedRows + normalized.skippedRows
   };
 }
 
@@ -499,10 +499,8 @@ async function previewPdvProducts(filePath: string, importSource = "Importacao e
     }
     configureCoseDellAbadiaComplements(normalized.products);
   }
-  return {
-    ...pdvStore.previewProductImport(normalized.categories, normalized.products, filePath, importSource),
-    ignoredRows: normalized.skippedRows
-  };
+  const preview = pdvStore.previewProductImport(normalized.categories, normalized.products, filePath, importSource);
+  return { ...preview, ignoredRows: normalized.skippedRows + preview.ignoredRows };
 }
 
 async function createUpgradeSafetyBackup(dataDirectory: string) {
@@ -732,7 +730,7 @@ function registerIpc() {
     return removed;
   });
 
-  ipcMain.handle("pdv:importProductsFile", async (): Promise<PdvProductImportResult | null> => {
+  ipcMain.handle("pdv:previewProductsFile", async (): Promise<PdvProductImportPreview | null> => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: "Importar produtos para o PDV",
       properties: ["openFile"],
@@ -741,6 +739,19 @@ function registerIpc() {
     if (result.canceled || !result.filePaths[0]) {
       return null;
     }
+    return previewPdvProducts(result.filePaths[0]);
+  });
+
+  ipcMain.handle("pdv:importProductsFile", async (_event, filePath?: string): Promise<PdvProductImportResult | null> => {
+    if (filePath) {
+      return importPdvProducts(filePath);
+    }
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: "Importar produtos para o PDV",
+      properties: ["openFile"],
+      filters: [{ name: "Planilha de produtos", extensions: ["xlsx"] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
     return importPdvProducts(result.filePaths[0]);
   });
 

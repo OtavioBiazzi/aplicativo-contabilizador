@@ -283,6 +283,7 @@ export class PdvStore {
     let importedProducts = 0;
     let updatedProducts = 0;
     let removedProducts = 0;
+    let skippedManualProducts = 0;
     db.run("BEGIN IMMEDIATE");
     try {
       const existingCategories = selectAll<{ id: string; name: string }>(db, "SELECT id, name FROM categories");
@@ -296,14 +297,20 @@ export class PdvStore {
       const existingProducts = selectAll<{ id: string; name: string; category_name: string; import_source: string }>(db, "SELECT products.id, products.name, categories.name AS category_name, COALESCE(products.import_source, '') AS import_source FROM products LEFT JOIN categories ON categories.id = products.category_id");
       const existingProductByKey = new Map(existingProducts.map((product) => [catalogKey(`${product.category_name}|${product.name}`), product]));
       const productIdMap = new Map<string, string>();
-      const normalizedProducts = products.map((product) => {
+      const normalizedProducts = products.flatMap((product) => {
         const category = normalizedCategories.find((item) => item.id === categoryIdMap.get(product.categoryId));
         const key = catalogKey(`${category?.name || product.categoryName}|${product.name}`);
         const existing = existingProductByKey.get(key);
+        // A reimportacao atualiza somente itens que pertencem a mesma origem.
+        // Assim, um produto cadastrado manualmente com o mesmo nome nunca e tomado pelo arquivo.
+        if (existing && importSource && existing.import_source !== importSource) {
+          skippedManualProducts += 1;
+          return [];
+        }
         const id = existing?.id || product.id;
         if (existing) updatedProducts += 1;
         productIdMap.set(product.id, id);
-        return { ...product, id, categoryId: categoryIdMap.get(product.categoryId) || product.categoryId };
+        return [{ ...product, id, categoryId: categoryIdMap.get(product.categoryId) || product.categoryId }];
       });
       const categoryStatement = db.prepare("INSERT INTO categories (id, name, active, favorite, sort_order) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, active=excluded.active, favorite=excluded.favorite, sort_order=excluded.sort_order");
       for (const category of normalizedCategories) {
@@ -349,7 +356,10 @@ export class PdvStore {
       for (const product of normalizedProducts) {
         db.run("DELETE FROM product_complements WHERE product_id = ?", [product.id]);
         (product.complementProductIds || []).forEach((complementId, index) => {
-          complementStatement.run([product.id, productIdMap.get(complementId) || complementId, index]);
+          const mappedComplementId = productIdMap.get(complementId);
+          if (mappedComplementId) {
+            complementStatement.run([product.id, mappedComplementId, index]);
+          }
         });
       }
       complementStatement.free();
@@ -365,7 +375,7 @@ export class PdvStore {
       filePath,
       importedCategories,
       importedProducts,
-      skippedRows: 0,
+      skippedRows: skippedManualProducts,
       updatedProducts,
       removedProducts
     };
@@ -375,8 +385,16 @@ export class PdvStore {
     const existingProducts = this.getProducts();
     const existingByKey = new Map(existingProducts.map((product) => [catalogKey(`${product.categoryName}|${product.name}`), product]));
     const incomingKeys = new Set(products.map((product) => catalogKey(`${product.categoryName}|${product.name}`)));
+    const manualConflicts = importSource
+      ? products.filter((product) => {
+        const existing = existingByKey.get(catalogKey(`${product.categoryName}|${product.name}`));
+        return Boolean(existing && existing.importSource !== importSource);
+      }).length
+      : 0;
     const addedProducts = products.filter((product) => !existingByKey.has(catalogKey(`${product.categoryName}|${product.name}`))).length;
-    const updatedProducts = products.length - addedProducts;
+    const updatedProducts = importSource
+      ? products.filter((product) => existingByKey.get(catalogKey(`${product.categoryName}|${product.name}`))?.importSource === importSource).length
+      : products.length - addedProducts;
     const removedProducts = importSource
       ? existingProducts.filter((product) => product.importSource === importSource && !incomingKeys.has(catalogKey(`${product.categoryName}|${product.name}`))).length
       : 0;
@@ -388,7 +406,8 @@ export class PdvStore {
       updatedProducts,
       removedProducts,
       manualProductsPreserved: existingProducts.filter((product) => product.importSource !== importSource).length,
-      ignoredRows: 0
+      manualConflicts,
+      ignoredRows: manualConflicts
     };
   }
 
