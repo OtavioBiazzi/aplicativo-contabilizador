@@ -2888,7 +2888,7 @@ th {
   place-items: center;
   height: 100vh;
   min-width: 0;
-  padding: 8px;
+  padding: 0;
   background: transparent;
   color: #1b2a24;
   -webkit-app-region: no-drag;
@@ -2905,8 +2905,9 @@ th {
   align-content: center;
   gap: 6px;
   width: 100%;
+  height: 100%;
   min-width: 0;
-  min-height: 94px;
+  min-height: 0;
   border: 1px solid color-mix(in srgb, var(--bar-accent) 14%, rgba(255, 255, 255, 0.62));
   border-radius: 10px;
   padding: 8px 42px 8px 10px;
@@ -4253,14 +4254,42 @@ body.floating-borderless .floating-bar {
 
 .pdv-sale-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 10px minmax(300px, var(--pdv-cart-pane-width, 420px));
+  gap: 6px;
   height: 100%;
   min-height: 0;
 }
 
 .pdv-table-open-grid {
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw);
+  grid-template-columns: minmax(0, 1fr) 10px minmax(300px, var(--pdv-cart-pane-width, 420px));
+}
+
+.pdv-cart-resizer {
+  position: relative;
+  z-index: 3;
+  width: 10px;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.pdv-cart-resizer::after {
+  position: absolute;
+  top: 18%;
+  right: 4px;
+  bottom: 18%;
+  width: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 72%, transparent);
+  content: "";
+}
+
+.pdv-cart-resizer:hover::after,
+.pdv-cart-resizer:focus-visible::after {
+  background: var(--pdv-action);
 }
 
 .pdv-products-area,
@@ -4345,6 +4374,8 @@ body.floating-borderless .floating-bar {
   text-align: center;
   font-size: 1.25rem;
   font-weight: 900;
+  background: #ffffff !important;
+  color: #071d30 !important;
 }
 
 .pdv-search {
@@ -4384,6 +4415,17 @@ body.floating-borderless .floating-bar {
   overflow: hidden;
 }
 
+.pdv-category-grid button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 7px 8px;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
 .pdv-category-grid button.active {
   background: var(--pdv-action);
   color: #fff;
@@ -4413,8 +4455,9 @@ body.floating-borderless .floating-bar {
   overflow: hidden;
   color: #071d30;
   display: -webkit-box;
-  font-size: clamp(0.74rem, 0.82vw, 0.9rem);
-  line-height: 1.12;
+  font-size: clamp(0.84rem, 0.95vw, 1.04rem);
+  font-weight: 950;
+  line-height: 1.14;
   text-overflow: ellipsis;
   text-transform: uppercase;
   -webkit-box-orient: vertical;
@@ -4424,15 +4467,15 @@ body.floating-borderless .floating-bar {
 
 .pdv-product-grid span {
   color: #071d30;
-  font-size: 0.88rem;
+  font-size: clamp(0.78rem, 0.84vw, 0.92rem);
   line-height: 1.05;
   white-space: nowrap;
 }
 
 @media (min-width: 1600px) and (min-height: 850px) {
   .pdv-direct-panel .pdv-sale-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(380px, 31vw);
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) 10px minmax(300px, var(--pdv-cart-pane-width, 420px));
+    gap: 6px;
   }
 
   .pdv-direct-panel .pdv-panel {
@@ -4451,6 +4494,51 @@ body.floating-borderless .floating-bar {
 
   .pdv-direct-panel .pdv-product-grid {
     gap: 6px;
+  }
+}
+
+@media (max-height: 780px) {
+  .pdv-modal-backdrop {
+    align-items: start;
+  }
+
+  .pdv-quantity-modal,
+  .pdv-payment-amount-modal {
+    gap: 6px;
+    padding: 10px;
+  }
+
+  .pdv-quantity-modal .pdv-window-title,
+  .pdv-payment-amount-modal .pdv-window-title {
+    margin: -10px -10px 4px;
+  }
+
+  .pdv-quantity-product {
+    padding: 10px 12px;
+    font-size: 1.1rem;
+  }
+
+  .pdv-quantity-body {
+    grid-template-columns: 46px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .pdv-question-mark {
+    width: 42px;
+    height: 42px;
+    border-width: 3px;
+    font-size: 1.5rem;
+  }
+
+  .pdv-quantity-fields input,
+  .pdv-inline-stepper input {
+    min-height: 38px;
+    font-size: 1.3rem;
+  }
+
+  .pdv-keypad button {
+    min-height: 42px;
+    font-size: 1.2rem;
   }
 }
 
@@ -5105,6 +5193,7 @@ body.floating-borderless .floating-bar {
 
 .pdv-table-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px;
   min-height: var(--pdv-table-card-height, 96px);
   border: 1px solid rgba(255, 255, 255, 0.42);
@@ -5117,15 +5206,36 @@ body.floating-borderless .floating-bar {
 }
 
 .pdv-table-card strong {
+  grid-column: 1;
   font-size: 1.7rem;
   line-height: 1;
 }
 
 .pdv-table-card span {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
   justify-self: end;
-  margin-top: -28px;
+  min-width: 0;
   color: #fff;
+  font-size: 0.74rem;
   font-weight: 900;
+  line-height: 1.05;
+  text-align: right;
+}
+
+.pdv-table-card small,
+.pdv-table-card b {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.pdv-table-note {
+  overflow: hidden;
+  font-size: 0.74rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pdv-table-card.ocupada {
@@ -5512,6 +5622,17 @@ body.floating-borderless .floating-bar {
   padding: 14px;
 }
 
+.pdv-cancel-items-modal select,
+.pdv-cancel-items-modal option {
+  background: #ffffff !important;
+  color: #071d30 !important;
+}
+
+.pdv-cancel-items-modal .pdv-wide-field,
+.pdv-cancel-items-modal .pdv-wide-field span {
+  color: #0b3151 !important;
+}
+
 input[type="date"] {
   color-scheme: light;
 }
@@ -5542,7 +5663,8 @@ input[type="date"] {
   z-index: 40;
   display: grid;
   place-items: center;
-  padding: 20px;
+  overflow: auto;
+  padding: 12px;
   background: rgba(0, 18, 34, 0.68);
 }
 
@@ -5550,7 +5672,7 @@ input[type="date"] {
   display: grid;
   gap: 14px;
   width: min(920px, 100%);
-  max-height: min(760px, calc(100vh - 32px));
+  max-height: calc(100vh - 24px);
   overflow: auto;
   border: 1px solid rgba(255, 255, 255, 0.42);
   border-radius: 6px;
@@ -5631,6 +5753,8 @@ input[type="date"] {
 
 .pdv-quantity-modal {
   width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 20px);
+  gap: 8px;
   padding-bottom: 12px;
 }
 
@@ -5648,7 +5772,7 @@ input[type="date"] {
   display: grid;
   grid-template-columns: 66px minmax(0, 1fr);
   gap: 14px;
-  padding: 14px 6px 8px;
+  padding: 8px 6px 4px;
 }
 
 .pdv-question-mark {
@@ -5668,7 +5792,7 @@ input[type="date"] {
 
 .pdv-quantity-fields {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .pdv-quantity-fields label {
@@ -5972,6 +6096,10 @@ input[type="date"] {
   .pdv-advanced-grid,
   .pdv-detail-columns {
     grid-template-columns: 1fr;
+  }
+
+  .pdv-cart-resizer {
+    display: none;
   }
 
   .pdv-report-grid {

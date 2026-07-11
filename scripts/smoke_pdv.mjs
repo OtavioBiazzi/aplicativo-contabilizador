@@ -80,6 +80,28 @@ const sale = await store.saveSale({
   discount: 0,
   payments: [{ id: crypto.randomUUID(), method: "Dinheiro", amount: 12, received: 20, change: 8 }]
 });
+if (!(await store.getSnapshot()).products.some((product) => product.id === baseProduct.id)) {
+  throw new Error("Finalizar venda direta removeu indevidamente o catalogo de produtos.");
+}
+const exactAmountSale = await store.saveSale({
+  type: "Venda direta",
+  items: [{
+    id: crypto.randomUUID(),
+    productId: baseProduct.id,
+    productName: "Banana valor exato",
+    categoryName: category.name,
+    quantity: 1,
+    baseUnitPrice: 2,
+    unitPrice: 2,
+    discount: 0,
+    total: 2
+  }],
+  discount: 0,
+  payments: [{ id: crypto.randomUUID(), method: "Pix", amount: 2 }]
+});
+if (exactAmountSale.total !== 2 || exactAmountSale.payments[0]?.amount !== 2) {
+  throw new Error("Venda direta de R$ 2,00 perdeu centavos indevidamente.");
+}
 
 const cancelled = await store.saveSale({
   type: "Mesa",

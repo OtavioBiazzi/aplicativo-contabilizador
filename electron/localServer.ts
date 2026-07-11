@@ -170,7 +170,7 @@ export class LocalServer {
       response.json(await this.options.getPdvSnapshot());
     });
 
-    app.patch("/api/pdv/products", this.authorize("manageProducts"), async (request, response) => {
+    app.patch("/api/pdv/products", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
       try {
         const ids = Array.isArray(request.body?.ids) ? request.body.ids.map(String) : [];
         await this.options.updatePdvProducts(ids, request.body?.patch || {});
@@ -182,7 +182,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/categories", this.authorize("manageProducts"), async (request, response) => {
+    app.post("/api/pdv/categories", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
       try {
         const category = await this.options.savePdvCategory(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -193,7 +193,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/products", this.authorize("manageProducts"), async (request, response) => {
+    app.post("/api/pdv/products", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
       try {
         const product = await this.options.savePdvProduct(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -204,7 +204,7 @@ export class LocalServer {
       }
     });
 
-    app.patch("/api/pdv/settings", this.authorize("manageProducts"), async (request, response) => {
+    app.patch("/api/pdv/settings", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
       try {
         const settings = await this.options.savePdvSettings(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -215,7 +215,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/preset/cose", this.authorize("manageProducts"), async (_request, response) => {
+    app.post("/api/pdv/preset/cose", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (_request, response) => {
       try {
         const result = await this.options.importPdvPreset();
         this.broadcast({ type: "pdv-changed" });
@@ -226,7 +226,7 @@ export class LocalServer {
       }
     });
 
-    app.delete("/api/pdv/preset/cose", this.authorize("manageProducts"), async (_request, response) => {
+    app.delete("/api/pdv/preset/cose", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (_request, response) => {
       try {
         const removed = await this.options.removePdvPreset();
         this.broadcast({ type: "pdv-changed" });
@@ -397,6 +397,11 @@ export class LocalServer {
       }
       next();
     };
+  }
+
+  private forbidClientPdvConfiguration(_request: Request, response: Response, next: NextFunction) {
+    response.status(403).json({ error: "Produtos e configuracoes do PDV sao definidos somente no computador servidor." });
+    void next;
   }
 
   private handleSocket(socket: WebSocket, request: http.IncomingMessage) {

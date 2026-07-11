@@ -154,13 +154,19 @@ export function PdvApp({
   initialTab = "sale",
   hideTopbar = false,
   remoteSession = null,
-  reloadToken = 0
+  reloadToken = 0,
+  roundingStep = 0.01,
+  roundingDirection = "nearest",
+  toastDuration = 3200
 }: {
   embedded?: boolean;
   initialTab?: PdvTab;
   hideTopbar?: boolean;
   remoteSession?: PdvRemoteSession | null;
   reloadToken?: number;
+  roundingStep?: number;
+  roundingDirection?: RoundDirection;
+  toastDuration?: number;
 }) {
   const [snapshot, setSnapshot] = useState<PdvSnapshot | null>(null);
   const [tab, setTab] = useState<PdvTab>(initialTab);
@@ -192,9 +198,9 @@ export function PdvApp({
   const [confirmRequest, setConfirmRequest] = useState<{ title: string; message: string; action: () => Promise<void> } | null>(null);
   const [tableSaveState, setTableSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const tableAutosaveTimer = useRef<number | null>(null);
+  const isRemoteClient = Boolean(remoteSession);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
-  const remoteProductsActive = Boolean(remoteSession && (tab === "products" || tab === "advanced"));
-  const remotePdvActive = remoteTablesActive || remoteProductsActive;
+  const remotePdvActive = Boolean(remoteSession);
 
   const getPdvSnapshot = () => remotePdvActive && remoteSession
     ? remotePdvRequest<PdvSnapshot>(remoteSession, "/api/pdv/snapshot")
@@ -272,33 +278,57 @@ export function PdvApp({
   const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount?: number, observations = "") => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ items, payments, discount: partialDiscount, observations }) }).then((result) => result.sale)
     : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount, crypto.randomUUID(), observations);
-  const updatePdvProducts = (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => remoteProductsActive && remoteSession
-    ? remotePdvRequest<{ ok: boolean }>(remoteSession, "/api/pdv/products", { method: "PATCH", body: JSON.stringify({ ids, patch }) }).then(() => undefined)
+  const clientConfigurationBlocked = () => Promise.reject(new Error("Produtos e regras do PDV sao definidos somente no servidor."));
+  const updatePdvProducts = (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => isRemoteClient
+    ? clientConfigurationBlocked()
     : window.caixa.updatePdvProducts(ids, patch);
-  const savePdvCategory = (draft: PdvCategoryDraft) => remoteProductsActive && remoteSession
-    ? remotePdvRequest<{ category: PdvCategory }>(remoteSession, "/api/pdv/categories", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.category)
+  const savePdvCategory = (draft: PdvCategoryDraft) => isRemoteClient
+    ? clientConfigurationBlocked() as Promise<PdvCategory>
     : window.caixa.savePdvCategory(draft);
-  const savePdvProduct = (draft: PdvProductDraft) => remoteProductsActive && remoteSession
-    ? remotePdvRequest<{ product: PdvProduct }>(remoteSession, "/api/pdv/products", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.product)
+  const savePdvProduct = (draft: PdvProductDraft) => isRemoteClient
+    ? clientConfigurationBlocked() as Promise<PdvProduct>
     : window.caixa.savePdvProduct(draft);
-  const savePdvSettings = (patch: Partial<PdvSettings>) => remoteProductsActive && remoteSession
-    ? remotePdvRequest<{ settings: PdvSettings }>(remoteSession, "/api/pdv/settings", { method: "PATCH", body: JSON.stringify(patch) }).then((result) => result.settings)
+  const savePdvSettings = (patch: Partial<PdvSettings>) => isRemoteClient
+    ? clientConfigurationBlocked() as Promise<PdvSettings>
     : window.caixa.savePdvSettings(patch);
-  const importPdvPreset = () => remoteProductsActive && remoteSession
-    ? remotePdvRequest<PdvProductImportResult>(remoteSession, "/api/pdv/preset/cose", { method: "POST" })
-    : window.caixa.importCoseProducts();
-  const removePdvPreset = () => remoteProductsActive && remoteSession
-    ? remotePdvRequest<{ removed: number }>(remoteSession, "/api/pdv/preset/cose", { method: "DELETE" }).then((result) => result.removed)
-    : window.caixa.removeCoseProducts();
+  const importPdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<PdvProductImportResult> : window.caixa.importCoseProducts();
+  const removePdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<number> : window.caixa.removeCoseProducts();
 
   const load = async () => {
-    setSnapshot(await getPdvSnapshot());
+    const next = await getPdvSnapshot();
+    setSnapshot(next);
+    return next;
+  };
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(""), Math.max(1200, toastDuration || 3200));
+    return () => window.clearTimeout(timer);
+  }, [toast, toastDuration]);
+
+  const applyFreshOpenTable = (next: PdvSnapshot, tableNumber: number) => {
+    const fresh = next.tables.find((table) => table.number === tableNumber);
+    if (!fresh) return;
+    setActiveTable(fresh);
+    setTableCart(fresh.items);
+    setTablePeople(fresh.people || 1);
+    setTableNote(fresh.note || "");
+    setSubtableNames(fresh.subtables || []);
+    setSelectedTableItemIds((current) => current.filter((id) => fresh.items.some((item) => item.id === id)));
+    setPartialSelectedItemIds((current) => current.filter((id) => fresh.items.some((item) => item.id === id && unpaidQuantity(item) > 0.009)));
   };
 
   useEffect(() => {
     load();
     return window.caixa.onPdvChanged(load);
   }, [remoteSession?.baseUrl, remotePdvActive, reloadToken]);
+
+  useEffect(() => {
+    if (!remoteSession || !activeTable || !snapshot || checkoutTarget || tableCloseMenuOpen) {
+      return;
+    }
+    applyFreshOpenTable(snapshot, activeTable.number);
+  }, [remoteSession?.baseUrl, snapshot?.tables, activeTable?.number, checkoutTarget, tableCloseMenuOpen]);
 
   useEffect(() => {
     setTab(initialTab);
@@ -741,10 +771,11 @@ export function PdvApp({
       }
       setCheckoutTarget(null);
       setToast(target.kind === "table-partial-items" ? "Parcial por itens registrada." : "Parcial manual registrada.");
+      const refreshed = await load();
+      applyFreshOpenTable(refreshed, target.table.number);
     } finally {
       setBusy(false);
     }
-    await load();
   };
 
   const importCose = async () => {
@@ -867,6 +898,7 @@ export function PdvApp({
                     <span>{table.status}</span>
                     <small>Abertura: {shortTime(table.openedAt) || "-"}</small>
                     {snapshot.settings.tablePeopleEnabled && <small>Pessoas: {table.people || "-"}</small>}
+                    {table.note && <small className="pdv-table-note" title={table.note}>Obs.: {table.note}</small>}
                     <b>{table.total ? money(table.total) : "Vr Total:"}</b>
                   </article>
                 ))}
@@ -922,16 +954,20 @@ export function PdvApp({
             onDeleteAllSubtables={deleteAllSubtables}
             onMoveSelectedToSubtable={moveSelectedItemsToSubtable}
             onRenameSubtable={renameSubtable}
+            onOpenTransferredTable={async (tableNumber) => {
+              const refreshed = await load();
+              applyFreshOpenTable(refreshed, tableNumber);
+            }}
             openPdvTable={openPdvTable}
             savePdvTableItems={savePdvTableItems}
             transferPdvTableItems={transferPdvTableItems}
           />
         )}
 
-        {tab === "products" && <ProductsScreen snapshot={snapshot} onImportCose={importPdvPreset} onRemoveCose={removePdvPreset} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} />}
-        {tab === "history" && <HistoryScreen snapshot={snapshot} onChanged={load} />}
+        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onRemoveCose={removePdvPreset} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} />}
+        {tab === "history" && <HistoryScreen snapshot={snapshot} readOnly={isRemoteClient} onChanged={load} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
-        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} onImportCose={importPdvPreset} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
+        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
       </main>
 
       {toast && (
@@ -970,8 +1006,8 @@ export function PdvApp({
         <TableCloseMenu
           table={activeTable}
           subtotal={tableTotal}
-          roundingStep={remoteSession?.roundingStep}
-          roundingDirection={remoteSession?.roundingDirection}
+          roundingStep={remoteSession?.roundingStep ?? roundingStep}
+          roundingDirection={remoteSession?.roundingDirection ?? roundingDirection}
           onCancel={() => {
             setTableCloseMenuOpen(false);
             void setPdvTableStatus(activeTable.number, "Ocupada");
@@ -1083,12 +1119,18 @@ function PdvSaleScreen(props: {
   onDeleteAllSubtables?: () => void;
   onMoveSelectedToSubtable?: (name: string) => void;
   onRenameSubtable?: (oldName: string, newName: string) => void;
+  onOpenTransferredTable?: (tableNumber: number) => void | Promise<void>;
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
 }) {
   const subtotal = roundMoney(props.cart.reduce((total, item) => total + (props.activeTableNumber ? unpaidItemTotal(item) : item.total), 0));
   const finalTotal = Math.max(0, roundMoney(subtotal - props.discount));
+  const saleGridRef = useRef<HTMLElement | null>(null);
+  const [cartPaneWidth, setCartPaneWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem("caixa.pdv.cart-pane-width"));
+    return Number.isFinite(saved) && saved >= 300 && saved <= 900 ? saved : 420;
+  });
   const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: PdvCartItem } | null>(null);
   const [transferItem, setTransferItem] = useState<PdvCartItem | null>(null);
   const [transferListOpen, setTransferListOpen] = useState(false);
@@ -1100,6 +1142,30 @@ function PdvSaleScreen(props: {
   const activeItemId = props.selectedItemIds?.[0] || props.cart.at(-1)?.id || "";
   const activeItem = props.cart.find((item) => item.id === activeItemId) || props.cart.at(-1) || null;
   const subtableNames = [...new Set([...(props.subtableNames || []), ...props.cart.map((item) => item.subtableName || "").filter(Boolean)])];
+
+  const beginCartResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const grid = saleGridRef.current;
+    if (!grid) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = cartPaneWidth;
+    const maxWidth = Math.max(300, Math.floor(grid.getBoundingClientRect().width * 0.58));
+    const onMove = (moveEvent: PointerEvent) => {
+      setCartPaneWidth(Math.max(300, Math.min(maxWidth, Math.round(startWidth + startX - moveEvent.clientX))));
+    };
+    const onEnd = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onEnd, { once: true });
+    window.addEventListener("pointercancel", onEnd, { once: true });
+  };
+
+  useEffect(() => {
+    window.localStorage.setItem("caixa.pdv.cart-pane-width", String(cartPaneWidth));
+  }, [cartPaneWidth]);
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
@@ -1180,7 +1246,11 @@ function PdvSaleScreen(props: {
     }
   };
   return (
-    <section className={`pdv-sale-grid ${props.activeTableNumber ? "pdv-table-open-grid" : ""}`}>
+    <section
+      ref={saleGridRef}
+      className={`pdv-sale-grid ${props.activeTableNumber ? "pdv-table-open-grid" : ""}`}
+      style={{ "--pdv-cart-pane-width": `${cartPaneWidth}px` } as React.CSSProperties}
+    >
       <div className="pdv-panel pdv-products-area">
         <div className="pdv-section-head">
           <div>
@@ -1240,6 +1310,13 @@ function PdvSaleScreen(props: {
         </div>
       </div>
 
+      <button
+        type="button"
+        className="pdv-cart-resizer"
+        aria-label="Redimensionar carrinho"
+        title="Arraste para aumentar ou diminuir o carrinho"
+        onPointerDown={beginCartResize}
+      />
       <aside className="pdv-panel pdv-cart-area">
         <div className="pdv-cart-head">
           <h2>Carrinho</h2>
@@ -1383,10 +1460,11 @@ function PdvSaleScreen(props: {
             savePdvTableItems={props.savePdvTableItems}
             transferPdvTableItems={props.transferPdvTableItems}
             onCancel={() => setTransferListOpen(false)}
-            onTransferred={(nextSource) => {
+            onTransferred={(nextSource, targetTableNumber) => {
               props.setCart(nextSource);
               props.setSelectedItemIds?.(nextSource.at(-1) ? [nextSource.at(-1)!.id] : []);
               setTransferListOpen(false);
+              void props.onOpenTransferredTable?.(targetTableNumber);
             }}
           />
         )}
@@ -1421,10 +1499,11 @@ function PdvSaleScreen(props: {
             savePdvTableItems={props.savePdvTableItems}
             transferPdvTableItems={props.transferPdvTableItems}
             onCancel={() => setTransferItem(null)}
-            onTransferred={(nextSource) => {
+            onTransferred={(nextSource, targetTableNumber) => {
               props.setCart(nextSource);
               props.setSelectedItemIds?.([]);
               setTransferItem(null);
+              void props.onOpenTransferredTable?.(targetTableNumber);
             }}
           />
         )}
@@ -2212,7 +2291,7 @@ function TransferListModal({
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   onCancel: () => void;
-  onTransferred: (nextSource: PdvCartItem[]) => void;
+  onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number) => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, String(unpaidQuantity(item)).replace(".", ",")])));
@@ -2254,7 +2333,7 @@ function TransferListModal({
         nextSource = selectedItems.reduce((items, item) => subtractCartItemQuantity(items, item.id, transferQuantity(item, quantities[item.id])), cart);
         await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
       }
-      onTransferred(nextSource);
+      onTransferred(nextSource, targetTableNumber);
     } catch (error) {
       setBusy(false);
       throw error;
@@ -2477,7 +2556,7 @@ function TransferItemModal({
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   onCancel: () => void;
-  onTransferred: (nextSource: PdvCartItem[]) => void;
+  onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number) => void;
 }) {
   const [targetTableNumber, setTargetTableNumber] = useState(sourceTableNumber);
   const [targetSubtable, setTargetSubtable] = useState(item.subtableName || "");
@@ -2513,7 +2592,7 @@ function TransferItemModal({
         nextSource = subtractCartItemQuantity(cart, item.id, quantity);
         await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
       }
-      onTransferred(nextSource);
+      onTransferred(nextSource, targetTableNumber);
     } catch (error) {
       setBusy(false);
       throw error;
@@ -2636,10 +2715,20 @@ function QuantityPriceModal({
       unitPrice
     });
   };
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      confirm();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+    }
+  };
 
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-quantity-modal">
+      <section className="pdv-payment-modal pdv-quantity-modal" tabIndex={-1} autoFocus onKeyDown={handleKeyDown}>
         <div className="pdv-window-title">
           <strong>Informe a Quantidade</strong>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
@@ -2909,7 +2998,7 @@ function TableCloseMenu({
   );
 }
 
-function ProductsScreen({ snapshot, onImportCose, onRemoveCose, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct }: { snapshot: PdvSnapshot; onImportCose: () => void; onRemoveCose: () => Promise<number>; onImportFile: () => void; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct> }) {
+function ProductsScreen({ snapshot, readOnly = false, onImportCose, onRemoveCose, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; onImportCose: () => void; onRemoveCose: () => Promise<number>; onImportFile: () => void; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct> }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [targetCategoryId, setTargetCategoryId] = useState(snapshot.categories[0]?.id || "");
   const [filterCategoryId, setFilterCategoryId] = useState("todos");
@@ -2946,21 +3035,21 @@ function ProductsScreen({ snapshot, onImportCose, onRemoveCose, onImportFile, bu
           <p>{snapshot.products.length} produtos em {snapshot.categories.length} categorias.</p>
         </div>
         <div className="pdv-action-row">
-          <button className="pdv-ghost-button" onClick={() => setEditingCategory("new")}>Nova categoria</button>
-          <button className="pdv-ghost-button" onClick={() => setEditingProduct("new")}>Novo produto</button>
-          <button className="pdv-ghost-button" disabled={busy} onClick={onImportFile}><FileSpreadsheet size={18} /> Importar arquivo</button>
-          <button className="pdv-primary-button" disabled={busy} onClick={onImportCose}><Download size={18} /> Importar Cose Dell Abadia</button>
-          <button className="pdv-danger-button" disabled={busy || !snapshot.products.some((product) => product.importSource === "Cose Dell Abadia")} onClick={() => setRemoveCoseConfirm(true)}>Remover importacao Cose</button>
+          {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingCategory("new")}>Nova categoria</button>}
+          {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingProduct("new")}>Novo produto</button>}
+          {!readOnly && <button className="pdv-ghost-button" disabled={busy} onClick={onImportFile}><FileSpreadsheet size={18} /> Importar arquivo</button>}
+          {!readOnly && <button className="pdv-primary-button" disabled={busy} onClick={onImportCose}><Download size={18} /> Importar Cose Dell Abadia</button>}
+          {!readOnly && <button className="pdv-danger-button" disabled={busy || !snapshot.products.some((product) => product.importSource === "Cose Dell Abadia")} onClick={() => setRemoveCoseConfirm(true)}>Remover importacao Cose</button>}
         </div>
       </div>
       <div className="pdv-category-manager">
         {snapshot.categories.map((category) => (
-          <button key={category.id} className={category.active ? "" : "inactive"} onClick={() => setEditingCategory(category)}>
+          <button key={category.id} className={category.active ? "" : "inactive"} disabled={readOnly} onClick={() => setEditingCategory(category)}>
             {category.favorite ? "[Fav] " : ""}{category.name} <small>{category.active ? "ativa" : "oculta"} | {category.favorite ? "favorita | " : ""}ordem {category.sortOrder}</small>
           </button>
         ))}
       </div>
-      <div className="pdv-bulk-toolbar">
+      {!readOnly && <div className="pdv-bulk-toolbar">
         <strong>{selectedIds.length} selecionado(s)</strong>
         <input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Pesquisar produto" />
         <select value={filterCategoryId} onChange={(event) => setFilterCategoryId(event.target.value)}>
@@ -2981,17 +3070,17 @@ function ProductsScreen({ snapshot, onImportCose, onRemoveCose, onImportFile, bu
         <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ favorite: false })}>Tirar favorito</button>
         <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ showOnPdv: true })}>Exibir no PDV</button>
         <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ showOnPdv: false })}>Ocultar do PDV</button>
-      </div>
+      </div>}
       <div className="pdv-product-table">
         {filteredProducts.map((product) => (
           <article key={product.id} className={product.active ? "" : "inactive"}>
-            <input type="checkbox" checked={selectedIds.includes(product.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} />
+            {!readOnly && <input type="checkbox" checked={selectedIds.includes(product.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} />}
             <strong>{product.favorite ? "[Fav] " : ""}{product.name}</strong>
             <span>{product.categoryName}</span>
             <span>{product.unitMode === "kg" ? "Kg" : product.unitMode === "grama" ? "Grama" : "Unidade"}</span>
             <b>{money(product.price)}</b>
             <small>{product.active ? "Ativo" : "Inativo"} | {product.showOnPdv ? "PDV" : "Oculto"} {product.favorite ? " | Favorito" : ""}{product.canBeComplement ? " | Complemento" : ""}{product.complementProductIds.length ? ` | ${product.complementProductIds.length} adicionais` : ""}{product.importSource ? ` | ${product.importSource}` : ""}</small>
-            <button className="pdv-ghost-button" onClick={() => setEditingProduct(product)}>Editar</button>
+            {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingProduct(product)}>Editar</button>}
           </article>
         ))}
         {!filteredProducts.length && <div className="pdv-empty">Nenhum produto encontrado nesse filtro.</div>}
@@ -3236,9 +3325,23 @@ function PdvConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onConfirm();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel, onConfirm]);
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
-      <section className="pdv-payment-modal pdv-confirm-modal">
+      <section className="pdv-payment-modal pdv-confirm-modal" tabIndex={-1} autoFocus>
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Confirmacao</span>
@@ -3256,7 +3359,7 @@ function PdvConfirmModal({
   );
 }
 
-function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChanged: () => void }) {
+function HistoryScreen({ snapshot, readOnly = false, onChanged }: { snapshot: PdvSnapshot; readOnly?: boolean; onChanged: () => void }) {
   const [filters, setFilters] = useState({
     from: "",
     to: "",
@@ -3343,7 +3446,7 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
               setSaleMenu({ x: event.clientX, y: event.clientY, sale });
             }}
             onDoubleClick={() => setSelectedSale(sale)}
-          >
+                  >
             <div>
               <strong>{sale.type}{sale.tableNumber ? ` ${String(sale.tableNumber).padStart(3, "0")}` : ""}</strong>
               <span>{new Date(sale.createdAt).toLocaleString("pt-BR")} | {sale.items.length} item(ns) | {sale.status}</span>
@@ -3360,11 +3463,11 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
           <button onClick={() => runSaleAction("details", saleMenu.sale)}>Ver detalhes</button>
           <button onClick={() => runSaleAction("items", saleMenu.sale)}>Ver produtos da venda</button>
           <button onClick={() => runSaleAction("export", saleMenu.sale)}>Exportar dia da venda</button>
-          {saleMenu.sale.status !== "Cancelada" && <button onClick={() => runSaleAction("payments", saleMenu.sale)}>Alterar forma de pagamento</button>}
-          {saleMenu.sale.status !== "Cancelada" && <button className="danger" onClick={() => runSaleAction("cancel", saleMenu.sale)}>Cancelar/estornar</button>}
+          {!readOnly && saleMenu.sale.status !== "Cancelada" && <button onClick={() => runSaleAction("payments", saleMenu.sale)}>Alterar forma de pagamento</button>}
+          {!readOnly && saleMenu.sale.status !== "Cancelada" && <button className="danger" onClick={() => runSaleAction("cancel", saleMenu.sale)}>Cancelar/estornar</button>}
         </ContextMenu>
       )}
-      {selectedSale && <SaleDetailModal sale={selectedSale} onClose={() => setSelectedSale(null)} onCancel={() => cancelSale(selectedSale)} />}
+      {selectedSale && <SaleDetailModal sale={selectedSale} onClose={() => setSelectedSale(null)} onCancel={() => readOnly ? undefined : cancelSale(selectedSale)} />}
       {cancelRequest && (
         <PdvConfirmModal
           title="Cancelar venda?"
@@ -3374,7 +3477,7 @@ function HistoryScreen({ snapshot, onChanged }: { snapshot: PdvSnapshot; onChang
         />
       )}
       {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
-      {editingPaymentsSale && (
+      {!readOnly && editingPaymentsSale && (
         <PaymentModal
           total={editingPaymentsSale.total}
           busy={false}
@@ -3468,11 +3571,14 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
   );
 }
 
-function AdvancedScreen({ snapshot, onImportCose, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; onImportCose: () => void; onImportFile: () => void; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
+function AdvancedScreen({ snapshot, readOnly = false, onImportCose, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; readOnly?: boolean; onImportCose: () => void; onImportFile: () => void; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
   const saveSetting = async (patch: Partial<PdvSnapshot["settings"]>) => {
     await savePdvSettings(patch);
     onSettingsUpdated();
   };
+  if (readOnly) {
+    return <section className="pdv-panel"><div className="pdv-section-head"><div><span className="pdv-eyebrow">Cliente conectado</span><h1>Ajustes definidos pelo servidor</h1><p>Produtos, mesas, complementos e regras deste PDV acompanham o computador servidor.</p></div></div></section>;
+  }
   return (
     <section className="pdv-panel">
       <div className="pdv-section-head">
@@ -3670,6 +3776,7 @@ function filterSales(
   filters: { from?: string; to?: string; query?: string; type?: string; payment?: string; status?: string; table?: string; origin?: string }
 ): PdvSale[] {
   const query = (filters.query || "").trim().toLocaleLowerCase("pt-BR");
+  const valueRange = parseSaleValueQuery(query);
   const table = (filters.table || "").replace(/^0+/, "");
   return sales.filter((sale) => {
     const dateKey = localDateInputValue(new Date(sale.createdAt));
@@ -3697,15 +3804,32 @@ function filterSales(
     if (!query) {
       return true;
     }
+    if (valueRange) {
+      return sale.total >= valueRange.min - 0.009 && sale.total <= valueRange.max + 0.009;
+    }
     const haystack = [
       sale.type,
       sale.status,
       sale.tableNumber ? String(sale.tableNumber) : "",
+      sale.tableNumber ? `mesa ${sale.tableNumber}` : "",
+      sale.description || "",
+      sale.observations || "",
       ...sale.items.flatMap((item) => [item.productName, item.categoryName, item.subtableName || ""]),
-      ...sale.payments.map((payment) => payment.method)
+      ...sale.payments.flatMap((payment) => [payment.method, payment.description || ""])
     ].join(" ").toLocaleLowerCase("pt-BR");
     return haystack.includes(query);
   });
+}
+
+function parseSaleValueQuery(query: string): { min: number; max: number } | null {
+  const normalized = query.replace(/^r\$\s*/i, "").trim();
+  const parts = normalized.split(/\s*(?:-|a|ate|até)\s*/i).filter(Boolean);
+  if (!parts.length || parts.length > 2 || !parts.every((part) => /^\d+(?:[.,]\d{1,2})?$/.test(part))) {
+    return null;
+  }
+  const values = parts.map((part) => parseBrazilianNumber(part));
+  if (values.some((value) => !Number.isFinite(value))) return null;
+  return { min: Math.min(...values), max: Math.max(...values) };
 }
 
 function TabButton({ icon: Icon, active, label, onClick }: { icon: typeof ShoppingCart; active: boolean; label: string; onClick: () => void }) {

@@ -39,6 +39,7 @@ let localServer: LocalServer;
 let logger: DiagnosticLogger;
 let floatingBoundsSaveTimer: NodeJS.Timeout | null = null;
 let floatingRememberBounds = true;
+let restoringFloatingBounds = false;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
@@ -147,6 +148,11 @@ async function saveFloatingBounds(settings?: AppSettings) {
 }
 
 function scheduleFloatingBoundsSave(settings?: AppSettings) {
+  // A restauracao de uma janela sem moldura tambem dispara eventos de resize/move.
+  // Eles nao sao um ajuste manual e nao devem sobrescrever os limites salvos.
+  if (restoringFloatingBounds) {
+    return;
+  }
   if (floatingBoundsSaveTimer) {
     clearTimeout(floatingBoundsSaveTimer);
   }
@@ -194,6 +200,13 @@ async function createFloatingWindow(options?: { opacity?: number; lockPosition?:
     }
   });
 
+  restoringFloatingBounds = Boolean(savedBounds);
+  if (restoringFloatingBounds) {
+    setTimeout(() => {
+      restoringFloatingBounds = false;
+    }, 700);
+  }
+
   floatingWindow.setAlwaysOnTop(true, "screen-saver", 1);
   floatingWindow.setOpacity(options?.opacity ?? 1);
   try {
@@ -212,6 +225,7 @@ async function createFloatingWindow(options?: { opacity?: number; lockPosition?:
   floatingWindow.on("closed", () => {
     void saveFloatingBounds(settings);
     floatingWindow = null;
+    restoringFloatingBounds = false;
     sendToMain("window:pinnedChanged", false);
   });
   floatingWindow.on("moved", () => scheduleFloatingBoundsSave(settings));
@@ -271,7 +285,6 @@ function applyFloatingWindowOptions(options?: { opacity?: number; lockPosition?:
   floatingWindow.setMinimumSize(size.minWidth, size.minHeight);
   floatingWindow.setOpacity(options?.opacity ?? 1);
   floatingWindow.setMovable(!options?.lockPosition);
-  scheduleFloatingBoundsSave(settings);
 }
 
 async function fetchLatestRelease(): Promise<GitHubReleaseResponse> {

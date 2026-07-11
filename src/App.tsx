@@ -1182,9 +1182,10 @@ export function App() {
     if (!toast) {
       return;
     }
-    const timeout = window.setTimeout(() => setToast(null), 3200);
+    const notificationDuration = Math.max(1200, settings?.notificationDurationMs || 3200);
+    const timeout = window.setTimeout(() => setToast(null), notificationDuration);
     return () => window.clearTimeout(timeout);
-  }, [toast]);
+  }, [toast, settings?.notificationDurationMs]);
 
   useEffect(() => {
     const onKeyDown = async (event: KeyboardEvent) => {
@@ -1417,6 +1418,9 @@ export function App() {
       };
       setRemoteSession(connectedSession);
       remoteSessionRef.current = connectedSession;
+      if (connectedSession.clientPolicy.operationMode === "pdv") {
+        setActiveTab("sale");
+      }
       remoteReconnectAttempt.current = 0;
       writeStoredRemoteSession({ baseUrl, password, deviceName: connectedSession.deviceName });
       openRemoteSocket(connectedSession);
@@ -1656,8 +1660,6 @@ export function App() {
     const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
     if (mode === "legacy" && activeTab === "tables") {
       setActiveTab("sale");
-    } else if (mode === "pdv" && remoteSession && activeTab === "sale") {
-      setActiveTab("tables");
     }
   }, [remoteSession?.clientPolicy.operationMode, settings?.operationMode, activeTab]);
 
@@ -1719,9 +1721,6 @@ export function App() {
   const legacyMode = effectiveOperationMode === "legacy";
   const visibleTabItems = TAB_ITEMS.filter((item) => {
     if (legacyMode && item.key === "tables") {
-      return false;
-    }
-    if (remoteSession && !legacyMode && item.key === "sale") {
       return false;
     }
     return true;
@@ -1851,11 +1850,14 @@ export function App() {
               embedded
               initialTab={pdvMainTab}
               hideTopbar
-              remoteSession={pdvMainTab === "tables" && remoteSession ? {
+              remoteSession={remoteSession ? {
                 ...remoteSession,
                 roundingStep: effectiveRemotePolicy?.defaultRoundingStep,
                 roundingDirection: effectiveRemotePolicy?.defaultRoundingDirection
               } : null}
+              roundingStep={settings.defaultRoundingStep}
+              roundingDirection={settings.defaultRoundingDirection}
+              toastDuration={settings.notificationDurationMs}
               reloadToken={remotePdvNonce}
             />
           </div>
@@ -4768,6 +4770,14 @@ function SettingsPanel({
               <option value="sidePanel">Painel lateral</option>
             </select>
           </label>
+          <label className="field"><span>Tempo dos avisos</span>
+            <select value={draft.notificationDurationMs || 3200} onChange={(event) => update("notificationDurationMs", Number(event.target.value))}>
+              <option value={1800}>Rapido (1,8 s)</option>
+              <option value={3200}>Padrao (3,2 s)</option>
+              <option value={5000}>Demorado (5 s)</option>
+              <option value={8000}>Lento (8 s)</option>
+            </select>
+          </label>
         </section>
 
         <section className={categoryClass("floating", "settings-group wide")} {...remoteSectionProps("floating")}>
@@ -5039,7 +5049,7 @@ function SettingsPanel({
           <p className="helper-text">
             Cadastre produtos e categorias, importe a planilha da Cose Dell Abadia, ajuste favoritos, unidades, produtos ocultos e adicionais permitidos.
           </p>
-          <PdvApp embedded initialTab="products" hideTopbar remoteSession={remoteSession} />
+          <PdvApp embedded initialTab="products" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} />
         </section>
 
         <section className={categoryClass("pdvTables", "settings-group wide pdv-settings-panel")}>
@@ -5047,7 +5057,7 @@ function SettingsPanel({
           <p className="helper-text">
             Configure quantidade de mesas, submesas/contas separadas, complementos e pasta de exportacao do PDV.
           </p>
-          <PdvApp embedded initialTab="advanced" hideTopbar remoteSession={remoteSession} />
+          <PdvApp embedded initialTab="advanced" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} />
         </section>
 
         <section className={categoryClass("privacy", "settings-group wide privacy-settings")}>

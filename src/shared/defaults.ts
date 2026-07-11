@@ -85,6 +85,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     defaultPeople: 1,
     defaultRoundingStep: 0.25,
     defaultRoundingDirection: "up",
+    notificationDurationMs: 3200,
     tableNumberEnabled: true,
     busNumberEnabled: true,
     theme: "datacaixa",

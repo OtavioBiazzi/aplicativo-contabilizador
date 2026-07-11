@@ -171,6 +171,7 @@ export interface AppSettings {
   defaultPeople: number;
   defaultRoundingStep: number;
   defaultRoundingDirection: RoundDirection;
+  notificationDurationMs: number;
   tableNumberEnabled: boolean;
   busNumberEnabled: boolean;
   theme: ThemeMode;

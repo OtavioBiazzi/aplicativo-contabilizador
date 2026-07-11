@@ -279,6 +279,7 @@ export class PdvStore {
     let importedCategories = 0;
     let importedProducts = 0;
     let updatedProducts = 0;
+    let removedProducts = 0;
     db.run("BEGIN IMMEDIATE");
     try {
       const existingCategories = selectAll<{ id: string; name: string }>(db, "SELECT id, name FROM categories");
@@ -330,6 +331,17 @@ export class PdvStore {
         ]);
       }
       productStatement.free();
+      if (importSource) {
+        const importedIds = new Set(normalizedProducts.map((product) => product.id));
+        const staleIds = existingProducts
+          .filter((product) => product.import_source === importSource && !importedIds.has(product.id))
+          .map((product) => product.id);
+        if (staleIds.length) {
+          const placeholders = staleIds.map(() => "?").join(", ");
+          db.run(`UPDATE products SET active = 0, show_on_pdv = 0 WHERE id IN (${placeholders})`, staleIds);
+          removedProducts = staleIds.length;
+        }
+      }
       const complementStatement = db.prepare("INSERT INTO product_complements (product_id, complement_product_id, sort_order) VALUES (?, ?, ?)");
       for (const product of normalizedProducts) {
         db.run("DELETE FROM product_complements WHERE product_id = ?", [product.id]);
@@ -351,7 +363,8 @@ export class PdvStore {
       importedCategories,
       importedProducts,
       skippedRows: 0,
-      updatedProducts
+      updatedProducts,
+      removedProducts
     };
   }
 
