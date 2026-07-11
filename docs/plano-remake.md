@@ -2,6 +2,73 @@
 
 Este documento define o objetivo atual do projeto. A ideia principal nao mudou: transformar o Contabilizador Caixa em um sistema local de caixa/PDV mais completo, simples, rapido e confiavel, inspirado no fluxo do Datacaixa, mas sem virar sistema de estoque, fiscal ou ERP.
 
+## Plano de estabilizacao atual
+
+Este bloco e a referencia para concluir as correcoes solicitadas depois das fases iniciais do remake. Uma funcionalidade somente deve ser marcada como concluida quando o fluxo real estiver consistente, e nao apenas quando a tela ou o botao existir.
+
+### Fase A - Venda, peso e carrinho
+
+- Manter a Venda pronta para novos lancamentos depois de finalizar uma venda.
+- Confirmar antes de sair da Venda com carrinho aberto; limpar somente se o usuario confirmar.
+- Limpar pesquisa depois de lancar produto, selecionar o ultimo item e rolar o carrinho ate ele.
+- Eliminar duplicacao eventual do ultimo produto.
+- Fazer o valor final manual prevalecer em produtos por peso; gramas sao somente informacao de apoio.
+- Aplicar alteracao de preco e desconto sobre o total final, nunca sobre peso ou gramas.
+- Confirmar lancamento por peso/valor com Enter.
+- Usar modal de desconto do total tambem na Venda.
+
+### Fase B - Mesas, submesas e avulso
+
+- Exibir lancamento avulso como botao `+` azul, com o padrao visual de mesa livre.
+- Separar itens da mesa principal e de cada submesa sem esconder, apagar ou misturar dados.
+- Exibir observacao resumida na grade e impedir sobreposicao de nomes de mesas.
+- Desabilitar Cancelar quando uma mesa estiver vazia.
+- Abrir a mesa de destino apos transferencia.
+- Manter modos avulso/onibus configuraveis e coerentes.
+
+### Fase C - Fechamento parcial e pagamentos
+
+- Persistir itens pagos, pagamentos, descricao, mesa/submesa e identificador de operacao.
+- Bloquear itens ja pagos e calcular proximos parciais somente com itens pendentes.
+- Preservar selecao pendente ate concluir, cancelar ou limpar manualmente.
+- Definir foco inicial em Fechar total; setas navegam, Enter entra/confirma e Esc retorna.
+- Mapear F1/F2/F3/F4 para Debito, Credito, Pix e Dinheiro.
+- Exibir dicas de atalhos somente ao passar o mouse.
+- Ajustar icones de editar/remover pagamentos e aproximacao por pessoa.
+- Expor aproximacao: sem aproximacao, R$ 0,25, R$ 0,50 e valor personalizado.
+
+### Fase D - Cliente, servidor e sincronizacao
+
+- Garantir a aba Venda do cliente PDV em qualquer resolucao e remover a barra antiga nesse modo.
+- Aplicar regras do servidor ao cliente em tempo real.
+- Restringir cliente a preferencias visuais locais; nao permitir alterar produtos, precos ou regras.
+- Sincronizar mesa aberta sem sobrescrever uma edicao local ativa.
+- Definir e aplicar a politica segura para queda de rede: bloqueio ou fila offline controlada pelo servidor.
+
+### Fase E - Produtos, importacao e complementos
+
+- Corrigir cards com nomes longos, mantendo nome e preco em areas separadas e legiveis.
+- Organizar produtos automaticamente em A-Z/Z-A, sem ordenacao manual exposta.
+- Garantir contraste em previa Cose, modais e temas.
+- Corrigir remocao/reimportacao Cose, preservando produtos manuais e vinculos de complementos.
+- Manter Coca Mini por R$ 5,00 no preset e revisar complementos permitidos por produto.
+
+### Fase F - Interface e acessibilidade
+
+- Restaurar redimensionadores para categorias, produtos, carrinho e painel direito, com limites seguros e salvamento por usuario.
+- Permitir configurar densidade e quantidade de produtos por linha.
+- Corrigir rolagem, tamanho e contraste dos modais de produto, pagamento e cancelamento.
+- Corrigir campo Qtde. no tema escuro e padronizar notificacoes com duracao configuravel.
+- Revisar Tab, Esc, setas e foco inicial de todos os modais importantes.
+
+### Fase G - Historico, relatorios e entrega
+
+- Permitir busca por descricao de pagamento, mesa, valor/faixa e forma de pagamento.
+- Garantir integracao de Venda, Mesa, parcial e pagamentos mistos em Historico, Relatorios e Excel.
+- Separar Debito, Credito, Pix e Dinheiro nos relatorios, sem consolidar como Misto.
+- Validar cancelamentos e edicoes sem duplicar registros.
+- Testar servidor/cliente, telas 1366x768 e 1920x1080, todos os temas e fluxos financeiros antes de gerar build, commit, push e release.
+
 O aplicativo deve continuar sendo o mesmo sistema. Nao deve existir um aplicativo separado, modulo isolado ou fluxo paralelo que pareca outro produto. As telas finais devem ser:
 
 ```text
