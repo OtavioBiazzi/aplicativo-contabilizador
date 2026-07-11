@@ -13,7 +13,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "./shared/types";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
@@ -23,6 +23,7 @@ export interface CaixaApi {
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
   importCoseProducts: () => Promise<PdvProductImportResult>;
+  previewCoseProducts: () => Promise<PdvProductImportPreview>;
   removeCoseProducts: () => Promise<number>;
   importPdvProductsFile: () => Promise<PdvProductImportResult | null>;
   saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[]) => Promise<PdvSale>;

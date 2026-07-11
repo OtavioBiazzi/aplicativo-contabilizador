@@ -18,7 +18,7 @@ import {
   Utensils,
   X
 } from "lucide-react";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 import type { RoundDirection } from "./shared/types";
 import { calculateSplit } from "./shared/calculations";
 
@@ -344,6 +344,7 @@ export function PdvApp({
     ? clientConfigurationBlocked() as Promise<PdvSettings>
     : window.caixa.savePdvSettings(patch);
   const importPdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<PdvProductImportResult> : window.caixa.importCoseProducts();
+  const previewPdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<PdvProductImportPreview> : window.caixa.previewCoseProducts();
   const removePdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<number> : window.caixa.removeCoseProducts();
 
   const load = async () => {
@@ -1077,10 +1078,10 @@ export function PdvApp({
           />
         )}
 
-        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onRemoveCose={removePdvPreset} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} />}
+        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} />}
         {tab === "history" && <HistoryScreen snapshot={snapshot} readOnly={isRemoteClient} onChanged={load} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
-        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
+        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
       </main>
 
       {toast && (
@@ -3277,7 +3278,62 @@ function TableCloseMenu({
   );
 }
 
-function ProductsScreen({ snapshot, readOnly = false, onImportCose, onRemoveCose, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; onImportCose: () => void; onRemoveCose: () => Promise<number>; onImportFile: () => void; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct> }) {
+function CoseImportButton({ onPreview, onImport, onImported, busy }: { onPreview: () => Promise<PdvProductImportPreview>; onImport: () => Promise<PdvProductImportResult>; onImported: () => void | Promise<void>; busy: boolean }) {
+  const [preview, setPreview] = useState<PdvProductImportPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const openPreview = async () => {
+    setLoading(true);
+    try {
+      setPreview(await onPreview());
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Nao foi possivel analisar a planilha Cose Dell Abadia.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  const confirm = async () => {
+    setLoading(true);
+    try {
+      const result = await onImport();
+      setPreview(null);
+      await onImported();
+      setNotice(`${result.importedProducts} produtos e ${result.importedCategories} categorias importados.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Nao foi possivel importar os produtos.");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <>
+      <button className="pdv-primary-button" disabled={busy || loading} onClick={() => void openPreview()}><Download size={18} /> {loading ? "Analisando..." : "Importar Cose Dell Abadia"}</button>
+      {preview && (
+        <div className="pdv-modal-backdrop">
+          <section className="pdv-payment-modal pdv-cose-preview-modal">
+            <div className="pdv-section-head">
+              <div><span className="pdv-eyebrow">Previa de importacao</span><h1>Cose Dell Abadia</h1><p>Confira a alteracao antes de substituir os produtos importados.</p></div>
+              <button className="pdv-icon-button" onClick={() => setPreview(null)}><X size={18} /></button>
+            </div>
+            <div className="pdv-payment-summary">
+              <Metric title="Produtos na planilha" value={String(preview.products)} />
+              <Metric title="Novos" value={String(preview.addedProducts)} />
+              <Metric title="Atualizados" value={String(preview.updatedProducts)} />
+              <Metric title="Desativados" value={String(preview.removedProducts)} />
+              <Metric title="Manuais preservados" value={String(preview.manualProductsPreserved)} />
+              <Metric title="Ignorados" value={String(preview.ignoredRows)} />
+            </div>
+            <p className="pdv-confirm-message">A importacao atualiza somente itens da Cose Dell Abadia. Produtos manuais que nao fazem parte dela permanecem no cadastro.</p>
+            <div className="pdv-action-row"><button className="pdv-danger-button" disabled={loading} onClick={() => setPreview(null)}>Cancelar</button><button className="pdv-primary-button" disabled={loading} onClick={() => void confirm()}>{loading ? "Importando..." : "Confirmar importacao"}</button></div>
+          </section>
+        </div>
+      )}
+      {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
+    </>
+  );
+}
+
+function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCose, onRemoveCose, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onRemoveCose: () => Promise<number>; onImportFile: () => void; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct> }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [targetCategoryId, setTargetCategoryId] = useState(snapshot.categories[0]?.id || "");
   const [filterCategoryId, setFilterCategoryId] = useState("todos");
@@ -3317,7 +3373,7 @@ function ProductsScreen({ snapshot, readOnly = false, onImportCose, onRemoveCose
           {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingCategory("new")}>Nova categoria</button>}
           {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingProduct("new")}>Novo produto</button>}
           {!readOnly && <button className="pdv-ghost-button" disabled={busy} onClick={onImportFile}><FileSpreadsheet size={18} /> Importar arquivo</button>}
-          {!readOnly && <button className="pdv-primary-button" disabled={busy} onClick={onImportCose}><Download size={18} /> Importar Cose Dell Abadia</button>}
+          {!readOnly && <CoseImportButton busy={busy} onPreview={onPreviewCose} onImport={onImportCose} onImported={onProductsUpdated} />}
           {!readOnly && <button className="pdv-danger-button" disabled={busy || !snapshot.products.some((product) => product.importSource === "Cose Dell Abadia")} onClick={() => setRemoveCoseConfirm(true)}>Remover importacao Cose</button>}
         </div>
       </div>
@@ -3907,7 +3963,7 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
   );
 }
 
-function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {}, onClientVisualSettingsChange, onImportCose, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; readOnly?: boolean; clientVisualSettings?: Partial<PdvClientVisualSettings>; onClientVisualSettingsChange?: (patch: Partial<PdvClientVisualSettings>) => void; onImportCose: () => void; onImportFile: () => void; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
+function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {}, onClientVisualSettingsChange, onImportCose, onPreviewCose, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; readOnly?: boolean; clientVisualSettings?: Partial<PdvClientVisualSettings>; onClientVisualSettingsChange?: (patch: Partial<PdvClientVisualSettings>) => void; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onImportFile: () => void; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
   const saveSetting = async (patch: Partial<PdvSnapshot["settings"]>) => {
     await savePdvSettings(patch);
     onSettingsUpdated();
@@ -4043,7 +4099,7 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           <FileSpreadsheet size={22} />
           <strong>Importar produtos</strong>
           <span>Usa DESCRICAO, GRUPO, PRECO_VENDA, UNIDADE, ATIVO e EXIBE_PDV.</span>
-          <button className="pdv-primary-button" disabled={busy} onClick={onImportCose}>Importar Cose Dell Abadia</button>
+          <CoseImportButton busy={busy} onPreview={onPreviewCose} onImport={onImportCose} onImported={onSettingsUpdated} />
           <button className="pdv-ghost-button" disabled={busy} onClick={onImportFile}>Escolher outro XLSX</button>
         </article>
       </div>

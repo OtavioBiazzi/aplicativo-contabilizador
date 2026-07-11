@@ -12,6 +12,7 @@ import type {
   PdvPayment,
   PdvProduct,
   PdvProductDraft,
+  PdvProductImportPreview,
   PdvProductImportResult,
   PdvSettings,
   PdvSale,
@@ -367,6 +368,27 @@ export class PdvStore {
       skippedRows: 0,
       updatedProducts,
       removedProducts
+    };
+  }
+
+  previewProductImport(categories: PdvCategory[], products: PdvProduct[], filePath: string, importSource = ""): PdvProductImportPreview {
+    const existingProducts = this.getProducts();
+    const existingByKey = new Map(existingProducts.map((product) => [catalogKey(`${product.categoryName}|${product.name}`), product]));
+    const incomingKeys = new Set(products.map((product) => catalogKey(`${product.categoryName}|${product.name}`)));
+    const addedProducts = products.filter((product) => !existingByKey.has(catalogKey(`${product.categoryName}|${product.name}`))).length;
+    const updatedProducts = products.length - addedProducts;
+    const removedProducts = importSource
+      ? existingProducts.filter((product) => product.importSource === importSource && !incomingKeys.has(catalogKey(`${product.categoryName}|${product.name}`))).length
+      : 0;
+    return {
+      filePath,
+      categories: categories.length,
+      products: products.length,
+      addedProducts,
+      updatedProducts,
+      removedProducts,
+      manualProductsPreserved: existingProducts.filter((product) => product.importSource !== importSource).length,
+      ignoredRows: 0
     };
   }
 
@@ -1043,11 +1065,19 @@ export class PdvStore {
       const db = this.requireDb();
       const tempPath = `${this.dbFilePath}.${process.pid}.${Date.now()}.tmp`;
       await fs.writeFile(tempPath, Buffer.from(db.export()));
-      try {
-        await fs.rename(tempPath, this.dbFilePath);
-      } catch (error) {
-        await fs.rm(tempPath, { force: true }).catch(() => undefined);
-        throw error;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+          await fs.rename(tempPath, this.dbFilePath);
+          return;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          const canRetry = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+          if (!canRetry || attempt === 4) {
+            await fs.rm(tempPath, { force: true }).catch(() => undefined);
+            throw error;
+          }
+          await new Promise<void>((resolve) => setTimeout(resolve, 90 * (attempt + 1)));
+        }
       }
     });
     this.persistQueue = write;

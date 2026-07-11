@@ -157,6 +157,17 @@ export interface PdvProductImportResult {
   removedProducts?: number;
 }
 
+export interface PdvProductImportPreview {
+  filePath: string;
+  categories: number;
+  products: number;
+  addedProducts: number;
+  updatedProducts: number;
+  removedProducts: number;
+  manualProductsPreserved: number;
+  ignoredRows: number;
+}
+
 export interface PdvExportFilters {
   from?: string;
   to?: string;

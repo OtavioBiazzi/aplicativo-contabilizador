@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("caixa", {
   savePdvCategory: (draft: PdvCategoryDraft) => ipcRenderer.invoke("pdv:saveCategory", draft),
   savePdvProduct: (draft: PdvProductDraft) => ipcRenderer.invoke("pdv:saveProduct", draft),
   importCoseProducts: () => ipcRenderer.invoke("pdv:importCoseProducts"),
+  previewCoseProducts: () => ipcRenderer.invoke("pdv:previewCoseProducts"),
   removeCoseProducts: () => ipcRenderer.invoke("pdv:removeCoseProducts"),
   importPdvProductsFile: () => ipcRenderer.invoke("pdv:importProductsFile"),
   saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[]) =>

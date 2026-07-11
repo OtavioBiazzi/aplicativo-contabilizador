@@ -26,7 +26,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -466,6 +466,45 @@ async function importPdvProducts(filePath: string, importSource = "Importacao ex
   };
 }
 
+async function previewPdvProducts(filePath: string, importSource = "Importacao externa"): Promise<PdvProductImportPreview> {
+  const rows = await readPdvProductsFromXlsx(filePath);
+  const normalized = normalizeImportedProducts(rows);
+  if (importSource === "Cose Dell Abadia") {
+    const beverageCategory = normalized.categories.find((category) => category.name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase() === "BEBIDAS");
+    const category = beverageCategory || {
+      id: "category-cose-bebidas",
+      name: "BEBIDAS",
+      active: true,
+      favorite: false,
+      sortOrder: normalized.categories.length
+    };
+    if (!beverageCategory) normalized.categories.push(category);
+    if (!normalized.products.some((product) => product.name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toUpperCase() === "COCA MINI")) {
+      normalized.products.push({
+        id: "product-cose-coca-mini",
+        name: "COCA MINI",
+        categoryId: category.id,
+        categoryName: category.name,
+        price: 5,
+        unit: "UNID",
+        unitMode: "unidade",
+        active: true,
+        showOnPdv: true,
+        favorite: false,
+        canBeComplement: false,
+        hasComplements: false,
+        complementProductIds: [],
+        sortOrder: normalized.products.length
+      });
+    }
+    configureCoseDellAbadiaComplements(normalized.products);
+  }
+  return {
+    ...pdvStore.previewProductImport(normalized.categories, normalized.products, filePath, importSource),
+    ignoredRows: normalized.skippedRows
+  };
+}
+
 async function createUpgradeSafetyBackup(dataDirectory: string) {
   await fs.mkdir(dataDirectory, { recursive: true });
   const markerPath = path.join(dataDirectory, ".pdv-remake-safety-backup");
@@ -680,6 +719,11 @@ function registerIpc() {
   ipcMain.handle("pdv:importCoseProducts", async (): Promise<PdvProductImportResult> => {
     const defaultPath = path.join(app.getPath("downloads"), "produtos.xlsx");
     return importPdvProducts(defaultPath, "Cose Dell Abadia");
+  });
+
+  ipcMain.handle("pdv:previewCoseProducts", async (): Promise<PdvProductImportPreview> => {
+    const defaultPath = path.join(app.getPath("downloads"), "produtos.xlsx");
+    return previewPdvProducts(defaultPath, "Cose Dell Abadia");
   });
 
   ipcMain.handle("pdv:removeCoseProducts", async (): Promise<number> => {
