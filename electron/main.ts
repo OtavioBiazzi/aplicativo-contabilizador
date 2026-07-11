@@ -558,6 +558,12 @@ async function bootstrap() {
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     },
     getPdvSnapshot: () => pdvStore.getSnapshot(),
+    savePdvDirectSale: async (items, discount, payments, originDevice, operationId) => {
+      const sale = await pdvStore.saveSale({ type: "Venda direta", items, discount, payments, originDevice, operationId });
+      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      sendToAll("entries:changed");
+      return sale;
+    },
     openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
     savePdvTableItems: (tableNumber, items, subtables) => pdvStore.saveTableItems(tableNumber, items, subtables),

@@ -38,6 +38,7 @@ const server = new LocalServer({
   removeEntry: async () => undefined,
   deleteEntry: async () => undefined,
   getPdvSnapshot: () => pdvStore.getSnapshot(),
+  savePdvDirectSale: (items, discount, payments, origin, operationId) => pdvStore.saveSale({ type: "Venda direta", items, discount, payments, originDevice: origin, operationId }),
   openPdvTable: (number, people, note) => pdvStore.openTable(number, people, note),
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
   savePdvTableItems: (number, items) => pdvStore.saveTableItems(number, items),
@@ -95,6 +96,16 @@ const productUpdate = await fetch("http://127.0.0.1:43991/api/pdv/products", { m
 if (productUpdate.status !== 403) throw new Error(`Cliente conseguiu alterar produto controlado pelo servidor: ${await productUpdate.text()}`);
 if ((await pdvStore.getSnapshot()).products.find((entry) => entry.id === product.id)?.favorite) {
   throw new Error("Produto foi alterado apesar da protecao de configuracao remota.");
+}
+
+const direct = await fetch("http://127.0.0.1:43991/api/pdv/sales/direct", {
+  method: "POST",
+  headers: { ...headers, "x-idempotency-key": crypto.randomUUID() },
+  body: JSON.stringify({ items: [{ ...item, id: crypto.randomUUID() }], discount: 0, payments: [{ id: crypto.randomUUID(), method: "Debito", amount: 12 }] })
+});
+if (!direct.ok) throw new Error(`Cliente nao conseguiu registrar venda direta no servidor: ${await direct.text()}`);
+if (!(await pdvStore.getSnapshot()).recentSales.some((sale) => sale.type === "Venda direta" && sale.originDevice === "Cliente smoke")) {
+  throw new Error("Venda direta do cliente nao foi registrada no banco do servidor.");
 }
 
 const open = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });

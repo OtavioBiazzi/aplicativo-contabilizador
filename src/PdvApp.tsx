@@ -25,6 +25,7 @@ import { calculateSplit } from "./shared/calculations";
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; roundingStep?: number; roundingDirection?: RoundDirection };
 type PendingRemoteTable = { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; updatedAt: string };
+type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "categoryCardHeight" | "tableCardHeight">;
 type CheckoutTarget =
   | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean }
   | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[] }
@@ -32,11 +33,34 @@ type CheckoutTarget =
   | { kind: "table-partial-manual"; table: PdvOpenTable; total: number; items: PdvCartItem[] };
 
 const PAYMENT_METHODS: PdvPaymentMethod[] = ["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Nao definido"];
+const CLIENT_VISUAL_SETTINGS_KEY = "caixa.pdv.client-visual-settings";
 type PendingProduct = { product: PdvProduct; quantity: number; measureLabel?: string; unitPrice?: number };
 type PendingMeasureProduct = { product: PdvProduct; direct: boolean };
 
 function money(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
+}
+
+function readClientVisualSettings(): Partial<PdvClientVisualSettings> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(CLIENT_VISUAL_SETTINGS_KEY) || "{}") as Partial<PdvClientVisualSettings>;
+    const fields: Array<keyof PdvClientVisualSettings> = ["gridColumns", "categoryColumns", "tableColumns", "productCardHeight", "categoryCardHeight", "tableCardHeight"];
+    return fields.reduce<Partial<PdvClientVisualSettings>>((current, field) => {
+      const numeric = Number(value[field]);
+      if (Number.isFinite(numeric) && numeric > 0) current[field] = Math.round(numeric);
+      return current;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
+function samePdvValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function shortTime(value: string | null): string {
@@ -201,6 +225,7 @@ export function PdvApp({
   const [confirmRequest, setConfirmRequest] = useState<{ title: string; message: string; action: () => Promise<void> } | null>(null);
   const [tableSaveState, setTableSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [remoteOfflineBlocked, setRemoteOfflineBlocked] = useState(false);
+  const [clientVisualSettings, setClientVisualSettings] = useState<Partial<PdvClientVisualSettings>>(readClientVisualSettings);
   const tableAutosaveTimer = useRef<number | null>(null);
   const lastProductLaunch = useRef<{ productId: string; at: number } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
@@ -222,7 +247,15 @@ export function PdvApp({
       return;
     }
     try {
-      await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items, subtables }) });
+      const send = () => remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items, subtables }) });
+      try {
+        await send();
+      } catch (firstError) {
+        const message = firstError instanceof Error ? firstError.message : "";
+        if (/HTTP 4\d\d/.test(message)) throw firstError;
+        await wait(350);
+        await send();
+      }
       clearQueuedRemoteTable(tableNumber);
     } catch (error) {
       const current = snapshot?.tables.find((table) => table.number === tableNumber);
@@ -250,6 +283,13 @@ export function PdvApp({
       return;
     }
     writePendingRemoteTables(remoteSession.baseUrl, readPendingRemoteTables(remoteSession.baseUrl).filter((item) => item.tableNumber !== tableNumber));
+  };
+  const saveClientVisualSettings = (patch: Partial<PdvClientVisualSettings>) => {
+    setClientVisualSettings((current) => {
+      const next = { ...current, ...patch };
+      window.localStorage.setItem(CLIENT_VISUAL_SETTINGS_KEY, JSON.stringify(next));
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -284,6 +324,9 @@ export function PdvApp({
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount?: number) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
     : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, crypto.randomUUID());
+  const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[]) => remotePdvActive && remoteSession
+    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, "/api/pdv/sales/direct", { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ items, discount: directDiscount, payments }) }).then((result) => result.sale)
+    : window.caixa.saveDirectSale(items, directDiscount, payments);
   const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount?: number, observations = "") => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ items, payments, discount: partialDiscount, observations }) }).then((result) => result.sale)
     : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount, crypto.randomUUID(), observations);
@@ -323,11 +366,11 @@ export function PdvApp({
   const applyFreshOpenTable = (next: PdvSnapshot, tableNumber: number) => {
     const fresh = next.tables.find((table) => table.number === tableNumber);
     if (!fresh) return;
-    setActiveTable(fresh);
-    setTableCart(fresh.items);
-    setTablePeople(fresh.people || 1);
-    setTableNote(fresh.note || "");
-    setSubtableNames(fresh.subtables || []);
+    setActiveTable((current) => samePdvValue(current, fresh) ? current : fresh);
+    setTableCart((current) => samePdvValue(current, fresh.items) ? current : fresh.items);
+    setTablePeople((current) => current === (fresh.people || 1) ? current : fresh.people || 1);
+    setTableNote((current) => current === (fresh.note || "") ? current : fresh.note || "");
+    setSubtableNames((current) => samePdvValue(current, fresh.subtables || []) ? current : fresh.subtables || []);
     setSelectedTableItemIds((current) => current.filter((id) => fresh.items.some((item) => item.id === id)));
     setPartialSelectedItemIds((current) => current.filter((id) => fresh.items.some((item) => item.id === id && unpaidQuantity(item) > 0.009)));
   };
@@ -338,11 +381,35 @@ export function PdvApp({
   }, [remoteSession?.baseUrl, remotePdvActive, reloadToken]);
 
   useEffect(() => {
-    if (!remoteSession || !activeTable || !snapshot || checkoutTarget || tableCloseMenuOpen) {
+    if (!remotePdvActive || !remoteSession) {
+      return;
+    }
+    let disposed = false;
+    let loading = false;
+    const refreshRemoteSnapshot = async () => {
+      if (loading || disposed) return;
+      loading = true;
+      try {
+        await load();
+      } catch {
+        if (!disposed) setRemoteOfflineBlocked(true);
+      } finally {
+        loading = false;
+      }
+    };
+    const timer = window.setInterval(refreshRemoteSnapshot, 2500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [remotePdvActive, remoteSession?.baseUrl]);
+
+  useEffect(() => {
+    if (!remoteSession || !activeTable || !snapshot || checkoutTarget || tableCloseMenuOpen || tableSaveState === "saving" || remoteOfflineBlocked) {
       return;
     }
     applyFreshOpenTable(snapshot, activeTable.number);
-  }, [remoteSession?.baseUrl, snapshot?.tables, activeTable?.number, checkoutTarget, tableCloseMenuOpen]);
+  }, [remoteSession?.baseUrl, snapshot?.tables, activeTable?.number, checkoutTarget, tableCloseMenuOpen, tableSaveState, remoteOfflineBlocked]);
 
   useEffect(() => {
     setTab(initialTab);
@@ -467,12 +534,15 @@ export function PdvApp({
   const confirmDirectSale = async (payments: PdvPayment[], items = cart) => {
     setBusy(true);
     try {
-      await window.caixa.saveDirectSale(items, discount, payments);
+      await saveDirectPdvSale(items, discount, payments);
       setCart([]);
       setDiscount(0);
       setCheckoutTarget(null);
       setToast("Venda direta finalizada.");
       await load();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Nao foi possivel finalizar a venda.");
+      throw error;
     } finally {
       setBusy(false);
     }
@@ -842,6 +912,8 @@ export function PdvApp({
     return <div className="pdv-loading">Carregando PDV local...</div>;
   }
 
+  const visibleSettings = isRemoteClient ? { ...snapshot.settings, ...clientVisualSettings } : snapshot.settings;
+
   return (
     <div className={`pdv-shell ${embedded ? "embedded" : ""} ${hideTopbar ? "no-topbar" : ""}`}>
       {!hideTopbar && (
@@ -884,7 +956,7 @@ export function PdvApp({
             setDiscount={setDiscount}
             finishLabel="Receber e finalizar"
             onFinish={finishDirectSale}
-            settings={snapshot.settings}
+            settings={visibleSettings}
           />
         )}
 
@@ -906,8 +978,8 @@ export function PdvApp({
             <div
               className="pdv-table-grid"
               style={{
-                "--pdv-table-cols": snapshot.settings.tableColumns || 9,
-                "--pdv-table-card-height": `${snapshot.settings.tableCardHeight || 96}px`
+                "--pdv-table-cols": visibleSettings.tableColumns || 9,
+                "--pdv-table-card-height": `${visibleSettings.tableCardHeight || 96}px`
               } as React.CSSProperties}
             >
               {snapshot.tables
@@ -985,7 +1057,7 @@ export function PdvApp({
             setTableNote={setTableNote}
             selectedItemIds={selectedTableItemIds}
             setSelectedItemIds={setSelectedTableItemIds}
-            settings={snapshot.settings}
+            settings={visibleSettings}
             currentSubtable={currentSubtable}
             subtableNames={subtableNames}
             setSubtableNames={setSubtableNames}
@@ -1008,7 +1080,7 @@ export function PdvApp({
         {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onRemoveCose={removePdvPreset} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} />}
         {tab === "history" && <HistoryScreen snapshot={snapshot} readOnly={isRemoteClient} onChanged={load} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
-        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
+        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
       </main>
 
       {toast && (
@@ -1187,6 +1259,10 @@ function PdvSaleScreen(props: {
   const [cancelTableRequest, setCancelTableRequest] = useState(false);
   const [subtableManagerOpen, setSubtableManagerOpen] = useState(false);
   const [directDiscountOpen, setDirectDiscountOpen] = useState(false);
+  const [cartDensity, setCartDensity] = useState<"compact" | "normal" | "comfortable">(() => {
+    const saved = window.localStorage.getItem("caixa.pdv.cart-density");
+    return saved === "compact" || saved === "comfortable" ? saved : "normal";
+  });
   const activeItemId = props.selectedItemIds?.[0] || props.cart.at(-1)?.id || "";
   const activeItem = props.cart.find((item) => item.id === activeItemId) || props.cart.at(-1) || null;
   const subtableNames = [...new Set([...(props.subtableNames || []), ...props.cart.map((item) => item.subtableName || "").filter(Boolean)])];
@@ -1205,6 +1281,10 @@ function PdvSaleScreen(props: {
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [itemMenu, transferItem, transferListOpen, editingItem, movingItem, directDiscountOpen, subtableManagerOpen]);
+
+  useEffect(() => {
+    window.localStorage.setItem("caixa.pdv.cart-density", cartDensity);
+  }, [cartDensity]);
 
   useEffect(() => {
     if (!props.setSelectedItemIds || !props.cart.length) {
@@ -1336,9 +1416,13 @@ function PdvSaleScreen(props: {
         </div>
       </div>
 
-      <aside className="pdv-panel pdv-cart-area">
+      <aside className={`pdv-panel pdv-cart-area cart-${cartDensity}`}>
         <div className="pdv-cart-head">
           <h2>Carrinho</h2>
+          <div className="pdv-cart-density" aria-label="Tamanho dos itens do carrinho">
+            <button type="button" title="Diminuir itens do carrinho" aria-label="Diminuir itens do carrinho" disabled={cartDensity === "compact"} onClick={() => setCartDensity((current) => current === "comfortable" ? "normal" : "compact")}><Minus size={15} /></button>
+            <button type="button" title="Aumentar itens do carrinho" aria-label="Aumentar itens do carrinho" disabled={cartDensity === "comfortable"} onClick={() => setCartDensity((current) => current === "compact" ? "normal" : "comfortable")}><Plus size={15} /></button>
+          </div>
         </div>
         <div
           ref={cartListRef}
@@ -2036,21 +2120,22 @@ function PaymentAmountModal({
 
 function QuickValueModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: (item: PdvCartItem) => void }) {
   const [valueText, setValueText] = useState("");
-  const [description, setDescription] = useState("Valor avulso");
+  const [mode, setMode] = useState("Venda avulsa");
+  const [description, setDescription] = useState("Venda avulsa");
   const value = Math.max(0, parseBrazilianNumber(valueText));
   const confirm = () => {
     if (value <= 0) return;
     onConfirm({
       id: crypto.randomUUID(),
-      productId: "valor-avulso",
-      productName: description.trim() || "Valor avulso",
-      categoryName: "Valor avulso",
+      productId: `valor-avulso-${mode.toLocaleLowerCase("pt-BR").replace(/[^a-z0-9]+/g, "-")}`,
+      productName: description.trim() || mode,
+      categoryName: mode,
       quantity: 1,
       unitPrice: roundMoney(value),
       baseUnitPrice: roundMoney(value),
       discount: 0,
       total: roundMoney(value),
-      note: "Lancamento avulso pelo mapa de mesas"
+      note: `${mode} pelo mapa de mesas`
     });
   };
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -2065,6 +2150,14 @@ function QuickValueModal({ onCancel, onConfirm }: { onCancel: () => void; onConf
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
         <div className="pdv-editor-grid">
+          <label>
+            <span>Tipo de lancamento</span>
+            <select value={mode} onChange={(event) => { const nextMode = event.target.value; setMode(nextMode); setDescription((current) => current === mode ? nextMode : current); }}>
+              <option>Venda avulsa</option>
+              <option>Onibus</option>
+              <option>Ajuste de valor</option>
+            </select>
+          </label>
           <label><span>Descricao</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Onibus ou ajuste" /></label>
           <label><span>Valor</span><input autoFocus inputMode="decimal" value={valueText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setValueText(event.target.value)} placeholder="0,00" /></label>
         </div>
@@ -3757,13 +3850,70 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
   );
 }
 
-function AdvancedScreen({ snapshot, readOnly = false, onImportCose, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; readOnly?: boolean; onImportCose: () => void; onImportFile: () => void; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
+function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot: PdvSnapshot; settings: Partial<PdvClientVisualSettings>; onChange: (patch: Partial<PdvClientVisualSettings>) => void }) {
+  const visible = { ...snapshot.settings, ...settings };
+  return (
+    <section className="pdv-panel">
+      <div className="pdv-section-head">
+        <div>
+          <span className="pdv-eyebrow">Cliente conectado</span>
+          <h1>Ajustes deste computador</h1>
+          <p>As regras do PDV acompanham o servidor. Aqui voce altera somente o tamanho e a distribuicao visual desta tela.</p>
+        </div>
+      </div>
+      <div className="pdv-advanced-grid">
+        <article>
+          <LayoutGrid size={22} />
+          <strong>Grade e tamanho local</strong>
+          <label className="pdv-setting-line">
+            <span>Produtos por linha</span>
+            <select value={visible.gridColumns || 5} onChange={(event) => onChange({ gridColumns: Number(event.target.value) })}>
+              {[4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value} produtos por linha</option>)}
+            </select>
+          </label>
+          <label className="pdv-setting-line">
+            <span>Categorias por linha</span>
+            <select value={visible.categoryColumns || 5} onChange={(event) => onChange({ categoryColumns: Number(event.target.value) })}>
+              {[3, 4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value} categorias por linha</option>)}
+            </select>
+          </label>
+          <label className="pdv-setting-line">
+            <span>Mesas por linha</span>
+            <select value={visible.tableColumns || 9} onChange={(event) => onChange({ tableColumns: Number(event.target.value) })}>
+              {[5, 6, 7, 8, 9, 10, 11, 12].map((value) => <option key={value} value={value}>{value} mesas por linha</option>)}
+            </select>
+          </label>
+          <label className="pdv-setting-line">
+            <span>Altura dos produtos</span>
+            <input type="number" min={56} max={110} value={visible.productCardHeight || 74} onChange={(event) => onChange({ productCardHeight: Number(event.target.value || 74) })} />
+          </label>
+          <label className="pdv-setting-line">
+            <span>Altura das categorias</span>
+            <input type="number" min={44} max={90} value={visible.categoryCardHeight || 64} onChange={(event) => onChange({ categoryCardHeight: Number(event.target.value || 64) })} />
+          </label>
+          <label className="pdv-setting-line">
+            <span>Altura das mesas</span>
+            <input type="number" min={74} max={130} value={visible.tableCardHeight || 96} onChange={(event) => onChange({ tableCardHeight: Number(event.target.value || 96) })} />
+          </label>
+        </article>
+        <article>
+          <Settings size={22} />
+          <strong>Protegido pelo servidor</strong>
+          <span>Produtos, precos, complementos, mesas, pagamentos, importacao e regras continuam sob controle do servidor conectado.</span>
+          <small>Essas preferencias ficam salvas apenas neste computador cliente.</small>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {}, onClientVisualSettingsChange, onImportCose, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; readOnly?: boolean; clientVisualSettings?: Partial<PdvClientVisualSettings>; onClientVisualSettingsChange?: (patch: Partial<PdvClientVisualSettings>) => void; onImportCose: () => void; onImportFile: () => void; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
   const saveSetting = async (patch: Partial<PdvSnapshot["settings"]>) => {
     await savePdvSettings(patch);
     onSettingsUpdated();
   };
   if (readOnly) {
-    return <section className="pdv-panel"><div className="pdv-section-head"><div><span className="pdv-eyebrow">Cliente conectado</span><h1>Ajustes definidos pelo servidor</h1><p>Produtos, mesas, complementos e regras deste PDV acompanham o computador servidor.</p></div></div></section>;
+    return <ClientVisualSettingsScreen snapshot={snapshot} settings={clientVisualSettings} onChange={(patch) => onClientVisualSettingsChange?.(patch)} />;
   }
   return (
     <section className="pdv-panel">

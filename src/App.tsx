@@ -1206,9 +1206,9 @@ export function App() {
       } else if (action === "bus") {
         commandMode("Onibus");
       } else if (action === "history") {
-        setActiveTab("history");
+        requestNavigation("history");
       } else if (action === "settings") {
-        setActiveTab("settings");
+        requestNavigation("settings");
       } else if (action === "repeatLast") {
         await repeatLastEntry();
       }
@@ -1248,7 +1248,7 @@ export function App() {
 
   const openTodayReport = () => {
     setReportFocus({ from: currentDateKey, to: currentDateKey, nonce: Date.now() });
-    setActiveTab("reports");
+    requestNavigation("reports");
     setTotalMenuOpen(false);
   };
 
@@ -1804,7 +1804,7 @@ export function App() {
               </button>
               {remoteSession ? (
                 <button type="button" onClick={() => {
-                  setActiveTab("server");
+                  requestNavigation("server");
                   setTotalMenuOpen(false);
                 }}>
                   <PlugZap size={16} />
@@ -1813,7 +1813,7 @@ export function App() {
               ) : (
                 <button type="button" onClick={() => {
                   setHistoryFocus({ date: currentDateKey, nonce: Date.now() });
-                  setActiveTab("history");
+                  requestNavigation("history");
                   setTotalMenuOpen(false);
                 }}>
                   <History size={16} />
@@ -1822,7 +1822,7 @@ export function App() {
               )}
               <button type="button" onClick={() => {
                 setSettingsFocus({ category: "privacy", nonce: Date.now() });
-                setActiveTab("settings");
+                requestNavigation("settings");
                 setTotalMenuOpen(false);
               }}>
                 <Settings size={16} />

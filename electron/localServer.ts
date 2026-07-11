@@ -19,6 +19,7 @@ interface LocalServerOptions {
   removeEntry: (id: string) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
   getPdvSnapshot: () => Promise<PdvSnapshot>;
+  savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string) => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
@@ -168,6 +169,25 @@ export class LocalServer {
 
     app.get("/api/pdv/snapshot", this.authorize("view"), async (_request, response) => {
       response.json(await this.options.getPdvSnapshot());
+    });
+
+    app.post("/api/pdv/sales/direct", this.authorize("create"), async (request, response) => {
+      try {
+        const device = String(request.header("x-device-name") || "Cliente remoto");
+        const operationId = String(request.header("x-idempotency-key") || "").trim() || undefined;
+        const sale = await this.options.savePdvDirectSale(
+          Array.isArray(request.body?.items) ? request.body.items : [],
+          Number(request.body?.discount || 0),
+          Array.isArray(request.body?.payments) ? request.body.payments : [],
+          device,
+          operationId
+        );
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.status(201).json({ sale });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel registrar a venda direta." });
+      }
     });
 
     app.patch("/api/pdv/products", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
