@@ -1069,9 +1069,11 @@ export function PdvApp({
             onDeleteAllSubtables={deleteAllSubtables}
             onMoveSelectedToSubtable={moveSelectedItemsToSubtable}
             onRenameSubtable={renameSubtable}
-            onOpenTransferredTable={async (tableNumber) => {
+            onOpenTransferredTable={async (tableNumber, subtableName) => {
               const refreshed = await load();
               applyFreshOpenTable(refreshed, tableNumber);
+              setCurrentSubtable(subtableName || "");
+              setSelectedTableItemIds([]);
             }}
             openPdvTable={openPdvTable}
             savePdvTableItems={savePdvTableItems}
@@ -1244,7 +1246,7 @@ function PdvSaleScreen(props: {
   onDeleteAllSubtables?: () => void;
   onMoveSelectedToSubtable?: (name: string) => void;
   onRenameSubtable?: (oldName: string, newName: string) => void;
-  onOpenTransferredTable?: (tableNumber: number) => void | Promise<void>;
+  onOpenTransferredTable?: (tableNumber: number, subtableName?: string) => void | Promise<void>;
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
@@ -1629,11 +1631,11 @@ function PdvSaleScreen(props: {
             savePdvTableItems={props.savePdvTableItems}
             transferPdvTableItems={props.transferPdvTableItems}
             onCancel={() => setTransferListOpen(false)}
-            onTransferred={(nextSource, targetTableNumber) => {
+            onTransferred={(nextSource, targetTableNumber, targetSubtable) => {
               props.setCart(nextSource);
               props.setSelectedItemIds?.(nextSource.at(-1) ? [nextSource.at(-1)!.id] : []);
               setTransferListOpen(false);
-              void props.onOpenTransferredTable?.(targetTableNumber);
+              void props.onOpenTransferredTable?.(targetTableNumber, targetSubtable);
             }}
           />
         )}
@@ -1668,11 +1670,11 @@ function PdvSaleScreen(props: {
             savePdvTableItems={props.savePdvTableItems}
             transferPdvTableItems={props.transferPdvTableItems}
             onCancel={() => setTransferItem(null)}
-            onTransferred={(nextSource, targetTableNumber) => {
+            onTransferred={(nextSource, targetTableNumber, targetSubtable) => {
               props.setCart(nextSource);
               props.setSelectedItemIds?.([]);
               setTransferItem(null);
-              void props.onOpenTransferredTable?.(targetTableNumber);
+              void props.onOpenTransferredTable?.(targetTableNumber, targetSubtable);
             }}
           />
         )}
@@ -2557,7 +2559,7 @@ function TransferListModal({
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   onCancel: () => void;
-  onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number) => void;
+  onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number, targetSubtable?: string) => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, String(unpaidQuantity(item)).replace(".", ",")])));
@@ -2599,7 +2601,7 @@ function TransferListModal({
         nextSource = selectedItems.reduce((items, item) => subtractCartItemQuantity(items, item.id, transferQuantity(item, quantities[item.id])), cart);
         await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
       }
-      onTransferred(nextSource, targetTableNumber);
+      onTransferred(nextSource, targetTableNumber, targetSubtable.trim() || undefined);
     } catch (error) {
       setBusy(false);
       setNotice(error instanceof Error ? error.message : "Nao foi possivel transferir os produtos. Tente novamente.");
@@ -2822,7 +2824,7 @@ function TransferItemModal({
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   onCancel: () => void;
-  onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number) => void;
+  onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number, targetSubtable?: string) => void;
 }) {
   const [targetTableNumber, setTargetTableNumber] = useState(sourceTableNumber);
   const [targetSubtable, setTargetSubtable] = useState(item.subtableName || "");
@@ -2858,7 +2860,7 @@ function TransferItemModal({
         nextSource = subtractCartItemQuantity(cart, item.id, quantity);
         await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
       }
-      onTransferred(nextSource, targetTableNumber);
+      onTransferred(nextSource, targetTableNumber, targetSubtable.trim() || undefined);
     } catch (error) {
       setBusy(false);
       setNotice(error instanceof Error ? error.message : "Nao foi possivel transferir o produto. Tente novamente.");
