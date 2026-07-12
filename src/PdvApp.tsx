@@ -1281,6 +1281,14 @@ function PdvSaleScreen(props: {
     const saved = window.localStorage.getItem("caixa.pdv.cart-density");
     return saved === "compact" || saved === "comfortable" ? saved : "normal";
   });
+  const [cartPaneWidth, setCartPaneWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem("caixa.pdv.cart-pane-width"));
+    return Number.isFinite(saved) ? Math.min(50, Math.max(26, saved)) : 34;
+  });
+  const [categoryPaneHeight, setCategoryPaneHeight] = useState(() => {
+    const saved = Number(window.localStorage.getItem("caixa.pdv.category-pane-height"));
+    return Number.isFinite(saved) ? Math.min(280, Math.max(96, saved)) : 136;
+  });
   const activeItemId = props.selectedItemIds?.[0] && visibleCart.some((item) => item.id === props.selectedItemIds?.[0])
     ? props.selectedItemIds[0]
     : visibleCart.at(-1)?.id || "";
@@ -1305,6 +1313,36 @@ function PdvSaleScreen(props: {
   useEffect(() => {
     window.localStorage.setItem("caixa.pdv.cart-density", cartDensity);
   }, [cartDensity]);
+
+  useEffect(() => {
+    window.localStorage.setItem("caixa.pdv.cart-pane-width", String(cartPaneWidth));
+  }, [cartPaneWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem("caixa.pdv.category-pane-height", String(categoryPaneHeight));
+  }, [categoryPaneHeight]);
+
+  const startResize = (axis: "horizontal" | "vertical", event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const initialCartWidth = cartPaneWidth;
+    const initialCategoryHeight = categoryPaneHeight;
+    const move = (nextEvent: PointerEvent) => {
+      if (axis === "horizontal") {
+        const delta = ((startX - nextEvent.clientX) / Math.max(1, window.innerWidth)) * 100;
+        setCartPaneWidth(Math.min(50, Math.max(26, initialCartWidth + delta)));
+      } else {
+        setCategoryPaneHeight(Math.min(280, Math.max(96, initialCategoryHeight + nextEvent.clientY - startY)));
+      }
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  };
 
   useEffect(() => {
     if (!props.setSelectedItemIds) {
@@ -1381,7 +1419,12 @@ function PdvSaleScreen(props: {
     }
   };
   return (
-    <section className={`pdv-sale-grid ${props.activeTableNumber ? "pdv-table-open-grid" : ""}`}>
+    <section
+      className={`pdv-sale-grid ${props.activeTableNumber ? "pdv-table-open-grid" : ""}`}
+      style={{
+        "--pdv-cart-pane-width": `${cartPaneWidth}%`
+      } as React.CSSProperties}
+    >
       <div className="pdv-panel pdv-products-area">
         <div className="pdv-section-head">
           <div>
@@ -1413,7 +1456,8 @@ function PdvSaleScreen(props: {
           className="pdv-category-grid"
           style={{
             "--pdv-category-cols": props.snapshot.settings.categoryColumns || 5,
-            "--pdv-category-card-height": `${props.snapshot.settings.categoryCardHeight || 64}px`
+            "--pdv-category-card-height": `${props.snapshot.settings.categoryCardHeight || 64}px`,
+            "--pdv-category-pane-height": `${categoryPaneHeight}px`
           } as React.CSSProperties}
         >
           <button className={props.activeCategory === "todos" ? "active" : ""} onClick={() => props.setActiveCategory("todos")}>Todos</button>
@@ -1423,6 +1467,7 @@ function PdvSaleScreen(props: {
             </button>
           ))}
         </div>
+        <div className="pdv-resize-handle pdv-resize-vertical" role="separator" aria-label="Redimensionar categorias e produtos" onPointerDown={(event) => startResize("vertical", event)} />
         <div
           className="pdv-product-grid"
           style={{
@@ -1439,6 +1484,7 @@ function PdvSaleScreen(props: {
           {!props.products.length && <div className="pdv-empty">Importe produtos ou ajuste a pesquisa.</div>}
         </div>
       </div>
+      <div className="pdv-resize-handle pdv-resize-horizontal" role="separator" aria-label="Redimensionar produtos e carrinho" onPointerDown={(event) => startResize("horizontal", event)} />
 
       <aside className={`pdv-panel pdv-cart-area cart-${cartDensity}`}>
         <div className="pdv-cart-head">
