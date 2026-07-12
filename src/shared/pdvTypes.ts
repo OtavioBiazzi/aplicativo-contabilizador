@@ -144,6 +144,7 @@ export interface PdvSettings {
   tableCardHeight?: number;
   stackIdenticalItems?: boolean;
   partialPaymentDescriptionEnabled?: boolean;
+  skipPaymentConfirmation?: boolean;
   individualUnitItems?: boolean;
   groupComplementsWithProduct?: boolean;
 }

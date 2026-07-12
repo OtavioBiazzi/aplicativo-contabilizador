@@ -38,6 +38,7 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   tableCardHeight: 96,
   stackIdenticalItems: false,
   partialPaymentDescriptionEnabled: false,
+  skipPaymentConfirmation: false,
   individualUnitItems: false,
   groupComplementsWithProduct: true
 };
@@ -1074,6 +1075,7 @@ export class PdvStore {
       tableCardHeight: Math.max(74, Math.min(130, parseIntegerSetting(map.get("table_card_height"), DEFAULT_PDV_SETTINGS.tableCardHeight || 96))),
       stackIdenticalItems: parseBooleanSetting(map.get("stack_identical_items"), DEFAULT_PDV_SETTINGS.stackIdenticalItems || false),
       partialPaymentDescriptionEnabled: parseBooleanSetting(map.get("partial_payment_description_enabled"), DEFAULT_PDV_SETTINGS.partialPaymentDescriptionEnabled || false),
+      skipPaymentConfirmation: parseBooleanSetting(map.get("skip_payment_confirmation"), DEFAULT_PDV_SETTINGS.skipPaymentConfirmation || false),
       individualUnitItems: parseBooleanSetting(map.get("individual_unit_items"), DEFAULT_PDV_SETTINGS.individualUnitItems || false),
       groupComplementsWithProduct: parseBooleanSetting(map.get("group_complements_with_product"), DEFAULT_PDV_SETTINGS.groupComplementsWithProduct ?? true)
     };

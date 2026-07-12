@@ -229,6 +229,8 @@ export function PdvApp({
   const [remoteOfflineBlocked, setRemoteOfflineBlocked] = useState(false);
   const [clientVisualSettings, setClientVisualSettings] = useState<Partial<PdvClientVisualSettings>>(readClientVisualSettings);
   const tableAutosaveTimer = useRef<number | null>(null);
+  const remoteTableWriteChains = useRef<Map<number, Promise<void>>>(new Map());
+  const snapshotLoadSequence = useRef(0);
   const lastProductLaunch = useRef<{ productId: string; at: number } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
@@ -248,25 +250,29 @@ export function PdvApp({
       await window.caixa.savePdvTableItems(tableNumber, items, subtables);
       return;
     }
+    const previous = remoteTableWriteChains.current.get(tableNumber) || Promise.resolve();
+    const write = previous.catch(() => undefined).then(async () => {
+      await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, {
+        method: "PUT",
+        body: JSON.stringify({ items, subtables })
+      });
+    });
+    remoteTableWriteChains.current.set(tableNumber, write);
     try {
-      const send = () => remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items, subtables }) });
-      try {
-        await send();
-      } catch (firstError) {
-        const message = firstError instanceof Error ? firstError.message : "";
-        if (/HTTP 4\d\d/.test(message)) throw firstError;
-        await wait(350);
-        await send();
-      }
+      await write;
       clearQueuedRemoteTable(tableNumber);
+      setRemoteOfflineBlocked(false);
     } catch (error) {
       const current = snapshot?.tables.find((table) => table.number === tableNumber);
-      if (snapshot?.settings.allowOfflineTables) {
-        queueRemoteTable(tableNumber, current?.people || 1, current?.note || "", items, subtables);
-      } else {
+      queueRemoteTable(tableNumber, current?.people || 1, current?.note || "", items, subtables);
+      if (!snapshot?.settings.allowOfflineTables) {
         setRemoteOfflineBlocked(true);
       }
       throw error;
+    } finally {
+      if (remoteTableWriteChains.current.get(tableNumber) === write) {
+        remoteTableWriteChains.current.delete(tableNumber);
+      }
     }
   };
   const transferPdvTableItems = (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => remoteTablesActive && remoteSession
@@ -298,30 +304,47 @@ export function PdvApp({
     if (!remoteTablesActive || !remoteSession) {
       return;
     }
-    const pending = readPendingRemoteTables(remoteSession.baseUrl);
-    if (!pending.length) {
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
+    let disposed = false;
+    let syncing = false;
+    const flushPendingTables = async () => {
+      if (disposed || syncing) {
+        return;
+      }
+      const pending = readPendingRemoteTables(remoteSession.baseUrl);
+      if (!pending.length) {
+        return;
+      }
+      syncing = true;
       const remaining: PendingRemoteTable[] = [];
-      for (const table of pending.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))) {
-        try {
-          await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/open`, { method: "POST", body: JSON.stringify({ people: table.people, note: table.note }) });
-          await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items: table.items, subtables: table.subtables }) });
-        } catch {
-          remaining.push(table);
+      let synchronizedAny = false;
+      try {
+        for (const table of pending.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))) {
+          try {
+            await openPdvTable(table.tableNumber, table.people, table.note);
+            await savePdvTableItems(table.tableNumber, table.items, table.subtables);
+            synchronizedAny = true;
+          } catch {
+            remaining.push(table);
+          }
         }
-      }
-      if (!cancelled) {
-        writePendingRemoteTables(remoteSession.baseUrl, remaining);
-        if (!remaining.length) {
-          setToast("Mesas pendentes foram sincronizadas.");
-          await load();
+        if (!disposed) {
+          writePendingRemoteTables(remoteSession.baseUrl, remaining);
+          if (synchronizedAny && !remaining.length) {
+            setRemoteOfflineBlocked(false);
+            setToast("Mesas pendentes foram sincronizadas.");
+            void load().catch(() => undefined);
+          }
         }
+      } finally {
+        syncing = false;
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    void flushPendingTables();
+    const timer = window.setInterval(() => void flushPendingTables(), 3000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
   }, [remoteSession?.baseUrl, remoteTablesActive, reloadToken]);
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount?: number) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
@@ -350,9 +373,12 @@ export function PdvApp({
   const removePdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<number> : window.caixa.removeCoseProducts();
 
   const load = async () => {
+    const sequence = ++snapshotLoadSequence.current;
     const next = await getPdvSnapshot();
-    setSnapshot(next);
-    setRemoteOfflineBlocked(false);
+    if (sequence === snapshotLoadSequence.current) {
+      setSnapshot(next);
+      setRemoteOfflineBlocked(false);
+    }
     return next;
   };
 
@@ -433,28 +459,28 @@ export function PdvApp({
       tableAutosaveTimer.current = null;
       void (async () => {
         try {
-          await openPdvTable(activeTable.number, tablePeople, tableNote);
-          await savePdvTableItems(activeTable.number, tableCart, subtableNames);
+          const headerChanged = activeTable.people !== tablePeople || activeTable.note !== tableNote;
+          if (headerChanged) {
+            await openPdvTable(activeTable.number, tablePeople, tableNote);
+            setActiveTable((current) => current ? { ...current, people: tablePeople, note: tableNote } : current);
+          }
+          if (tableCart.length || subtableNames.length) {
+            await savePdvTableItems(activeTable.number, tableCart, subtableNames);
+          }
           setTableSaveState("saved");
-          await load();
+          void load().catch(() => undefined);
         } catch (error) {
           if (remoteTablesActive) {
-            if (snapshot?.settings.allowOfflineTables) {
-              queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
-            } else {
+            queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
+            if (!snapshot?.settings.allowOfflineTables) {
               setRemoteOfflineBlocked(true);
-              const savedTable = snapshot?.tables.find((table) => table.number === activeTable.number);
-              if (savedTable) {
-                setTableCart(savedTable.items);
-                setSubtableNames(savedTable.subtables || []);
-              }
             }
           }
           setTableSaveState("error");
           setToast(error instanceof Error ? error.message : "Nao foi possivel salvar a mesa no servidor.");
         }
       })();
-    }, 180);
+    }, 280);
     return () => {
       if (tableAutosaveTimer.current !== null) {
         window.clearTimeout(tableAutosaveTimer.current);
@@ -462,7 +488,6 @@ export function PdvApp({
       }
     };
   }, [activeTable?.number, tab, tableCart, tablePeople, tableNote, subtableNames, checkoutTarget, tableCloseMenuOpen, remoteTablesActive, remoteSession?.baseUrl]);
-
   const products = useMemo(() => {
     const items = snapshot?.products.filter((product) => product.active && product.showOnPdv) || [];
     const direction = snapshot?.settings.productSortDirection === "za" ? -1 : 1;
@@ -1098,6 +1123,7 @@ export function PdvApp({
         <PaymentModal
           total={checkoutTarget.total}
           busy={busy}
+          skipConfirmation={Boolean(snapshot.settings.skipPaymentConfirmation)}
           title={checkoutTarget.kind === "direct" && checkoutTarget.manual ? "Receber valor avulso" : "Pagamento"}
           initialPayments={checkoutTarget.kind === "table" ? checkoutTarget.initialPayments || [] : []}
           showDescription={Boolean(checkoutTarget.kind !== "direct" && checkoutTarget.kind !== "table" && snapshot.settings.partialPaymentDescriptionEnabled)}
@@ -1291,7 +1317,7 @@ function PdvSaleScreen(props: {
   });
   const [cartListHeight, setCartListHeight] = useState(() => {
     const saved = Number(window.localStorage.getItem("caixa.pdv.cart-list-height"));
-    return Number.isFinite(saved) ? Math.min(620, Math.max(150, saved)) : 320;
+    return Number.isFinite(saved) ? Math.min(900, Math.max(108, saved)) : 320;
   });
   const [categoryPaneHeight, setCategoryPaneHeight] = useState(() => {
     const saved = Number(window.localStorage.getItem("caixa.pdv.category-pane-height"));
@@ -1356,8 +1382,9 @@ function PdvSaleScreen(props: {
       } else if (axis === "vertical") {
         setCategoryPaneHeight(Math.min(280, Math.max(96, initialCategoryHeight + nextEvent.clientY - startY)));
       } else {
-        const maxHeight = Math.max(150, Math.min(620, cartAreaHeight - 180));
-        setCartListHeight(Math.min(maxHeight, Math.max(150, initialCartListHeight + nextEvent.clientY - startY)));
+        const controlsSpace = cartDensity === "compact" ? 118 : 164;
+        const maxHeight = Math.max(108, Math.min(900, cartAreaHeight - controlsSpace));
+        setCartListHeight(Math.min(maxHeight, Math.max(108, initialCartListHeight + nextEvent.clientY - startY)));
       }
     };
     const stop = () => {
@@ -1856,6 +1883,7 @@ function PaymentModal({
   showDescription = false,
   title = "Pagamento",
   confirmLabel = "Finalizar conta",
+  skipConfirmation = false,
   onCancel,
   onConfirm
 }: {
@@ -1865,6 +1893,7 @@ function PaymentModal({
   showDescription?: boolean;
   title?: string;
   confirmLabel?: string;
+  skipConfirmation?: boolean;
   onCancel: () => void;
   onConfirm: (payments: PdvPayment[], observations?: string) => void | Promise<void>;
 }) {
@@ -1907,7 +1936,7 @@ function PaymentModal({
       setNotice("Ainda existe valor restante para fechar a conta.");
       return;
     }
-    if (!confirming) {
+    if (!skipConfirmation && !confirming) {
       setConfirming(true);
       return;
     }
@@ -2034,7 +2063,7 @@ function PaymentModal({
           />
         )}
         {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
-        {confirming && (
+        {!skipConfirmation && confirming && (
           <PdvConfirmModal
             title={confirmLabel === "Finalizar conta" ? "Confirmar fechamento" : "Confirmar pagamentos"}
             message={confirmLabel === "Finalizar conta" ? "Os pagamentos serao registrados e a conta sera encerrada." : "Deseja salvar a nova forma de pagamento?"}
@@ -2204,7 +2233,7 @@ function PaymentAmountModal({
                     autoFocus
                     inputMode="decimal"
                     value={receivedText}
-                    onFocus={() => setActiveField("received")}
+                    onFocus={(event) => { setActiveField("received"); event.currentTarget.select(); }}
                     onChange={(event) => updateReceived(event.target.value)}
                   />
                 </label>
@@ -2216,7 +2245,7 @@ function PaymentAmountModal({
                   autoFocus
                   inputMode="decimal"
                   value={amountText}
-                  onFocus={() => setActiveField("amount")}
+                  onFocus={(event) => { setActiveField("amount"); event.currentTarget.select(); }}
                   onChange={(event) => updateAmount(event.target.value)}
                 />
               </label>
@@ -2345,7 +2374,7 @@ function PartialValueModal({
         <div className="pdv-editor-grid">
           <label>
             <span>Valor parcial</span>
-            <input autoFocus value={valueText} onChange={(event) => setValueText(event.target.value)} />
+            <input autoFocus value={valueText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setValueText(event.target.value)} />
           </label>
         </div>
         <div className="pdv-action-row">
@@ -4305,6 +4334,10 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           <label className="pdv-switch-line">
             <input type="checkbox" checked={Boolean(snapshot.settings.partialPaymentDescriptionEnabled)} onChange={(event) => saveSetting({ partialPaymentDescriptionEnabled: event.target.checked })} />
             Solicitar descricao nos pagamentos parciais
+          </label>
+          <label className="pdv-switch-line">
+            <input type="checkbox" checked={Boolean(snapshot.settings.skipPaymentConfirmation)} onChange={(event) => saveSetting({ skipPaymentConfirmation: event.target.checked })} />
+            Finalizar pagamento sem pedir confirmacao
           </label>
         </article>
         <article>

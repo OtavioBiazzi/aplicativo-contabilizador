@@ -5525,17 +5525,29 @@ body.floating-borderless .floating-bar {
 }
 
 .pdv-sale-detail-modal {
-  width: min(980px, 100%);
-  max-height: calc(100vh - 24px);
+  width: min(980px, calc(100vw - 32px));
+  height: min(760px, calc(100vh - 40px));
+  max-height: calc(100vh - 40px);
   overflow: hidden;
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .pdv-sale-detail-scroll {
   min-height: 0;
-  overflow: auto;
-  padding: 2px 4px 4px 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 2px 8px 8px 0;
+  overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+@media (max-height: 700px) {
+  .pdv-sale-detail-modal {
+    height: calc(100vh - 20px);
+    max-height: calc(100vh - 20px);
+    padding: 12px;
+    gap: 10px;
+  }
 }
 
 .pdv-detail-columns {
@@ -6525,5 +6537,72 @@ input[type="date"] {
   .pdv-payment-keypad {
     width: 100%;
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Grade configurada pelo operador e carrinho compacto para telas menores. */
+.pdv-product-grid {
+  grid-template-columns: repeat(var(--pdv-grid-cols, 5), minmax(0, 1fr)) !important;
+}
+
+.pdv-cart-area {
+  --pdv-cart-controls-space: 164px;
+  grid-template-rows: auto minmax(108px, min(var(--pdv-cart-list-height, 320px), calc(100% - var(--pdv-cart-controls-space)))) 8px auto auto auto auto;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.pdv-cart-area.cart-compact {
+  --pdv-cart-controls-space: 118px;
+  gap: 6px;
+}
+
+.pdv-cart-area.cart-compact .pdv-total-box {
+  gap: 1px;
+}
+
+.pdv-cart-area.cart-compact .pdv-total-box span {
+  font-size: 1.05rem;
+}
+
+.pdv-cart-area.cart-compact .pdv-total-box strong {
+  padding: 6px 9px;
+  font-size: clamp(1.7rem, 3.8vw, 2.65rem);
+}
+
+.pdv-cart-area.cart-compact .pdv-total-box small {
+  font-size: 0.74rem;
+}
+
+.pdv-cart-area.cart-compact .pdv-primary-button,
+.pdv-cart-area.cart-compact .pdv-danger-button,
+.pdv-cart-area.cart-compact .pdv-ghost-button {
+  min-height: 36px;
+  padding-inline: 9px;
+  font-size: 0.84rem;
+}
+
+.pdv-cart-area.cart-compact .pdv-table-cart-actions > button {
+  min-height: 40px;
+}
+
+.pdv-cart-area.cart-compact .pdv-table-quick-actions > button {
+  min-height: 32px;
+  font-size: 0.8rem;
+}
+
+@media (max-height: 850px) {
+  .pdv-cart-area {
+    --pdv-cart-controls-space: 144px;
+    gap: 6px;
+  }
+
+  .pdv-cart-area .pdv-total-box span {
+    font-size: 1.25rem;
+  }
+
+  .pdv-cart-area .pdv-total-box strong {
+    padding: 8px 10px;
+    font-size: clamp(1.85rem, 4vw, 2.8rem);
   }
 }
