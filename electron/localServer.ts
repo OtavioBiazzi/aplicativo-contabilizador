@@ -285,10 +285,9 @@ export class LocalServer {
       try {
         const tableNumber = Number(request.params.number);
         await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : [], Array.isArray(request.body?.subtables) ? request.body.subtables : undefined);
-        const snapshot = await this.options.getPdvSnapshot();
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
-        response.json({ ok: true, table: snapshot.tables.find((table) => table.number === tableNumber) || null });
+        response.json({ ok: true });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar itens da mesa." });
       }

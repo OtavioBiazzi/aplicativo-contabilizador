@@ -117,10 +117,6 @@ const save = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/items", {
   body: JSON.stringify({ items: [remoteSubtableItem], subtables: ["Cliente remoto", "Submesa vazia"] })
 });
 if (!save.ok) throw new Error(`Cliente nao conseguiu salvar item no servidor: ${await save.text()}`);
-const savedResponse = await save.json();
-if (savedResponse.table?.number !== 7 || savedResponse.table?.items?.length !== 1) {
-  throw new Error("Servidor nao confirmou a mesa gravada para o cliente.");
-}
 const savedTable = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 7);
 if (!savedTable?.subtables?.includes("Cliente remoto") || !savedTable.subtables.includes("Submesa vazia") || savedTable.items[0]?.subtableName !== "Cliente remoto") {
   throw new Error("Cliente nao preservou submesas ao salvar a mesa no servidor.");

@@ -59,10 +59,6 @@ function samePdvValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
 function shortTime(value: string | null): string {
   if (!value) {
     return "";
@@ -226,16 +222,13 @@ export function PdvApp({
   const [quickValueModalOpen, setQuickValueModalOpen] = useState(false);
   const [confirmRequest, setConfirmRequest] = useState<{ title: string; message: string; action: () => Promise<void> } | null>(null);
   const [tableSaveState, setTableSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [remoteOfflineBlocked, setRemoteOfflineBlocked] = useState(false);
   const [clientVisualSettings, setClientVisualSettings] = useState<Partial<PdvClientVisualSettings>>(readClientVisualSettings);
   const tableAutosaveTimer = useRef<number | null>(null);
-  const remoteTableWriteChains = useRef<Map<number, Promise<void>>>(new Map());
-  const remoteTableRevisions = useRef<Map<number, number>>(new Map());
-  const snapshotLoadSequence = useRef(0);
   const lastProductLaunch = useRef<{ productId: string; at: number } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
-  const remotePdvActive = Boolean(remoteSession);
+  const remoteProductsActive = Boolean(remoteSession && (tab === "products" || tab === "advanced"));
+  const remotePdvActive = remoteTablesActive || remoteProductsActive;
 
   const getPdvSnapshot = () => remotePdvActive && remoteSession
     ? remotePdvRequest<PdvSnapshot>(remoteSession, "/api/pdv/snapshot")
@@ -251,37 +244,16 @@ export function PdvApp({
       await window.caixa.savePdvTableItems(tableNumber, items, subtables);
       return;
     }
-    const revision = (remoteTableRevisions.current.get(tableNumber) || 0) + 1;
-    remoteTableRevisions.current.set(tableNumber, revision);
-    const previous = remoteTableWriteChains.current.get(tableNumber) || Promise.resolve();
-    const write = previous.catch(() => undefined).then(async () => {
-      const result = await remotePdvRequest<{ ok: boolean; table?: PdvOpenTable | null }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, {
+    try {
+      await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, {
         method: "PUT",
         body: JSON.stringify({ items, subtables })
       });
-      if (result.table && remoteTableRevisions.current.get(tableNumber) === revision) {
-        setSnapshot((current) => current
-          ? { ...current, tables: current.tables.map((table) => table.number === tableNumber ? result.table! : table) }
-          : current
-        );
-      }
-    });
-    remoteTableWriteChains.current.set(tableNumber, write);
-    try {
-      await write;
       clearQueuedRemoteTable(tableNumber);
-      setRemoteOfflineBlocked(false);
     } catch (error) {
       const current = snapshot?.tables.find((table) => table.number === tableNumber);
       queueRemoteTable(tableNumber, current?.people || 1, current?.note || "", items, subtables);
-      if (!snapshot?.settings.allowOfflineTables) {
-        setRemoteOfflineBlocked(true);
-      }
       throw error;
-    } finally {
-      if (remoteTableWriteChains.current.get(tableNumber) === write) {
-        remoteTableWriteChains.current.delete(tableNumber);
-      }
     }
   };
   const transferPdvTableItems = (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => remoteTablesActive && remoteSession
@@ -313,54 +285,35 @@ export function PdvApp({
     if (!remoteTablesActive || !remoteSession) {
       return;
     }
-    let disposed = false;
-    let syncing = false;
-    const flushPendingTables = async () => {
-      if (disposed || syncing) {
-        return;
-      }
-      const pending = readPendingRemoteTables(remoteSession.baseUrl);
-      if (!pending.length) {
-        return;
-      }
-      syncing = true;
+    const pending = readPendingRemoteTables(remoteSession.baseUrl);
+    if (!pending.length) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
       const remaining: PendingRemoteTable[] = [];
-      let synchronizedAny = false;
-      try {
-        for (const table of pending.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))) {
-          try {
-            await openPdvTable(table.tableNumber, table.people, table.note);
-            await savePdvTableItems(table.tableNumber, table.items, table.subtables);
-            synchronizedAny = true;
-          } catch {
-            remaining.push(table);
-          }
+      for (const table of pending.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))) {
+        try {
+          await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/open`, { method: "POST", body: JSON.stringify({ people: table.people, note: table.note }) });
+          await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items: table.items, subtables: table.subtables }) });
+        } catch {
+          remaining.push(table);
         }
-        if (!disposed) {
-          writePendingRemoteTables(remoteSession.baseUrl, remaining);
-          if (synchronizedAny && !remaining.length) {
-            setRemoteOfflineBlocked(false);
-            setToast("Mesas pendentes foram sincronizadas.");
-            void load().catch(() => undefined);
-          }
-        }
-      } finally {
-        syncing = false;
       }
-    };
-    void flushPendingTables();
-    const timer = window.setInterval(() => void flushPendingTables(), 3000);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
+      if (!cancelled) {
+        writePendingRemoteTables(remoteSession.baseUrl, remaining);
+        if (!remaining.length) {
+          setToast("Mesas pendentes foram sincronizadas.");
+          await load();
+        }
+      }
+    })();
+    return () => { cancelled = true; };
   }, [remoteSession?.baseUrl, remoteTablesActive, reloadToken]);
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount?: number) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
     : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, crypto.randomUUID());
-  const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[]) => remotePdvActive && remoteSession
-    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, "/api/pdv/sales/direct", { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ items, discount: directDiscount, payments }) }).then((result) => result.sale)
-    : window.caixa.saveDirectSale(items, directDiscount, payments);
+  const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[]) => window.caixa.saveDirectSale(items, directDiscount, payments);
   const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount?: number, observations = "") => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ items, payments, discount: partialDiscount, observations }) }).then((result) => result.sale)
     : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount, crypto.randomUUID(), observations);
@@ -382,12 +335,8 @@ export function PdvApp({
   const removePdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<number> : window.caixa.removeCoseProducts();
 
   const load = async () => {
-    const sequence = ++snapshotLoadSequence.current;
     const next = await getPdvSnapshot();
-    if (sequence === snapshotLoadSequence.current) {
-      setSnapshot(next);
-      setRemoteOfflineBlocked(false);
-    }
+    setSnapshot(next);
     return next;
   };
 
@@ -419,37 +368,6 @@ export function PdvApp({
   }, [remoteSession?.baseUrl, remotePdvActive, reloadToken]);
 
   useEffect(() => {
-    if (!remotePdvActive || !remoteSession) {
-      return;
-    }
-    let disposed = false;
-    let loading = false;
-    const refreshRemoteSnapshot = async () => {
-      if (loading || disposed) return;
-      loading = true;
-      try {
-        await load();
-      } catch {
-        if (!disposed) setRemoteOfflineBlocked(true);
-      } finally {
-        loading = false;
-      }
-    };
-    const timer = window.setInterval(refreshRemoteSnapshot, 2500);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, [remotePdvActive, remoteSession?.baseUrl]);
-
-  useEffect(() => {
-    if (!remoteSession || !activeTable || !snapshot || checkoutTarget || tableCloseMenuOpen || tableSaveState === "saving" || remoteOfflineBlocked || remoteTableWriteChains.current.has(activeTable.number)) {
-      return;
-    }
-    applyFreshOpenTable(snapshot, activeTable.number);
-  }, [remoteSession?.baseUrl, snapshot?.tables, activeTable?.number, checkoutTarget, tableCloseMenuOpen, tableSaveState, remoteOfflineBlocked]);
-
-  useEffect(() => {
     setTab(initialTab);
     if (initialTab === "tables") {
       setActiveTable(null);
@@ -468,28 +386,19 @@ export function PdvApp({
       tableAutosaveTimer.current = null;
       void (async () => {
         try {
-          const headerChanged = activeTable.people !== tablePeople || activeTable.note !== tableNote;
-          if (headerChanged) {
-            await openPdvTable(activeTable.number, tablePeople, tableNote);
-            setActiveTable((current) => current ? { ...current, people: tablePeople, note: tableNote } : current);
-          }
-          if (tableCart.length || subtableNames.length) {
-            await savePdvTableItems(activeTable.number, tableCart, subtableNames);
-          }
+          await openPdvTable(activeTable.number, tablePeople, tableNote);
+          await savePdvTableItems(activeTable.number, tableCart, subtableNames);
           setTableSaveState("saved");
-          void load().catch(() => undefined);
+          await load();
         } catch (error) {
           if (remoteTablesActive) {
             queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
-            if (!snapshot?.settings.allowOfflineTables) {
-              setRemoteOfflineBlocked(true);
-            }
           }
           setTableSaveState("error");
           setToast(error instanceof Error ? error.message : "Nao foi possivel salvar a mesa no servidor.");
         }
       })();
-    }, 280);
+    }, 180);
     return () => {
       if (tableAutosaveTimer.current !== null) {
         window.clearTimeout(tableAutosaveTimer.current);
@@ -512,10 +421,6 @@ export function PdvApp({
   const tableTotal = useMemo(() => roundMoney(tableCart.reduce((total, item) => total + unpaidItemTotal(item), 0)), [tableCart]);
 
   const addProduct = (product: PdvProduct, direct = false, bypassReopen = false) => {
-    if (activeTable && isRemoteClient && remoteOfflineBlocked && !snapshot?.settings.allowOfflineTables) {
-      setToast("Cliente sem conexao com o servidor. A mesa esta bloqueada para evitar perda de dados.");
-      return;
-    }
     if (activeTable?.status === "Fechamento" && !bypassReopen) {
       setConfirmRequest({
         title: "Reabrir mesa para adicionar produto?",
