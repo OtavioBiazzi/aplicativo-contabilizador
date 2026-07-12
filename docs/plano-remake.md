@@ -18,8 +18,8 @@ Este e o plano ativo de implementacao. Ele considera a base ja existente do apli
 ## Progresso da execucao
 
 - Fase 1: parcialmente atendida. A limpeza da venda, limpeza da pesquisa, selecao/rolagem do ultimo item, formula de peso, retorno da quantidade para 1 e protecao contra duplo lancamento possuem implementacao. Produtos medidos agora preservam o valor final informado, inclusive no banco, sem exigir quantidade x preco unitario. Falta validar a selecao apos excluir um item, o uso de venda avulsa por teclado e o fluxo continuo depois do fechamento.
-- Fase 2: parcialmente atendida. A tela filtra os itens pela submesa ativa, preserva os itens da mesa principal, persiste submesa vazia imediatamente, o avulso aparece como `+` e a transferencia parcial/mesa destino possui smoke automatizado aprovado. Falta validar todos os estados de mesa visualmente.
-- Fase 3: parcialmente atendida. Fechamento parcial persistente, pagamentos multiplos, confirmacao opcional configuravel, aproximacao, atalhos e navegacao por setas nas formas de pagamento possuem base; o smoke do PDV confirmou itens pagos, parcial, fechamento total, misto e idempotencia. Cada fechamento recebe chave unica, o Enter possui trava imediata e o parcial volta a deixar a mesa ocupada com os itens pagos bloqueados. Falta validacao manual do fluxo completo.
+- Fase 2: parcialmente atendida. A tela filtra os itens pela submesa ativa, preserva os itens da mesa principal, persiste submesa vazia imediatamente, o avulso aparece como `+` e a transferencia parcial/mesa destino possui smoke automatizado aprovado. O salvamento de itens passou a ser serializado por mesa para impedir que um snapshot antigo apague um lancamento recente. Falta validar todos os estados de mesa visualmente.
+- Fase 3: parcialmente atendida. Fechamento parcial persistente, pagamentos multiplos, confirmacao opcional configuravel, aproximacao, atalhos e navegacao por setas nas formas de pagamento possuem base; o smoke do PDV confirmou itens pagos, parcial, fechamento total, misto e idempotencia. Cada fechamento recebe chave unica, o Enter possui trava imediata e o parcial volta a deixar a mesa ocupada com os itens pagos bloqueados. Apos registrar um parcial, a selecao de parciais reabre automaticamente; quando todos os itens estiverem pagos, ela oferece concluir e liberar a mesa. Falta validacao manual do fluxo completo.
 - Fase 4: parcialmente atendida. O fluxo de rede das mesas voltou a seguir a base direta e comprovada da versao `0.3.13`: abrir mesa, salvar itens e recarregar, sem bloqueio offline, polling extra ou filas concorrentes. O cliente continua impedido de alterar produtos e regras do servidor. Eventos remotos consecutivos de mesa sao agrupados por poucos milissegundos para reduzir requisicoes repetidas, mantendo o protocolo existente. Falta confirmar em dois computadores que o cliente recebe e exibe itens de mesa aberta em todos os cenarios.
 - Fase 5: parcialmente atendida. Importacao segura, Cose, complementos e ordenacao automatica possuem base. Falta revisar todos os vinculos e conflitos no uso real.
 - Fase 6: parcialmente atendida. Contraste, textos longos, notificacoes e divisores redimensionaveis foram ajustados. As barras entre categorias/produtos, produtos/carrinho e lista/total do carrinho salvam a proporcao no computador; o carrinho compacto pode crescer mais em telas baixas e a grade respeita a quantidade de produtos escolhida pelo operador. Alturas e espacamentos foram reduzidos em telas baixas. Falta revisar todos os temas e telas menores.
@@ -59,6 +59,8 @@ Objetivo: separar corretamente os dados de mesa principal, submesas e lancamento
 - Exibir observacao resumida na grade de mesas.
 - Reduzir fonte dos nomes e observacoes para evitar sobreposicao.
 - Manter Cancelar desativado enquanto a mesa estiver vazia.
+- Confirmar o cancelamento de mesa por Enter e fechar somente o modal por Esc.
+- Serializar cada salvamento de itens da mesma mesa para que uma requisicao antiga nunca sobrescreva o ultimo lancamento.
 - Manter modos Mesa, Onibus e Avulso configuraveis conforme o modo atual.
 
 ## Fase 3 - Fechamento parcial e pagamentos
@@ -69,6 +71,8 @@ Objetivo: tornar o fechamento seguro, persistente e navegavel pelo teclado.
 - Bloquear itens ja pagos nos fechamentos parciais seguintes.
 - Calcular cada parcial apenas com itens ainda pendentes.
 - Preservar selecao pendente ao voltar para a mesa antes de concluir.
+- Depois de registrar um pagamento parcial, retornar automaticamente para a selecao de fechamento parcial da mesma mesa.
+- Quando todos os itens estiverem pagos, permitir concluir e liberar a mesa a partir do proprio fechamento parcial.
 - Adicionar Limpar selecao sem alterar itens pagos ou registros financeiros.
 - Manter Resetar estados como acao administrativa com confirmacao clara.
 - Abrir o fechamento com foco inicial em Fechar total.
@@ -121,6 +125,7 @@ Objetivo: deixar o app legivel e adaptavel em notebook e 1920x1080.
 - Salvar tamanho e proporcao por usuario, respeitando limites de tela.
 - Permitir configurar quantidade de produtos por linha e densidade visual.
 - Ajustar rolagem de carrinho, listas, produtos e modais.
+- Compactar Venda e Mesa para priorizar lista do carrinho, com alvo de cerca de 10 itens visiveis em notebook e produtos em mais linhas.
 - Fazer modais de peso e pagamento caberem sem rolagem obrigatoria em telas comuns.
 - Corrigir textos claros em fundos claros e textos escuros em fundos escuros.
 - Corrigir campo Qtde. no tema escuro.
@@ -137,6 +142,8 @@ Objetivo: confirmar que todas as operacoes chegam aos mesmos registros e prepara
 - Buscar no Historico por descricao de pagamento, mesa, valor exato/faixa, produto e forma de pagamento.
 - Persistir a data e os filtros selecionados no Historico ao trocar de aba ou reabrir a tela, ate o usuario alterar ou limpar manualmente.
 - Mostrar detalhes dos produtos da venda ou mesa em modal proprio.
+- Manter o modal de detalhes do Historico centralizado, com cabecalho e botoes acessiveis, lista interna rolavel e fechamento por Esc.
+- Permitir salvar a edicao de lancamento do Historico por Enter e fechar por Esc.
 - Garantir que Venda direta, Mesa, Submesa e fechamento parcial usem o mesmo Historico.
 - Separar Debito, Credito, Pix, Dinheiro e outros nos Relatorios.
 - Garantir que totais, descontos, cancelamentos e pagamentos mistos batam com o banco.

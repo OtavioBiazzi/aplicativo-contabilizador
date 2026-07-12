@@ -3087,9 +3087,25 @@ function HistoryDeleteConfirmModal({ permanent, onCancel, onConfirm }: { permane
 }
 
 function HistorySaleDetailModal({ sale, onClose }: { sale: PdvSale; onClose: () => void }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        scrollRef.current?.scrollBy({ top: event.key === "ArrowDown" ? 80 : -80, behavior: "smooth" });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
   return (
     <div className="modal-backdrop">
-      <div className="modal history-sale-detail-modal">
+      <div className="modal history-sale-detail-modal" tabIndex={-1} autoFocus>
         <div className="modal-head">
           <div>
             <span className="settings-overline">Detalhes do PDV</span>
@@ -3098,26 +3114,28 @@ function HistorySaleDetailModal({ sale, onClose }: { sale: PdvSale; onClose: () 
           </div>
           <button className="icon-button" onClick={onClose}><X size={18} /></button>
         </div>
-        <div className="history-detail-summary">
-          <Metric label="Subtotal" value={formatCurrency(sale.subtotal)} />
-          <Metric label="Desconto" value={formatCurrency(sale.discount)} />
-          <Metric label="Total" value={formatCurrency(sale.total)} />
-        </div>
-        <div className="history-detail-list">
-          <strong>Itens</strong>
-          {sale.items.map((item) => (
-            <div key={item.id}>
-              <span>{item.quantity}x {item.productName}{item.complements?.length ? ` + ${item.complements.map((part) => part.name).join(" + ")}` : ""}</span>
-              <b>{formatCurrency(item.total)}</b>
-            </div>
-          ))}
-          <strong>Pagamentos</strong>
-          {sale.payments.map((payment) => (
-            <div key={payment.id}>
-              <span>{payment.method}{payment.change ? ` | Troco ${formatCurrency(payment.change)}` : ""}</span>
-              <b>{formatCurrency(payment.amount)}</b>
-            </div>
-          ))}
+        <div ref={scrollRef} className="history-detail-scroll" tabIndex={0}>
+          <div className="history-detail-summary">
+            <Metric label="Subtotal" value={formatCurrency(sale.subtotal)} />
+            <Metric label="Desconto" value={formatCurrency(sale.discount)} />
+            <Metric label="Total" value={formatCurrency(sale.total)} />
+          </div>
+          <div className="history-detail-list">
+            <strong>Itens</strong>
+            {sale.items.map((item) => (
+              <div key={item.id}>
+                <span>{item.quantity}x {item.productName}{item.complements?.length ? ` + ${item.complements.map((part) => part.name).join(" + ")}` : ""}</span>
+                <b>{formatCurrency(item.total)}</b>
+              </div>
+            ))}
+            <strong>Pagamentos</strong>
+            {sale.payments.map((payment) => (
+              <div key={payment.id}>
+                <span>{payment.method}{payment.change ? ` | Troco ${formatCurrency(payment.change)}` : ""}</span>
+                <b>{formatCurrency(payment.amount)}</b>
+              </div>
+            ))}
+          </div>
         </div>
         <div className="submit-row"><button className="primary-button" onClick={onClose}>Fechar</button></div>
       </div>
@@ -3241,6 +3259,29 @@ function EditEntryModal({
   const [busNumber, setBusNumber] = useState(entry.busNumber);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(entry.paymentMethod);
   const [observations, setObservations] = useState(entry.observations);
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave({ type, description, finalValue: parseMoney(finalValue), tableNumber, busNumber, paymentMethod, observations });
+    } finally {
+      setSaving(false);
+    }
+  };
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      } else if (event.key === "Enter" && !event.repeat) {
+        event.preventDefault();
+        void submit();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, type, description, finalValue, tableNumber, busNumber, paymentMethod, observations, saving]);
 
   return (
     <div className="modal-backdrop">
@@ -3286,20 +3327,11 @@ function EditEntryModal({
         <div className="submit-row">
           <button
             className="primary-button"
-            onClick={() =>
-              onSave({
-                type,
-                description,
-                finalValue: parseMoney(finalValue),
-                tableNumber,
-                busNumber,
-                paymentMethod,
-                observations
-              })
-            }
+            onClick={() => void submit()}
+            disabled={saving}
           >
             <Save size={18} />
-            Salvar
+            {saving ? "Salvando..." : "Salvar"}
           </button>
           <button className="ghost-button" onClick={onClose}>Cancelar</button>
         </div>

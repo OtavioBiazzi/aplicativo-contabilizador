@@ -250,6 +250,10 @@ export function PdvApp({
   const [tableSaveState, setTableSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [clientVisualSettings, setClientVisualSettings] = useState<Partial<PdvClientVisualSettings>>(readClientVisualSettings);
   const tableAutosaveTimer = useRef<number | null>(null);
+  // Todas as gravacoes da mesa passam por esta fila. Sem isso, uma resposta antiga
+  // podia terminar depois da mais nova e repor no banco uma versao desatualizada.
+  const tableSaveChain = useRef<Promise<void>>(Promise.resolve());
+  const tableSaveRevision = useRef(0);
   const lastPersistedTableMeta = useRef<{ number: number; people: number; note: string } | null>(null);
   const lastProductLaunch = useRef<{ productId: string; at: number } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
@@ -377,6 +381,31 @@ export function PdvApp({
     return next;
   };
 
+  const queueTableSave = async (payload: { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables: string[] }, refresh = true) => {
+    const revision = ++tableSaveRevision.current;
+    setTableSaveState("saving");
+    const save = async () => {
+      await ensureTableMeta(payload.tableNumber, payload.people, payload.note);
+      await savePdvTableItems(payload.tableNumber, payload.items, payload.subtables);
+    };
+    const queued = tableSaveChain.current.catch(() => undefined).then(save);
+    tableSaveChain.current = queued;
+    try {
+      await queued;
+      if (revision === tableSaveRevision.current) {
+        setTableSaveState("saved");
+        if (refresh) {
+          void load();
+        }
+      }
+    } catch (error) {
+      if (revision === tableSaveRevision.current) {
+        setTableSaveState("error");
+      }
+      throw error;
+    }
+  };
+
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), Math.max(1200, toastDuration || 3200));
@@ -429,15 +458,19 @@ export function PdvApp({
     if (tableAutosaveTimer.current !== null) {
       window.clearTimeout(tableAutosaveTimer.current);
     }
+    // Protege o carrinho otimista contra snapshots antigos enquanto aguarda a fila.
     setTableSaveState("saving");
     tableAutosaveTimer.current = window.setTimeout(() => {
       tableAutosaveTimer.current = null;
       void (async () => {
         try {
-          await ensureTableMeta(activeTable.number, tablePeople, tableNote);
-          await savePdvTableItems(activeTable.number, tableCart, subtableNames);
-          setTableSaveState("saved");
-          void load();
+          await queueTableSave({
+            tableNumber: activeTable.number,
+            people: tablePeople,
+            note: tableNote,
+            items: tableCart,
+            subtables: subtableNames
+          });
         } catch (error) {
           if (remoteTablesActive) {
             queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
@@ -654,8 +687,7 @@ export function PdvApp({
       return;
     }
     try {
-      await ensureTableMeta(activeTable.number, tablePeople, tableNote);
-      await savePdvTableItems(activeTable.number, tableCart, subtableNames);
+      await queueTableSave({ tableNumber: activeTable.number, people: tablePeople, note: tableNote, items: tableCart, subtables: subtableNames });
     } catch (error) {
       if (remoteTablesActive) {
         queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
@@ -670,18 +702,38 @@ export function PdvApp({
     if (!activeTable) {
       return false;
     }
+    if (tableAutosaveTimer.current !== null) {
+      window.clearTimeout(tableAutosaveTimer.current);
+      tableAutosaveTimer.current = null;
+    }
     try {
-      await ensureTableMeta(activeTable.number, tablePeople, tableNote);
-      await savePdvTableItems(activeTable.number, tableCart, subtableNames);
+      await queueTableSave({ tableNumber: activeTable.number, people: tablePeople, note: tableNote, items: tableCart, subtables: subtableNames });
     } catch (error) {
       if (remoteTablesActive) {
         queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
       }
       throw error;
     }
-    setTableSaveState("saved");
-    await load();
     return true;
+  };
+
+  const finalizeFullyPaidTable = () => {
+    if (!activeTable) {
+      return;
+    }
+    setConfirmRequest({
+      title: `Concluir mesa ${String(activeTable.number).padStart(3, "0")}?`,
+      message: "Todos os itens foram pagos em fechamentos parciais. A mesa sera liberada e os pagamentos permanecerao no historico.",
+      action: async () => {
+        await savePdvTableItems(activeTable.number, [], []);
+        await setPdvTableStatus(activeTable.number, "Livre");
+        setPartialSelectedItemIds([]);
+        setPartialItemsModalOpen(false);
+        setActiveTable(null);
+        setTableCart([]);
+        await load();
+      }
+    });
   };
 
   const requestCloseTable = async () => {
@@ -873,6 +925,9 @@ export function PdvApp({
       setToast(target.kind === "table-partial-items" ? "Parcial por itens registrada." : "Parcial manual registrada.");
       const refreshed = await load();
       applyFreshOpenTable(refreshed, target.table.number);
+      if (target.kind === "table-partial-items") {
+        setPartialItemsModalOpen(true);
+      }
     } finally {
       setBusy(false);
     }
@@ -1141,9 +1196,11 @@ export function PdvApp({
         <PartialItemsModal
           table={activeTable}
           cart={tableCart}
+          previousPartials={snapshot.recentSales.filter((sale) => sale.type === "Mesa" && sale.tableNumber === activeTable.number && sale.status === "Parcial")}
           defaultSelectedIds={partialSelectedItemIds}
           onSelectedIdsChange={setPartialSelectedItemIds}
           onResetPaidItems={resetPaidItemStates}
+          onComplete={finalizeFullyPaidTable}
           onCancel={() => setPartialItemsModalOpen(false)}
           onConfirm={(items) => {
             setPartialItemsModalOpen(false);
@@ -1300,9 +1357,8 @@ function PdvSaleScreen(props: {
   const previousVisibleItemIds = useRef<string[]>([]);
   const persistSubtableNames = (nextNames: string[]) => {
     props.setSubtableNames?.(nextNames);
-    if (props.activeTableNumber && props.savePdvTableItems) {
-      void props.savePdvTableItems(props.activeTableNumber, props.cart, nextNames).catch(() => undefined);
-    }
+    // O efeito de autosave da mesa grava nomes e itens como um unico snapshot.
+    // Gravar apenas os nomes aqui usava um carrinho capturado antes da ultima mudanca.
   };
 
   useEffect(() => {
@@ -2751,17 +2807,21 @@ function TransferListModal({
 function PartialItemsModal({
   table,
   cart,
+  previousPartials,
   defaultSelectedIds,
   onSelectedIdsChange,
   onResetPaidItems,
+  onComplete,
   onCancel,
   onConfirm
 }: {
   table: PdvOpenTable;
   cart: PdvCartItem[];
+  previousPartials: PdvSale[];
   defaultSelectedIds: string[];
   onSelectedIdsChange: (ids: string[]) => void;
   onResetPaidItems: (ids?: string[], selectAfter?: boolean) => void;
+  onComplete: () => void;
   onCancel: () => void;
   onConfirm: (items: PdvCartItem[]) => void;
 }) {
@@ -2793,12 +2853,14 @@ function PartialItemsModal({
   
   const selectedTotal = roundMoney(selectedItems.reduce((total, item) => total + item.total, 0));
   const remainingTotal = roundMoney(cart.reduce((total, item) => total + unpaidItemTotal(item), 0) - selectedTotal);
+  const allPaid = cart.length > 0 && cart.every((item) => unpaidQuantity(item) <= 0.009);
+  const paidTotal = roundMoney(previousPartials.reduce((total, sale) => total + sale.total, 0));
   const confirm = () => {
     if (selectedItems.length) {
       onConfirm(selectedItems);
     }
   };
-  useModalConfirmShortcut(confirm, onCancel, selectedItems.length > 0);
+  useModalConfirmShortcut(allPaid ? onComplete : confirm, onCancel, allPaid || selectedItems.length > 0);
   
   const toggle = (id: string) => {
     const current = cart.find((item) => item.id === id);
@@ -2822,8 +2884,24 @@ function PartialItemsModal({
         <div className="pdv-payment-summary">
           <Metric title="Selecionado agora" value={money(selectedTotal)} />
           <Metric title="Fica na mesa" value={money(Math.max(0, remainingTotal))} />
-          <Metric title="Itens escolhidos" value={String(selectedItems.length)} />
+          <Metric title={allPaid ? "Situacao" : "Itens escolhidos"} value={allPaid ? "Tudo pago" : String(selectedItems.length)} />
         </div>
+        {previousPartials.length > 0 && (
+          <section className="pdv-partial-payments" aria-label="Pagamentos parciais ja registrados">
+            <div>
+              <strong>Ja pago nesta mesa</strong>
+              <b>{money(paidTotal)}</b>
+            </div>
+            <div className="pdv-partial-payments-list">
+              {previousPartials.flatMap((sale) => sale.payments.map((payment) => ({ sale, payment }))).map(({ sale, payment }) => (
+                <article key={payment.id}>
+                  <span>{new Date(sale.createdAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} | {payment.method}{payment.description ? ` | ${payment.description}` : ""}</span>
+                  <b>{money(payment.amount)}</b>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
         <div className="pdv-transfer-list">
           {cart.map((item, index) => {
             const isSelected = selectedIds.includes(item.id);
@@ -2880,7 +2958,11 @@ function PartialItemsModal({
           <button className="pdv-ghost-button" onClick={() => updateSelected([])} disabled={!selectedIds.length}>Limpar selecao</button>
           <button className="pdv-ghost-button" onClick={() => onResetPaidItems()}>Resetar estados</button>
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
-          <button className="pdv-primary-button" disabled={!selectedItems.length} onClick={confirm}>Fechar parcial</button>
+          {allPaid ? (
+            <button className="pdv-primary-button" onClick={onComplete}>Concluir mesa</button>
+          ) : (
+            <button className="pdv-primary-button" disabled={!selectedItems.length} onClick={confirm}>Fechar parcial</button>
+          )}
         </div>
       </section>
     </div>
@@ -3854,8 +3936,9 @@ function CancelItemsModal({
 }) {
   const [selectedId, setSelectedId] = useState(cart[0]?.id || "");
   const selected = cart.find((item) => item.id === selectedId) || null;
+  useModalConfirmShortcut(onClear, onCancel, true);
   return (
-    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+    <div className="pdv-modal-backdrop">
       <section className="pdv-payment-modal pdv-confirm-modal pdv-cancel-items-modal">
         <div className="pdv-section-head">
           <div>
