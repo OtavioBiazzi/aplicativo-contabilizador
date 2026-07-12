@@ -254,6 +254,8 @@ export function PdvApp({
   // podia terminar depois da mais nova e repor no banco uma versao desatualizada.
   const tableSaveChain = useRef<Promise<void>>(Promise.resolve());
   const tableSaveRevision = useRef(0);
+  const tableMutationRevision = useRef(0);
+  const persistedTableMutationRevision = useRef(0);
   const lastPersistedTableMeta = useRef<{ number: number; people: number; note: string } | null>(null);
   const lastProductLaunch = useRef<{ productId: string; at: number } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
@@ -322,6 +324,30 @@ export function PdvApp({
     });
   };
 
+  const resetTableMutationTracking = () => {
+    tableMutationRevision.current = 0;
+    persistedTableMutationRevision.current = 0;
+  };
+  const markTableMutation = () => {
+    tableMutationRevision.current += 1;
+  };
+  const updateLocalTableCart: React.Dispatch<React.SetStateAction<PdvCartItem[]>> = (next) => {
+    markTableMutation();
+    setTableCart(next);
+  };
+  const updateLocalTablePeople = (value: number) => {
+    markTableMutation();
+    setTablePeople(value);
+  };
+  const updateLocalTableNote = (value: string) => {
+    markTableMutation();
+    setTableNote(value);
+  };
+  const updateLocalSubtableNames: React.Dispatch<React.SetStateAction<string[]>> = (next) => {
+    markTableMutation();
+    setSubtableNames(next);
+  };
+
   useEffect(() => {
     if (!remoteTablesActive || !remoteSession) {
       return;
@@ -381,7 +407,7 @@ export function PdvApp({
     return next;
   };
 
-  const queueTableSave = async (payload: { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables: string[] }, refresh = true) => {
+  const queueTableSave = async (payload: { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables: string[]; mutationRevision: number }, refresh = true) => {
     const revision = ++tableSaveRevision.current;
     setTableSaveState("saving");
     const save = async () => {
@@ -392,6 +418,9 @@ export function PdvApp({
     tableSaveChain.current = queued;
     try {
       await queued;
+      if (payload.mutationRevision === tableMutationRevision.current) {
+        persistedTableMutationRevision.current = payload.mutationRevision;
+      }
       if (revision === tableSaveRevision.current) {
         setTableSaveState("saved");
         if (refresh) {
@@ -438,6 +467,9 @@ export function PdvApp({
     if (!activeTable || !snapshot || tableSaveState === "saving" || tableAutosaveTimer.current !== null) {
       return;
     }
+    if (tableMutationRevision.current !== persistedTableMutationRevision.current) {
+      return;
+    }
     const fresh = snapshot.tables.find((table) => table.number === activeTable.number);
     if (fresh && !samePdvValue(tableCart, fresh.items)) {
       applyFreshOpenTable(snapshot, activeTable.number);
@@ -455,6 +487,9 @@ export function PdvApp({
     if (!activeTable || tab !== "tables" || checkoutTarget || tableCloseMenuOpen) {
       return;
     }
+    if (tableMutationRevision.current === persistedTableMutationRevision.current) {
+      return;
+    }
     if (tableAutosaveTimer.current !== null) {
       window.clearTimeout(tableAutosaveTimer.current);
     }
@@ -469,7 +504,8 @@ export function PdvApp({
             people: tablePeople,
             note: tableNote,
             items: tableCart,
-            subtables: subtableNames
+            subtables: subtableNames,
+            mutationRevision: tableMutationRevision.current
           });
         } catch (error) {
           if (remoteTablesActive) {
@@ -536,7 +572,7 @@ export function PdvApp({
     const item = createCartItem(product, resolvedQuantity.quantity, [], resolvedQuantity.unitPrice, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "", resolvedQuantity.measureLabel, resolvedQuantity.finalTotal);
     const items = expandIndividualUnits(item, Boolean(snapshot?.settings.individualUnitItems));
     if (activeTable) {
-      setTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
+      updateLocalTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
       setQuery("");
       setQuantity(1);
       return;
@@ -578,6 +614,7 @@ export function PdvApp({
         await openPdvTable(table.number, 1, "");
         const fresh = (await getPdvSnapshot()).tables.find((item) => item.number === table.number);
         const opened = fresh || { ...table, status: "Ocupada" as PdvTableStatus, openedAt: new Date().toISOString(), people: 1, note: "", items: [] };
+        resetTableMutationTracking();
         setActiveTable(opened);
         setTableCart(opened.items);
         setTablePeople(opened.people || 1);
@@ -589,6 +626,7 @@ export function PdvApp({
         lastPersistedTableMeta.current = { number: table.number, people: opened.people || 1, note: opened.note || "" };
         return;
       }
+      resetTableMutationTracking();
       setActiveTable(table);
       setTableCart(table.items);
       setTablePeople(table.people || 1);
@@ -674,7 +712,7 @@ export function PdvApp({
       : [];
     const items = [mainItem, ...separateComplements].flatMap((item) => expandIndividualUnits(item, Boolean(snapshot?.settings.individualUnitItems)));
     if (activeTable) {
-      setTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
+      updateLocalTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
     } else {
       setCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
     }
@@ -687,7 +725,7 @@ export function PdvApp({
       return;
     }
     try {
-      await queueTableSave({ tableNumber: activeTable.number, people: tablePeople, note: tableNote, items: tableCart, subtables: subtableNames });
+      await queueTableSave({ tableNumber: activeTable.number, people: tablePeople, note: tableNote, items: tableCart, subtables: subtableNames, mutationRevision: tableMutationRevision.current });
     } catch (error) {
       if (remoteTablesActive) {
         queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
@@ -707,7 +745,7 @@ export function PdvApp({
       tableAutosaveTimer.current = null;
     }
     try {
-      await queueTableSave({ tableNumber: activeTable.number, people: tablePeople, note: tableNote, items: tableCart, subtables: subtableNames });
+      await queueTableSave({ tableNumber: activeTable.number, people: tablePeople, note: tableNote, items: tableCart, subtables: subtableNames, mutationRevision: tableMutationRevision.current });
     } catch (error) {
       if (remoteTablesActive) {
         queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
@@ -1098,21 +1136,21 @@ export function PdvApp({
             setQuery={setQuery}
             setQuantity={setQuantity}
             addProduct={addProduct}
-            setCart={setTableCart}
+            setCart={updateLocalTableCart}
             setDiscount={() => undefined}
             finishLabel="Fechar conta"
             onFinish={requestCloseTable}
             tablePeople={tablePeople}
             tableNote={tableNote}
             activeTableNumber={activeTable.number}
-            setTablePeople={setTablePeople}
-            setTableNote={setTableNote}
+            setTablePeople={updateLocalTablePeople}
+            setTableNote={updateLocalTableNote}
             selectedItemIds={selectedTableItemIds}
             setSelectedItemIds={setSelectedTableItemIds}
             settings={visibleSettings}
             currentSubtable={currentSubtable}
             subtableNames={subtableNames}
-            setSubtableNames={setSubtableNames}
+            setSubtableNames={updateLocalSubtableNames}
             setCurrentSubtable={setCurrentSubtable}
             onCloseSubtable={requestCloseSubtable}
             onDeleteSubtable={deleteSubtable}
