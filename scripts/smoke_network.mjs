@@ -41,7 +41,7 @@ const server = new LocalServer({
   savePdvDirectSale: (items, discount, payments, origin, operationId) => pdvStore.saveSale({ type: "Venda direta", items, discount, payments, originDevice: origin, operationId }),
   openPdvTable: (number, people, note) => pdvStore.openTable(number, people, note),
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
-  savePdvTableItems: (number, items) => pdvStore.saveTableItems(number, items),
+  savePdvTableItems: (number, items, subtables) => pdvStore.saveTableItems(number, items, subtables),
   closePdvTable: (number, payments, discount, origin) => pdvStore.closeTable(number, payments, discount, origin),
   savePdvTablePartial: (number, items, payments, discount, origin) => pdvStore.closeTablePartial(number, items, payments, discount, origin),
   updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
@@ -110,8 +110,17 @@ if (!(await pdvStore.getSnapshot()).recentSales.some((sale) => sale.type === "Ve
 
 const open = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });
 if (!open.ok) throw new Error(`Cliente nao conseguiu abrir mesa no servidor: ${await open.text()}`);
-const save = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/items", { method: "PUT", headers, body: JSON.stringify({ items: [item] }) });
+const remoteSubtableItem = { ...item, subtableName: "Cliente remoto" };
+const save = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/items", {
+  method: "PUT",
+  headers,
+  body: JSON.stringify({ items: [remoteSubtableItem], subtables: ["Cliente remoto", "Submesa vazia"] })
+});
 if (!save.ok) throw new Error(`Cliente nao conseguiu salvar item no servidor: ${await save.text()}`);
+const savedTable = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 7);
+if (!savedTable?.subtables?.includes("Cliente remoto") || !savedTable.subtables.includes("Submesa vazia") || savedTable.items[0]?.subtableName !== "Cliente remoto") {
+  throw new Error("Cliente nao preservou submesas ao salvar a mesa no servidor.");
+}
 const close = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/close", { method: "POST", headers, body: JSON.stringify({ payments: [{ id: crypto.randomUUID(), method: "Pix", amount: 12 }] }) });
 if (!close.ok) throw new Error(`Cliente nao conseguiu fechar mesa no servidor: ${await close.text()}`);
 

@@ -17,12 +17,12 @@ Este e o plano ativo de implementacao. Ele considera a base ja existente do apli
 
 ## Progresso da execucao
 
-- Fase 1: parcialmente atendida. A limpeza da venda, limpeza da pesquisa, selecao/rolagem do ultimo item, formula de peso, retorno da quantidade para 1 e protecao contra duplo lancamento possuem implementacao. Falta validacao manual do valor final em kg/grama e do fluxo continuo depois do fechamento.
-- Fase 2: parcialmente atendida. A tela filtra os itens pela submesa ativa, preserva os itens da mesa principal, o avulso aparece como `+` e a transferencia parcial/mesa destino possui smoke automatizado aprovado. Falta validar todos os estados de mesa visualmente.
+- Fase 1: parcialmente atendida. A limpeza da venda, limpeza da pesquisa, selecao/rolagem do ultimo item, formula de peso, retorno da quantidade para 1 e protecao contra duplo lancamento possuem implementacao. A edicao de preco de item por peso agora usa o valor final do item. Falta validacao manual do fluxo continuo depois do fechamento.
+- Fase 2: parcialmente atendida. A tela filtra os itens pela submesa ativa, preserva os itens da mesa principal, persiste submesa vazia imediatamente, o avulso aparece como `+` e a transferencia parcial/mesa destino possui smoke automatizado aprovado. Falta validar todos os estados de mesa visualmente.
 - Fase 3: parcialmente atendida. Fechamento parcial persistente, pagamentos multiplos, confirmacao, aproximacao e atalhos possuem base; o smoke do PDV confirmou itens pagos, parcial, fechamento total, misto e idempotencia. Falta validacao manual do fluxo completo.
 - Fase 4: parcialmente atendida. Cliente remoto, bloqueio de configuracoes operacionais, sincronizacao por atualizacao e salvamento de mesa no servidor foram verificados pelo smoke de rede. Falta validar o modo PDV em resolucao menor e a mesa aberta durante alteracoes remotas.
 - Fase 5: parcialmente atendida. Importacao segura, Cose, complementos e ordenacao automatica possuem base. Falta revisar todos os vinculos e conflitos no uso real.
-- Fase 6: parcialmente atendida. Contraste, textos longos, notificacoes e divisores redimensionaveis foram ajustados. As barras entre categorias/produtos e produtos/carrinho salvam a proporcao no computador; falta revisar todos os temas e telas menores.
+- Fase 6: parcialmente atendida. Contraste, textos longos, notificacoes e divisores redimensionaveis foram ajustados. As barras entre categorias/produtos e produtos/carrinho salvam a proporcao no computador; os controles `-` e `+` do carrinho foram reforcados e os cards de produtos se adaptam a telas estreitas. Falta revisar todos os temas e telas menores.
 - Fase 7: parcialmente atendida. Historico, relatorios e Excel integrados possuem base e os smoke tests confirmam mesa, venda, pagamentos e exportacao. Falta a conferencia visual final de valores, pagamentos mistos e exportacao.
 
 ## Fase 1 - Venda, carrinho e produtos por peso

@@ -1296,6 +1296,12 @@ function PdvSaleScreen(props: {
     : visibleCart.at(-1)?.id || "";
   const activeItem = visibleCart.find((item) => item.id === activeItemId) || visibleCart.at(-1) || null;
   const subtableNames = [...new Set([...(props.subtableNames || []), ...props.cart.map((item) => item.subtableName || "").filter(Boolean)])];
+  const persistSubtableNames = (nextNames: string[]) => {
+    props.setSubtableNames?.(nextNames);
+    if (props.activeTableNumber && props.savePdvTableItems) {
+      void props.savePdvTableItems(props.activeTableNumber, props.cart, nextNames).catch(() => undefined);
+    }
+  };
 
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
@@ -1492,8 +1498,8 @@ function PdvSaleScreen(props: {
         <div className="pdv-cart-head">
           <h2>Carrinho</h2>
           <div className="pdv-cart-density" aria-label="Tamanho dos itens do carrinho">
-            <button type="button" title="Diminuir itens do carrinho" aria-label="Diminuir itens do carrinho" disabled={cartDensity === "compact"} onClick={() => setCartDensity((current) => current === "comfortable" ? "normal" : "compact")}><Minus size={15} /></button>
-            <button type="button" title="Aumentar itens do carrinho" aria-label="Aumentar itens do carrinho" disabled={cartDensity === "comfortable"} onClick={() => setCartDensity((current) => current === "compact" ? "normal" : "comfortable")}><Plus size={15} /></button>
+            <button type="button" title="Diminuir itens do carrinho" aria-label="Diminuir itens do carrinho" disabled={cartDensity === "compact"} onClick={() => setCartDensity((current) => current === "comfortable" ? "normal" : "compact")}>-</button>
+            <button type="button" title="Aumentar itens do carrinho" aria-label="Aumentar itens do carrinho" disabled={cartDensity === "comfortable"} onClick={() => setCartDensity((current) => current === "compact" ? "normal" : "comfortable")}>+</button>
           </div>
         </div>
         <div
@@ -1651,7 +1657,7 @@ function PdvSaleScreen(props: {
             }}
             onCreate={(name) => {
               props.setCurrentSubtable?.(name);
-              props.setSubtableNames?.((current) => current.includes(name) ? current : [...current, name]);
+              persistSubtableNames(subtableNames.includes(name) ? subtableNames : [...subtableNames, name]);
               setSubtableManagerOpen(false);
             }}
             onRename={props.onRenameSubtable}
@@ -2249,6 +2255,7 @@ function QuickValueModal({ onCancel, onConfirm }: { onCancel: () => void; onConf
             <span>Tipo de lancamento</span>
             <select value={mode} onChange={(event) => { const nextMode = event.target.value; setMode(nextMode); setDescription((current) => current === mode ? nextMode : current); }}>
               <option>Venda avulsa</option>
+              <option>Mesa avulsa</option>
               <option>Onibus</option>
               <option>Ajuste de valor</option>
             </select>
@@ -2450,10 +2457,11 @@ function ItemEditModal({
   onCancel: () => void;
   onConfirm: (patch: Partial<Pick<PdvCartItem, "quantity" | "discount" | "note" | "unitPrice">>) => void;
 }) {
+  const isMeasured = /\bg\s*$/i.test(item.measureLabel || "");
   const [quantityText, setQuantityText] = useState(String(item.quantity).replace(".", ","));
   const [discountValueText, setDiscountValueText] = useState(String(item.discount || 0).replace(".", ","));
   const [discountPercentText, setDiscountPercentText] = useState("");
-  const [priceText, setPriceText] = useState(String(item.unitPrice).replace(".", ","));
+  const [priceText, setPriceText] = useState(String(isMeasured ? item.total : item.unitPrice).replace(".", ","));
   const [note, setNote] = useState(item.note || "");
   const gross = roundMoney(item.quantity * item.unitPrice);
   const discountByValue = Math.max(0, parseBrazilianNumber(discountValueText));
@@ -2471,7 +2479,8 @@ function ItemEditModal({
       return;
     }
     if (mode === "price") {
-      onConfirm({ unitPrice: Math.max(0, parseBrazilianNumber(priceText)) });
+      const value = Math.max(0, parseBrazilianNumber(priceText));
+      onConfirm({ unitPrice: isMeasured && item.quantity > 0 ? roundMoney(value / item.quantity) : value });
       return;
     }
     onConfirm({ note });
@@ -2517,7 +2526,7 @@ function ItemEditModal({
           )}
           {mode === "price" && (
             <label>
-              <span>Preco apenas neste lancamento</span>
+              <span>{isMeasured ? "Valor final apenas neste lancamento" : "Preco apenas neste lancamento"}</span>
               <input autoFocus inputMode="decimal" value={priceText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setPriceText(event.target.value)} />
             </label>
           )}
@@ -2529,9 +2538,9 @@ function ItemEditModal({
           )}
         </div>
         <div className="pdv-payment-summary">
-          <Metric title="Quantidade" value={String(item.quantity).replace(".", ",")} />
-          <Metric title="Unitario" value={money(item.unitPrice)} />
-          <Metric title="Total final" value={money(mode === "discount" ? previewTotal : item.total)} />
+          <Metric title={isMeasured ? "Peso" : "Quantidade"} value={isMeasured ? item.measureLabel || String(item.quantity).replace(".", ",") : String(item.quantity).replace(".", ",")} />
+          <Metric title={isMeasured ? "Preco por kg/g" : "Unitario"} value={money(item.unitPrice)} />
+          <Metric title="Total final" value={money(mode === "price" && isMeasured ? parseBrazilianNumber(priceText) : mode === "discount" ? previewTotal : item.total)} />
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>

@@ -4443,8 +4443,8 @@ body.floating-borderless .floating-bar {
 .pdv-product-grid button {
   display: grid;
   gap: 4px;
-  grid-template-rows: minmax(0, 1fr) auto;
-  min-height: var(--pdv-product-card-height, 74px);
+  grid-template-rows: minmax(2.28em, 1fr) minmax(1.08em, auto);
+  min-height: max(var(--pdv-product-card-height, 74px), 82px);
   padding: 10px 11px;
 }
 
@@ -4461,6 +4461,7 @@ body.floating-borderless .floating-bar {
   text-transform: uppercase;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  max-height: 2.28em;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -4474,6 +4475,16 @@ body.floating-borderless .floating-bar {
   line-height: 1.05;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 1440px) {
+  .pdv-product-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .pdv-product-grid button {
+    min-height: max(var(--pdv-product-card-height, 74px), 90px);
+  }
 }
 
 @media (min-width: 1600px) and (min-height: 850px) {
@@ -4490,9 +4501,12 @@ body.floating-borderless .floating-bar {
     gap: 6px;
   }
 
-  .pdv-direct-panel .pdv-category-grid button,
-  .pdv-direct-panel .pdv-product-grid button {
+  .pdv-direct-panel .pdv-category-grid button {
     min-height: 58px;
+  }
+
+  .pdv-direct-panel .pdv-product-grid button {
+    min-height: max(var(--pdv-product-card-height, 74px), 78px);
   }
 
   .pdv-direct-panel .pdv-product-grid {
@@ -4561,7 +4575,7 @@ body.floating-borderless .floating-bar {
 
 .pdv-cart-density button {
   display: grid;
-  width: 30px;
+  width: 34px;
   height: 28px;
   place-items: center;
   border: 0;
@@ -4569,6 +4583,9 @@ body.floating-borderless .floating-bar {
   background: #f3f8fb;
   color: #082942;
   cursor: pointer;
+  font-size: 1.2rem;
+  font-weight: 950;
+  line-height: 1;
 }
 
 .pdv-cart-density button:first-child {

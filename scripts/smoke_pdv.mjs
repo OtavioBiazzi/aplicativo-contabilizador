@@ -164,6 +164,14 @@ if (!tableSeven?.items.some((item) => item.subtableName === "Joao")) {
   throw new Error("Renomeacao/persistencia de submesa nao funcionou como esperado.");
 }
 
+await store.openTable(6);
+await store.saveTableItems(6, [], ["Cliente sem itens"]);
+const emptySubtableSnapshot = await store.getSnapshot();
+const tableSix = emptySubtableSnapshot.tables.find((table) => table.number === 6);
+if (!tableSix?.subtables?.includes("Cliente sem itens") || tableSix.items.length !== 0) {
+  throw new Error("Submesa vazia nao foi preservada ao salvar a mesa.");
+}
+
 await store.openTable(9);
 const transferItem = {
   id: crypto.randomUUID(),
