@@ -15,6 +15,16 @@ Este e o plano ativo de implementacao. Ele considera a base ja existente do apli
 - No modo Classico, manter a barra fixa conforme as versoes antigas, com suas configuracoes somente nesse modo.
 - Marcar uma fase como concluida somente depois de verificar o fluxo real correspondente.
 
+## Progresso da execucao
+
+- Fase 1: parcialmente atendida. A limpeza da venda, limpeza da pesquisa, selecao/rolagem do ultimo item, formula de peso e retorno da quantidade para 1 possuem implementacao. Falta validacao manual do valor final em kg/grama e do fluxo continuo depois do fechamento.
+- Fase 2: parcialmente atendida. A tela agora filtra os itens pela submesa ativa, preserva os itens da mesa principal e o avulso aparece como `+`. Falta validar transferencias, retorno para a mesa destino e todos os estados de mesa.
+- Fase 3: parcialmente atendida. Fechamento parcial persistente, pagamentos multiplos, confirmacao e atalhos possuem base. Falta validar o ciclo completo com itens pagos, aproximacao e pagamento misto.
+- Fase 4: parcialmente atendida. Cliente remoto, bloqueio de configuracoes operacionais e sincronizacao por atualizacao possuem base. Falta validar o modo PDV em resolucao menor e a mesa aberta durante alteracoes remotas.
+- Fase 5: parcialmente atendida. Importacao segura, Cose, complementos e ordenacao automatica possuem base. Falta revisar todos os vinculos e conflitos no uso real.
+- Fase 6: parcialmente atendida. Contraste, textos longos, notificacoes e divisores redimensionaveis foram ajustados. Falta revisar todos os temas e telas menores.
+- Fase 7: parcialmente atendida. Historico, relatorios e Excel integrados possuem base. Falta a conferencia final de valores, pagamentos mistos e exportacao.
+
 ## Fase 1 - Venda, carrinho e produtos por peso
 
 Objetivo: deixar a venda direta pronta para uso continuo e corrigir o calculo de peso.
