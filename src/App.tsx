@@ -5486,8 +5486,47 @@ function SettingsConfirmModal({
   onConfirm: () => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [focusedAction, setFocusedAction] = useState<"cancel" | "confirm">("cancel");
+
+  const runConfirm = async () => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "Tab") {
+        event.preventDefault();
+        setFocusedAction((current) => current === "cancel" ? "confirm" : "cancel");
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (focusedAction === "cancel") {
+          onCancel();
+        } else {
+          void runConfirm();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [busy, focusedAction, onCancel, onConfirm]);
+
   return (
-    <div className="modal-backdrop">
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal confirmation-modal">
         <div className="modal-head">
           <div>
@@ -5498,18 +5537,11 @@ function SettingsConfirmModal({
         </div>
         <p>{message}</p>
         <div className="modal-actions">
-          <button className="ghost-button" onClick={onCancel} disabled={busy}>Cancelar</button>
+          <button className={`ghost-button ${focusedAction === "cancel" ? "keyboard-selected" : ""}`} onClick={onCancel} disabled={busy}>Cancelar</button>
           <button
-            className={danger ? "danger-button" : "primary-button"}
+            className={`${danger ? "danger-button" : "primary-button"} ${focusedAction === "confirm" ? "keyboard-selected" : ""}`}
             disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              try {
-                await onConfirm();
-              } finally {
-                setBusy(false);
-              }
-            }}
+            onClick={() => void runConfirm()}
           >
             {busy ? "Processando..." : confirmLabel}
           </button>

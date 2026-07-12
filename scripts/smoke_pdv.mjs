@@ -124,6 +124,26 @@ const exactAmountSale = await store.saveSale({
 if (exactAmountSale.total !== 2 || exactAmountSale.payments[0]?.amount !== 2) {
   throw new Error("Venda direta de R$ 2,00 perdeu centavos indevidamente.");
 }
+const exactMeasuredSale = await store.saveSale({
+  type: "Venda direta",
+  items: [{
+    id: crypto.randomUUID(),
+    productId: baseProduct.id,
+    productName: "Mamao valor final exato",
+    categoryName: category.name,
+    quantity: 0.051,
+    measureLabel: "51 g",
+    baseUnitPrice: 40,
+    unitPrice: 40,
+    discount: 0,
+    total: 2
+  }],
+  discount: 0,
+  payments: [{ id: crypto.randomUUID(), method: "Pix", amount: 2 }]
+});
+if (exactMeasuredSale.total !== 2 || exactMeasuredSale.items[0]?.total !== 2) {
+  throw new Error("Produto por peso nao preservou o valor final informado de R$ 2,00.");
+}
 
 const cancelled = await store.saveSale({
   type: "Mesa",
