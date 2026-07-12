@@ -4232,9 +4232,7 @@ function SettingsPanel({
   const [settingsConfirm, setSettingsConfirm] = useState<{ title: string; message: string; action: () => void | Promise<void>; confirmLabel?: string; danger?: boolean } | null>(null);
   const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
   const effectiveSettingsOperationMode = remoteSession?.clientPolicy.operationMode || draft.operationMode;
-  const remoteLockedCategoryList: SettingsCategory[] = remoteCustomizationAllowed
-    ? ["operation", "files", "server", "advanced"]
-    : ["operation", "defaults", "profiles", "files", "server", "advanced"];
+  const remoteLockedCategoryList: SettingsCategory[] = ["operation", "defaults", "profiles", "files", "server", "advanced"];
   const remoteLockedCategories = new Set<SettingsCategory>(remoteLockedCategoryList);
   const remoteLockMessage = "So o computador servidor pode editar essa parte enquanto este app esta conectado como cliente. Desconecte do servidor para editar as configuracoes locais deste PC.";
 
