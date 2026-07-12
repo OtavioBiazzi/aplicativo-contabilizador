@@ -221,7 +221,7 @@ if (partialSale.status !== "Parcial" || partialSale.total !== 10) {
 }
 const partialSnapshot = await store.getSnapshot();
 const remainingTable = partialSnapshot.tables.find((table) => table.number === 7);
-if (!remainingTable?.items.length || remainingTable.items[0].quantity !== 2 || remainingTable.items[0].paidQuantity !== 1 || remainingTable.total !== 10) {
+if (!remainingTable?.items.length || remainingTable.items[0].quantity !== 2 || remainingTable.items[0].paidQuantity !== 1 || remainingTable.total !== 10 || remainingTable.status !== "Ocupada") {
   throw new Error("Fechamento parcial nao preservou o item pago e o saldo restante da mesa.");
 }
 await store.closeTable(7, [{ id: crypto.randomUUID(), method: "Dinheiro", amount: 10, received: 20, change: 10 }]);

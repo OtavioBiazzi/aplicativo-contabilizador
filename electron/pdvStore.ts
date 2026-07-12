@@ -580,7 +580,9 @@ export class PdvStore {
         paidQuantity: 0,
         subtableName: String(selection.subtableName || "").trim(),
         discount,
-        total: roundMoney(Math.max(0, quantity * source.unitPrice - discount))
+        total: /\bg\s*$/i.test(source.measureLabel || "")
+          ? roundMoney(Math.max(0, source.total * ratio))
+          : roundMoney(Math.max(0, quantity * source.unitPrice - discount))
       });
     }
     const remainingItems = sourceItems.flatMap((item) => {
@@ -593,7 +595,15 @@ export class PdvStore {
         return [];
       }
       const ratio = item.quantity > 0 ? remainingQuantity / item.quantity : 1;
-      return [{ ...item, quantity: remainingQuantity, discount: roundMoney(item.discount * ratio), total: roundMoney(Math.max(0, remainingQuantity * item.unitPrice - item.discount * ratio)) }];
+      const discount = roundMoney(item.discount * ratio);
+      return [{
+        ...item,
+        quantity: remainingQuantity,
+        discount,
+        total: /\bg\s*$/i.test(item.measureLabel || "")
+          ? roundMoney(Math.max(0, item.total * ratio))
+          : roundMoney(Math.max(0, remainingQuantity * item.unitPrice - discount))
+      }];
     });
     const nextTargetItems = targetTableNumber === sourceTableNumber
       ? [...remainingItems, ...movedItems]
@@ -701,7 +711,8 @@ export class PdvStore {
       insertSale(db, sale);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       writeTableItems(db, tableNumber, nextItems);
-      db.run("UPDATE table_sessions SET status = 'Fechamento' WHERE table_number = ?", [tableNumber]);
+      // O parcial registra os itens pagos, mas deixa o restante da conta aberto.
+      db.run("UPDATE table_sessions SET status = 'Ocupada' WHERE table_number = ?", [tableNumber]);
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");

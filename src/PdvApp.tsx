@@ -26,11 +26,12 @@ type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced
 type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; roundingStep?: number; roundingDirection?: RoundDirection };
 type PendingRemoteTable = { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; updatedAt: string };
 type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "categoryCardHeight" | "tableCardHeight">;
+type PdvOperationId = ReturnType<typeof crypto.randomUUID>;
 type CheckoutTarget =
-  | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean }
-  | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[] }
-  | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[] }
-  | { kind: "table-partial-manual"; table: PdvOpenTable; total: number; items: PdvCartItem[] };
+  | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean; operationId?: PdvOperationId }
+  | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[]; operationId: PdvOperationId }
+  | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
+  | { kind: "table-partial-manual"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId };
 
 const PAYMENT_METHODS: PdvPaymentMethod[] = ["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Nao definido"];
 const CLIENT_VISUAL_SETTINGS_KEY = "caixa.pdv.client-visual-settings";
@@ -141,7 +142,7 @@ function createCartItem(product: PdvProduct, quantity: number, complements: PdvC
     discount: 0,
     total: customTotal === undefined
       ? roundMoney(unitPrice * safeQuantity)
-      : Math.max(0, customTotal + complementTotal * safeQuantity),
+      : roundMoney(Math.max(0, customTotal + complementTotal * safeQuantity)),
     subtableName,
     complements
   };
@@ -171,6 +172,30 @@ async function remotePdvRequest<T>(session: PdvRemoteSession, path: string, opti
   return data as T;
 }
 
+function useModalConfirmShortcut(onConfirm: () => void, onCancel: () => void, enabled = true) {
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || document.querySelector(".pdv-nested-backdrop")) {
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+      if (event.key === "Enter" && !event.repeat) {
+        event.preventDefault();
+        onConfirm();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel, onConfirm, enabled]);
+}
+
 export function PdvApp({
   embedded = false,
   initialTab = "sale",
@@ -198,6 +223,7 @@ export function PdvApp({
   const [query, setQuery] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [cart, setCart] = useState<PdvCartItem[]>([]);
+  const [selectedDirectItemIds, setSelectedDirectItemIds] = useState<string[]>([]);
   const [discount, setDiscount] = useState(0);
   const [tableFilter, setTableFilter] = useState<PdvTableStatus | "Todas">("Todas");
   const [activeTable, setActiveTable] = useState<PdvOpenTable | null>(null);
@@ -224,11 +250,13 @@ export function PdvApp({
   const [tableSaveState, setTableSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [clientVisualSettings, setClientVisualSettings] = useState<Partial<PdvClientVisualSettings>>(readClientVisualSettings);
   const tableAutosaveTimer = useRef<number | null>(null);
+  const lastPersistedTableMeta = useRef<{ number: number; people: number; note: string } | null>(null);
   const lastProductLaunch = useRef<{ productId: string; at: number } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
-  const remoteProductsActive = Boolean(remoteSession && (tab === "products" || tab === "advanced"));
-  const remotePdvActive = remoteTablesActive || remoteProductsActive;
+  // O cliente usa o mesmo catalogo e as mesmas mesas do servidor em todas as abas do PDV.
+  // A venda direta continua sendo finalizada localmente, mas nunca pode ficar sem produtos por ler um catalogo local vazio.
+  const remotePdvActive = Boolean(remoteSession);
 
   const getPdvSnapshot = () => remotePdvActive && remoteSession
     ? remotePdvRequest<PdvSnapshot>(remoteSession, "/api/pdv/snapshot")
@@ -236,6 +264,15 @@ export function PdvApp({
   const openPdvTable = (tableNumber: number, people?: number, note?: string) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/open`, { method: "POST", body: JSON.stringify({ people, note }) }).then(() => undefined)
     : window.caixa.openPdvTable(tableNumber, people, note);
+  const ensureTableMeta = async (tableNumber: number, people: number, note: string) => {
+    const normalized = { number: tableNumber, people: Math.max(1, Math.floor(people || 1)), note: note || "" };
+    const previous = lastPersistedTableMeta.current;
+    if (previous && previous.number === normalized.number && previous.people === normalized.people && previous.note === normalized.note) {
+      return;
+    }
+    await openPdvTable(normalized.number, normalized.people, normalized.note);
+    lastPersistedTableMeta.current = normalized;
+  };
   const setPdvTableStatus = (tableNumber: number, status: PdvTableStatus) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/status`, { method: "PATCH", body: JSON.stringify({ status }) }).then(() => undefined)
     : window.caixa.setPdvTableStatus(tableNumber, status);
@@ -310,13 +347,13 @@ export function PdvApp({
     })();
     return () => { cancelled = true; };
   }, [remoteSession?.baseUrl, remoteTablesActive, reloadToken]);
-  const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount?: number) => remoteTablesActive && remoteSession
-    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
-    : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, crypto.randomUUID());
+  const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount = 0, operationId: PdvOperationId = crypto.randomUUID()) => remoteTablesActive && remoteSession
+    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
+    : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, operationId);
   const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[]) => window.caixa.saveDirectSale(items, directDiscount, payments);
-  const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount?: number, observations = "") => remoteTablesActive && remoteSession
-    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", headers: { "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ items, payments, discount: partialDiscount, observations }) }).then((result) => result.sale)
-    : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount, crypto.randomUUID(), observations);
+  const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount = 0, observations = "", operationId: PdvOperationId = crypto.randomUUID()) => remoteTablesActive && remoteSession
+    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ items, payments, discount: partialDiscount, observations }) }).then((result) => result.sale)
+    : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount, operationId, observations);
   const clientConfigurationBlocked = () => Promise.reject(new Error("Produtos e regras do PDV sao definidos somente no servidor."));
   const updatePdvProducts = (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => isRemoteClient
     ? clientConfigurationBlocked()
@@ -360,12 +397,23 @@ export function PdvApp({
     setSubtableNames((current) => samePdvValue(current, fresh.subtables || []) ? current : fresh.subtables || []);
     setSelectedTableItemIds((current) => current.filter((id) => fresh.items.some((item) => item.id === id)));
     setPartialSelectedItemIds((current) => current.filter((id) => fresh.items.some((item) => item.id === id && unpaidQuantity(item) > 0.009)));
+    lastPersistedTableMeta.current = { number: fresh.number, people: fresh.people || 1, note: fresh.note || "" };
   };
 
   useEffect(() => {
     load();
     return window.caixa.onPdvChanged(load);
   }, [remoteSession?.baseUrl, remotePdvActive, reloadToken]);
+
+  useEffect(() => {
+    if (!activeTable || !snapshot || tableSaveState === "saving" || tableAutosaveTimer.current !== null) {
+      return;
+    }
+    const fresh = snapshot.tables.find((table) => table.number === activeTable.number);
+    if (fresh && !samePdvValue(tableCart, fresh.items)) {
+      applyFreshOpenTable(snapshot, activeTable.number);
+    }
+  }, [snapshot, activeTable?.number, tableCart, tableSaveState]);
 
   useEffect(() => {
     setTab(initialTab);
@@ -386,10 +434,10 @@ export function PdvApp({
       tableAutosaveTimer.current = null;
       void (async () => {
         try {
-          await openPdvTable(activeTable.number, tablePeople, tableNote);
+          await ensureTableMeta(activeTable.number, tablePeople, tableNote);
           await savePdvTableItems(activeTable.number, tableCart, subtableNames);
           setTableSaveState("saved");
-          await load();
+          void load();
         } catch (error) {
           if (remoteTablesActive) {
             queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
@@ -478,6 +526,7 @@ export function PdvApp({
     try {
       await saveDirectPdvSale(items, discount, payments);
       setCart([]);
+      setSelectedDirectItemIds([]);
       setDiscount(0);
       setCheckoutTarget(null);
       setToast("Venda direta finalizada.");
@@ -504,6 +553,7 @@ export function PdvApp({
         setTableSaveState("idle");
         setSelectedTableItemIds([]);
         setCurrentSubtable("");
+        lastPersistedTableMeta.current = { number: table.number, people: opened.people || 1, note: opened.note || "" };
         return;
       }
       setActiveTable(table);
@@ -514,6 +564,7 @@ export function PdvApp({
       setTableSaveState("idle");
       setSelectedTableItemIds([]);
       setCurrentSubtable("");
+      lastPersistedTableMeta.current = { number: table.number, people: table.people || 1, note: table.note || "" };
     } catch (error) {
       setTableSaveState("error");
       setToast(error instanceof Error ? error.message : "Nao foi possivel abrir a mesa no servidor.");
@@ -603,7 +654,7 @@ export function PdvApp({
       return;
     }
     try {
-      await openPdvTable(activeTable.number, tablePeople, tableNote);
+      await ensureTableMeta(activeTable.number, tablePeople, tableNote);
       await savePdvTableItems(activeTable.number, tableCart, subtableNames);
     } catch (error) {
       if (remoteTablesActive) {
@@ -620,7 +671,7 @@ export function PdvApp({
       return false;
     }
     try {
-      await openPdvTable(activeTable.number, tablePeople, tableNote);
+      await ensureTableMeta(activeTable.number, tablePeople, tableNote);
       await savePdvTableItems(activeTable.number, tableCart, subtableNames);
     } catch (error) {
       if (remoteTablesActive) {
@@ -672,7 +723,7 @@ export function PdvApp({
       return;
     }
     await persistTableBeforeAction();
-    setCheckoutTarget({ kind: "table-partial-items", table: activeTable, total: roundMoney(selected.reduce((total, item) => total + item.total, 0)), items: selected });
+    setCheckoutTarget({ kind: "table-partial-items", table: activeTable, total: roundMoney(selected.reduce((total, item) => total + item.total, 0)), items: selected, operationId: crypto.randomUUID() });
   };
 
   const requestCloseSubtable = async (name: string) => {
@@ -685,7 +736,7 @@ export function PdvApp({
       return;
     }
     await persistTableBeforeAction();
-    setCheckoutTarget({ kind: "table-partial-items", table: activeTable, total: roundMoney(selected.reduce((total, item) => total + item.total, 0)), items: selected });
+    setCheckoutTarget({ kind: "table-partial-items", table: activeTable, total: roundMoney(selected.reduce((total, item) => total + item.total, 0)), items: selected, operationId: crypto.randomUUID() });
   };
 
   const deleteSubtable = async (name: string) => {
@@ -786,7 +837,7 @@ export function PdvApp({
     };
     setPartialManualValue("");
     setPartialValueModalOpen(false);
-    setCheckoutTarget({ kind: "table-partial-manual", table: activeTable, total: manualItem.total, items: [manualItem] });
+    setCheckoutTarget({ kind: "table-partial-manual", table: activeTable, total: manualItem.total, items: [manualItem], operationId: crypto.randomUUID() });
   };
 
   const confirmCloseTable = async (payments: PdvPayment[]) => {
@@ -797,7 +848,7 @@ export function PdvApp({
     try {
       await savePdvTableItems(activeTable.number, tableCart, subtableNames);
       const tableDiscount = checkoutTarget?.kind === "table" ? checkoutTarget.discount : 0;
-      await closePdvTable(activeTable.number, payments, tableDiscount);
+      await closePdvTable(activeTable.number, payments, tableDiscount, checkoutTarget?.kind === "table" ? checkoutTarget.operationId : undefined);
       setToast(`Mesa ${String(activeTable.number).padStart(3, "0")} fechada.`);
       setActiveTable(null);
       setTableCart([]);
@@ -811,12 +862,13 @@ export function PdvApp({
   const confirmPartialTable = async (target: Extract<CheckoutTarget, { kind: "table-partial-items" | "table-partial-manual" }>, payments: PdvPayment[], observations = "") => {
     setBusy(true);
     try {
-      await savePdvTablePartial(target.table.number, target.items, payments, 0, observations);
+      await savePdvTablePartial(target.table.number, target.items, payments, 0, observations, target.operationId);
       if (target.kind === "table-partial-items") {
         const selectedById = new Map(target.items.map((item) => [item.id, item.quantity]));
         setTableCart((current) => current.map((item) => selectedById.has(item.id) ? { ...item, paidQuantity: roundMoney(Math.min(item.quantity, (item.paidQuantity || 0) + (selectedById.get(item.id) || 0))) } : item));
         setPartialSelectedItemIds([]);
       }
+      setActiveTable((current) => current ? { ...current, status: "Ocupada" } : current);
       setCheckoutTarget(null);
       setToast(target.kind === "table-partial-items" ? "Parcial por itens registrada." : "Parcial manual registrada.");
       const refreshed = await load();
@@ -899,6 +951,8 @@ export function PdvApp({
             addProduct={addProduct}
             setCart={setCart}
             setDiscount={setDiscount}
+            selectedItemIds={selectedDirectItemIds}
+            setSelectedItemIds={setSelectedDirectItemIds}
             finishLabel="Receber e finalizar"
             onFinish={finishDirectSale}
             settings={visibleSettings}
@@ -976,7 +1030,7 @@ export function PdvApp({
         {tab === "tables" && activeTable && (
           <PdvSaleScreen
             title={`Mesa ${String(activeTable.number).padStart(3, "0")}`}
-            subtitle={`Aberta ${shortTime(activeTable.openedAt) || "agora"}${snapshot.settings.tablePeopleEnabled ? ` | ${activeTable.people || 1} pessoa(s)` : ""} | ${tableSaveState === "saving" ? "salvando..." : tableSaveState === "saved" ? "salvo" : tableSaveState === "error" ? "erro ao salvar" : "autosave ativo"}`}
+            subtitle={`Aberta ${shortTime(activeTable.openedAt) || "agora"}${snapshot.settings.tablePeopleEnabled ? ` | ${activeTable.people || 1} pessoa(s)` : ""}${tableSaveState === "error" ? " | erro ao salvar" : ""}`}
             snapshot={snapshot}
             products={products}
             activeCategory={activeCategory}
@@ -1079,7 +1133,7 @@ export function PdvApp({
           }}
           onCloseTotal={(total, discount, initialPayments) => {
             setTableCloseMenuOpen(false);
-            setCheckoutTarget({ kind: "table", table: activeTable, total, discount, initialPayments });
+            setCheckoutTarget({ kind: "table", table: activeTable, total, discount, initialPayments, operationId: crypto.randomUUID() });
           }}
         />
       )}
@@ -1231,7 +1285,7 @@ function PdvSaleScreen(props: {
   });
   const [cartListHeight, setCartListHeight] = useState(() => {
     const saved = Number(window.localStorage.getItem("caixa.pdv.cart-list-height"));
-    return Number.isFinite(saved) ? Math.min(900, Math.max(108, saved)) : 320;
+    return Number.isFinite(saved) ? Math.min(900, Math.max(88, saved)) : Math.max(240, Math.min(440, window.innerHeight - 280));
   });
   const [categoryPaneHeight, setCategoryPaneHeight] = useState(() => {
     const saved = Number(window.localStorage.getItem("caixa.pdv.category-pane-height"));
@@ -1243,6 +1297,7 @@ function PdvSaleScreen(props: {
   const activeItem = visibleCart.find((item) => item.id === activeItemId) || visibleCart.at(-1) || null;
   const subtableNames = [...new Set([...(props.subtableNames || []), ...props.cart.map((item) => item.subtableName || "").filter(Boolean)])];
   const cartAreaRef = useRef<HTMLElement | null>(null);
+  const previousVisibleItemIds = useRef<string[]>([]);
   const persistSubtableNames = (nextNames: string[]) => {
     props.setSubtableNames?.(nextNames);
     if (props.activeTableNumber && props.savePdvTableItems) {
@@ -1296,9 +1351,9 @@ function PdvSaleScreen(props: {
       } else if (axis === "vertical") {
         setCategoryPaneHeight(Math.min(280, Math.max(96, initialCategoryHeight + nextEvent.clientY - startY)));
       } else {
-        const controlsSpace = cartDensity === "compact" ? 118 : 164;
-        const maxHeight = Math.max(108, Math.min(900, cartAreaHeight - controlsSpace));
-        setCartListHeight(Math.min(maxHeight, Math.max(108, initialCartListHeight + nextEvent.clientY - startY)));
+        const controlsSpace = cartDensity === "compact" ? 96 : 142;
+        const maxHeight = Math.max(88, Math.min(900, cartAreaHeight - controlsSpace));
+        setCartListHeight(Math.min(maxHeight, Math.max(88, initialCartListHeight + nextEvent.clientY - startY)));
       }
     };
     const stop = () => {
@@ -1314,15 +1369,25 @@ function PdvSaleScreen(props: {
       return;
     }
     const selectedId = props.selectedItemIds?.[0];
+    const nextIds = visibleCart.map((item) => item.id);
+    const previousIds = previousVisibleItemIds.current;
     if (!visibleCart.length) {
       props.setSelectedItemIds([]);
+      previousVisibleItemIds.current = [];
       return;
     }
-    const stillVisible = selectedId && visibleCart.some((item) => item.id === selectedId);
-    if (!stillVisible || selectedId !== visibleCart[visibleCart.length - 1].id) {
-      props.setSelectedItemIds([visibleCart[visibleCart.length - 1].id]);
+    const addedId = nextIds.find((id) => !previousIds.includes(id));
+    if (!selectedId) {
+      props.setSelectedItemIds([addedId || visibleCart[visibleCart.length - 1].id]);
+    } else if (!nextIds.includes(selectedId)) {
+      const previousIndex = previousIds.indexOf(selectedId);
+      const fallback = nextIds[Math.min(Math.max(0, previousIndex), nextIds.length - 1)] || nextIds.at(-1);
+      props.setSelectedItemIds(fallback ? [fallback] : []);
+    } else if (addedId) {
+      props.setSelectedItemIds([addedId]);
     }
-  }, [visibleCart.length, visibleCart.at(-1)?.id, props.currentSubtable]);
+    previousVisibleItemIds.current = nextIds;
+  }, [visibleCart, props.currentSubtable]);
 
   useEffect(() => {
     if (!activeItemId || !cartListRef.current) return;
@@ -1338,6 +1403,16 @@ function PdvSaleScreen(props: {
     const currentIndex = Math.max(0, visibleCart.findIndex((item) => item.id === currentId));
     const nextIndex = Math.max(0, Math.min(visibleCart.length - 1, currentIndex + direction));
     props.setSelectedItemIds([visibleCart[nextIndex].id]);
+  };
+
+  const selectAfterRemoving = (id: string) => {
+    if (!props.setSelectedItemIds) {
+      return;
+    }
+    const index = visibleCart.findIndex((item) => item.id === id);
+    const remaining = visibleCart.filter((item) => item.id !== id);
+    const fallback = remaining[Math.min(Math.max(0, index), remaining.length - 1)] || remaining.at(-1);
+    props.setSelectedItemIds(fallback ? [fallback.id] : []);
   };
 
   const repeatLastItem = () => {
@@ -1659,9 +1734,8 @@ function PdvSaleScreen(props: {
             message={`${removeRequest.productName} sera removido desta conta.`}
             onCancel={() => setRemoveRequest(null)}
             onConfirm={() => {
-              const fallback = props.cart.filter((row) => row.id !== removeRequest.id).at(-1);
+              selectAfterRemoving(removeRequest.id);
               props.setCart((current) => current.filter((row) => row.id !== removeRequest.id));
-              props.setSelectedItemIds?.(fallback ? [fallback.id] : []);
               setRemoveRequest(null);
             }}
           />
@@ -1677,9 +1751,8 @@ function PdvSaleScreen(props: {
               setCancelTableRequest(false);
             }}
             onRemove={(item) => {
-              const fallback = props.cart.filter((row) => row.id !== item.id).at(-1);
+              selectAfterRemoving(item.id);
               props.setCart((current) => current.filter((row) => row.id !== item.id));
-              props.setSelectedItemIds?.(fallback ? [fallback.id] : []);
               setCancelTableRequest(false);
             }}
           />
@@ -1819,6 +1892,7 @@ function PaymentModal({
   const [confirming, setConfirming] = useState(false);
   const [observations, setObservations] = useState("");
   const [focusedPaymentIndex, setFocusedPaymentIndex] = useState(0);
+  const finishLocked = useRef(false);
   const paid = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
   const remaining = Math.max(0, roundMoney(total - paid));
 
@@ -1843,7 +1917,7 @@ function PaymentModal({
   };
 
   const finish = async () => {
-    if (submitting || busy) {
+    if (finishLocked.current || submitting || busy) {
       return;
     }
     if (payments.length > 0 && remaining > 0.009) {
@@ -1855,11 +1929,13 @@ function PaymentModal({
       return;
     }
     setConfirming(false);
+    finishLocked.current = true;
     setSubmitting(true);
     try {
       const resolvedPayments = payments.length ? payments : [{ id: crypto.randomUUID(), method: "Nao definido" as const, amount: total }];
       await onConfirm(resolvedPayments.map((payment) => ({ ...payment, description: observations.trim() || payment.description })), observations);
     } catch (error) {
+      finishLocked.current = false;
       setSubmitting(false);
       setNotice(error instanceof Error ? error.message : "Nao foi possivel registrar o pagamento. Confira a conexao e tente novamente.");
     }
@@ -1877,6 +1953,12 @@ function PaymentModal({
     if (!paymentEntryMethod && paymentShortcut[event.key]) {
       event.preventDefault();
       openPaymentMethod(paymentShortcut[event.key]);
+      return;
+    }
+    // Ignora a repeticao de uma tecla mantida ao abrir o modal anterior.
+    // Isso evita que Enter vindo do valor avulso abra Dinheiro automaticamente.
+    if (event.key === "Enter" && event.repeat) {
+      event.preventDefault();
       return;
     }
     if (!paymentEntryMethod && (event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === "ArrowLeft" || event.key === "ArrowUp")) {
@@ -2268,6 +2350,7 @@ function PartialValueModal({
     setConfirming(false);
     onConfirm(roundMoney(value));
   };
+  useModalConfirmShortcut(confirm, onCancel, !confirming && !notice);
 
   return (
     <div className="pdv-modal-backdrop">
@@ -2336,6 +2419,7 @@ function MoveItemModal({
     }
     onConfirm(referenceIndex);
   };
+  useModalConfirmShortcut(confirm, onCancel, !notice);
 
   return (
     <div className="pdv-modal-backdrop">
@@ -2436,7 +2520,7 @@ function ItemEditModal({
   const [discountPercentText, setDiscountPercentText] = useState("");
   const [priceText, setPriceText] = useState(String(isMeasured ? item.total : item.unitPrice).replace(".", ","));
   const [note, setNote] = useState(item.note || "");
-  const gross = roundMoney(item.quantity * item.unitPrice);
+  const gross = isMeasured ? roundMoney(item.total + (item.discount || 0)) : roundMoney(item.quantity * item.unitPrice);
   const discountByValue = Math.max(0, parseBrazilianNumber(discountValueText));
   const discountByPercent = roundMoney(gross * (Math.max(0, parseBrazilianNumber(discountPercentText)) / 100));
   const previewDiscount = Math.min(gross, roundMoney(discountByValue + discountByPercent));
@@ -2457,12 +2541,12 @@ function ItemEditModal({
       return;
     }
     if (mode === "discount") {
-      onConfirm({ discount: previewDiscount });
+      onConfirm(isMeasured ? { discount: previewDiscount, total: previewTotal } : { discount: previewDiscount });
       return;
     }
     if (mode === "price") {
       const value = Math.max(0, parseBrazilianNumber(priceText));
-      onConfirm({ unitPrice: isMeasured && item.quantity > 0 ? roundMoney(value / item.quantity) : value });
+      onConfirm(isMeasured ? { total: value, unitPrice: item.quantity > 0 ? roundMoney(value / item.quantity) : item.unitPrice } : { unitPrice: value });
       return;
     }
     onConfirm({ note });
@@ -2475,6 +2559,7 @@ function ItemEditModal({
       : mode === "price"
         ? "Alterar preco"
         : "Observacao do item";
+  useModalConfirmShortcut(confirm, onCancel);
 
   return (
     <div className="pdv-modal-backdrop">
@@ -2559,7 +2644,11 @@ function TransferListModal({
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const selectedItems = cart.filter((item) => selectedIds.includes(item.id));
-  const selectedTotal = roundMoney(selectedItems.reduce((total, item) => total + transferQuantity(item, quantities[item.id]) * item.unitPrice, 0));
+  const selectedTotal = roundMoney(selectedItems.reduce((total, item) => {
+    const quantity = transferQuantity(item, quantities[item.id]);
+    const ratio = item.quantity > 0 ? quantity / item.quantity : 1;
+    return total + (isMeasuredCartItem(item) ? item.total * ratio : quantity * item.unitPrice);
+  }, 0));
   const targetTable = tables.find((table) => table.number === targetTableNumber);
   const existingSubtables = [...new Set([...(targetTable?.subtables || []), ...(targetTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
   const toggle = (id: string) => {
@@ -2598,6 +2687,7 @@ function TransferListModal({
       setNotice(error instanceof Error ? error.message : "Nao foi possivel transferir os produtos. Tente novamente.");
     }
   };
+  useModalConfirmShortcut(() => { void confirm(); }, onCancel, !busy && !notice);
 
   return (
     <div className="pdv-modal-backdrop">
@@ -2642,7 +2732,9 @@ function TransferListModal({
                 Qtde
                 <input value={quantities[item.id] ?? String(item.quantity).replace(".", ",")} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} />
               </label>
-              <strong>{money(roundMoney(transferQuantity(item, quantities[item.id]) * item.unitPrice))}</strong>
+              <strong>{money(roundMoney(isMeasuredCartItem(item)
+                ? item.total * (item.quantity > 0 ? transferQuantity(item, quantities[item.id]) / item.quantity : 1)
+                : transferQuantity(item, quantities[item.id]) * item.unitPrice))}</strong>
             </button>
           ))}
           {!cart.length && <div className="pdv-empty">Nenhum produto para transferir.</div>}
@@ -2676,17 +2768,6 @@ function PartialItemsModal({
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultSelectedIds.filter((id) => cart.some((item) => item.id === id && unpaidQuantity(item) > 0.009)));
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, String(item.quantity).replace(".", ",")])));
 
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCancel();
-      }
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onCancel]);
-  
   const updateSelected = (next: string[] | ((current: string[]) => string[])) => {
     setSelectedIds((current) => {
       const resolved = typeof next === "function" ? next(current) : next;
@@ -2703,13 +2784,21 @@ function PartialItemsModal({
       ...item,
       quantity: q,
       discount: roundMoney(item.discount * ratio),
-      total: roundMoney(Math.max(0, item.unitPrice * q - item.discount * ratio)),
+      total: isMeasuredCartItem(item)
+        ? roundMoney(Math.max(0, item.total * ratio))
+        : roundMoney(Math.max(0, item.unitPrice * q - item.discount * ratio)),
       paidQuantity: 0
     };
   });
   
   const selectedTotal = roundMoney(selectedItems.reduce((total, item) => total + item.total, 0));
   const remainingTotal = roundMoney(cart.reduce((total, item) => total + unpaidItemTotal(item), 0) - selectedTotal);
+  const confirm = () => {
+    if (selectedItems.length) {
+      onConfirm(selectedItems);
+    }
+  };
+  useModalConfirmShortcut(confirm, onCancel, selectedItems.length > 0);
   
   const toggle = (id: string) => {
     const current = cart.find((item) => item.id === id);
@@ -2742,7 +2831,9 @@ function PartialItemsModal({
             const isPaid = remainingQuantity <= 0.009;
             const qVal = quantities[item.id] ?? String(remainingQuantity).replace(".", ",");
             const parsedQ = parseBrazilianNumber(qVal);
-            const currentItemTotal = isSelected ? roundMoney(parsedQ * item.unitPrice) : unpaidItemTotal(item);
+            const currentItemTotal = isSelected
+              ? roundMoney(isMeasuredCartItem(item) ? item.total * (item.quantity > 0 ? parsedQ / item.quantity : 1) : parsedQ * item.unitPrice)
+              : unpaidItemTotal(item);
             return (
               <button
                 className={`${isSelected ? "selected" : ""} ${isPaid ? "locked paid" : ""}`.trim()}
@@ -2789,7 +2880,7 @@ function PartialItemsModal({
           <button className="pdv-ghost-button" onClick={() => updateSelected([])} disabled={!selectedIds.length}>Limpar selecao</button>
           <button className="pdv-ghost-button" onClick={() => onResetPaidItems()}>Resetar estados</button>
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
-          <button className="pdv-primary-button" disabled={!selectedItems.length} onClick={() => onConfirm(selectedItems)}>Fechar parcial</button>
+          <button className="pdv-primary-button" disabled={!selectedItems.length} onClick={confirm}>Fechar parcial</button>
         </div>
       </section>
     </div>
@@ -2857,6 +2948,7 @@ function TransferItemModal({
       setNotice(error instanceof Error ? error.message : "Nao foi possivel transferir o produto. Tente novamente.");
     }
   };
+  useModalConfirmShortcut(() => { void confirm(); }, onCancel, !busy && !notice);
 
   return (
     <div className="pdv-modal-backdrop">
@@ -2934,7 +3026,7 @@ function QuantityPriceModal({
     ? typedValue
     : roundMoney(typedValue * Math.max(0, saleQuantity));
   const unitPrice = isMeasured ? product.price : typedValue;
-  const shownGrams = isKg ? roundMoney(saleQuantity * 1000) : isGram ? roundMoney(saleQuantity) : rawQuantity;
+  const shownGrams = isMeasured ? Math.max(1, Math.round(isKg ? saleQuantity * 1000 : saleQuantity)) : rawQuantity;
   const unitLabel = isMeasured ? "g" : product.unit || "UNID";
   const append = (value: string) => {
     if (activeField === "value") {
@@ -2972,7 +3064,8 @@ function QuantityPriceModal({
       quantity: saleQuantity,
       measureLabel: `${isMeasured ? shownGrams : rawQuantity} ${unitLabel}`,
       unitPrice,
-      finalTotal: isMeasured && activeField === "value" ? typedValue : undefined
+      // O peso e apenas referencia visual: o total digitado sempre vence.
+      finalTotal: isMeasured ? typedValue : undefined
     });
   };
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -3020,7 +3113,7 @@ function QuantityPriceModal({
               <span>{isKg ? "Valor final desejado" : "Valor unitario"}</span>
               <input autoFocus={isMeasured} inputMode="decimal" value={valueText} onFocus={(event) => { setActiveField("value"); event.currentTarget.select(); }} onChange={(event) => onValueChange(event.target.value)} />
             </label>
-            {isMeasured && <p className="pdv-helper-note">Edite o peso para calcular o valor, ou edite o valor para calcular o peso automaticamente.</p>}
+            {isMeasured && <p className="pdv-helper-note">O valor final informado e mantido exatamente. Os gramas servem apenas como referencia visual.</p>}
             <div className="pdv-calculated-price">
               <span>Final do item</span>
               <strong>{money(finalPrice)}</strong>
@@ -3821,11 +3914,19 @@ function PdvConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const confirmed = useRef(false);
+  const runConfirm = () => {
+    if (confirmed.current) {
+      return;
+    }
+    confirmed.current = true;
+    onConfirm();
+  };
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        onConfirm();
+        runConfirm();
       }
       if (event.key === "Escape") {
         event.preventDefault();
@@ -3848,7 +3949,7 @@ function PdvConfirmModal({
         <p className="pdv-confirm-message">{message}</p>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
-          <button className="pdv-primary-button" onClick={onConfirm}><Check size={16} /> Confirmar</button>
+          <button className="pdv-primary-button" onClick={runConfirm}><Check size={16} /> Confirmar</button>
         </div>
       </section>
     </div>
@@ -3856,15 +3957,14 @@ function PdvConfirmModal({
 }
 
 function HistoryScreen({ snapshot, readOnly = false, onChanged }: { snapshot: PdvSnapshot; readOnly?: boolean; onChanged: () => void }) {
-  const [filters, setFilters] = useState({
-    from: "",
-    to: "",
-    query: "",
-    type: "Todos",
-    payment: "Todos",
-    status: "Todos",
-    table: "",
-    origin: "Todos"
+  const [filters, setFilters] = useState(() => {
+    const fallback = { from: "", to: "", query: "", type: "Todos", payment: "Todos", status: "Todos", table: "", origin: "Todos" };
+    try {
+      const stored = JSON.parse(window.localStorage.getItem("caixa.pdv.history.filters") || "{}");
+      return { ...fallback, ...stored };
+    } catch {
+      return fallback;
+    }
   });
   const [selectedSale, setSelectedSale] = useState<PdvSale | null>(null);
   const [saleMenu, setSaleMenu] = useState<{ x: number; y: number; sale: PdvSale } | null>(null);
@@ -3872,6 +3972,10 @@ function HistoryScreen({ snapshot, readOnly = false, onChanged }: { snapshot: Pd
   const [cancelRequest, setCancelRequest] = useState<PdvSale | null>(null);
   const [notice, setNotice] = useState("");
   const sales = filterSales(snapshot.recentSales, filters);
+
+  useEffect(() => {
+    window.localStorage.setItem("caixa.pdv.history.filters", JSON.stringify(filters));
+  }, [filters]);
 
   const cancelSale = (sale: PdvSale) => {
     setCancelRequest(sale);
@@ -4102,15 +4206,15 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
           </label>
           <label className="pdv-setting-line">
             <span>Altura dos produtos</span>
-            <input type="number" min={56} max={110} value={visible.productCardHeight || 74} onChange={(event) => onChange({ productCardHeight: Number(event.target.value || 74) })} />
+            <input type="number" min={44} max={110} value={visible.productCardHeight || 74} onChange={(event) => onChange({ productCardHeight: Number(event.target.value || 74) })} />
           </label>
           <label className="pdv-setting-line">
             <span>Altura das categorias</span>
-            <input type="number" min={44} max={90} value={visible.categoryCardHeight || 64} onChange={(event) => onChange({ categoryCardHeight: Number(event.target.value || 64) })} />
+            <input type="number" min={36} max={90} value={visible.categoryCardHeight || 64} onChange={(event) => onChange({ categoryCardHeight: Number(event.target.value || 64) })} />
           </label>
           <label className="pdv-setting-line">
             <span>Altura das mesas</span>
-            <input type="number" min={74} max={130} value={visible.tableCardHeight || 96} onChange={(event) => onChange({ tableCardHeight: Number(event.target.value || 96) })} />
+            <input type="number" min={58} max={130} value={visible.tableCardHeight || 96} onChange={(event) => onChange({ tableCardHeight: Number(event.target.value || 96) })} />
           </label>
         </article>
         <article>
@@ -4202,15 +4306,15 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           </label>
           <label className="pdv-setting-line">
             <span>Altura dos produtos</span>
-            <input type="number" min={56} max={110} value={snapshot.settings.productCardHeight || 74} onChange={(event) => saveSetting({ productCardHeight: Number(event.target.value || 74) })} />
+            <input type="number" min={44} max={110} value={snapshot.settings.productCardHeight || 74} onChange={(event) => saveSetting({ productCardHeight: Number(event.target.value || 74) })} />
           </label>
           <label className="pdv-setting-line">
             <span>Altura das categorias</span>
-            <input type="number" min={44} max={90} value={snapshot.settings.categoryCardHeight || 64} onChange={(event) => saveSetting({ categoryCardHeight: Number(event.target.value || 64) })} />
+            <input type="number" min={36} max={90} value={snapshot.settings.categoryCardHeight || 64} onChange={(event) => saveSetting({ categoryCardHeight: Number(event.target.value || 64) })} />
           </label>
           <label className="pdv-setting-line">
             <span>Altura das mesas</span>
-            <input type="number" min={74} max={130} value={snapshot.settings.tableCardHeight || 96} onChange={(event) => saveSetting({ tableCardHeight: Number(event.target.value || 96) })} />
+            <input type="number" min={58} max={130} value={snapshot.settings.tableCardHeight || 96} onChange={(event) => saveSetting({ tableCardHeight: Number(event.target.value || 96) })} />
           </label>
           <label className="pdv-switch-line">
             <input type="checkbox" checked={Boolean(snapshot.settings.stackIdenticalItems)} onChange={(event) => saveSetting({ stackIdenticalItems: event.target.checked })} />
@@ -4464,6 +4568,10 @@ function mergeCartItem(items: PdvCartItem[], incoming: PdvCartItem, stackIdentic
   });
 }
 
+function isMeasuredCartItem(item: PdvCartItem): boolean {
+  return /\bg\s*$/i.test(item.measureLabel || "");
+}
+
 function expandIndividualUnits(item: PdvCartItem, enabled = false): PdvCartItem[] {
   if (!enabled || !Number.isInteger(item.quantity) || item.quantity <= 1 || item.measureLabel) {
     return [item];
@@ -4520,7 +4628,9 @@ function splitCartItemForTransfer(item: PdvCartItem, quantity: number, subtableN
     quantity,
     subtableName,
     discount,
-    total: Math.max(0, roundMoney(quantity * item.unitPrice - discount))
+    total: isMeasuredCartItem(item)
+      ? Math.max(0, roundMoney(item.total * ratio))
+      : Math.max(0, roundMoney(quantity * item.unitPrice - discount))
   };
 }
 
@@ -4551,7 +4661,9 @@ function subtractCartItemQuantity(items: PdvCartItem[], id: string, quantity: nu
       ...item,
       quantity: nextQuantity,
       discount,
-      total: Math.max(0, roundMoney(nextQuantity * item.unitPrice - discount))
+      total: isMeasuredCartItem(item)
+        ? Math.max(0, roundMoney(item.total * ratio))
+        : Math.max(0, roundMoney(nextQuantity * item.unitPrice - discount))
     }];
   });
 }
@@ -4564,14 +4676,16 @@ function updateCartItem(items: PdvCartItem[], id: string, patch: Partial<Pick<Pd
     const quantity = patch.quantity ?? item.quantity;
     const discount = Math.max(0, patch.discount ?? item.discount);
     const unitPrice = patch.unitPrice ?? item.unitPrice;
+    const measureLabel = patch.measureLabel ?? item.measureLabel;
+    const isMeasured = /\bg\s*$/i.test(measureLabel || "");
     return {
       ...item,
       quantity,
       unitPrice,
       discount,
       note: patch.note ?? item.note,
-      measureLabel: patch.measureLabel ?? item.measureLabel,
-      total: patch.total ?? Math.max(0, roundMoney(quantity * unitPrice - discount))
+      measureLabel,
+      total: patch.total ?? (isMeasured ? item.total : Math.max(0, roundMoney(quantity * unitPrice - discount)))
     };
   });
 }

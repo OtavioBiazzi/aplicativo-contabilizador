@@ -1016,6 +1016,7 @@ export function App() {
   const remoteManualDisconnect = useRef(false);
   const remoteReconnectTimer = useRef<number | null>(null);
   const remoteReconnectAttempt = useRef(0);
+  const remotePdvRefreshTimer = useRef<number | null>(null);
   const autoConnectionAttemptKey = useRef<string | null>(null);
   const combinedEntries = useMemo(() => [...entries].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()), [entries]);
   const todayEntries = useMemo(() => filterEntriesByLocalDate(combinedEntries, currentDateKey), [combinedEntries, currentDateKey]);
@@ -1065,6 +1066,10 @@ export function App() {
       if (remoteReconnectTimer.current !== null) {
         window.clearTimeout(remoteReconnectTimer.current);
         remoteReconnectTimer.current = null;
+      }
+      if (remotePdvRefreshTimer.current !== null) {
+        window.clearTimeout(remotePdvRefreshTimer.current);
+        remotePdvRefreshTimer.current = null;
       }
       remoteSocket.current?.close();
       remoteSocket.current = null;
@@ -1314,9 +1319,11 @@ export function App() {
       setRemoteMessage("Tempo real ativo.");
     };
     remoteSocket.current.onmessage = (event) => {
+      let isPdvChange = false;
       try {
         const message = JSON.parse(String(event.data || "{}")) as { type?: string };
         if (message.type === "pdv-changed") {
+          isPdvChange = true;
           setRemotePdvNonce((nonce) => nonce + 1);
         }
       } catch {
@@ -1324,6 +1331,19 @@ export function App() {
       }
       const current = remoteSessionRef.current;
       if (current) {
+        if (isPdvChange) {
+          if (remotePdvRefreshTimer.current !== null) {
+            window.clearTimeout(remotePdvRefreshTimer.current);
+          }
+          // Agrupa eventos consecutivos de mesa sem mudar o protocolo da conexao.
+          remotePdvRefreshTimer.current = window.setTimeout(() => {
+            remotePdvRefreshTimer.current = null;
+            void refreshRemote(current).catch((error) => {
+              setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar o cliente remoto.");
+            });
+          }, 80);
+          return;
+        }
         void refreshRemote(current).catch((error) => {
           setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar o cliente remoto.");
         });
@@ -1452,6 +1472,10 @@ export function App() {
     if (remoteReconnectTimer.current !== null) {
       window.clearTimeout(remoteReconnectTimer.current);
       remoteReconnectTimer.current = null;
+    }
+    if (remotePdvRefreshTimer.current !== null) {
+      window.clearTimeout(remotePdvRefreshTimer.current);
+      remotePdvRefreshTimer.current = null;
     }
     socket?.close();
     remoteSocket.current = null;

@@ -17,12 +17,12 @@ Este e o plano ativo de implementacao. Ele considera a base ja existente do apli
 
 ## Progresso da execucao
 
-- Fase 1: parcialmente atendida. A limpeza da venda, limpeza da pesquisa, selecao/rolagem do ultimo item, formula de peso, retorno da quantidade para 1 e protecao contra duplo lancamento possuem implementacao. Produtos medidos agora preservam o valor final informado, inclusive no banco, sem exigir quantidade x preco unitario. Falta validacao manual do fluxo continuo depois do fechamento.
+- Fase 1: parcialmente atendida. A limpeza da venda, limpeza da pesquisa, selecao/rolagem do ultimo item, formula de peso, retorno da quantidade para 1 e protecao contra duplo lancamento possuem implementacao. Produtos medidos agora preservam o valor final informado, inclusive no banco, sem exigir quantidade x preco unitario. Falta validar a selecao apos excluir um item, o uso de venda avulsa por teclado e o fluxo continuo depois do fechamento.
 - Fase 2: parcialmente atendida. A tela filtra os itens pela submesa ativa, preserva os itens da mesa principal, persiste submesa vazia imediatamente, o avulso aparece como `+` e a transferencia parcial/mesa destino possui smoke automatizado aprovado. Falta validar todos os estados de mesa visualmente.
-- Fase 3: parcialmente atendida. Fechamento parcial persistente, pagamentos multiplos, confirmacao opcional configuravel, aproximacao, atalhos e navegacao por setas nas formas de pagamento possuem base; o smoke do PDV confirmou itens pagos, parcial, fechamento total, misto e idempotencia. Falta validacao manual do fluxo completo.
-- Fase 4: parcialmente atendida. O fluxo de rede das mesas voltou a seguir a base direta e comprovada da versao `0.3.13`: abrir mesa, salvar itens e recarregar, sem bloqueio offline, polling extra ou filas concorrentes. O cliente continua impedido de alterar produtos e regras do servidor. Falta validar o modo PDV em resolucao menor e a mesa aberta durante alteracoes remotas.
+- Fase 3: parcialmente atendida. Fechamento parcial persistente, pagamentos multiplos, confirmacao opcional configuravel, aproximacao, atalhos e navegacao por setas nas formas de pagamento possuem base; o smoke do PDV confirmou itens pagos, parcial, fechamento total, misto e idempotencia. Cada fechamento recebe chave unica, o Enter possui trava imediata e o parcial volta a deixar a mesa ocupada com os itens pagos bloqueados. Falta validacao manual do fluxo completo.
+- Fase 4: parcialmente atendida. O fluxo de rede das mesas voltou a seguir a base direta e comprovada da versao `0.3.13`: abrir mesa, salvar itens e recarregar, sem bloqueio offline, polling extra ou filas concorrentes. O cliente continua impedido de alterar produtos e regras do servidor. Eventos remotos consecutivos de mesa sao agrupados por poucos milissegundos para reduzir requisicoes repetidas, mantendo o protocolo existente. Falta confirmar em dois computadores que o cliente recebe e exibe itens de mesa aberta em todos os cenarios.
 - Fase 5: parcialmente atendida. Importacao segura, Cose, complementos e ordenacao automatica possuem base. Falta revisar todos os vinculos e conflitos no uso real.
-- Fase 6: parcialmente atendida. Contraste, textos longos, notificacoes e divisores redimensionaveis foram ajustados. As barras entre categorias/produtos, produtos/carrinho e lista/total do carrinho salvam a proporcao no computador; o carrinho compacto pode crescer mais em telas baixas e a grade respeita a quantidade de produtos escolhida pelo operador. Falta revisar todos os temas e telas menores.
+- Fase 6: parcialmente atendida. Contraste, textos longos, notificacoes e divisores redimensionaveis foram ajustados. As barras entre categorias/produtos, produtos/carrinho e lista/total do carrinho salvam a proporcao no computador; o carrinho compacto pode crescer mais em telas baixas e a grade respeita a quantidade de produtos escolhida pelo operador. Alturas e espacamentos foram reduzidos em telas baixas. Falta revisar todos os temas e telas menores.
 - Fase 7: parcialmente atendida. Historico, relatorios e Excel integrados possuem base e os smoke tests confirmam mesa, venda, pagamentos e exportacao. Falta a conferencia visual final de valores, pagamentos mistos e exportacao.
 
 ## Fase 1 - Venda, carrinho e produtos por peso
@@ -34,12 +34,16 @@ Objetivo: deixar a venda direta pronta para uso continuo e corrigir o calculo de
 - Limpar automaticamente a pesquisa depois de lancar um produto.
 - Selecionar o ultimo produto lancado e rolar o carrinho ate ele.
 - Investigar e eliminar duplicacao eventual do ultimo produto.
+- Ao remover um item, manter a selecao no proximo item visivel; se nao existir proximo, selecionar o anterior, sem pular para o ultimo item sem motivo.
 - Permitir informar peso para calcular valor e valor final para calcular o peso correspondente.
 - Respeitar exatamente o valor final manual informado pelo usuario.
 - Usar gramas somente como informacao, sem recalcular ou alterar o valor final confirmado.
+- Simplificar a exibicao de gramas quando o valor gerar muitos digitos, sem perder o valor final registrado.
 - Alterar preco e desconto sobre o total final do item, nunca sobre o peso.
 - Pressionar Enter no modal de peso/valor deve confirmar e enviar o produto.
 - Aplicar desconto sobre o total da Venda por um modal integrado.
+- Permitir selecionar itens no carrinho da Venda com o mesmo fluxo de teclado e mouse usado na Mesa.
+- Corrigir o fluxo de venda avulsa para que Enter nao registre automaticamente como Dinheiro antes da escolha do metodo.
 
 ## Fase 2 - Mesas e submesas
 
@@ -70,8 +74,10 @@ Objetivo: tornar o fechamento seguro, persistente e navegavel pelo teclado.
 - Abrir o fechamento com foco inicial em Fechar total.
 - Usar setas para navegar entre opcoes e Enter para entrar ou confirmar.
 - Usar Esc para retornar ou fechar o elemento temporario superior.
+- Padronizar Enter como confirmacao em todos os modais que possuem acao explicita de Confirmar, sem acionar a primeira forma de pagamento por engano.
 - Adicionar atalhos F1/F2/F3/F4 para Debito, Credito, Pix e Dinheiro.
 - Permitir aceitar a confirmacao final com Enter novamente.
+- Bloquear uma segunda confirmacao enquanto o fechamento anterior ainda estiver sendo salvo, inclusive para dois Enters muito rapidos.
 - Exibir dicas de atalhos somente ao passar o mouse.
 - Configurar aproximacao da divisao por pessoa: sem aproximacao, R$ 0,25, R$ 0,50 ou outro valor.
 - Garantir que troco nunca entre no total vendido ou no Excel.
@@ -85,7 +91,10 @@ Objetivo: manter as regras do servidor e sincronizar mesas com seguranca.
 - Impedir que o cliente conectado altere produtos, precos, regras ou configuracoes operacionais.
 - Permitir ao cliente somente preferencias visuais locais autorizadas.
 - Fazer o cliente seguir modo e preferencias definidos pelo servidor.
+- Garantir que o cliente conectado carregue e mostre corretamente os itens de cada mesa, inclusive com a mesa ja aberta.
 - Atualizar a mesa aberta quando houver alteracao remota, sem sobrescrever edicao local ativa.
+- Enviar alteracoes de mesa de forma imediata e nao bloqueante: atualizar a tela local primeiro e concluir a persistencia/sincronizacao em segundo plano, com uma unica requisicao por alteracao consolidada.
+- Medir e eliminar repeticoes de requisicao que possam fazer cliente/servidor processarem o mesmo lancamento mais de uma vez.
 - Definir politica configuravel para queda de rede: bloqueio ou fila offline controlada.
 - Garantir identificadores unicos, confirmacao de recebimento e ausencia de duplicidade.
 
@@ -126,6 +135,7 @@ Objetivo: deixar o app legivel e adaptavel em notebook e 1920x1080.
 Objetivo: confirmar que todas as operacoes chegam aos mesmos registros e preparar a entrega.
 
 - Buscar no Historico por descricao de pagamento, mesa, valor exato/faixa, produto e forma de pagamento.
+- Persistir a data e os filtros selecionados no Historico ao trocar de aba ou reabrir a tela, ate o usuario alterar ou limpar manualmente.
 - Mostrar detalhes dos produtos da venda ou mesa em modal proprio.
 - Garantir que Venda direta, Mesa, Submesa e fechamento parcial usem o mesmo Historico.
 - Separar Debito, Credito, Pix, Dinheiro e outros nos Relatorios.
