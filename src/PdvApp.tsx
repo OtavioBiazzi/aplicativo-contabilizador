@@ -3551,7 +3551,7 @@ function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCos
       <div className="pdv-category-manager">
         {snapshot.categories.map((category) => (
           <button key={category.id} className={category.active ? "" : "inactive"} disabled={readOnly} onClick={() => setEditingCategory(category)}>
-            {category.favorite ? "[Fav] " : ""}{category.name} <small>{category.active ? "ativa" : "oculta"} | {category.favorite ? "favorita | " : ""}ordem {category.sortOrder}</small>
+            {category.favorite ? "[Fav] " : ""}{category.name} <small>{category.active ? "ativa" : "oculta"}{category.favorite ? " | favorita" : ""}</small>
           </button>
         ))}
       </div>
@@ -3663,7 +3663,6 @@ function ProductEditorModal({ product, categories, products, onCancel, onSave }:
               <option value="grama">Grama</option>
             </select>
           </label>
-          <label><span>Ordem</span><input type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value || 0) })} /></label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Ativo</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.showOnPdv} onChange={(event) => setDraft({ ...draft, showOnPdv: event.target.checked })} /> Exibir no PDV</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.favorite} onChange={(event) => setDraft({ ...draft, favorite: event.target.checked })} /> Favorito no topo</label>
@@ -3724,7 +3723,6 @@ function CategoryEditorModal({ category, onCancel, onSave }: { category: PdvCate
         </div>
         <div className="pdv-editor-grid">
           <label><span>Nome</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-          <label><span>Ordem</span><input type="number" value={draft.sortOrder} onChange={(event) => setDraft({ ...draft, sortOrder: Number(event.target.value || 0) })} /></label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Categoria ativa</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.favorite} onChange={(event) => setDraft({ ...draft, favorite: event.target.checked })} /> Categoria favorita no topo</label>
         </div>

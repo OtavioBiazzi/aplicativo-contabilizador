@@ -4726,6 +4726,12 @@ body.floating-borderless .floating-bar {
   line-height: 1.5;
 }
 
+.pdv-confirm-modal h1,
+.pdv-confirm-modal .pdv-confirm-message,
+.pdv-confirm-modal .pdv-eyebrow {
+  color: #0b3151 !important;
+}
+
 .pdv-context-menu button {
   min-height: 38px;
   border-bottom: 1px solid #d8e8f2;
@@ -5263,7 +5269,9 @@ body.floating-borderless .floating-bar {
 
 .pdv-table-card strong {
   grid-column: 1;
-  font-size: 1.7rem;
+  min-width: 0;
+  overflow: hidden;
+  font-size: clamp(1.15rem, 1.5vw, 1.55rem);
   line-height: 1;
 }
 
@@ -5288,7 +5296,8 @@ body.floating-borderless .floating-bar {
 
 .pdv-table-note {
   overflow: hidden;
-  font-size: 0.74rem;
+  max-width: 100%;
+  font-size: 0.68rem;
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
