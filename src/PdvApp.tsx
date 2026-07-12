@@ -3020,14 +3020,14 @@ function QuantityPriceModal({
             <label>
               <span>{isMeasured ? "Peso em gramas" : "Informe a Quantidade"} <b>{unitLabel}</b></span>
               <div className="pdv-inline-stepper">
-                <input autoFocus={!isKg} inputMode="decimal" value={quantityText} onFocus={(event) => { setActiveField("quantity"); event.currentTarget.select(); }} onChange={(event) => onQuantityChange(event.target.value)} />
+                <input autoFocus={!isMeasured} inputMode="decimal" value={quantityText} onFocus={(event) => { setActiveField("quantity"); event.currentTarget.select(); }} onChange={(event) => onQuantityChange(event.target.value)} />
                 <button onClick={() => onQuantityChange(String(Math.max(0, rawQuantity - 1)).replace(".", ","))}>-</button>
                 <button onClick={() => onQuantityChange(String(rawQuantity + 1).replace(".", ","))}>+</button>
               </div>
             </label>
             <label>
               <span>{isKg ? "Valor final desejado" : "Valor unitario"}</span>
-              <input autoFocus={isKg} inputMode="decimal" value={valueText} onFocus={(event) => { setActiveField("value"); event.currentTarget.select(); }} onChange={(event) => onValueChange(event.target.value)} />
+              <input autoFocus={isMeasured} inputMode="decimal" value={valueText} onFocus={(event) => { setActiveField("value"); event.currentTarget.select(); }} onChange={(event) => onValueChange(event.target.value)} />
             </label>
             {isMeasured && <p className="pdv-helper-note">Edite o peso para calcular o valor, ou edite o valor para calcular o peso automaticamente.</p>}
             <div className="pdv-calculated-price">
