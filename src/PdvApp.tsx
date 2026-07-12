@@ -230,6 +230,7 @@ export function PdvApp({
   const [clientVisualSettings, setClientVisualSettings] = useState<Partial<PdvClientVisualSettings>>(readClientVisualSettings);
   const tableAutosaveTimer = useRef<number | null>(null);
   const remoteTableWriteChains = useRef<Map<number, Promise<void>>>(new Map());
+  const remoteTableRevisions = useRef<Map<number, number>>(new Map());
   const snapshotLoadSequence = useRef(0);
   const lastProductLaunch = useRef<{ productId: string; at: number } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
@@ -250,12 +251,20 @@ export function PdvApp({
       await window.caixa.savePdvTableItems(tableNumber, items, subtables);
       return;
     }
+    const revision = (remoteTableRevisions.current.get(tableNumber) || 0) + 1;
+    remoteTableRevisions.current.set(tableNumber, revision);
     const previous = remoteTableWriteChains.current.get(tableNumber) || Promise.resolve();
     const write = previous.catch(() => undefined).then(async () => {
-      await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, {
+      const result = await remotePdvRequest<{ ok: boolean; table?: PdvOpenTable | null }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, {
         method: "PUT",
         body: JSON.stringify({ items, subtables })
       });
+      if (result.table && remoteTableRevisions.current.get(tableNumber) === revision) {
+        setSnapshot((current) => current
+          ? { ...current, tables: current.tables.map((table) => table.number === tableNumber ? result.table! : table) }
+          : current
+        );
+      }
     });
     remoteTableWriteChains.current.set(tableNumber, write);
     try {
@@ -434,7 +443,7 @@ export function PdvApp({
   }, [remotePdvActive, remoteSession?.baseUrl]);
 
   useEffect(() => {
-    if (!remoteSession || !activeTable || !snapshot || checkoutTarget || tableCloseMenuOpen || tableSaveState === "saving" || remoteOfflineBlocked) {
+    if (!remoteSession || !activeTable || !snapshot || checkoutTarget || tableCloseMenuOpen || tableSaveState === "saving" || remoteOfflineBlocked || remoteTableWriteChains.current.has(activeTable.number)) {
       return;
     }
     applyFreshOpenTable(snapshot, activeTable.number);
