@@ -2988,7 +2988,7 @@ function QuantityPriceModal({
       : (isKg ? rawQuantity / 1000 : rawQuantity))
     : rawQuantity;
   const finalPrice = isMeasured
-    ? activeField === "value" ? typedValue : roundMoney(saleQuantity * product.price)
+    ? typedValue
     : roundMoney(typedValue * Math.max(0, saleQuantity));
   const unitPrice = isMeasured ? product.price : typedValue;
   const shownGrams = isKg ? roundMoney(saleQuantity * 1000) : isGram ? roundMoney(saleQuantity) : rawQuantity;
