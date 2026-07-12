@@ -1,6 +1,7 @@
 import type { CashBreakdownItem, CashDetails, DaySummary, LedgerEntry, RoundDirection, SplitDetails } from "./types.js";
 
-export const ROUNDING_STEPS = [0.05, 0.1, 0.25, 0.5, 0.75, 1, 5];
+// R$ 0,01 representa o valor exato em centavos, ou seja, sem aproximacao adicional.
+export const ROUNDING_STEPS = [0.01, 0.25, 0.5, 0.75, 1, 5];
 
 const DENOMINATIONS = [
   200,

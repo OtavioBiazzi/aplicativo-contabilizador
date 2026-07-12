@@ -2661,7 +2661,7 @@ function SplitBox({
           <span>Multiplo</span>
           <select value={roundingStep} onChange={(event) => onRoundingStep(Number(event.target.value))}>
             {ROUNDING_STEPS.map((step) => (
-              <option key={step} value={step}>{formatCurrency(step)}</option>
+              <option key={step} value={step}>{step === 0.01 ? "Sem aproximacao" : formatCurrency(step)}</option>
             ))}
           </select>
         </label>
@@ -4909,7 +4909,7 @@ function SettingsPanel({
           <label className="field"><span>Pessoas padrao</span><input type="number" min={1} value={draft.defaultPeople} onChange={(event) => update("defaultPeople", Number(event.target.value || 1))} /></label>
           <label className="field"><span>Arredondamento</span>
             <select value={draft.defaultRoundingStep} onChange={(event) => update("defaultRoundingStep", Number(event.target.value))}>
-              {ROUNDING_STEPS.map((step) => <option value={step} key={step}>{formatCurrency(step)}</option>)}
+              {ROUNDING_STEPS.map((step) => <option value={step} key={step}>{step === 0.01 ? "Sem aproximacao" : formatCurrency(step)}</option>)}
             </select>
           </label>
           <label className="field"><span>Direcao</span>
