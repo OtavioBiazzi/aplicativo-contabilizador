@@ -1880,9 +1880,20 @@ function PaymentModal({
     }
   };
 
+  useEffect(() => {
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (paymentEntryMethod || confirming || notice) {
+        return;
+      }
+      handleReceiveKeyDown(event as unknown as React.KeyboardEvent);
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [paymentEntryMethod, confirming, notice, submitting, busy, payments, remaining, observations]);
+
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-receive-modal" onKeyDown={handleReceiveKeyDown} tabIndex={-1}>
+      <section className="pdv-payment-modal pdv-receive-modal" tabIndex={-1}>
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Fechar conta</span>
@@ -2075,9 +2086,20 @@ function PaymentAmountModal({
     }
   };
 
+  useEffect(() => {
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (notice) {
+        return;
+      }
+      handleKeyDown(event as unknown as React.KeyboardEvent);
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [notice, invalidAmount, invalidCash, activeField, amountText, receivedText]);
+
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
-      <section className="pdv-payment-modal pdv-payment-amount-modal" onKeyDown={handleKeyDown} tabIndex={-1}>
+      <section className="pdv-payment-modal pdv-payment-amount-modal" tabIndex={-1}>
         <div className="pdv-window-title">
           <strong>Informar pagamento</strong>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
@@ -2926,9 +2948,20 @@ function QuantityPriceModal({
     }
   };
 
+  useEffect(() => {
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (notice) {
+        return;
+      }
+      handleKeyDown(event as unknown as React.KeyboardEvent);
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [notice, activeField, quantityText, valueText, rawQuantity, typedValue]);
+
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-quantity-modal" tabIndex={-1} autoFocus onKeyDown={handleKeyDown}>
+      <section className="pdv-payment-modal pdv-quantity-modal" tabIndex={-1} autoFocus>
         <div className="pdv-window-title">
           <strong>Informe a Quantidade</strong>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
@@ -3252,9 +3285,17 @@ function TableCloseMenu({
     }
   };
 
+  useEffect(() => {
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      handleKeyDown(event as unknown as React.KeyboardEvent);
+    };
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [focusedAction, total, discount]);
+
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-close-menu" tabIndex={-1} autoFocus onKeyDown={handleKeyDown}>
+      <section className="pdv-payment-modal pdv-close-menu" tabIndex={-1} autoFocus>
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Fechar conta</span>
