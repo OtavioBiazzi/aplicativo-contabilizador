@@ -1476,7 +1476,7 @@ function PdvSaleScreen(props: {
           } as React.CSSProperties}
         >
           {props.products.map((product) => (
-            <button key={product.id} onClick={(event) => props.addProduct(product, event.shiftKey)}>
+            <button key={product.id} title={product.name} onClick={(event) => props.addProduct(product, event.shiftKey)}>
               <strong>{product.name}</strong>
               <span>{props.activeCategory === "todos" ? `${product.categoryName} | ` : ""}{money(product.price)}{product.unitMode === "kg" ? "/kg" : product.unitMode === "grama" ? "/g" : ""}</span>
             </button>
@@ -1520,6 +1520,7 @@ function PdvSaleScreen(props: {
             <article
               key={item.id}
               data-cart-item-id={item.id}
+              title={item.productName}
               className={`${activeItemId === item.id ? "selected" : ""} ${unpaidQuantity(item) <= 0.009 ? "paid" : ""}`.trim()}
               onClick={() => props.setSelectedItemIds?.([item.id])}
               onContextMenu={(event) => {

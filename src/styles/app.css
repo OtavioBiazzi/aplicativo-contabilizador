@@ -4598,6 +4598,24 @@ body.floating-borderless .floating-bar {
   cursor: context-menu;
 }
 
+.pdv-cart-list article > div {
+  min-width: 0;
+}
+
+.pdv-cart-list article > div strong {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.pdv-cart-list article > b {
+  white-space: nowrap;
+}
+
 .pdv-cart-area.cart-compact .pdv-cart-list article {
   gap: 6px;
   padding: 5px 7px;
@@ -6191,6 +6209,13 @@ input[type="date"] {
 
 .pdv-close-menu .pdv-action-row small {
   margin-left: 6px;
+  opacity: 0;
+  font-size: 0.78rem !important;
+  transition: opacity 0.15s ease;
+}
+
+.pdv-close-menu .pdv-action-row button:hover small,
+.pdv-close-menu .pdv-action-row button:focus-visible small {
   opacity: 0.76;
 }
 
