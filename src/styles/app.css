@@ -5278,21 +5278,16 @@ body.floating-borderless .floating-bar {
   place-content: center;
   min-height: var(--pdv-table-card-height, 96px);
   border-style: dashed;
-  background: #1675bf;
+  background: #064f95;
   text-align: center;
 }
 
-.pdv-quick-value-card strong,
-.pdv-quick-value-card span,
-.pdv-quick-value-card small {
-  grid-column: 1 / -1;
-  grid-row: auto;
-  justify-self: center;
-  margin: 0;
-}
-
 .pdv-quick-value-card strong {
-  font-size: 2rem;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  justify-self: center;
+  font-size: 2.4rem;
+  line-height: 1;
 }
 
 .pdv-product-table,

@@ -1016,8 +1016,6 @@ export function PdvApp({
                 ))}
               <button className="pdv-table-card pdv-quick-value-card" type="button" onClick={() => setQuickValueModalOpen(true)}>
                 <strong>+</strong>
-                <span>Avulso</span>
-                <small>Registrar valor sem produto</small>
               </button>
             </div>
             {tableMenu && (
@@ -1251,7 +1249,23 @@ function PdvSaleScreen(props: {
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
 }) {
-  const subtotal = roundMoney(props.cart.reduce((total, item) => total + (props.activeTableNumber ? unpaidItemTotal(item) : item.total), 0));
+  const visibleCart = props.activeTableNumber && props.settings.subtablesEnabled
+    ? props.cart.filter((item) => (item.subtableName || "") === (props.currentSubtable || ""))
+    : props.cart;
+  const updateVisibleCart = (updater: (items: PdvCartItem[]) => PdvCartItem[]) => {
+    if (!props.activeTableNumber || !props.settings.subtablesEnabled) {
+      props.setCart(updater);
+      return;
+    }
+    props.setCart((current) => {
+      const visibleIds = new Set(current.filter((item) => (item.subtableName || "") === (props.currentSubtable || "")).map((item) => item.id));
+      const nextVisible = updater(current.filter((item) => visibleIds.has(item.id)));
+      let visibleIndex = 0;
+      const next = current.map((item) => visibleIds.has(item.id) ? nextVisible[visibleIndex++] : item);
+      return [...next, ...nextVisible.slice(visibleIndex)];
+    });
+  };
+  const subtotal = roundMoney(visibleCart.reduce((total, item) => total + (props.activeTableNumber ? unpaidItemTotal(item) : item.total), 0));
   const finalTotal = Math.max(0, roundMoney(subtotal - props.discount));
   const cartListRef = useRef<HTMLDivElement | null>(null);
   const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: PdvCartItem } | null>(null);
@@ -1267,8 +1281,10 @@ function PdvSaleScreen(props: {
     const saved = window.localStorage.getItem("caixa.pdv.cart-density");
     return saved === "compact" || saved === "comfortable" ? saved : "normal";
   });
-  const activeItemId = props.selectedItemIds?.[0] || props.cart.at(-1)?.id || "";
-  const activeItem = props.cart.find((item) => item.id === activeItemId) || props.cart.at(-1) || null;
+  const activeItemId = props.selectedItemIds?.[0] && visibleCart.some((item) => item.id === props.selectedItemIds?.[0])
+    ? props.selectedItemIds[0]
+    : visibleCart.at(-1)?.id || "";
+  const activeItem = visibleCart.find((item) => item.id === activeItemId) || visibleCart.at(-1) || null;
   const subtableNames = [...new Set([...(props.subtableNames || []), ...props.cart.map((item) => item.subtableName || "").filter(Boolean)])];
 
   useEffect(() => {
@@ -1291,38 +1307,42 @@ function PdvSaleScreen(props: {
   }, [cartDensity]);
 
   useEffect(() => {
-    if (!props.setSelectedItemIds || !props.cart.length) {
+    if (!props.setSelectedItemIds) {
       return;
     }
     const selectedId = props.selectedItemIds?.[0];
-    const stillExists = selectedId && props.cart.some((item) => item.id === selectedId);
-    if (!stillExists || selectedId !== props.cart.at(-1)?.id) {
-      props.setSelectedItemIds([props.cart[props.cart.length - 1].id]);
+    if (!visibleCart.length) {
+      props.setSelectedItemIds([]);
+      return;
     }
-  }, [props.cart.length, props.cart.at(-1)?.id]);
+    const stillVisible = selectedId && visibleCart.some((item) => item.id === selectedId);
+    if (!stillVisible || selectedId !== visibleCart[visibleCart.length - 1].id) {
+      props.setSelectedItemIds([visibleCart[visibleCart.length - 1].id]);
+    }
+  }, [visibleCart.length, visibleCart.at(-1)?.id, props.currentSubtable]);
 
   useEffect(() => {
     if (!activeItemId || !cartListRef.current) return;
     const item = cartListRef.current.querySelector<HTMLElement>(`[data-cart-item-id="${activeItemId}"]`);
     item?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [activeItemId, props.cart.length]);
+  }, [activeItemId, visibleCart.length, visibleCart.at(-1)?.id]);
 
   const selectCartItemByDirection = (direction: -1 | 1) => {
-    if (!props.setSelectedItemIds || !props.cart.length) {
+    if (!props.setSelectedItemIds || !visibleCart.length) {
       return;
     }
-    const currentId = activeItemId || props.cart[props.cart.length - 1].id;
-    const currentIndex = Math.max(0, props.cart.findIndex((item) => item.id === currentId));
-    const nextIndex = Math.max(0, Math.min(props.cart.length - 1, currentIndex + direction));
-    props.setSelectedItemIds([props.cart[nextIndex].id]);
+    const currentId = activeItemId || visibleCart[visibleCart.length - 1].id;
+    const currentIndex = Math.max(0, visibleCart.findIndex((item) => item.id === currentId));
+    const nextIndex = Math.max(0, Math.min(visibleCart.length - 1, currentIndex + direction));
+    props.setSelectedItemIds([visibleCart[nextIndex].id]);
   };
 
   const repeatLastItem = () => {
-    const last = props.cart[props.cart.length - 1];
+    const last = visibleCart[visibleCart.length - 1];
     if (!last) {
       return;
     }
-    props.setCart((current) => mergeCartItem(current, { ...last, id: crypto.randomUUID(), quantity: 1, measureLabel: "", total: roundMoney(last.unitPrice) }, props.snapshot.settings.stackIdenticalItems));
+    updateVisibleCart((current) => mergeCartItem(current, { ...last, id: crypto.randomUUID(), quantity: 1, measureLabel: "", total: roundMoney(last.unitPrice) }, props.snapshot.settings.stackIdenticalItems));
   };
   const runItemAction = async (action: string, item: PdvCartItem) => {
     setItemMenu(null);
@@ -1345,10 +1365,10 @@ function PdvSaleScreen(props: {
       setRemoveRequest(item);
     }
     if (action === "up") {
-      props.setCart((current) => moveCartItem(current, item.id, -1));
+      updateVisibleCart((current) => moveCartItem(current, item.id, -1));
     }
     if (action === "down") {
-      props.setCart((current) => moveCartItem(current, item.id, 1));
+      updateVisibleCart((current) => moveCartItem(current, item.id, 1));
     }
     if (action === "before" || action === "after") {
       setMovingItem({ item, after: action === "after" });
@@ -1450,7 +1470,7 @@ function PdvSaleScreen(props: {
             }
           }}
         >
-          {props.cart.map((item, index) => (
+          {visibleCart.map((item, index) => (
             <article
               key={item.id}
               data-cart-item-id={item.id}
@@ -1470,7 +1490,7 @@ function PdvSaleScreen(props: {
               <b>{money(props.activeTableNumber ? unpaidItemTotal(item) : item.total)}</b>
             </article>
           ))}
-          {!props.cart.length && <div className="pdv-empty">Nenhum produto lancado.</div>}
+          {!visibleCart.length && <div className="pdv-empty">Nenhum produto lancado nesta conta.</div>}
         </div>
         {itemMenu && (
           <ContextMenu x={itemMenu.x} y={itemMenu.y} onClose={() => setItemMenu(null)}>
@@ -1498,23 +1518,23 @@ function PdvSaleScreen(props: {
           <strong>{money(finalTotal)}</strong>
           <small>Subtotal {money(subtotal)}</small>
         </div>
-        {props.activeTableNumber && (
+            {props.activeTableNumber && (
           <div className="pdv-table-quick-actions">
             <button
               className="pdv-ghost-button"
               onClick={() => {
-                const selected = props.cart.find((row) => row.id === props.selectedItemIds?.[0]) || props.cart[props.cart.length - 1];
+                const selected = visibleCart.find((row) => row.id === props.selectedItemIds?.[0]) || visibleCart[visibleCart.length - 1];
                 if (selected) {
                   setEditingItem({ item: selected, mode: "note" });
                 }
               }}
-              disabled={!props.cart.length}
+              disabled={!visibleCart.length}
             >
               Observacao
             </button>
             <button
               className="pdv-ghost-button"
-              disabled={!props.cart.length}
+              disabled={!visibleCart.length}
               onClick={() => setTransferListOpen(true)}
             >
               Transferir
@@ -1555,7 +1575,7 @@ function PdvSaleScreen(props: {
         )}
         {transferListOpen && props.activeTableNumber && (
           <TransferListModal
-            cart={props.cart}
+            cart={visibleCart}
             tables={props.snapshot.tables}
             sourceTableNumber={props.activeTableNumber}
             openPdvTable={props.openPdvTable}
@@ -1615,7 +1635,7 @@ function PdvSaleScreen(props: {
             mode={editingItem.mode}
             onCancel={() => setEditingItem(null)}
             onConfirm={(patch) => {
-              props.setCart((current) => updateCartItem(current, editingItem.item.id, patch));
+              updateVisibleCart((current) => updateCartItem(current, editingItem.item.id, patch));
               setEditingItem(null);
             }}
           />
@@ -1658,7 +1678,7 @@ function PdvSaleScreen(props: {
             cart={props.cart}
             onCancel={() => setMovingItem(null)}
             onConfirm={(referenceIndex) => {
-              props.setCart((current) => moveCartItemNear(current, movingItem.item.id, referenceIndex, movingItem.after));
+              updateVisibleCart((current) => moveCartItemNear(current, movingItem.item.id, referenceIndex, movingItem.after));
               setMovingItem(null);
             }}
           />
@@ -2836,21 +2856,22 @@ function QuantityPriceModal({
 }) {
   const isKg = product.unitMode === "kg";
   const isGram = product.unitMode === "grama";
-  const [activeField, setActiveField] = useState<"quantity" | "value">(isKg ? "value" : "quantity");
-  const [quantityText, setQuantityText] = useState(isKg ? "1000" : String(defaultQuantity || 1).replace(".", ","));
-  const [valueText, setValueText] = useState(isKg ? money(roundMoney(product.price * 1.0)).replace("R$", "").trim() : String(product.price || 0).replace(".", ","));
+  const isMeasured = isKg || isGram;
+  const [activeField, setActiveField] = useState<"quantity" | "value">(isMeasured ? "value" : "quantity");
+  const [quantityText, setQuantityText] = useState(isMeasured ? "1000" : String(defaultQuantity || 1).replace(".", ","));
+  const [valueText, setValueText] = useState(isMeasured ? money(roundMoney(product.price * (isKg ? 1 : 1000))).replace("R$", "").trim() : String(product.price || 0).replace(".", ","));
   const [notice, setNotice] = useState("");
   const rawQuantity = Math.max(0, parseBrazilianNumber(quantityText));
   const typedValue = Math.max(0, parseBrazilianNumber(valueText));
-  const saleQuantity = isKg
-    ? (activeField === "value" && product.price > 0 ? typedValue / product.price : rawQuantity / 1000)
-    : isGram
-      ? rawQuantity
-      : rawQuantity;
-  const finalPrice = isKg ? roundMoney(saleQuantity * product.price) : roundMoney(typedValue * Math.max(0, saleQuantity));
-  const unitPrice = isKg || isGram ? product.price : typedValue;
-  const shownGrams = isKg ? roundMoney(saleQuantity * 1000) : rawQuantity;
-  const unitLabel = isKg ? "g" : product.unit || "UNID";
+  const saleQuantity = isMeasured
+    ? (activeField === "value" && product.price > 0
+      ? typedValue / product.price
+      : (isKg ? rawQuantity / 1000 : rawQuantity))
+    : rawQuantity;
+  const finalPrice = isMeasured ? roundMoney(saleQuantity * product.price) : roundMoney(typedValue * Math.max(0, saleQuantity));
+  const unitPrice = isMeasured ? product.price : typedValue;
+  const shownGrams = isKg ? roundMoney(saleQuantity * 1000) : isGram ? roundMoney(saleQuantity) : rawQuantity;
+  const unitLabel = isMeasured ? "g" : product.unit || "UNID";
   const append = (value: string) => {
     if (activeField === "value") {
       setValueText((current) => (current === "0" ? value : `${current}${value}`));
@@ -2868,17 +2889,19 @@ function QuantityPriceModal({
   const onQuantityChange = (value: string) => {
     setActiveField("quantity");
     setQuantityText(value);
-    if (isKg) {
+    if (isMeasured) {
       const grams = Math.max(0, parseBrazilianNumber(value));
-      setValueText(String(roundMoney((grams / 1000) * product.price)).replace(".", ","));
+      const measuredQuantity = isKg ? grams / 1000 : grams;
+      setValueText(String(roundMoney(measuredQuantity * product.price)).replace(".", ","));
     }
   };
   const onValueChange = (value: string) => {
     setActiveField("value");
     setValueText(value);
-    if (isKg && product.price > 0) {
+    if (isMeasured && product.price > 0) {
       const total = Math.max(0, parseBrazilianNumber(value));
-      setQuantityText(String(roundMoney((total / product.price) * 1000)).replace(".", ","));
+      const grams = (total / product.price) * (isKg ? 1000 : 1);
+      setQuantityText(String(roundMoney(grams)).replace(".", ","));
     }
   };
   const confirm = () => {
@@ -2888,7 +2911,7 @@ function QuantityPriceModal({
     }
     onConfirm({
       quantity: saleQuantity,
-      measureLabel: `${isKg ? shownGrams : rawQuantity} ${unitLabel}`,
+      measureLabel: `${isMeasured ? shownGrams : rawQuantity} ${unitLabel}`,
       unitPrice
     });
   };
@@ -2915,7 +2938,7 @@ function QuantityPriceModal({
           <div className="pdv-question-mark">?</div>
           <div className="pdv-quantity-fields">
             <label>
-              <span>{isKg ? "Peso em gramas" : "Informe a Quantidade"} <b>{unitLabel}</b></span>
+              <span>{isMeasured ? "Peso em gramas" : "Informe a Quantidade"} <b>{unitLabel}</b></span>
               <div className="pdv-inline-stepper">
                 <input autoFocus={!isKg} inputMode="decimal" value={quantityText} onFocus={(event) => { setActiveField("quantity"); event.currentTarget.select(); }} onChange={(event) => onQuantityChange(event.target.value)} />
                 <button onClick={() => onQuantityChange(String(Math.max(0, rawQuantity - 1)).replace(".", ","))}>-</button>
@@ -2926,11 +2949,11 @@ function QuantityPriceModal({
               <span>{isKg ? "Valor final desejado" : "Valor unitario"}</span>
               <input autoFocus={isKg} inputMode="decimal" value={valueText} onFocus={(event) => { setActiveField("value"); event.currentTarget.select(); }} onChange={(event) => onValueChange(event.target.value)} />
             </label>
-            {isKg && <p className="pdv-helper-note">Edite o peso para calcular o valor, ou edite o valor para calcular o peso automaticamente.</p>}
+            {isMeasured && <p className="pdv-helper-note">Edite o peso para calcular o valor, ou edite o valor para calcular o peso automaticamente.</p>}
             <div className="pdv-calculated-price">
               <span>Final do item</span>
               <strong>{money(finalPrice)}</strong>
-              <small>{isKg ? `${shownGrams} g a ${money(product.price)}/kg` : `${money(unitPrice)} por ${product.unit || product.unitMode}`}</small>
+              <small>{isMeasured ? `${shownGrams} g a ${money(product.price)}/${isKg ? "kg" : "g"}` : `${money(unitPrice)} por ${product.unit || product.unitMode}`}</small>
             </div>
           </div>
         </div>
