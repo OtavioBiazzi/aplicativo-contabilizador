@@ -702,7 +702,8 @@ export class PdvStore {
       if (!selected) {
         return item;
       }
-      return { ...item, paidQuantity: roundMoney(Math.min(item.quantity, (item.paidQuantity || 0) + selected.quantity)) };
+      const paidQuantity = Math.min(item.quantity, (item.paidQuantity || 0) + selected.quantity);
+      return { ...item, paidQuantity: item.measureLabel ? roundQuantity(paidQuantity) : roundMoney(paidQuantity) };
     });
     const sale = createSale({ type: "Mesa", tableNumber, status: "Parcial", items: selectedItems, discount, payments, originDevice, operationId, observations });
     const db = this.requireDb();
@@ -1292,14 +1293,17 @@ function validateCartItems(items: PdvCartItem[]) {
 }
 
 function unpaidQuantity(item: PdvCartItem): number {
-  return roundMoney(Math.max(0, item.quantity - Math.min(item.quantity, Math.max(0, item.paidQuantity || 0))));
+  const remaining = Math.max(0, item.quantity - Math.min(item.quantity, Math.max(0, item.paidQuantity || 0)));
+  return item.measureLabel ? roundQuantity(remaining) : roundMoney(remaining);
 }
 
 function unpaidItemTotal(item: PdvCartItem): number {
-  if (!item.quantity) {
-    return 0;
-  }
-  return roundMoney(item.total * (unpaidQuantity(item) / item.quantity));
+  if (!item.quantity) return 0;
+  const paid = Math.min(item.quantity, Math.max(0, item.paidQuantity || 0));
+  if (paid <= 0.000001) return roundMoney(item.total);
+  const remaining = unpaidQuantity(item);
+  if (remaining <= 0.000001) return 0;
+  return roundMoney(item.total * (remaining / item.quantity));
 }
 
 function normalizePaymentsForTotal(payments: PdvPayment[], total: number): PdvPayment[] {
@@ -1450,5 +1454,9 @@ function snakeCase(value: string): string {
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function roundQuantity(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
 

@@ -145,6 +145,28 @@ if (exactMeasuredSale.total !== 2 || exactMeasuredSale.items[0]?.total !== 2) {
   throw new Error("Produto por peso nao preservou o valor final informado de R$ 2,00.");
 }
 
+await store.openTable(5);
+await store.saveTableItems(5, [{
+  id: crypto.randomUUID(),
+  productId: baseProduct.id,
+  productName: "Mamao na mesa com valor exato",
+  categoryName: category.name,
+  quantity: 2 / 39,
+  measureLabel: "51 g",
+  baseUnitPrice: 39,
+  unitPrice: 39,
+  discount: 0,
+  total: 2
+}]);
+const exactMeasuredTable = (await store.getSnapshot()).tables.find((table) => table.number === 5);
+if (exactMeasuredTable?.total !== 2 || exactMeasuredTable.items[0]?.total !== 2) {
+  throw new Error("Mesa recalculou o valor final de produto por peso.");
+}
+const exactMeasuredTableSale = await store.closeTable(5, [{ id: crypto.randomUUID(), method: "Pix", amount: 2 }]);
+if (exactMeasuredTableSale.total !== 2 || exactMeasuredTableSale.items[0]?.total !== 2) {
+  throw new Error("Fechamento da mesa alterou o valor final de produto por peso.");
+}
+
 const cancelled = await store.saveSale({
   type: "Mesa",
   tableNumber: 1,

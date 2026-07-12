@@ -97,12 +97,22 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function roundQuantity(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+}
+
 function unpaidQuantity(item: PdvCartItem): number {
-  return roundMoney(Math.max(0, item.quantity - Math.min(item.quantity, Math.max(0, item.paidQuantity || 0))));
+  const remaining = Math.max(0, item.quantity - Math.min(item.quantity, Math.max(0, item.paidQuantity || 0)));
+  return isMeasuredCartItem(item) ? roundQuantity(remaining) : roundMoney(remaining);
 }
 
 function unpaidItemTotal(item: PdvCartItem): number {
-  return item.quantity ? roundMoney(item.total * (unpaidQuantity(item) / item.quantity)) : 0;
+  if (!item.quantity) return 0;
+  const paid = Math.min(item.quantity, Math.max(0, item.paidQuantity || 0));
+  if (paid <= 0.000001) return roundMoney(item.total);
+  const remaining = unpaidQuantity(item);
+  if (remaining <= 0.000001) return 0;
+  return roundMoney(item.total * (remaining / item.quantity));
 }
 
 function pendingRemoteTableKey(baseUrl: string): string {
@@ -257,7 +267,6 @@ export function PdvApp({
   const tableMutationRevision = useRef(0);
   const persistedTableMutationRevision = useRef(0);
   const lastPersistedTableMeta = useRef<{ number: number; people: number; note: string } | null>(null);
-  const lastProductLaunch = useRef<{ productId: string; at: number } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
   // O cliente usa o mesmo catalogo e as mesmas mesas do servidor em todas as abas do PDV.
@@ -418,14 +427,23 @@ export function PdvApp({
     tableSaveChain.current = queued;
     try {
       await queued;
-      if (payload.mutationRevision === tableMutationRevision.current) {
-        persistedTableMutationRevision.current = payload.mutationRevision;
-      }
       if (revision === tableSaveRevision.current) {
-        setTableSaveState("saved");
         if (refresh) {
-          void load();
+          // Enquanto a gravacao e confirmada, o snapshot atualmente renderizado
+          // ainda pode conter a versao anterior da mesa. Busque e aplique a
+          // resposta confirmada antes de liberar a reconciliacao automatica.
+          const confirmed = await getPdvSnapshot();
+          if (payload.mutationRevision === tableMutationRevision.current) {
+            setSnapshot(confirmed);
+            applyFreshOpenTable(confirmed, payload.tableNumber);
+            persistedTableMutationRevision.current = payload.mutationRevision;
+          } else {
+            setSnapshot(confirmed);
+          }
+        } else if (payload.mutationRevision === tableMutationRevision.current) {
+          persistedTableMutationRevision.current = payload.mutationRevision;
         }
+        setTableSaveState("saved");
       }
     } catch (error) {
       if (revision === tableSaveRevision.current) {
@@ -558,12 +576,6 @@ export function PdvApp({
   };
 
   const addResolvedProduct = (product: PdvProduct, resolvedQuantity: { quantity: number; measureLabel?: string; unitPrice?: number; finalTotal?: number }, direct = false) => {
-    const now = Date.now();
-    const previousLaunch = lastProductLaunch.current;
-    if (previousLaunch?.productId === product.id && now - previousLaunch.at < 140) {
-      return;
-    }
-    lastProductLaunch.current = { productId: product.id, at: now };
     const availableComplements = snapshot ? complementsForProduct(product, snapshot.products) : [];
     if (snapshot?.settings.complementsEnabled && !direct && (product.hasComplements || product.complementProductIds.length > 0) && availableComplements.length > 0) {
       setPendingProduct({ product, ...resolvedQuantity });
@@ -955,7 +967,12 @@ export function PdvApp({
       await savePdvTablePartial(target.table.number, target.items, payments, 0, observations, target.operationId);
       if (target.kind === "table-partial-items") {
         const selectedById = new Map(target.items.map((item) => [item.id, item.quantity]));
-        setTableCart((current) => current.map((item) => selectedById.has(item.id) ? { ...item, paidQuantity: roundMoney(Math.min(item.quantity, (item.paidQuantity || 0) + (selectedById.get(item.id) || 0))) } : item));
+        setTableCart((current) => current.map((item) => selectedById.has(item.id) ? {
+          ...item,
+          paidQuantity: isMeasuredCartItem(item)
+            ? roundQuantity(Math.min(item.quantity, (item.paidQuantity || 0) + (selectedById.get(item.id) || 0)))
+            : roundMoney(Math.min(item.quantity, (item.paidQuantity || 0) + (selectedById.get(item.id) || 0)))
+        } : item));
         setPartialSelectedItemIds([]);
       }
       setActiveTable((current) => current ? { ...current, status: "Ocupada" } : current);
@@ -1486,7 +1503,7 @@ function PdvSaleScreen(props: {
   useEffect(() => {
     if (!activeItemId || !cartListRef.current) return;
     const item = cartListRef.current.querySelector<HTMLElement>(`[data-cart-item-id="${activeItemId}"]`);
-    item?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    item?.scrollIntoView({ block: "nearest", behavior: "auto" });
   }, [activeItemId, visibleCart.length, visibleCart.at(-1)?.id]);
 
   const selectCartItemByDirection = (direction: -1 | 1) => {
@@ -2640,7 +2657,9 @@ function ItemEditModal({
     }
     if (mode === "price") {
       const value = Math.max(0, parseBrazilianNumber(priceText));
-      onConfirm(isMeasured ? { total: value, unitPrice: item.quantity > 0 ? roundMoney(value / item.quantity) : item.unitPrice } : { unitPrice: value });
+      // Em produtos por peso, o preco cadastrado por kg/g continua intacto.
+      // Esta acao altera somente o valor final deste lancamento.
+      onConfirm(isMeasured ? { total: roundMoney(value) } : { unitPrice: value });
       return;
     }
     onConfirm({ note });
@@ -3132,15 +3151,13 @@ function QuantityPriceModal({
   const isGram = product.unitMode === "grama";
   const isMeasured = isKg || isGram;
   const [activeField, setActiveField] = useState<"quantity" | "value">(isMeasured ? "value" : "quantity");
-  const [quantityText, setQuantityText] = useState(isMeasured ? "1000" : String(defaultQuantity || 1).replace(".", ","));
+  const [quantityText, setQuantityText] = useState(isMeasured ? "" : String(defaultQuantity || 1).replace(".", ","));
   const [valueText, setValueText] = useState(isMeasured ? money(roundMoney(product.price * (isKg ? 1 : 1000))).replace("R$", "").trim() : String(product.price || 0).replace(".", ","));
   const [notice, setNotice] = useState("");
   const rawQuantity = Math.max(0, parseBrazilianNumber(quantityText));
-  const typedValue = Math.max(0, parseBrazilianNumber(valueText));
+  const typedValue = roundMoney(Math.max(0, parseBrazilianNumber(valueText)));
   const saleQuantity = isMeasured
-    ? (activeField === "value" && product.price > 0
-      ? typedValue / product.price
-      : (isKg ? rawQuantity / 1000 : rawQuantity))
+    ? (product.price > 0 ? typedValue / product.price : 1)
     : rawQuantity;
   const finalPrice = isMeasured
     ? typedValue
@@ -3149,31 +3166,29 @@ function QuantityPriceModal({
   const shownGrams = isMeasured ? Math.max(1, Math.round(isKg ? saleQuantity * 1000 : saleQuantity)) : rawQuantity;
   const unitLabel = isMeasured ? "g" : product.unit || "UNID";
   const append = (value: string) => {
-    if (activeField === "value") {
+    if (isMeasured || activeField === "value") {
       setValueText((current) => (current === "0" ? value : `${current}${value}`));
       return;
     }
     setQuantityText((current) => (current === "0" ? value : `${current}${value}`));
   };
   const erase = () => {
-    if (activeField === "value") {
+    if (isMeasured || activeField === "value") {
       setValueText((current) => current.slice(0, -1) || "0");
       return;
     }
     setQuantityText((current) => current.slice(0, -1) || "0");
   };
   const onQuantityChange = (value: string) => {
+    if (isMeasured) {
+      return;
+    }
     setActiveField("quantity");
     setQuantityText(value);
   };
   const onValueChange = (value: string) => {
     setActiveField("value");
     setValueText(value);
-    if (isMeasured && product.price > 0) {
-      const total = Math.max(0, parseBrazilianNumber(value));
-      const grams = (total / product.price) * (isKg ? 1000 : 1);
-      setQuantityText(String(roundMoney(grams)).replace(".", ","));
-    }
   };
   const confirm = () => {
     if (saleQuantity <= 0 || finalPrice <= 0) {
@@ -3185,7 +3200,7 @@ function QuantityPriceModal({
       measureLabel: `${isMeasured ? shownGrams : rawQuantity} ${unitLabel}`,
       unitPrice,
       // O peso e apenas referencia visual: o total digitado sempre vence.
-      finalTotal: isMeasured ? typedValue : undefined
+      finalTotal: isMeasured ? finalPrice : undefined
     });
   };
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -3224,16 +3239,16 @@ function QuantityPriceModal({
             <label>
               <span>{isMeasured ? "Peso em gramas" : "Informe a Quantidade"} <b>{unitLabel}</b></span>
               <div className="pdv-inline-stepper">
-                <input autoFocus={!isMeasured} inputMode="decimal" value={quantityText} onFocus={(event) => { setActiveField("quantity"); event.currentTarget.select(); }} onChange={(event) => onQuantityChange(event.target.value)} />
-                <button onClick={() => onQuantityChange(String(Math.max(0, rawQuantity - 1)).replace(".", ","))}>-</button>
-                <button onClick={() => onQuantityChange(String(rawQuantity + 1).replace(".", ","))}>+</button>
+                <input autoFocus={!isMeasured} readOnly={isMeasured} inputMode="decimal" value={isMeasured ? String(shownGrams).replace(".", ",") : quantityText} onFocus={(event) => { if (!isMeasured) setActiveField("quantity"); event.currentTarget.select(); }} onChange={(event) => onQuantityChange(event.target.value)} />
+                <button disabled={isMeasured} onClick={() => onQuantityChange(String(Math.max(0, rawQuantity - 1)).replace(".", ","))}>-</button>
+                <button disabled={isMeasured} onClick={() => onQuantityChange(String(rawQuantity + 1).replace(".", ","))}>+</button>
               </div>
             </label>
             <label>
               <span>{isKg ? "Valor final desejado" : "Valor unitario"}</span>
               <input autoFocus={isMeasured} inputMode="decimal" value={valueText} onFocus={(event) => { setActiveField("value"); event.currentTarget.select(); }} onChange={(event) => onValueChange(event.target.value)} />
             </label>
-            {isMeasured && <p className="pdv-helper-note">O valor final informado e mantido exatamente. Os gramas servem apenas como referencia visual.</p>}
+            {isMeasured && <p className="pdv-helper-note">Digite somente o valor final. Os gramas sao calculados automaticamente para referencia e nao alteram o preco.</p>}
             <div className="pdv-calculated-price">
               <span>Final do item</span>
               <strong>{money(finalPrice)}</strong>
@@ -4658,7 +4673,9 @@ function TabButton({ icon: Icon, active, label, onClick }: { icon: typeof Shoppi
 }
 
 function mergeCartItem(items: PdvCartItem[], incoming: PdvCartItem, stackIdenticalItems = false): PdvCartItem[] {
-  if (!stackIdenticalItems) {
+  // Produtos medidos carregam um total final informado pelo operador. Nunca devem
+  // ser agrupados por quantidade, pois isso voltaria a calcular peso x preco/kg.
+  if (!stackIdenticalItems || isMeasuredCartItem(incoming)) {
     return [...items, incoming];
   }
   const hasCustomComposition = Boolean(incoming.discount || incoming.note || incoming.subtableName || incoming.complements?.length || incoming.unitPrice !== incoming.baseUnitPrice);
