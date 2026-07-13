@@ -412,6 +412,9 @@ input[type="range"] {
 .topbar-card {
   align-self: center;
   min-width: 172px;
+  min-height: 66px;
+  grid-template-rows: 16px 24px 14px;
+  align-content: center;
   padding: 10px 12px;
   background: color-mix(in srgb, var(--panel) 92%, var(--accent) 8%);
 }
@@ -500,8 +503,70 @@ input[type="range"] {
 }
 
 .topbar-card .private-value {
-  font-size: 1.12rem;
-  letter-spacing: 0.02em;
+  font-size: 1.38rem;
+  letter-spacing: 0;
+}
+
+.pdv-previous-payment-list {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #9abed4;
+  border-radius: 6px;
+  padding: 9px 10px;
+  background: #e4f1f8;
+  color: #0b3151;
+}
+
+.pdv-previous-payment-list > div:first-child,
+.pdv-previous-payment-list article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pdv-previous-payment-scroll {
+  display: grid;
+  gap: 4px;
+  max-height: 112px;
+  overflow-y: auto;
+}
+
+.pdv-previous-payment-list article {
+  border-top: 1px solid #bfd5e3;
+  padding: 5px 0;
+  font-size: 0.86rem;
+}
+
+.pdv-previous-payment-list span,
+.pdv-previous-payment-list strong,
+.pdv-previous-payment-list b {
+  color: #0b3151 !important;
+}
+
+.pdv-navigation-confirm {
+  border-color: #7aa8c9;
+  border-radius: 6px;
+  background: #dcebf5;
+  color: #0b3151;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.4);
+}
+
+.pdv-navigation-confirm .modal-head strong,
+.pdv-navigation-confirm .settings-overline,
+.pdv-navigation-confirm > p {
+  color: #0b3151;
+}
+
+.pdv-navigation-confirm .modal-actions button,
+.pdv-navigation-confirm .icon-button {
+  border: 1px solid #9fc4dc;
+  background: linear-gradient(#f8fbfd, #d3e7f4);
+  color: #0b3151;
+}
+
+.pdv-navigation-confirm .modal-actions .danger-button {
+  color: #8f2019;
 }
 
 .pin-button {
@@ -4362,6 +4427,20 @@ body.floating-borderless .floating-bar {
   grid-template-columns: minmax(132px, auto) 46px 72px 46px repeat(2, minmax(72px, auto));
 }
 
+.pdv-quantity-box.has-sale-mode {
+  grid-template-columns: 46px 72px 46px repeat(2, minmax(72px, auto)) minmax(94px, auto);
+}
+
+.pdv-sale-mode-select {
+  min-height: 40px;
+  border: 1px solid #adc9db;
+  border-radius: 5px;
+  padding: 0 9px;
+  background: #e7eef3;
+  color: #0a2a44;
+  font-weight: 900;
+}
+
 .pdv-quantity-box.has-subtable > span {
   grid-column: 2 / -1;
 }
@@ -4898,9 +4977,19 @@ body.floating-borderless .floating-bar {
 }
 
 .pdv-primary-button:disabled,
-.pdv-ghost-button:disabled {
+.pdv-ghost-button:disabled,
+.pdv-danger-button:disabled {
+  filter: grayscale(0.55);
   opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.pdv-danger-button:disabled:hover {
+  filter: grayscale(0.55);
+  opacity: 0.55;
+  transform: none;
 }
 
 .pdv-action-row,
@@ -5659,6 +5748,78 @@ body.floating-borderless .floating-bar {
   gap: 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
   padding-bottom: 7px;
+}
+
+.pdv-product-sales-report {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.pdv-product-sales-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.pdv-product-sales-head h2 {
+  margin: 2px 0 0;
+  font-size: 1.08rem;
+}
+
+.pdv-product-sales-table-wrap {
+  max-height: 420px;
+  overflow: auto;
+}
+
+.pdv-product-sales-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--text);
+}
+
+.pdv-product-sales-table th,
+.pdv-product-sales-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.pdv-product-sales-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel-2);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.pdv-product-sales-table th:nth-child(n + 3),
+.pdv-product-sales-table td:nth-child(n + 3) {
+  text-align: right;
+}
+
+.pdv-product-sales-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.pdv-empty-cell {
+  padding: 28px !important;
+  text-align: center !important;
+  color: var(--muted);
+}
+
+@media (max-width: 760px) {
+  .pdv-product-sales-table th,
+  .pdv-product-sales-table td {
+    padding: 8px 10px;
+  }
 }
 
 .pdv-advanced-grid {
@@ -6486,39 +6647,18 @@ input[type="date"] {
 
 /* Responsividade do Grid de Produtos */
 @media (max-width: 1200px) {
-  .pdv-category-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .pdv-product-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  }
-
   .pdv-table-grid {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 900px) {
-  .pdv-category-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .pdv-product-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  }
-
   .pdv-table-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 600px) {
-  .pdv-category-grid,
-  .pdv-product-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  }
-
   .pdv-table-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -6647,6 +6787,36 @@ input[type="date"] {
   gap: 6px;
 }
 
+.pdv-cart-area.cart-ultra {
+  --pdv-cart-controls-space: 88px;
+  gap: 4px;
+}
+
+.pdv-cart-area.cart-ultra .pdv-cart-list article {
+  gap: 4px;
+  padding: 3px 6px;
+  font-size: 0.8rem;
+}
+
+.pdv-cart-area.cart-ultra .pdv-cart-list article > div strong {
+  line-height: 1.02;
+  -webkit-line-clamp: 1;
+}
+
+.pdv-cart-area.cart-ultra .pdv-cart-list article span {
+  margin-top: 0;
+  font-size: 0.68rem;
+}
+
+.pdv-cart-area.cart-ultra .pdv-total-box {
+  gap: 1px;
+}
+
+.pdv-cart-area.cart-ultra .pdv-table-quick-actions > button {
+  min-height: 30px;
+  font-size: 0.76rem;
+}
+
 .pdv-cart-area.cart-compact .pdv-total-box {
   gap: 1px;
 }
@@ -6694,5 +6864,424 @@ input[type="date"] {
   .pdv-cart-area .pdv-total-box strong {
     padding: 8px 10px;
     font-size: clamp(1.85rem, 4vw, 2.8rem);
+  }
+}
+
+/* Compactacao operacional aplicada por ultimo para vencer estilos legados. */
+@media (max-height: 850px), (max-width: 1440px) {
+  .app-shell.pdv-main-mode .sidebar {
+    gap: 10px;
+    padding: 7px 16px;
+  }
+
+  .app-shell.pdv-main-mode .tabs {
+    gap: 4px;
+  }
+
+  .app-shell.pdv-main-mode .tabs button {
+    min-width: 104px;
+    padding: 9px 10px;
+  }
+
+  .app-shell.pdv-main-mode .topbar-card {
+    min-height: 62px;
+    padding: 6px 10px;
+  }
+
+  .pdv-panel {
+    padding: 8px;
+  }
+
+  .pdv-products-area,
+  .pdv-cart-area {
+    gap: 5px;
+  }
+
+  .pdv-section-head h1 {
+    font-size: 1.32rem;
+  }
+
+  .pdv-quantity-box span {
+    font-size: 0.98rem;
+  }
+
+  .pdv-search input,
+  .pdv-discount input {
+    min-height: 36px;
+  }
+
+  .pdv-quantity-box button,
+  .pdv-quantity-box input,
+  .pdv-quantity-box.has-subtable .pdv-subtable-trigger {
+    min-height: 36px;
+    height: 36px;
+  }
+
+  .pdv-category-grid,
+  .pdv-product-grid {
+    gap: 5px;
+  }
+
+  .pdv-category-grid button {
+    min-height: min(var(--pdv-category-card-height, 52px), 52px);
+    padding: 5px 7px;
+    font-size: 0.86rem;
+  }
+
+  .pdv-product-grid button {
+    min-height: max(min(var(--pdv-product-card-height, 60px), 62px), 52px);
+    padding: 4px 6px;
+  }
+
+  .pdv-product-grid strong {
+    font-size: clamp(0.72rem, 0.82vw, 0.9rem);
+  }
+
+  .pdv-product-grid span {
+    font-size: clamp(0.66rem, 0.72vw, 0.8rem);
+  }
+}
+
+/* Modais operacionais precisam caber inteiros em notebooks. */
+.pdv-quantity-modal .pdv-window-title,
+.pdv-quantity-modal .pdv-window-title strong {
+  background: linear-gradient(180deg, #144b79, #0c345b) !important;
+  color: #ffffff !important;
+}
+
+@media (max-height: 850px) {
+  .pdv-modal-backdrop:has(.pdv-quantity-modal) {
+    align-items: center;
+    overflow: hidden;
+    padding: 8px;
+  }
+
+  .pdv-quantity-modal {
+    width: min(530px, calc(100vw - 16px));
+    max-height: calc(100vh - 16px);
+    overflow: hidden;
+    gap: 5px;
+    padding: 10px;
+  }
+
+  .pdv-quantity-modal .pdv-window-title {
+    margin: -10px -10px 4px;
+    padding: 5px 8px;
+  }
+
+  .pdv-quantity-modal .pdv-quantity-product {
+    padding: 9px 11px;
+    font-size: 1.08rem;
+  }
+
+  .pdv-quantity-modal .pdv-quantity-body {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 8px;
+    padding: 3px 4px;
+  }
+
+  .pdv-quantity-modal .pdv-question-mark {
+    width: 38px;
+    height: 38px;
+    border-width: 3px;
+    font-size: 1.35rem;
+  }
+
+  .pdv-quantity-modal .pdv-quantity-fields {
+    gap: 4px;
+  }
+
+  .pdv-quantity-modal .pdv-quantity-fields input,
+  .pdv-quantity-modal .pdv-inline-stepper input {
+    min-height: 36px;
+    height: 36px;
+    font-size: 1.25rem;
+  }
+
+  .pdv-quantity-modal .pdv-helper-note {
+    margin: 1px 0;
+    font-size: 0.78rem;
+    line-height: 1.2;
+  }
+
+  .pdv-quantity-modal .pdv-calculated-price {
+    padding: 5px 8px;
+  }
+
+  .pdv-quantity-modal .pdv-calculated-price strong {
+    font-size: 1.22rem;
+  }
+
+  .pdv-quantity-modal .pdv-keypad {
+    width: min(330px, 100%);
+    margin: 2px auto 4px;
+  }
+
+  .pdv-quantity-modal .pdv-keypad button {
+    min-height: 38px;
+    font-size: 1.05rem;
+  }
+
+  .pdv-quantity-modal > .pdv-action-row button {
+    min-height: 36px;
+  }
+
+  .pdv-cart-area:not(.cart-comfortable) .pdv-cart-list article {
+    gap: 6px;
+    padding: 5px 7px;
+    font-size: 0.88rem;
+  }
+
+  .pdv-cart-area:not(.cart-comfortable) .pdv-cart-list article > div strong {
+    line-height: 1.08;
+    -webkit-line-clamp: 1;
+  }
+
+  .pdv-cart-area:not(.cart-comfortable) .pdv-cart-list article span {
+    margin-top: 1px;
+    font-size: 0.74rem;
+    line-height: 1.05;
+  }
+
+  .pdv-modal-backdrop:has(.pdv-payment-amount-modal) {
+    align-items: center;
+    overflow: hidden;
+    padding: 8px;
+  }
+
+  .pdv-payment-amount-modal {
+    width: min(520px, calc(100vw - 16px));
+    max-height: calc(100vh - 16px);
+    overflow: hidden;
+    gap: 5px;
+    padding: 10px;
+  }
+
+  .pdv-payment-amount-modal .pdv-window-title {
+    margin: -10px -10px 4px;
+    padding: 5px 8px;
+  }
+
+  .pdv-payment-amount-modal .pdv-quantity-product {
+    padding: 8px 11px;
+    font-size: 1.05rem;
+  }
+
+  .pdv-payment-amount-modal .pdv-quantity-body {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 7px;
+    padding: 2px 4px;
+  }
+
+  .pdv-payment-amount-modal .pdv-question-mark {
+    width: 36px;
+    height: 36px;
+    border-width: 3px;
+    font-size: 1.25rem;
+  }
+
+  .pdv-payment-amount-modal .pdv-quantity-fields input {
+    min-height: 34px;
+    height: 34px;
+    font-size: 1.18rem;
+  }
+
+  .pdv-payment-amount-modal .pdv-calculated-price {
+    padding: 5px 8px;
+  }
+
+  .pdv-payment-amount-modal .pdv-keypad {
+    width: min(320px, 100%);
+    margin: 2px auto 4px;
+  }
+
+  .pdv-payment-amount-modal .pdv-keypad button {
+    min-height: 36px;
+    font-size: 1rem;
+  }
+
+  .pdv-payment-amount-modal > .pdv-action-row button {
+    min-height: 34px;
+  }
+}
+
+.pdv-density-compact .pdv-products-area {
+  gap: 4px;
+}
+
+.pdv-density-compact .pdv-section-head {
+  margin-bottom: 2px;
+}
+
+.pdv-density-compact .pdv-section-head .pdv-eyebrow,
+.pdv-density-compact .pdv-section-head p {
+  display: none;
+}
+
+.pdv-density-compact .pdv-section-head h1 {
+  font-size: 1.15rem;
+}
+
+.pdv-density-compact .pdv-search input {
+  min-height: 32px;
+}
+
+.pdv-density-compact .pdv-quantity-box button,
+.pdv-density-compact .pdv-quantity-box input,
+.pdv-density-compact .pdv-sale-mode-select,
+.pdv-density-compact .pdv-quantity-box.has-subtable .pdv-subtable-trigger {
+  min-height: 32px;
+  height: 32px;
+}
+
+.pdv-density-compact .pdv-quantity-box span {
+  font-size: 0.82rem;
+}
+
+/* A confirmacao de saida da Venda usa a mesma superficie dos modais do PDV. */
+.modal.pdv-navigation-confirm {
+  border: 1px solid #7aa8c9 !important;
+  border-radius: 6px !important;
+  background: #dcebf5 !important;
+  color: #0b3151 !important;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.4) !important;
+}
+
+.modal.pdv-navigation-confirm .modal-head strong,
+.modal.pdv-navigation-confirm .settings-overline,
+.modal.pdv-navigation-confirm > p {
+  color: #0b3151 !important;
+}
+
+.modal.pdv-navigation-confirm .modal-actions button,
+.modal.pdv-navigation-confirm .icon-button {
+  border: 1px solid #9fc4dc !important;
+  background: linear-gradient(#f8fbfd, #d3e7f4) !important;
+  color: #0b3151 !important;
+}
+
+.modal.pdv-navigation-confirm .modal-actions .danger-button {
+  color: #8f2019 !important;
+}
+
+/* Cadastro e ajustes: blocos densos, separados por funcao e com rolagem local. */
+.pdv-products-settings-screen,
+.pdv-settings-screen {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 10px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.pdv-products-settings-screen .pdv-section-head {
+  align-items: flex-start;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  padding-bottom: 9px;
+}
+
+.pdv-products-settings-screen .pdv-section-head .pdv-action-row {
+  justify-content: flex-end;
+}
+
+.pdv-products-settings-screen .pdv-section-head button {
+  min-height: 38px;
+  padding-inline: 11px;
+  font-size: 0.82rem;
+}
+
+.pdv-products-settings-screen .pdv-category-manager {
+  margin: 0;
+  padding: 2px 0 5px;
+}
+
+.pdv-products-settings-screen .pdv-category-manager button {
+  min-width: 122px;
+  padding: 6px 9px;
+}
+
+.pdv-products-settings-screen .pdv-bulk-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(170px, 1fr) repeat(2, minmax(140px, auto));
+  gap: 6px;
+  padding: 8px;
+}
+
+.pdv-products-settings-screen .pdv-bulk-toolbar button {
+  min-height: 34px;
+  padding: 0 9px;
+  font-size: 0.76rem;
+}
+
+.pdv-products-settings-screen .pdv-product-table {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.pdv-settings-screen {
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: auto;
+}
+
+.pdv-settings-screen .pdv-advanced-grid {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  align-items: start;
+  gap: 10px;
+}
+
+.pdv-visual-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.pdv-visual-presets span {
+  margin-right: 4px;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.pdv-visual-presets button {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 5px;
+  padding: 0 11px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.pdv-visual-presets button:hover {
+  background: var(--pdv-action);
+  color: #fff;
+}
+
+.pdv-settings-screen .pdv-advanced-grid article {
+  align-content: start;
+  gap: 8px;
+  border-color: rgba(255, 255, 255, 0.28);
+  padding: 12px;
+}
+
+.pdv-settings-screen .pdv-setting-line,
+.pdv-settings-screen .pdv-switch-line {
+  min-height: 38px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 900px) {
+  .pdv-products-settings-screen .pdv-bulk-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pdv-products-settings-screen .pdv-section-head {
+    display: grid;
   }
 }

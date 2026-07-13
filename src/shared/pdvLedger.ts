@@ -34,7 +34,7 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
     id: `pdv-${sale.id}`,
     createdAt: sale.createdAt,
     updatedAt: sale.createdAt,
-    type: sale.type === "Mesa" ? "Mesa" : "Venda",
+    type: sale.type === "Mesa" ? "Mesa" : sale.type === "Onibus" ? "Onibus" : "Venda",
     originalValue: sale.subtotal,
     finalValue: sale.total,
     people: 1,

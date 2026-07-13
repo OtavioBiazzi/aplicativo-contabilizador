@@ -92,6 +92,7 @@ export interface PdvTransferSelection {
 
 export interface PdvOpenTable {
   id: string;
+  sessionId?: string;
   number: number;
   status: PdvTableStatus;
   openedAt: string | null;
@@ -105,8 +106,9 @@ export interface PdvOpenTable {
 export interface PdvSale {
   id: string;
   createdAt: string;
-  type: "Venda direta" | "Mesa";
+  type: "Venda direta" | "Mesa" | "Onibus";
   tableNumber?: number;
+  tableSessionId?: string;
   status: "Finalizada" | "Cancelada" | "Parcial" | "deleted";
   subtotal: number;
   discount: number;

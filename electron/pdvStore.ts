@@ -154,7 +154,7 @@ export class PdvStore {
     const limitSql = limit ? ` LIMIT ${Math.max(1, Math.floor(limit))}` : "";
     const sales = selectAll<Omit<PdvSale, "items" | "payments">>(
       this.requireDb(),
-      `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations, origin_device AS originDevice, operation_id AS operationId
+      `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, table_session_id AS tableSessionId, COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations, origin_device AS originDevice, operation_id AS operationId
        FROM sales ORDER BY created_at DESC${limitSql}`
     );
     return sales.map((sale) => this.hydrateSale(sale)).filter((sale) => matchesSaleFilters(sale, filters));
@@ -460,7 +460,7 @@ export class PdvStore {
     tableNumber = this.normalizeTableNumber(tableNumber);
     const safePeople = Number.isFinite(people) ? Math.max(1, Math.floor(people)) : 1;
     const db = this.requireDb();
-    const id = `mesa-${tableNumber}`;
+    const id = randomUUID();
     db.run(
       `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
        VALUES (?, ?, 'Ocupada', ?, ?, ?)
@@ -480,7 +480,7 @@ export class PdvStore {
       `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
        VALUES (?, ?, ?, NULL, 1, '')
        ON CONFLICT(table_number) DO UPDATE SET status=excluded.status`,
-      [`mesa-${tableNumber}`, tableNumber, status]
+      [randomUUID(), tableNumber, status]
     );
     await this.persist();
   }
@@ -511,7 +511,7 @@ export class PdvStore {
            ELSE table_sessions.status
          END,
          opened_at=COALESCE(table_sessions.opened_at, excluded.opened_at)`,
-      [`mesa-${tableNumber}`, tableNumber, new Date().toISOString()]
+      [randomUUID(), tableNumber, new Date().toISOString()]
     );
     if (subtables !== undefined) {
       db.run("UPDATE table_sessions SET subtables_json = ? WHERE table_number = ?", [JSON.stringify(normalizeSubtableNames(subtables)), tableNumber]);
@@ -622,7 +622,7 @@ export class PdvStore {
           `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
            VALUES (?, ?, 'Ocupada', ?, 1, '')
            ON CONFLICT(table_number) DO UPDATE SET status='Ocupada', opened_at=COALESCE(table_sessions.opened_at, excluded.opened_at)`,
-          [`mesa-${targetTableNumber}`, targetTableNumber, new Date().toISOString()]
+          [randomUUID(), targetTableNumber, new Date().toISOString()]
         );
       }
       if (!remainingItems.length && sourceTableNumber !== targetTableNumber) {
@@ -644,6 +644,8 @@ export class PdvStore {
       if (existing) {
         return existing;
       }
+      const mapped = selectAll<{ saleId: string }>(this.requireDb(), "SELECT sale_id AS saleId FROM partial_operations WHERE operation_id = ?", [operationId])[0];
+      if (mapped) return this.getSales({}).find((sale) => sale.id === mapped.saleId) || this.getSales({})[0];
     }
     const table = this.getTables().find((item) => item.number === tableNumber);
     const pendingItems = table?.items.flatMap((item) => {
@@ -656,10 +658,16 @@ export class PdvStore {
       throw new Error("Mesa sem itens para fechar.");
     }
     const db = this.requireDb();
-    const sale = createSale({ type: "Mesa", tableNumber, items: pendingItems, discount, payments, originDevice, operationId });
+    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, items: pendingItems, discount, payments, originDevice, operationId });
     db.run("BEGIN IMMEDIATE");
     try {
-      insertSale(db, sale);
+      const existingPartial = table.sessionId ? this.getSales({}).find((item) => item.tableSessionId === table.sessionId && item.status === "Parcial") : undefined;
+      if (existingPartial) {
+        appendSaleSegment(db, existingPartial, sale, "Finalizada");
+        if (operationId) db.run("INSERT OR IGNORE INTO partial_operations (operation_id, sale_id) VALUES (?, ?)", [operationId, existingPartial.id]);
+      } else {
+        insertSale(db, sale);
+      }
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
       db.run("COMMIT");
@@ -668,16 +676,14 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
-    return sale;
+    return table.sessionId ? this.getSales({}).find((item) => item.tableSessionId === table.sessionId) || sale : sale;
   }
 
   async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string, observations = ""): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     if (operationId) {
-      const existing = this.getSales({}).find((sale) => sale.operationId === operationId);
-      if (existing) {
-        return existing;
-      }
+      const operation = selectAll<{ saleId: string }>(this.requireDb(), "SELECT sale_id AS saleId FROM partial_operations WHERE operation_id = ?", [operationId])[0];
+      if (operation) return this.getSales({}).find((sale) => sale.id === operation.saleId) || this.getSales({})[0];
     }
     const table = this.getTables().find((item) => item.number === tableNumber);
     if (!table || !table.items.length) {
@@ -705,11 +711,17 @@ export class PdvStore {
       const paidQuantity = Math.min(item.quantity, (item.paidQuantity || 0) + selected.quantity);
       return { ...item, paidQuantity: item.measureLabel ? roundQuantity(paidQuantity) : roundMoney(paidQuantity) };
     });
-    const sale = createSale({ type: "Mesa", tableNumber, status: "Parcial", items: selectedItems, discount, payments, originDevice, operationId, observations });
+    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, status: "Parcial", items: selectedItems, discount, payments, originDevice, operationId, observations });
+    const existingPartial = table.sessionId ? this.getSales({}).find((item) => item.tableSessionId === table.sessionId && item.status === "Parcial") : undefined;
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
-      insertSale(db, sale);
+      if (existingPartial) {
+        appendSaleSegment(db, existingPartial, sale, "Parcial");
+      } else {
+        insertSale(db, sale);
+      }
+      if (operationId) db.run("INSERT OR IGNORE INTO partial_operations (operation_id, sale_id) VALUES (?, ?)", [operationId, existingPartial?.id || sale.id]);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       writeTableItems(db, tableNumber, nextItems);
       // O parcial registra os itens pagos, mas deixa o restante da conta aberto.
@@ -720,7 +732,7 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
-    return sale;
+    return existingPartial ? this.getSales({}).find((item) => item.id === existingPartial.id) || sale : sale;
   }
 
   async cancelSale(id: string): Promise<void> {
@@ -875,9 +887,9 @@ export class PdvStore {
 
   private getTables(): PdvOpenTable[] {
     const tableCount = Math.max(1, Math.min(300, this.getSettings().tableCount || DEFAULT_PDV_SETTINGS.tableCount));
-    const sessions = selectAll<{ tableNumber: number; status: PdvTableStatus; openedAt: string | null; people: number; note: string; subtablesJson: string }>(
+    const sessions = selectAll<{ id: string; tableNumber: number; status: PdvTableStatus; openedAt: string | null; people: number; note: string; subtablesJson: string }>(
       this.requireDb(),
-      "SELECT table_number AS tableNumber, status, opened_at AS openedAt, people, note, subtables_json AS subtablesJson FROM table_sessions"
+      "SELECT id, table_number AS tableNumber, status, opened_at AS openedAt, people, note, subtables_json AS subtablesJson FROM table_sessions"
     );
     const byNumber = new Map(sessions.map((session) => [session.tableNumber, session]));
     return Array.from({ length: tableCount }, (_, index) => {
@@ -892,6 +904,7 @@ export class PdvStore {
           : "Livre";
       return {
         id: `mesa-${number}`,
+        sessionId: session?.id,
         number,
         status: visualStatus,
         openedAt: items.length ? session?.openedAt || null : null,
@@ -1005,7 +1018,8 @@ export class PdvStore {
         id TEXT PRIMARY KEY,
         created_at TEXT NOT NULL,
         type TEXT NOT NULL,
-        table_number INTEGER,
+         table_number INTEGER,
+         table_session_id TEXT,
          status TEXT NOT NULL DEFAULT 'Finalizada',
          subtotal REAL NOT NULL,
          discount REAL NOT NULL,
@@ -1040,6 +1054,10 @@ export class PdvStore {
         change REAL,
         description TEXT NOT NULL DEFAULT ''
       );
+      CREATE TABLE IF NOT EXISTS partial_operations (
+        operation_id TEXT PRIMARY KEY,
+        sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE
+      );
     `);
     addColumnIfMissing(db, "products", "can_be_complement", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "has_complements", "INTEGER NOT NULL DEFAULT 0");
@@ -1058,6 +1076,7 @@ export class PdvStore {
     addColumnIfMissing(db, "sales", "status", "TEXT NOT NULL DEFAULT 'Finalizada'");
     addColumnIfMissing(db, "sales", "description", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sales", "observations", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "sales", "table_session_id", "TEXT");
     addColumnIfMissing(db, "sales", "origin_device", "TEXT NOT NULL DEFAULT 'Este computador'");
     addColumnIfMissing(db, "sales", "operation_id", "TEXT");
     addColumnIfMissing(db, "sale_payments", "description", "TEXT NOT NULL DEFAULT ''");
@@ -1165,11 +1184,12 @@ export class PdvStore {
 }
 
 function insertSale(db: Database, sale: PdvSale) {
-  db.run("INSERT INTO sales (id, created_at, type, table_number, status, subtotal, discount, total, description, observations, origin_device, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+  db.run("INSERT INTO sales (id, created_at, type, table_number, table_session_id, status, subtotal, discount, total, description, observations, origin_device, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
     sale.id,
     sale.createdAt,
     sale.type,
     sale.tableNumber ?? null,
+    sale.tableSessionId || null,
     sale.status,
     sale.subtotal,
     sale.discount,
@@ -1210,6 +1230,23 @@ function insertSale(db: Database, sale: PdvSale) {
   paymentStatement.free();
 }
 
+function appendSaleSegment(db: Database, existing: PdvSale, segment: PdvSale, status: PdvSale["status"]) {
+  db.run(
+    "UPDATE sales SET status = ?, subtotal = ?, discount = ?, total = ?, observations = ? WHERE id = ?",
+    [status, roundMoney(existing.subtotal + segment.subtotal), roundMoney(existing.discount + segment.discount), roundMoney(existing.total + segment.total), [existing.observations, segment.observations].filter(Boolean).join(" | "), existing.id]
+  );
+  const merged = { ...segment, id: existing.id };
+  const itemStatement = db.prepare(
+    `INSERT INTO sale_items (id, sale_id, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  merged.items.forEach((item) => itemStatement.run([randomUUID(), existing.id, item.productId, item.productName, item.categoryName, item.quantity, item.measureLabel || "", item.unitPrice, item.baseUnitPrice ?? item.unitPrice, item.discount, item.total, item.subtableName || "", item.note || "", JSON.stringify(item.complements || [])]));
+  itemStatement.free();
+  const paymentStatement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  merged.payments.forEach((payment) => paymentStatement.run([payment.id, existing.id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null, payment.description?.trim() || ""]));
+  paymentStatement.free();
+}
+
 function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]) {
   const statement = db.prepare(
     `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, paid_quantity, subtable_name, note, complements_json, sort_order)
@@ -1238,7 +1275,7 @@ function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]
   statement.free();
 }
 
-function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string; observations?: string }): PdvSale {
+function createSale(input: { type: PdvSale["type"]; tableNumber?: number; tableSessionId?: string; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string; observations?: string }): PdvSale {
   const subtotal = roundMoney(input.items.reduce((total, item) => total + item.total, 0));
   const discount = Math.min(subtotal, roundMoney(Math.max(0, input.discount)));
   const total = Math.max(0, roundMoney(subtotal - discount));
@@ -1248,11 +1285,12 @@ function createSale(input: { type: PdvSale["type"]; tableNumber?: number; status
     createdAt: new Date().toISOString(),
     type: input.type,
     tableNumber: input.tableNumber,
+    tableSessionId: input.tableSessionId,
     status: input.status || "Finalizada",
     subtotal,
     discount,
     total,
-    description: input.tableNumber ? `Mesa ${input.tableNumber}` : "Venda direta",
+    description: input.tableNumber ? `Mesa ${input.tableNumber}` : input.type === "Onibus" ? "Venda de onibus" : "Venda direta",
     observations: input.observations?.trim() || "",
     originDevice: input.originDevice || "Este computador",
     operationId: input.operationId,

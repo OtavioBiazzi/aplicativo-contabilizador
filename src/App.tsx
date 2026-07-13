@@ -2017,6 +2017,7 @@ export function App() {
           message="Existem produtos ainda nao finalizados na Venda. Ao sair, o carrinho atual sera cancelado."
           confirmLabel="Sair e cancelar venda"
           danger
+          operational
           onCancel={() => setPdvNavigationRequest(null)}
           onConfirm={async () => {
             const nextTab = pdvNavigationRequest;
@@ -5531,6 +5532,7 @@ function SettingsConfirmModal({
   message,
   confirmLabel = "Confirmar",
   danger = false,
+  operational = false,
   onCancel,
   onConfirm
 }: {
@@ -5538,6 +5540,7 @@ function SettingsConfirmModal({
   message: string;
   confirmLabel?: string;
   danger?: boolean;
+  operational?: boolean;
   onCancel: () => void;
   onConfirm: () => Promise<void>;
 }) {
@@ -5583,7 +5586,7 @@ function SettingsConfirmModal({
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal confirmation-modal">
+      <div className={`modal confirmation-modal ${operational ? "pdv-navigation-confirm" : ""}`}>
         <div className="modal-head">
           <div>
             <span className="settings-overline">Confirmacao</span>

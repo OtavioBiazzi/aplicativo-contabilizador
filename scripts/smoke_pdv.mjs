@@ -124,6 +124,15 @@ const exactAmountSale = await store.saveSale({
 if (exactAmountSale.total !== 2 || exactAmountSale.payments[0]?.amount !== 2) {
   throw new Error("Venda direta de R$ 2,00 perdeu centavos indevidamente.");
 }
+const busSale = await store.saveSale({
+  type: "Onibus",
+  items: [{ ...exactAmountSale.items[0], id: crypto.randomUUID(), productName: "Venda onibus smoke", total: 2 }],
+  discount: 0,
+  payments: [{ id: crypto.randomUUID(), method: "Debito", amount: 2 }]
+});
+if (busSale.type !== "Onibus" || busSale.description !== "Venda de onibus") {
+  throw new Error("Venda de onibus nao foi integrada ao mesmo fluxo do PDV.");
+}
 const exactMeasuredSale = await store.saveSale({
   type: "Venda direta",
   items: [{
@@ -247,8 +256,30 @@ if (!remainingTable?.items.length || remainingTable.items[0].quantity !== 2 || r
   throw new Error("Fechamento parcial nao preservou o item pago e o saldo restante da mesa.");
 }
 await store.closeTable(7, [{ id: crypto.randomUUID(), method: "Dinheiro", amount: 10, received: 20, change: 10 }]);
+const consolidatedTableSale = store.getSales({}).filter((sale) => sale.tableSessionId === tableSeven.sessionId);
+if (consolidatedTableSale.length !== 1 || consolidatedTableSale[0].status !== "Finalizada" || consolidatedTableSale[0].total !== 20 || consolidatedTableSale[0].payments.length !== 2) {
+  throw new Error("Pagamentos parcial e final nao foram consolidados na mesma sessao da mesa.");
+}
+const correctedMixedSale = await store.updateSalePayments(consolidatedTableSale[0].id, [
+  { id: crypto.randomUUID(), method: "Debito", amount: 8, description: "Correcao smoke" },
+  { id: crypto.randomUUID(), method: "Credito", amount: 12 }
+]);
+if (correctedMixedSale.total !== 20 || correctedMixedSale.payments.length !== 2 || correctedMixedSale.payments[0]?.method !== "Debito" || correctedMixedSale.payments[1]?.method !== "Credito") {
+  throw new Error("Edicao individual dos pagamentos mistos nao preservou o total da venda.");
+}
 if ((await store.getSnapshot()).tables.find((table) => table.number === 7)?.status !== "Livre") {
   throw new Error("Fechamento total depois do parcial nao liberou a mesa.");
+}
+
+await store.openTable(7);
+await store.saveTableItems(7, [{ ...partialSource, id: crypto.randomUUID(), quantity: 1, paidQuantity: 0, total: 10 }]);
+const reopenedTable = (await store.getSnapshot()).tables.find((table) => table.number === 7);
+if (!reopenedTable?.sessionId || reopenedTable.sessionId === tableSeven.sessionId) {
+  throw new Error("Nova abertura da mesma mesa reutilizou a sessao financeira anterior.");
+}
+await store.closeTable(7, [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }]);
+if (store.getSales({}).filter((sale) => sale.tableNumber === 7).length !== 2) {
+  throw new Error("Visitas diferentes da mesma mesa foram consolidadas indevidamente.");
 }
 
 await store.openTable(8);
@@ -341,6 +372,16 @@ if (!["Resumo", "Vendas", "Itens", "Pagamentos"].every((sheet) => workbook.inclu
 const paymentsSheet = await zip.file("xl/worksheets/sheet4.xml").async("string");
 if (!paymentsSheet.includes("Pix") || !paymentsSheet.includes("<v>12</v>")) {
   throw new Error("XLSX PDV nao registrou pagamento/recebido/troco como esperado.");
+}
+const consolidatedPaymentRows = paymentsSheet.split(consolidatedTableSale[0].id).length - 1;
+const salesSheet = await zip.file("xl/worksheets/sheet2.xml").async("string");
+const consolidatedSaleRows = salesSheet.split(consolidatedTableSale[0].id).length - 1;
+// O ID aparece em duas colunas (venda e operacao) por linha.
+if (consolidatedPaymentRows !== 4 || consolidatedSaleRows !== 2 || !paymentsSheet.includes("Debito") || !paymentsSheet.includes("Credito")) {
+  throw new Error(`XLSX nao separou os pagamentos mistos mantendo uma unica venda da mesa. vendas=${consolidatedSaleRows}, pagamentos=${consolidatedPaymentRows}`);
+}
+if (!salesSheet.includes("Onibus") || !salesSheet.includes("Venda de onibus")) {
+  throw new Error("XLSX nao exportou a venda de onibus integrada.");
 }
 
 const integratedExportStatus = await new PdvExporter(exportDir).exportSales(store.getSales({}), {}, [{

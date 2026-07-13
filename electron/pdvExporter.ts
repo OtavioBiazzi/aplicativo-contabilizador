@@ -50,7 +50,7 @@ export class PdvExporter {
 }
 
 function legacyEntryToSale(entry: LedgerEntry): PdvSale {
-  const type = entry.tableNumber ? "Mesa" : "Venda direta";
+  const type: PdvSale["type"] = entry.tableNumber ? "Mesa" : entry.type === "Onibus" ? "Onibus" : "Venda direta";
   const status = entry.status === "cancelled" ? "Cancelada" : entry.status === "deleted" ? "deleted" : "Finalizada";
   const method = normalizePaymentMethod(entry.paymentMethod);
   const payments = entry.paymentBreakdown?.length
@@ -98,7 +98,8 @@ function matchesLegacyFilters(entry: LedgerEntry, filters: PdvExportFilters): bo
   if (filters.from && date < filters.from) return false;
   if (filters.to && date > filters.to) return false;
   if (filters.type === "Mesa" && !entry.tableNumber) return false;
-  if (filters.type === "Venda direta" && entry.tableNumber) return false;
+  if (filters.type === "Venda direta" && (entry.tableNumber || entry.type === "Onibus")) return false;
+  if (filters.type === "Onibus" && entry.type !== "Onibus") return false;
   if (filters.table && entry.tableNumber !== filters.table) return false;
   if (filters.payment && filters.payment !== "Todos") {
     const methods = entry.paymentBreakdown?.map((payment) => normalizePaymentMethod(payment.method)) || [normalizePaymentMethod(entry.paymentMethod)];

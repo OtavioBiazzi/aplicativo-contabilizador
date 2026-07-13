@@ -755,8 +755,8 @@ function registerIpc() {
     return importPdvProducts(result.filePaths[0]);
   });
 
-  ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[] }): Promise<PdvSale> => {
-    const sale = await pdvStore.saveSale({ type: "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
+  ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[]; saleType?: "Venda direta" | "Onibus" }): Promise<PdvSale> => {
+    const sale = await pdvStore.saveSale({ type: input.saleType === "Onibus" ? "Onibus" : "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
     sendToAll("pdv:changed");

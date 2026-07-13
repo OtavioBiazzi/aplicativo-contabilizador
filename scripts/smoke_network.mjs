@@ -42,8 +42,8 @@ const server = new LocalServer({
   openPdvTable: (number, people, note) => pdvStore.openTable(number, people, note),
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
   savePdvTableItems: (number, items, subtables) => pdvStore.saveTableItems(number, items, subtables),
-  closePdvTable: (number, payments, discount, origin) => pdvStore.closeTable(number, payments, discount, origin),
-  savePdvTablePartial: (number, items, payments, discount, origin) => pdvStore.closeTablePartial(number, items, payments, discount, origin),
+  closePdvTable: (number, payments, discount, origin, operationId) => pdvStore.closeTable(number, payments, discount, origin, operationId),
+  savePdvTablePartial: (number, items, payments, discount, origin, operationId, observations) => pdvStore.closeTablePartial(number, items, payments, discount, origin, operationId, observations),
   updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
   savePdvCategory: (draft) => pdvStore.saveCategory(draft),
   savePdvProduct: (draft) => pdvStore.saveProduct(draft),
@@ -110,7 +110,7 @@ if (!(await pdvStore.getSnapshot()).recentSales.some((sale) => sale.type === "Ve
 
 const open = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });
 if (!open.ok) throw new Error(`Cliente nao conseguiu abrir mesa no servidor: ${await open.text()}`);
-const remoteSubtableItem = { ...item, subtableName: "Cliente remoto" };
+const remoteSubtableItem = { ...item, quantity: 2, total: 24, subtableName: "Cliente remoto" };
 const save = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/items", {
   method: "PUT",
   headers,
@@ -121,13 +121,23 @@ const savedTable = (await pdvStore.getSnapshot()).tables.find((table) => table.n
 if (!savedTable?.subtables?.includes("Cliente remoto") || !savedTable.subtables.includes("Submesa vazia") || savedTable.items[0]?.subtableName !== "Cliente remoto") {
   throw new Error("Cliente nao preservou submesas ao salvar a mesa no servidor.");
 }
-const close = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/close", { method: "POST", headers, body: JSON.stringify({ payments: [{ id: crypto.randomUUID(), method: "Pix", amount: 12 }] }) });
+const partialOperation = crypto.randomUUID();
+const partial = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/partial", {
+  method: "POST",
+  headers: { ...headers, "x-idempotency-key": partialOperation },
+  body: JSON.stringify({ items: [{ ...remoteSubtableItem, quantity: 1, total: 12 }], payments: [{ id: crypto.randomUUID(), method: "Debito", amount: 12 }], observations: "Pessoa 1" })
+});
+if (!partial.ok) throw new Error(`Cliente nao conseguiu registrar parcial no servidor: ${await partial.text()}`);
+const partialTable = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 7);
+if (partialTable?.items[0]?.paidQuantity !== 1 || partialTable.total !== 12) throw new Error("Servidor nao refletiu o saldo parcial da mesa para o cliente.");
+
+const close = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/close", { method: "POST", headers: { ...headers, "x-idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ payments: [{ id: crypto.randomUUID(), method: "Pix", amount: 12 }] }) });
 if (!close.ok) throw new Error(`Cliente nao conseguiu fechar mesa no servidor: ${await close.text()}`);
 
 const after = await (await readEntries()).json();
 const sale = after.entries.find((entry) => entry.type === "Mesa");
-if (!sale || sale.originDevice !== "Cliente smoke" || sale.paymentBreakdown?.[0]?.method !== "Pix") {
-  throw new Error("Venda remota nao entrou no historico integrado com origem/pagamento corretos.");
+if (!sale || sale.originDevice !== "Cliente smoke" || sale.finalValue !== 24 || sale.paymentBreakdown?.length !== 2 || !sale.paymentBreakdown.some((payment) => payment.method === "Debito") || !sale.paymentBreakdown.some((payment) => payment.method === "Pix")) {
+  throw new Error(`Venda remota nao entrou no historico integrado com origem/pagamento corretos: ${JSON.stringify(sale)}`);
 }
 
 settings.operationMode = "legacy";

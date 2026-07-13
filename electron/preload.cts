@@ -15,8 +15,8 @@ contextBridge.exposeInMainWorld("caixa", {
   removeCoseProducts: () => ipcRenderer.invoke("pdv:removeCoseProducts"),
   previewPdvProductsFile: () => ipcRenderer.invoke("pdv:previewProductsFile"),
   importPdvProductsFile: (filePath?: string) => ipcRenderer.invoke("pdv:importProductsFile", filePath),
-  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[]) =>
-    ipcRenderer.invoke("pdv:saveDirectSale", { items, discount, payments }),
+  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], saleType?: "Venda direta" | "Onibus") =>
+    ipcRenderer.invoke("pdv:saveDirectSale", { items, discount, payments, saleType }),
   openPdvTable: (tableNumber: number, people?: number, note?: string) => ipcRenderer.invoke("pdv:openTable", tableNumber, people, note),
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => ipcRenderer.invoke("pdv:setTableStatus", tableNumber, status),
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => ipcRenderer.invoke("pdv:saveTableItems", tableNumber, items, subtables),

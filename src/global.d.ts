@@ -27,7 +27,7 @@ export interface CaixaApi {
   removeCoseProducts: () => Promise<number>;
   previewPdvProductsFile: () => Promise<PdvProductImportPreview | null>;
   importPdvProductsFile: (filePath?: string) => Promise<PdvProductImportResult | null>;
-  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[]) => Promise<PdvSale>;
+  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], saleType?: "Venda direta" | "Onibus") => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
