@@ -1017,6 +1017,7 @@ export function App() {
   const remoteReconnectTimer = useRef<number | null>(null);
   const remoteReconnectAttempt = useRef(0);
   const remotePdvRefreshTimer = useRef<number | null>(null);
+  const remotePdvSignature = useRef("");
   const autoConnectionAttemptKey = useRef<string | null>(null);
   const combinedEntries = useMemo(() => [...entries].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()), [entries]);
   const todayEntries = useMemo(() => filterEntriesByLocalDate(combinedEntries, currentDateKey), [combinedEntries, currentDateKey]);
@@ -1324,7 +1325,6 @@ export function App() {
         const message = JSON.parse(String(event.data || "{}")) as { type?: string };
         if (message.type === "pdv-changed") {
           isPdvChange = true;
-          setRemotePdvNonce((nonce) => nonce + 1);
         }
       } catch {
         // Mensagens antigas podem nao ser JSON valido.
@@ -1366,6 +1366,11 @@ export function App() {
     }
     const data = await remoteRequest<RemoteEntriesResponse>(session, REMOTE_ENTRY_LIMIT ? `/api/entries?limit=${REMOTE_ENTRY_LIMIT}` : "/api/entries");
     const pdv = await remoteRequest<PdvSnapshot>(session, "/api/pdv/snapshot");
+    const signature = JSON.stringify(pdv);
+    if (signature !== remotePdvSignature.current) {
+      remotePdvSignature.current = signature;
+      setRemotePdvNonce((nonce) => nonce + 1);
+    }
     setRemotePdvSales(pdv.recentSales);
     const nextSession = {
       ...session,
@@ -1380,6 +1385,18 @@ export function App() {
     setRemoteSession(nextSession);
     remoteSessionRef.current = nextSession;
   };
+
+  useEffect(() => {
+    if (!remoteSession) return;
+    const interval = window.setInterval(() => {
+      const current = remoteSessionRef.current;
+      if (!current) return;
+      void refreshRemote(current).catch((error) => {
+        setRemoteMessage(error instanceof Error ? error.message : "Sincronizacao em tempo real temporariamente indisponivel.");
+      });
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [remoteSession?.baseUrl, remoteSession?.password]);
 
   const connectRemoteClient = async (
     host: string,
@@ -1427,6 +1444,7 @@ export function App() {
       };
       const data = await remoteRequest<RemoteEntriesResponse>(pendingSession, `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`);
       const remotePdv = await remoteRequest<PdvSnapshot>(pendingSession, "/api/pdv/snapshot");
+      remotePdvSignature.current = JSON.stringify(remotePdv);
       setRemotePdvSales(remotePdv.recentSales);
       const connectedSession: RemoteClientSession = {
         ...pendingSession,
@@ -1480,6 +1498,7 @@ export function App() {
     socket?.close();
     remoteSocket.current = null;
     remoteSessionRef.current = null;
+    remotePdvSignature.current = "";
     setRemoteSession(null);
     remoteReconnectAttempt.current = 0;
     setRemoteMessage("");

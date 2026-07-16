@@ -142,6 +142,7 @@ export interface PdvSettings {
   productSortDirection?: "az" | "za";
   allowOfflineTables?: boolean;
   productCardHeight?: number;
+  productFontSize?: number;
   categoryCardHeight?: number;
   tableCardHeight?: number;
   stackIdenticalItems?: boolean;

@@ -25,7 +25,7 @@ import { calculateSplit } from "./shared/calculations";
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; roundingStep?: number; roundingDirection?: RoundDirection };
 type PendingRemoteTable = { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; updatedAt: string };
-type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "categoryCardHeight" | "tableCardHeight">;
+type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "productFontSize" | "categoryCardHeight" | "tableCardHeight">;
 type PdvOperationId = ReturnType<typeof crypto.randomUUID>;
 type CheckoutTarget =
   | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean; operationId?: PdvOperationId }
@@ -45,7 +45,7 @@ function money(value: number): string {
 function readClientVisualSettings(): Partial<PdvClientVisualSettings> {
   try {
     const value = JSON.parse(window.localStorage.getItem(CLIENT_VISUAL_SETTINGS_KEY) || "{}") as Partial<PdvClientVisualSettings>;
-    const fields: Array<keyof PdvClientVisualSettings> = ["gridColumns", "categoryColumns", "tableColumns", "productCardHeight", "categoryCardHeight", "tableCardHeight"];
+    const fields: Array<keyof PdvClientVisualSettings> = ["gridColumns", "categoryColumns", "tableColumns", "productCardHeight", "productFontSize", "categoryCardHeight", "tableCardHeight"];
     return fields.reduce<Partial<PdvClientVisualSettings>>((current, field) => {
       const numeric = Number(value[field]);
       if (Number.isFinite(numeric) && numeric > 0) current[field] = Math.round(numeric);
@@ -391,7 +391,13 @@ export function PdvApp({
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount = 0, operationId: PdvOperationId = crypto.randomUUID()) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
     : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, operationId);
-  const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[]) => window.caixa.saveDirectSale(items, directDiscount, payments, directSaleMode);
+  const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[]) => remotePdvActive && remoteSession
+    ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, "/api/pdv/sales/direct", {
+        method: "POST",
+        headers: { "x-idempotency-key": crypto.randomUUID() },
+        body: JSON.stringify({ items, discount: directDiscount, payments, saleType: directSaleMode })
+      }).then((result) => result.sale)
+    : window.caixa.saveDirectSale(items, directDiscount, payments, directSaleMode);
   const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount = 0, observations = "", operationId: PdvOperationId = crypto.randomUUID()) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ items, payments, discount: partialDiscount, observations }) }).then((result) => result.sale)
     : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount, operationId, observations);
@@ -1660,8 +1666,8 @@ function PdvSaleScreen(props: {
         <div
           className="pdv-category-grid"
           style={{
-            "--pdv-category-cols": props.snapshot.settings.categoryColumns || 5,
-            "--pdv-category-card-height": `${props.snapshot.settings.categoryCardHeight || 52}px`,
+            "--pdv-category-cols": props.settings.categoryColumns || 5,
+            "--pdv-category-card-height": `${props.settings.categoryCardHeight || 52}px`,
             "--pdv-category-pane-height": `${categoryPaneHeight}px`
           } as React.CSSProperties}
         >
@@ -1676,8 +1682,9 @@ function PdvSaleScreen(props: {
         <div
           className="pdv-product-grid"
           style={{
-            "--pdv-grid-cols": props.snapshot.settings.gridColumns || 5,
-            "--pdv-product-card-height": `${props.snapshot.settings.productCardHeight || 60}px`
+            "--pdv-grid-cols": props.settings.gridColumns || 5,
+            "--pdv-product-card-height": `${props.settings.productCardHeight || 60}px`,
+            "--pdv-product-font-size": `${props.settings.productFontSize || 14}px`
           } as React.CSSProperties}
         >
           {props.products.map((product) => (
@@ -4498,6 +4505,10 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
             <input type="number" min={44} max={110} value={visible.productCardHeight || 74} onChange={(event) => onChange({ productCardHeight: Number(event.target.value || 74) })} />
           </label>
           <label className="pdv-setting-line">
+            <span>Fonte dos produtos: {visible.productFontSize || 14}px</span>
+            <input type="range" min={10} max={20} step={1} value={visible.productFontSize || 14} onChange={(event) => onChange({ productFontSize: Number(event.target.value) })} />
+          </label>
+          <label className="pdv-setting-line">
             <span>Altura das categorias</span>
             <input type="number" min={36} max={90} value={visible.categoryCardHeight || 64} onChange={(event) => onChange({ categoryCardHeight: Number(event.target.value || 64) })} />
           </label>
@@ -4610,6 +4621,10 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           <label className="pdv-setting-line">
             <span>Altura dos produtos</span>
             <input type="number" min={44} max={110} value={snapshot.settings.productCardHeight || 74} onChange={(event) => saveSetting({ productCardHeight: Number(event.target.value || 74) })} />
+          </label>
+          <label className="pdv-setting-line">
+            <span>Fonte dos produtos: {snapshot.settings.productFontSize || 14}px</span>
+            <input type="range" min={10} max={20} step={1} value={snapshot.settings.productFontSize || 14} onChange={(event) => saveSetting({ productFontSize: Number(event.target.value) })} />
           </label>
           <label className="pdv-setting-line">
             <span>Altura das categorias</span>

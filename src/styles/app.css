@@ -4558,7 +4558,7 @@ body.floating-borderless .floating-bar {
   overflow: hidden;
   color: #071d30;
   display: -webkit-box;
-  font-size: clamp(0.78rem, 0.9vw, 1rem);
+  font-size: var(--pdv-product-font-size, 14px) !important;
   font-weight: 950;
   line-height: 1.14;
   text-overflow: ellipsis;
@@ -4575,7 +4575,7 @@ body.floating-borderless .floating-bar {
   max-width: 100%;
   overflow: hidden;
   color: #071d30;
-  font-size: clamp(0.72rem, 0.8vw, 0.88rem);
+  font-size: max(10px, calc(var(--pdv-product-font-size, 14px) - 2px)) !important;
   line-height: 1.05;
   white-space: nowrap;
   text-overflow: ellipsis;

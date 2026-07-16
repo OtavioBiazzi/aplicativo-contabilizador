@@ -459,7 +459,7 @@ async function importPdvProducts(filePath: string, importSource = "Importacao ex
     "Produtos PDV importados",
     `${result.importedProducts} produto(s), ${result.importedCategories} categoria(s): ${path.basename(filePath)}`
   );
-  sendToAll("pdv:changed");
+  publishPdvChanged();
   return {
     ...result,
     skippedRows: result.skippedRows + normalized.skippedRows
@@ -596,8 +596,8 @@ async function bootstrap() {
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     },
     getPdvSnapshot: () => pdvStore.getSnapshot(),
-    savePdvDirectSale: async (items, discount, payments, originDevice, operationId) => {
-      const sale = await pdvStore.saveSale({ type: "Venda direta", items, discount, payments, originDevice, operationId });
+    savePdvDirectSale: async (items, discount, payments, originDevice, operationId, saleType) => {
+      const sale = await pdvStore.saveSale({ type: saleType === "Onibus" ? "Onibus" : "Venda direta", items, discount, payments, originDevice, operationId });
       await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       sendToAll("entries:changed");
       return sale;
@@ -667,6 +667,15 @@ function sendToAll(channel: string, ...args: unknown[]) {
   }
 }
 
+function publishPdvChanged() {
+  sendToAll("pdv:changed");
+  localServer.broadcast({ type: "pdv-changed", changedAt: new Date().toISOString() });
+}
+
+function publishServerPolicyChanged() {
+  localServer.broadcast({ type: "server-policy-changed", changedAt: new Date().toISOString() });
+}
+
 async function logExportStatus(action: string, status: ExportStatus) {
   if (!status.ok) {
     await logger.warn(`Exportacao pendente em ${action}`, status.message || "Sem detalhe informado.");
@@ -693,24 +702,24 @@ function registerIpc() {
 
   ipcMain.handle("pdv:saveSettings", async (_event, patch: Partial<PdvSettings>) => {
     const settings = await pdvStore.saveSettings(patch);
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return settings;
   });
 
   ipcMain.handle("pdv:updateProducts", async (_event, ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => {
     await pdvStore.updateProducts(ids, patch);
-    sendToAll("pdv:changed");
+    publishPdvChanged();
   });
 
   ipcMain.handle("pdv:saveCategory", async (_event, draft: PdvCategoryDraft): Promise<PdvCategory> => {
     const category = await pdvStore.saveCategory(draft);
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return category;
   });
 
   ipcMain.handle("pdv:saveProduct", async (_event, draft: PdvProductDraft): Promise<PdvProduct> => {
     const product = await pdvStore.saveProduct(draft);
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return product;
   });
 
@@ -726,7 +735,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:removeCoseProducts", async (): Promise<number> => {
     const removed = await pdvStore.removeImportedProducts("Cose Dell Abadia");
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return removed;
   });
 
@@ -759,28 +768,28 @@ function registerIpc() {
     const sale = await pdvStore.saveSale({ type: input.saleType === "Onibus" ? "Onibus" : "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return sale;
   });
 
   ipcMain.handle("pdv:openTable", async (_event, tableNumber: number, people?: number, note?: string) => {
     await pdvStore.openTable(tableNumber, people, note);
-    sendToAll("pdv:changed");
+    publishPdvChanged();
   });
 
   ipcMain.handle("pdv:setTableStatus", async (_event, tableNumber: number, status: PdvTableStatus) => {
     await pdvStore.setTableStatus(tableNumber, status);
-    sendToAll("pdv:changed");
+    publishPdvChanged();
   });
 
   ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[], subtables?: string[]) => {
     await pdvStore.saveTableItems(tableNumber, items, subtables);
-    sendToAll("pdv:changed");
+    publishPdvChanged();
   });
 
   ipcMain.handle("pdv:transferTableItems", async (_event, sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]): Promise<PdvCartItem[]> => {
     const items = await pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections);
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return items;
   });
 
@@ -788,7 +797,7 @@ function registerIpc() {
     const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Este computador", operationId || randomUUID());
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return sale;
   });
 
@@ -796,7 +805,7 @@ function registerIpc() {
     const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Este computador", operationId || randomUUID(), observations);
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return sale;
   });
 
@@ -804,14 +813,14 @@ function registerIpc() {
     await pdvStore.cancelSale(id);
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
-    sendToAll("pdv:changed");
+    publishPdvChanged();
   });
 
   ipcMain.handle("pdv:updateSalePayments", async (_event, id: string, payments: PdvPayment[]): Promise<PdvSale> => {
     const sale = await pdvStore.updateSalePayments(id, payments);
     await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
     sendToAll("entries:changed");
-    sendToAll("pdv:changed");
+    publishPdvChanged();
     return sale;
   });
 
@@ -838,7 +847,7 @@ function registerIpc() {
       const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       await logExportStatus("edicao de lancamento pdv", exportStatus);
       sendToAll("entries:changed");
-      sendToAll("pdv:changed");
+      publishPdvChanged();
       return { entry: null, exportStatus };
     }
     const entry = await store.updateEntry(id, patch);
@@ -856,7 +865,7 @@ function registerIpc() {
       const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       await logExportStatus("lixeira pdv", exportStatus);
       sendToAll("entries:changed");
-      sendToAll("pdv:changed");
+      publishPdvChanged();
       return { exportStatus };
     }
     await store.removeEntry(id);
@@ -874,7 +883,7 @@ function registerIpc() {
       const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       await logExportStatus("exclusao definitiva pdv", exportStatus);
       sendToAll("entries:changed");
-      sendToAll("pdv:changed");
+      publishPdvChanged();
       return { exportStatus };
     }
     await store.deleteEntry(id);
@@ -904,7 +913,7 @@ function registerIpc() {
       const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
       await logExportStatus("cancelamento pdv", exportStatus);
       sendToAll("entries:changed");
-      sendToAll("pdv:changed");
+      publishPdvChanged();
       return { entry: null, exportStatus };
     }
     const entry = await store.cancelEntry(id);
@@ -926,6 +935,7 @@ function registerIpc() {
     await logExportStatus("salvar configuracoes", exportStatus);
     sendToAll("settings:changed", saved);
     sendToAll("server:changed", localServer.getState());
+    publishServerPolicyChanged();
     return saved;
   });
 

@@ -19,7 +19,7 @@ interface LocalServerOptions {
   removeEntry: (id: string) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
   getPdvSnapshot: () => Promise<PdvSnapshot>;
-  savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string) => Promise<PdvSale>;
+  savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string, saleType?: "Venda direta" | "Onibus") => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
@@ -180,7 +180,8 @@ export class LocalServer {
           Number(request.body?.discount || 0),
           Array.isArray(request.body?.payments) ? request.body.payments : [],
           device,
-          operationId
+          operationId,
+          request.body?.saleType === "Onibus" ? "Onibus" : "Venda direta"
         );
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
