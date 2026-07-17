@@ -5145,18 +5145,10 @@ function SettingsPanel({
         </section>
 
         <section className={categoryClass("pdv", "settings-group wide pdv-settings-panel")}>
-          <h3>Produtos</h3>
-          <p className="helper-text">
-            Cadastre produtos e categorias, importe a planilha da Cose Dell Abadia, ajuste favoritos, unidades, produtos ocultos e adicionais permitidos.
-          </p>
           <PdvApp embedded initialTab="products" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} />
         </section>
 
         <section className={categoryClass("pdvTables", "settings-group wide pdv-settings-panel")}>
-          <h3>Mesas e funcionamento</h3>
-          <p className="helper-text">
-            Configure quantidade de mesas, submesas/contas separadas, complementos e pasta de exportacao do PDV.
-          </p>
           <PdvApp embedded initialTab="advanced" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} />
         </section>
 

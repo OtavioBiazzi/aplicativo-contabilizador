@@ -411,6 +411,9 @@ export function PdvApp({
   const savePdvProduct = (draft: PdvProductDraft) => isRemoteClient
     ? clientConfigurationBlocked() as Promise<PdvProduct>
     : window.caixa.savePdvProduct(draft);
+  const removePdvProduct = (id: string) => isRemoteClient
+    ? clientConfigurationBlocked() as ReturnType<typeof window.caixa.removePdvProduct>
+    : window.caixa.removePdvProduct(id);
   const savePdvSettings = (patch: Partial<PdvSettings>) => isRemoteClient
     ? clientConfigurationBlocked() as Promise<PdvSettings>
     : window.caixa.savePdvSettings(patch);
@@ -1201,7 +1204,7 @@ export function PdvApp({
           />
         )}
 
-        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} />}
+        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} removePdvProduct={removePdvProduct} />}
         {tab === "history" && <HistoryScreen snapshot={snapshot} readOnly={isRemoteClient} onChanged={load} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
         {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
@@ -1631,13 +1634,22 @@ function PdvSaleScreen(props: {
       } as React.CSSProperties}
     >
       <div className="pdv-panel pdv-products-area">
-        <div className="pdv-section-head">
-          <div>
+        <div className="pdv-operational-head">
+          <div className="pdv-sale-identity">
             <span className="pdv-eyebrow">Lancamento rapido</span>
             <h1>{props.title}</h1>
             {props.subtitle && <p>{props.subtitle}</p>}
           </div>
+          <div className="pdv-search pdv-header-search">
+            <Search size={18} />
+            <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="Pesquisar produto pelo nome" />
+          </div>
           <div className={`pdv-quantity-box ${props.activeTableNumber && props.settings.subtablesEnabled ? "has-subtable" : ""} ${!props.activeTableNumber && props.saleMode ? "has-sale-mode" : ""}`}>
+            {props.activeTableNumber && props.settings.subtablesEnabled && (
+              <button className="pdv-subtable-trigger" type="button" onClick={() => setSubtableManagerOpen(true)}>
+                Submesa: {props.currentSubtable || "Principal"}
+              </button>
+            )}
             <span>Qtde</span>
             <button onClick={() => props.setQuantity(Math.max(1, props.quantity - 1))}><Minus size={18} /></button>
             <input type="number" min={1} value={props.quantity} onChange={(event) => props.setQuantity(Number(event.target.value || 1))} />
@@ -1650,17 +1662,7 @@ function PdvSaleScreen(props: {
                 <option value="Onibus">Onibus</option>
               </select>
             )}
-            {props.activeTableNumber && props.settings.subtablesEnabled && (
-              <button className="pdv-subtable-trigger" type="button" onClick={() => setSubtableManagerOpen(true)}>
-                Submesa: {props.currentSubtable || "Principal"}
-              </button>
-            )}
           </div>
-        </div>
-
-        <div className="pdv-search">
-          <Search size={18} />
-          <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="Pesquisar produto pelo nome" />
         </div>
 
         <div
@@ -3836,19 +3838,35 @@ function FileImportButton({ onPreview, onImport, onImported, busy }: { onPreview
   );
 }
 
-function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCose, onRemoveCose, onPreviewImportFile, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onRemoveCose: () => Promise<number>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct> }) {
+function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCose, onRemoveCose, onPreviewImportFile, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct, removePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onRemoveCose: () => Promise<number>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>; removePdvProduct: (id: string) => ReturnType<typeof window.caixa.removePdvProduct> }) {
+  const [section, setSection] = useState<"products" | "categories" | "complements" | "imports">("products");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [targetCategoryId, setTargetCategoryId] = useState(snapshot.categories[0]?.id || "");
   const [filterCategoryId, setFilterCategoryId] = useState("todos");
+  const [statusFilter, setStatusFilter] = useState<"todos" | "ativos" | "inativos" | "ocultos">("todos");
   const [productQuery, setProductQuery] = useState("");
   const [editingProduct, setEditingProduct] = useState<PdvProduct | "new" | null>(null);
   const [editingCategory, setEditingCategory] = useState<PdvCategory | "new" | null>(null);
+  const [removeProductRequest, setRemoveProductRequest] = useState<PdvProduct | null>(null);
   const [removeCoseConfirm, setRemoveCoseConfirm] = useState(false);
+  const [notice, setNotice] = useState("");
   const filteredProducts = snapshot.products.filter((product) => {
     const categoryMatch = filterCategoryId === "todos" || product.categoryId === filterCategoryId;
     const queryMatch = !productQuery.trim() || product.name.toLocaleLowerCase("pt-BR").includes(productQuery.trim().toLocaleLowerCase("pt-BR"));
-    return categoryMatch && queryMatch;
+    const statusMatch = statusFilter === "todos"
+      || (statusFilter === "ativos" && product.active && product.showOnPdv)
+      || (statusFilter === "inativos" && !product.active)
+      || (statusFilter === "ocultos" && !product.showOnPdv);
+    const sectionMatch = section !== "complements" || product.canBeComplement || product.hasComplements || product.complementProductIds.length > 0;
+    return categoryMatch && queryMatch && statusMatch && sectionMatch;
   });
+  const showAllProducts = () => {
+    setSection("products");
+    setProductQuery("");
+    setFilterCategoryId("todos");
+    setStatusFilter("todos");
+    setSelectedIds([]);
+  };
   const updateSelected = async (patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => {
     await updatePdvProducts(selectedIds, patch);
     setSelectedIds([]);
@@ -3864,6 +3882,16 @@ function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCos
     setEditingCategory(null);
     onProductsUpdated();
   };
+  const removeProduct = async () => {
+    if (!removeProductRequest) return;
+    const result = await removePdvProduct(removeProductRequest.id);
+    setRemoveProductRequest(null);
+    setSelectedIds((current) => current.filter((id) => id !== result.id));
+    setNotice(result.mode === "deleted"
+      ? "Produto excluido. Nenhum historico foi alterado."
+      : "Produto arquivado porque possui lancamentos. O historico foi preservado.");
+    onProductsUpdated();
+  };
   return (
     <section className="pdv-panel pdv-products-settings-screen">
       <div className="pdv-section-head">
@@ -3873,56 +3901,111 @@ function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCos
           <p>{snapshot.products.length} produtos em {snapshot.categories.length} categorias.</p>
         </div>
         <div className="pdv-action-row">
-          {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingCategory("new")}>Nova categoria</button>}
-          {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingProduct("new")}>Novo produto</button>}
-          {!readOnly && <FileImportButton busy={busy} onPreview={onPreviewImportFile} onImport={onImportFile} onImported={onProductsUpdated} />}
-          {!readOnly && <CoseImportButton busy={busy} onPreview={onPreviewCose} onImport={onImportCose} onImported={onProductsUpdated} />}
-          {!readOnly && <button className="pdv-danger-button" disabled={busy || !snapshot.products.some((product) => product.importSource === "Cose Dell Abadia")} onClick={() => setRemoveCoseConfirm(true)}>Remover importacao Cose</button>}
+          {!readOnly && section === "products" && <button className="pdv-primary-button" onClick={() => setEditingProduct("new")}><Plus size={16} /> Novo produto</button>}
+          {!readOnly && section === "categories" && <button className="pdv-primary-button" onClick={() => setEditingCategory("new")}><Plus size={16} /> Nova categoria</button>}
         </div>
       </div>
-      <div className="pdv-category-manager">
-        {snapshot.categories.map((category) => (
-          <button key={category.id} className={category.active ? "" : "inactive"} disabled={readOnly} onClick={() => setEditingCategory(category)}>
-            {category.favorite ? "[Fav] " : ""}{category.name} <small>{category.active ? "ativa" : "oculta"}{category.favorite ? " | favorita" : ""}</small>
-          </button>
-        ))}
+      <div className="pdv-settings-nav" role="tablist" aria-label="Cadastro do PDV">
+        <button className={section === "products" ? "active" : ""} onClick={() => setSection("products")}>Produtos <span>{snapshot.products.length}</span></button>
+        <button className={section === "categories" ? "active" : ""} onClick={() => setSection("categories")}>Categorias <span>{snapshot.categories.length}</span></button>
+        <button className={section === "complements" ? "active" : ""} onClick={() => setSection("complements")}>Adicionais</button>
+        <button className={section === "imports" ? "active" : ""} onClick={() => setSection("imports")}>Importacao</button>
       </div>
-      {!readOnly && <div className="pdv-bulk-toolbar">
-        <strong>{selectedIds.length} selecionado(s)</strong>
-        <input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Pesquisar produto" />
-        <select value={filterCategoryId} onChange={(event) => setFilterCategoryId(event.target.value)}>
-          <option value="todos">Todas categorias</option>
-          {snapshot.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-        </select>
-        <select value={targetCategoryId} onChange={(event) => setTargetCategoryId(event.target.value)}>
-          {snapshot.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-        </select>
-        <button className="pdv-ghost-button" disabled={!filteredProducts.length} onClick={() => setSelectedIds(filteredProducts.map((product) => product.id))}>Selecionar visiveis</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => setSelectedIds([])}>Limpar selecao</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ categoryId: targetCategoryId })}>Mover categoria</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ canBeComplement: true })}>Usar como complemento</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ canBeComplement: false })}>Nao complemento</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ hasComplements: true })}>Abrir adicionais</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ hasComplements: false })}>Nao abrir adicionais</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ favorite: true })}>Favoritar</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ favorite: false })}>Tirar favorito</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ showOnPdv: true })}>Exibir no PDV</button>
-        <button className="pdv-ghost-button" disabled={!selectedIds.length} onClick={() => updateSelected({ showOnPdv: false })}>Ocultar do PDV</button>
-      </div>}
-      <div className="pdv-product-table">
-        {filteredProducts.map((product) => (
-          <article key={product.id} className={product.active ? "" : "inactive"}>
-            {!readOnly && <input type="checkbox" checked={selectedIds.includes(product.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, product.id] : current.filter((id) => id !== product.id))} />}
-            <strong>{product.favorite ? "[Fav] " : ""}{product.name}</strong>
-            <span>{product.categoryName}</span>
-            <span>{product.unitMode === "kg" ? "Kg" : product.unitMode === "grama" ? "Grama" : "Unidade"}</span>
-            <b>{money(product.price)}</b>
-            <small>{product.active ? "Ativo" : "Inativo"} | {product.showOnPdv ? "PDV" : "Oculto"} {product.favorite ? " | Favorito" : ""}{product.canBeComplement ? " | Complemento" : ""}{product.complementProductIds.length ? ` | ${product.complementProductIds.length} adicionais` : ""}{product.importSource ? ` | ${product.importSource}` : ""}</small>
-            {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingProduct(product)}>Editar</button>}
-          </article>
-        ))}
-        {!filteredProducts.length && <div className="pdv-empty">Nenhum produto encontrado nesse filtro.</div>}
-      </div>
+
+      {(section === "products" || section === "complements") && (
+        <div className="pdv-products-content">
+          <div className="pdv-product-filterbar">
+            <button className={filterCategoryId === "todos" && statusFilter === "todos" && !productQuery ? "active" : ""} onClick={showAllProducts}>
+              Todos os produtos <span>{snapshot.products.length}</span>
+            </button>
+            <div className="pdv-search pdv-settings-search">
+              <Search size={17} />
+              <input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Pesquisar por nome" />
+            </div>
+            <select value={filterCategoryId} onChange={(event) => setFilterCategoryId(event.target.value)}>
+              <option value="todos">Todas as categorias</option>
+              {snapshot.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+            </select>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+              <option value="todos">Todos os estados</option>
+              <option value="ativos">Ativos no PDV</option>
+              <option value="inativos">Inativos</option>
+              <option value="ocultos">Ocultos do PDV</option>
+            </select>
+            <strong>{filteredProducts.length} exibido(s)</strong>
+          </div>
+          {!readOnly && selectedIds.length > 0 && (
+            <div className="pdv-selection-toolbar">
+              <strong>{selectedIds.length} selecionado(s)</strong>
+              <select value={targetCategoryId} onChange={(event) => setTargetCategoryId(event.target.value)}>
+                {snapshot.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </select>
+              <button onClick={() => updateSelected({ categoryId: targetCategoryId })}>Mover</button>
+              <button onClick={() => updateSelected({ showOnPdv: true })}>Exibir</button>
+              <button onClick={() => updateSelected({ showOnPdv: false })}>Ocultar</button>
+              <button onClick={() => updateSelected({ favorite: true })}>Favoritar</button>
+              <button onClick={() => setSelectedIds([])}>Limpar</button>
+            </div>
+          )}
+          <div className="pdv-product-table">
+            {filteredProducts.map((product) => (
+              <article key={product.id} className={product.active ? "" : "inactive"}>
+                {!readOnly && <input type="checkbox" aria-label={`Selecionar ${product.name}`} checked={selectedIds.includes(product.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, product.id])] : current.filter((id) => id !== product.id))} />}
+                <div className="pdv-product-main">
+                  <strong>{product.name}</strong>
+                  <small>{product.categoryName} · {product.unitMode === "kg" ? "Kg" : product.unitMode === "grama" ? "Grama" : "Unidade"}</small>
+                </div>
+                <b>{money(product.price)}</b>
+                <div className="pdv-product-badges">
+                  <span className={product.active && product.showOnPdv ? "success" : "muted"}>{product.active ? (product.showOnPdv ? "No PDV" : "Oculto") : "Inativo"}</span>
+                  {Boolean(product.favorite) && <span>Favorito</span>}
+                  {Boolean(product.canBeComplement) && <span>Adicional</span>}
+                  {product.complementProductIds.length > 0 && <span>{product.complementProductIds.length} vinculado(s)</span>}
+                  {product.importSource && <span>{product.importSource}</span>}
+                </div>
+                {!readOnly && (
+                  <div className="pdv-row-actions">
+                    <button className="pdv-icon-button" title="Editar produto" onClick={() => setEditingProduct(product)}><Pencil size={16} /></button>
+                    <button className="pdv-icon-button danger" title="Excluir ou arquivar produto" onClick={() => setRemoveProductRequest(product)}><Trash2 size={16} /></button>
+                  </div>
+                )}
+              </article>
+            ))}
+            {!filteredProducts.length && <div className="pdv-empty">Nenhum produto encontrado. Use “Todos os produtos” para limpar os filtros.</div>}
+          </div>
+        </div>
+      )}
+
+      {section === "categories" && (
+        <div className="pdv-category-settings-list">
+          {snapshot.categories.map((category) => {
+            const count = snapshot.products.filter((product) => product.categoryId === category.id).length;
+            return (
+              <article key={category.id} className={category.active ? "" : "inactive"}>
+                <div><strong>{category.name}</strong><span>{count} produto(s)</span></div>
+                <small>{category.active ? "Visivel no lancamento" : "Categoria oculta"}{category.favorite ? " · Favorita" : ""}</small>
+                {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingCategory(category)}>Editar</button>}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {section === "imports" && (
+        <div className="pdv-import-settings">
+          <div>
+            <strong>Importar arquivo Excel ou CSV</strong>
+            <span>Adicione e atualize produtos sem usar a planilha como banco principal.</span>
+            {!readOnly && <FileImportButton busy={busy} onPreview={onPreviewImportFile} onImport={onImportFile} onImported={onProductsUpdated} />}
+          </div>
+          <div>
+            <strong>Preset Cose Dell Abadia</strong>
+            <span>{snapshot.products.filter((product) => product.importSource === "Cose Dell Abadia").length} produto(s) identificados nesta importacao.</span>
+            {!readOnly && <CoseImportButton busy={busy} onPreview={onPreviewCose} onImport={onImportCose} onImported={onProductsUpdated} />}
+            {!readOnly && <button className="pdv-danger-button" disabled={busy || !snapshot.products.some((product) => product.importSource === "Cose Dell Abadia")} onClick={() => setRemoveCoseConfirm(true)}>Remover somente esta importacao</button>}
+          </div>
+        </div>
+      )}
       {editingProduct && (
         <ProductEditorModal
           product={editingProduct === "new" ? null : editingProduct}
@@ -3947,6 +4030,15 @@ function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCos
           onConfirm={() => { void onRemoveCose().then(() => { setRemoveCoseConfirm(false); onProductsUpdated(); }); }}
         />
       )}
+      {removeProductRequest && (
+        <PdvConfirmModal
+          title={`Excluir ${removeProductRequest.name}?`}
+          message="Se o produto ja fizer parte de vendas ou mesas, ele sera apenas arquivado. Historico, relatorios e valores antigos continuarao preservados."
+          onCancel={() => setRemoveProductRequest(null)}
+          onConfirm={() => { void removeProduct(); }}
+        />
+      )}
+      {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
     </section>
   );
 }
@@ -4454,22 +4546,35 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
 }
 
 function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot: PdvSnapshot; settings: Partial<PdvClientVisualSettings>; onChange: (patch: Partial<PdvClientVisualSettings>) => void }) {
-  const visible = { ...snapshot.settings, ...settings };
+  const visible = useMemo(() => ({ ...snapshot.settings, ...settings }), [snapshot.settings, settings]);
+  const [draft, setDraft] = useState<Partial<PdvClientVisualSettings>>(visible);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    if (!dirty) setDraft(visible);
+  }, [snapshot.settings, settings, dirty]);
+  const changeDraft = (patch: Partial<PdvClientVisualSettings>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+    setDirty(true);
+  };
   const applyPreset = (preset: "compact" | "normal" | "comfortable") => {
     const presets: Record<typeof preset, PdvClientVisualSettings> = {
       compact: { gridColumns: 7, categoryColumns: 7, tableColumns: 11, productCardHeight: 52, categoryCardHeight: 44, tableCardHeight: 74 },
       normal: { gridColumns: 5, categoryColumns: 5, tableColumns: 9, productCardHeight: 60, categoryCardHeight: 52, tableCardHeight: 88 },
       comfortable: { gridColumns: 5, categoryColumns: 5, tableColumns: 8, productCardHeight: 76, categoryCardHeight: 62, tableCardHeight: 104 }
     };
-    onChange(presets[preset]);
+    changeDraft(presets[preset]);
   };
   return (
-    <section className="pdv-panel">
+    <section className="pdv-panel pdv-settings-screen">
       <div className="pdv-section-head">
         <div>
           <span className="pdv-eyebrow">Cliente conectado</span>
           <h1>Ajustes deste computador</h1>
           <p>As regras do PDV acompanham o servidor. Aqui voce altera somente o tamanho e a distribuicao visual desta tela.</p>
+        </div>
+        <div className="pdv-action-row">
+          <button className="pdv-ghost-button" disabled={!dirty} onClick={() => { setDraft(visible); setDirty(false); }}>Descartar</button>
+          <button className="pdv-primary-button" disabled={!dirty} onClick={() => { onChange(draft); setDirty(false); }}>Salvar alteracoes</button>
         </div>
       </div>
       <div className="pdv-visual-presets" aria-label="Densidade visual deste computador">
@@ -4484,37 +4589,37 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
           <strong>Grade e tamanho local</strong>
           <label className="pdv-setting-line">
             <span>Produtos por linha</span>
-            <select value={visible.gridColumns || 5} onChange={(event) => onChange({ gridColumns: Number(event.target.value) })}>
+            <select value={draft.gridColumns || 5} onChange={(event) => changeDraft({ gridColumns: Number(event.target.value) })}>
               {[4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value} produtos por linha</option>)}
             </select>
           </label>
           <label className="pdv-setting-line">
             <span>Categorias por linha</span>
-            <select value={visible.categoryColumns || 5} onChange={(event) => onChange({ categoryColumns: Number(event.target.value) })}>
+            <select value={draft.categoryColumns || 5} onChange={(event) => changeDraft({ categoryColumns: Number(event.target.value) })}>
               {[3, 4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value} categorias por linha</option>)}
             </select>
           </label>
           <label className="pdv-setting-line">
             <span>Mesas por linha</span>
-            <select value={visible.tableColumns || 9} onChange={(event) => onChange({ tableColumns: Number(event.target.value) })}>
+            <select value={draft.tableColumns || 9} onChange={(event) => changeDraft({ tableColumns: Number(event.target.value) })}>
               {[5, 6, 7, 8, 9, 10, 11, 12].map((value) => <option key={value} value={value}>{value} mesas por linha</option>)}
             </select>
           </label>
           <label className="pdv-setting-line">
             <span>Altura dos produtos</span>
-            <input type="number" min={44} max={110} value={visible.productCardHeight || 74} onChange={(event) => onChange({ productCardHeight: Number(event.target.value || 74) })} />
+            <input type="number" min={44} max={110} value={draft.productCardHeight || 74} onChange={(event) => changeDraft({ productCardHeight: Number(event.target.value || 74) })} />
           </label>
           <label className="pdv-setting-line">
-            <span>Fonte dos produtos: {visible.productFontSize || 14}px</span>
-            <input type="range" min={10} max={20} step={1} value={visible.productFontSize || 14} onChange={(event) => onChange({ productFontSize: Number(event.target.value) })} />
+            <span>Fonte dos produtos: {draft.productFontSize || 14}px</span>
+            <input type="range" min={10} max={20} step={1} value={draft.productFontSize || 14} onChange={(event) => changeDraft({ productFontSize: Number(event.target.value) })} />
           </label>
           <label className="pdv-setting-line">
             <span>Altura das categorias</span>
-            <input type="number" min={36} max={90} value={visible.categoryCardHeight || 64} onChange={(event) => onChange({ categoryCardHeight: Number(event.target.value || 64) })} />
+            <input type="number" min={36} max={90} value={draft.categoryCardHeight || 64} onChange={(event) => changeDraft({ categoryCardHeight: Number(event.target.value || 64) })} />
           </label>
           <label className="pdv-setting-line">
             <span>Altura das mesas</span>
-            <input type="number" min={58} max={130} value={visible.tableCardHeight || 96} onChange={(event) => onChange({ tableCardHeight: Number(event.target.value || 96) })} />
+            <input type="number" min={58} max={130} value={draft.tableCardHeight || 96} onChange={(event) => changeDraft({ tableCardHeight: Number(event.target.value || 96) })} />
           </label>
         </article>
         <article>
@@ -4529,9 +4634,26 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
 }
 
 function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {}, onClientVisualSettingsChange, onImportCose, onPreviewCose, onPreviewImportFile, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; readOnly?: boolean; clientVisualSettings?: Partial<PdvClientVisualSettings>; onClientVisualSettingsChange?: (patch: Partial<PdvClientVisualSettings>) => void; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
-  const saveSetting = async (patch: Partial<PdvSnapshot["settings"]>) => {
-    await savePdvSettings(patch);
-    onSettingsUpdated();
+  const [section, setSection] = useState<"tables" | "appearance" | "operation" | "data">("tables");
+  const [draft, setDraft] = useState<PdvSettings>(snapshot.settings);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!dirty) setDraft(snapshot.settings);
+  }, [snapshot.settings, dirty]);
+  const changeDraft = (patch: Partial<PdvSettings>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+    setDirty(true);
+  };
+  const saveChanges = async () => {
+    setSaving(true);
+    try {
+      await savePdvSettings(draft);
+      setDirty(false);
+      onSettingsUpdated();
+    } finally {
+      setSaving(false);
+    }
   };
   if (readOnly) {
     return <ClientVisualSettingsScreen snapshot={snapshot} settings={clientVisualSettings} onChange={(patch) => onClientVisualSettingsChange?.(patch)} />;
@@ -4542,153 +4664,114 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
       normal: { gridColumns: 5, categoryColumns: 5, tableColumns: 9, productCardHeight: 60, categoryCardHeight: 52, tableCardHeight: 88 },
       comfortable: { gridColumns: 5, categoryColumns: 5, tableColumns: 8, productCardHeight: 76, categoryCardHeight: 62, tableCardHeight: 104 }
     };
-    void saveSetting(presets[preset]);
+    changeDraft(presets[preset]);
   };
   return (
     <section className="pdv-panel pdv-settings-screen">
       <div className="pdv-section-head">
         <div>
-          <span className="pdv-eyebrow">Base nova</span>
-          <h1>Avancado</h1>
-          <p>Banco principal do PDV: {snapshot.dataFile}</p>
+          <span className="pdv-eyebrow">Configuracao do PDV</span>
+          <h1>Mesas e operacao</h1>
+          <p>Altere os campos e confirme em Salvar. Nada e gravado antes disso.</p>
+        </div>
+        <div className="pdv-action-row">
+          <button className="pdv-ghost-button" disabled={!dirty || saving} onClick={() => { setDraft(snapshot.settings); setDirty(false); }}>Descartar</button>
+          <button className="pdv-primary-button" disabled={!dirty || saving} onClick={() => void saveChanges()}>{saving ? "Salvando..." : "Salvar alteracoes"}</button>
         </div>
       </div>
-      <div className="pdv-visual-presets" aria-label="Densidade visual padrao do PDV">
-        <span>Densidade visual</span>
-        <button onClick={() => applyVisualPreset("compact")}>Compacto</button>
-        <button onClick={() => applyVisualPreset("normal")}>Normal</button>
-        <button onClick={() => applyVisualPreset("comfortable")}>Confortavel</button>
+      <div className="pdv-settings-nav" role="tablist" aria-label="Configuracoes do PDV">
+        <button className={section === "tables" ? "active" : ""} onClick={() => setSection("tables")}>Mesas</button>
+        <button className={section === "appearance" ? "active" : ""} onClick={() => setSection("appearance")}>Aparencia</button>
+        <button className={section === "operation" ? "active" : ""} onClick={() => setSection("operation")}>Operacao</button>
+        <button className={section === "data" ? "active" : ""} onClick={() => setSection("data")}>Dados e Excel</button>
       </div>
-      <div className="pdv-advanced-grid">
-        <article>
-          <Settings size={22} />
-          <strong>Preset Cose Dell Abadia</strong>
-          <span>Perfil nativo do app para mesas, complementos e importacao de produtos da Cose Dell Abadia.</span>
-          <small>Preset ativo: {snapshot.settings.activePreset}</small>
-        </article>
-        <article>
+
+      <div className="pdv-settings-content">
+        {section === "tables" && <div className="pdv-settings-form">
           <Utensils size={22} />
-          <strong>Mesas e submesas</strong>
+          <div><strong>Estrutura das mesas</strong><span>Quantidade, ordenacao e contas separadas.</span></div>
           <label className="pdv-setting-line">
             <span>Quantidade de mesas</span>
-            <input type="number" min={1} max={300} value={snapshot.settings.tableCount} onChange={(event) => saveSetting({ tableCount: Number(event.target.value || 47) })} />
-          </label>
-          <label className="pdv-setting-line">
-            <span>Grid de produtos</span>
-            <select value={snapshot.settings.gridColumns || 5} onChange={(event) => saveSetting({ gridColumns: Number(event.target.value) })}>
-              <option value={4}>4 produtos por linha</option>
-              <option value={5}>5 produtos por linha</option>
-              <option value={6}>6 produtos por linha</option>
-              <option value={7}>7 produtos por linha</option>
-              <option value={8}>8 produtos por linha</option>
-              <option value={9}>9 produtos por linha</option>
-              <option value={10}>10 produtos por linha</option>
-            </select>
-          </label>
-          <label className="pdv-setting-line">
-            <span>Grid de categorias</span>
-            <select value={snapshot.settings.categoryColumns || 5} onChange={(event) => saveSetting({ categoryColumns: Number(event.target.value) })}>
-              <option value={3}>3 categorias por linha</option>
-              <option value={4}>4 categorias por linha</option>
-              <option value={5}>5 categorias por linha</option>
-              <option value={6}>6 categorias por linha</option>
-              <option value={7}>7 categorias por linha</option>
-              <option value={8}>8 categorias por linha</option>
-              <option value={9}>9 categorias por linha</option>
-              <option value={10}>10 categorias por linha</option>
-            </select>
+            <input type="number" min={1} max={300} value={draft.tableCount} onChange={(event) => changeDraft({ tableCount: Number(event.target.value || 47) })} />
           </label>
           <label className="pdv-setting-line">
             <span>Ordem dos produtos</span>
-            <select value={snapshot.settings.productSortDirection || "az"} onChange={(event) => saveSetting({ productSortDirection: event.target.value as "az" | "za" })}>
+            <select value={draft.productSortDirection || "az"} onChange={(event) => changeDraft({ productSortDirection: event.target.value as "az" | "za" })}>
               <option value="az">A a Z</option>
               <option value="za">Z a A</option>
             </select>
           </label>
-          <label className="pdv-setting-line">
-            <span>Grid de mesas</span>
-            <select value={snapshot.settings.tableColumns || 9} onChange={(event) => saveSetting({ tableColumns: Number(event.target.value) })}>
-              <option value={5}>5 mesas por linha</option>
-              <option value={6}>6 mesas por linha</option>
-              <option value={7}>7 mesas por linha</option>
-              <option value={8}>8 mesas por linha</option>
-              <option value={9}>9 mesas por linha</option>
-              <option value={10}>10 mesas por linha</option>
-              <option value={11}>11 mesas por linha</option>
-              <option value={12}>12 mesas por linha</option>
-            </select>
-          </label>
-          <label className="pdv-setting-line">
-            <span>Altura dos produtos</span>
-            <input type="number" min={44} max={110} value={snapshot.settings.productCardHeight || 74} onChange={(event) => saveSetting({ productCardHeight: Number(event.target.value || 74) })} />
-          </label>
-          <label className="pdv-setting-line">
-            <span>Fonte dos produtos: {snapshot.settings.productFontSize || 14}px</span>
-            <input type="range" min={10} max={20} step={1} value={snapshot.settings.productFontSize || 14} onChange={(event) => saveSetting({ productFontSize: Number(event.target.value) })} />
-          </label>
-          <label className="pdv-setting-line">
-            <span>Altura das categorias</span>
-            <input type="number" min={36} max={90} value={snapshot.settings.categoryCardHeight || 64} onChange={(event) => saveSetting({ categoryCardHeight: Number(event.target.value || 64) })} />
-          </label>
-          <label className="pdv-setting-line">
-            <span>Altura das mesas</span>
-            <input type="number" min={58} max={130} value={snapshot.settings.tableCardHeight || 96} onChange={(event) => saveSetting({ tableCardHeight: Number(event.target.value || 96) })} />
-          </label>
           <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(snapshot.settings.stackIdenticalItems)} onChange={(event) => saveSetting({ stackIdenticalItems: event.target.checked })} />
-            Juntar produtos iguais no carrinho
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(snapshot.settings.individualUnitItems)} onChange={(event) => saveSetting({ individualUnitItems: event.target.checked })} />
-            Exibir cada unidade individualmente
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={snapshot.settings.subtablesEnabled} onChange={(event) => saveSetting({ subtablesEnabled: event.target.checked })} />
+            <input type="checkbox" checked={draft.subtablesEnabled} onChange={(event) => changeDraft({ subtablesEnabled: event.target.checked })} />
             Ativar submesas/contas separadas
           </label>
           <label className="pdv-switch-line">
-            <input type="checkbox" checked={snapshot.settings.tablePeopleEnabled} onChange={(event) => saveSetting({ tablePeopleEnabled: event.target.checked })} />
+            <input type="checkbox" checked={draft.tablePeopleEnabled} onChange={(event) => changeDraft({ tablePeopleEnabled: event.target.checked })} />
             Perguntar quantidade de pessoas ao abrir mesa
           </label>
           <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(snapshot.settings.allowOfflineTables)} onChange={(event) => saveSetting({ allowOfflineTables: event.target.checked })} />
+            <input type="checkbox" checked={Boolean(draft.allowOfflineTables)} onChange={(event) => changeDraft({ allowOfflineTables: event.target.checked })} />
             Permitir mesas offline no cliente
           </label>
-        </article>
-        <article>
-          <Plus size={22} />
-          <strong>Complementos e adicionais</strong>
-          <span>Quando ativo, produtos configurados podem abrir tela de adicionais. Shift+clique lanca direto.</span>
+        </div>}
+
+        {section === "appearance" && <div className="pdv-settings-form">
+          <LayoutGrid size={22} />
+          <div><strong>Tamanho e distribuicao</strong><span>Use uma densidade pronta ou ajuste cada medida.</span></div>
+          <div className="pdv-visual-presets" aria-label="Densidade visual padrao do PDV">
+            <span>Densidade</span>
+            <button onClick={() => applyVisualPreset("compact")}>Compacto</button>
+            <button onClick={() => applyVisualPreset("normal")}>Normal</button>
+            <button onClick={() => applyVisualPreset("comfortable")}>Confortavel</button>
+          </div>
+          <label className="pdv-setting-line"><span>Produtos por linha</span><select value={draft.gridColumns || 5} onChange={(event) => changeDraft({ gridColumns: Number(event.target.value) })}>{[4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label className="pdv-setting-line"><span>Categorias por linha</span><select value={draft.categoryColumns || 5} onChange={(event) => changeDraft({ categoryColumns: Number(event.target.value) })}>{[3, 4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label className="pdv-setting-line"><span>Mesas por linha</span><select value={draft.tableColumns || 9} onChange={(event) => changeDraft({ tableColumns: Number(event.target.value) })}>{[5, 6, 7, 8, 9, 10, 11, 12].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label className="pdv-setting-line"><span>Altura dos produtos</span><input type="number" min={44} max={110} value={draft.productCardHeight || 74} onChange={(event) => changeDraft({ productCardHeight: Number(event.target.value || 74) })} /></label>
+          <label className="pdv-setting-line"><span>Fonte dos produtos: {draft.productFontSize || 14}px</span><input type="range" min={10} max={20} step={1} value={draft.productFontSize || 14} onChange={(event) => changeDraft({ productFontSize: Number(event.target.value) })} /></label>
+          <label className="pdv-setting-line"><span>Altura das categorias</span><input type="number" min={36} max={90} value={draft.categoryCardHeight || 64} onChange={(event) => changeDraft({ categoryCardHeight: Number(event.target.value || 64) })} /></label>
+          <label className="pdv-setting-line"><span>Altura das mesas</span><input type="number" min={58} max={130} value={draft.tableCardHeight || 96} onChange={(event) => changeDraft({ tableCardHeight: Number(event.target.value || 96) })} /></label>
+        </div>}
+
+        {section === "operation" && <div className="pdv-settings-form">
+          <Settings size={22} />
+          <div><strong>Lancamento e pagamento</strong><span>Preferencias usadas em Venda e Mesas.</span></div>
           <label className="pdv-switch-line">
-            <input type="checkbox" checked={snapshot.settings.complementsEnabled} onChange={(event) => saveSetting({ complementsEnabled: event.target.checked })} />
+            <input type="checkbox" checked={Boolean(draft.stackIdenticalItems)} onChange={(event) => changeDraft({ stackIdenticalItems: event.target.checked })} />
+            Juntar produtos iguais no carrinho
+          </label>
+          <label className="pdv-switch-line">
+            <input type="checkbox" checked={Boolean(draft.individualUnitItems)} onChange={(event) => changeDraft({ individualUnitItems: event.target.checked })} />
+            Exibir cada unidade individualmente
+          </label>
+          <label className="pdv-switch-line">
+            <input type="checkbox" checked={draft.complementsEnabled} onChange={(event) => changeDraft({ complementsEnabled: event.target.checked })} />
             Ativar complementos
           </label>
           <label className="pdv-switch-line">
-            <input type="checkbox" checked={snapshot.settings.groupComplementsWithProduct ?? true} onChange={(event) => saveSetting({ groupComplementsWithProduct: event.target.checked })} />
+            <input type="checkbox" checked={draft.groupComplementsWithProduct ?? true} onChange={(event) => changeDraft({ groupComplementsWithProduct: event.target.checked })} />
             Mostrar adicionais junto ao produto principal
           </label>
           <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(snapshot.settings.partialPaymentDescriptionEnabled)} onChange={(event) => saveSetting({ partialPaymentDescriptionEnabled: event.target.checked })} />
+            <input type="checkbox" checked={Boolean(draft.partialPaymentDescriptionEnabled)} onChange={(event) => changeDraft({ partialPaymentDescriptionEnabled: event.target.checked })} />
             Solicitar descricao nos pagamentos parciais
           </label>
           <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(snapshot.settings.skipPaymentConfirmation)} onChange={(event) => saveSetting({ skipPaymentConfirmation: event.target.checked })} />
+            <input type="checkbox" checked={Boolean(draft.skipPaymentConfirmation)} onChange={(event) => changeDraft({ skipPaymentConfirmation: event.target.checked })} />
             Finalizar pagamento sem pedir confirmacao
           </label>
-        </article>
-        <article>
+        </div>}
+
+        {section === "data" && <div className="pdv-settings-form">
           <Banknote size={22} />
-          <strong>Excel agora e importacao/exportacao</strong>
-          <span>Produtos e vendas ficam no SQLite. Relatorios e exportacoes do PDV saem a partir deste banco.</span>
+          <div><strong>Banco e exportacao</strong><span>Produtos e vendas ficam no SQLite. O Excel e gerado a partir dele.</span></div>
+          <small className="pdv-data-path" title={snapshot.dataFile}>{snapshot.dataFile}</small>
           <button className="pdv-ghost-button" type="button" onClick={() => window.caixa.openOutputDirectory()}>Abrir pasta dos Excel</button>
-        </article>
-        <article>
-          <FileSpreadsheet size={22} />
-          <strong>Importar produtos</strong>
-          <span>Usa DESCRICAO, GRUPO, PRECO_VENDA, UNIDADE, ATIVO e EXIBE_PDV.</span>
-          <CoseImportButton busy={busy} onPreview={onPreviewCose} onImport={onImportCose} onImported={onSettingsUpdated} />
-          <FileImportButton busy={busy} onPreview={onPreviewImportFile} onImport={onImportFile} onImported={onSettingsUpdated} />
-        </article>
+          <div className="pdv-import-actions">
+            <CoseImportButton busy={busy} onPreview={onPreviewCose} onImport={onImportCose} onImported={onSettingsUpdated} />
+            <FileImportButton busy={busy} onPreview={onPreviewImportFile} onImport={onImportFile} onImported={onSettingsUpdated} />
+          </div>
+        </div>}
       </div>
     </section>
   );

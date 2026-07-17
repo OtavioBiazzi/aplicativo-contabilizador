@@ -44,6 +44,11 @@ export interface PdvProductDraft {
   sortOrder: number;
 }
 
+export interface PdvProductRemovalResult {
+  id: string;
+  mode: "deleted" | "archived";
+}
+
 export interface PdvCategoryDraft {
   id?: string;
   name: string;

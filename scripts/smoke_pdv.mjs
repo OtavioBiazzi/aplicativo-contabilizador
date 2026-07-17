@@ -415,6 +415,31 @@ if (!integratedSalesSheet.includes("Venda antiga smoke")) {
   throw new Error("Exportacao do PDV nao incluiu o lancamento antigo integrado.");
 }
 
+const disposableProduct = await store.saveProduct({
+  name: "Produto descartavel smoke",
+  categoryId: category.id,
+  price: 3,
+  unit: "UNID",
+  unitMode: "unidade",
+  active: true,
+  showOnPdv: true,
+  favorite: false,
+  canBeComplement: false,
+  hasComplements: false,
+  complementProductIds: [],
+  sortOrder: 99
+});
+if (await store.removeProduct(disposableProduct.id) !== "deleted" || (await store.getSnapshot()).products.some((product) => product.id === disposableProduct.id)) {
+  throw new Error("Produto sem historico nao foi excluido definitivamente.");
+}
+if (await store.removeProduct(baseProduct.id) !== "archived") {
+  throw new Error("Produto presente no historico deveria ter sido arquivado.");
+}
+const archivedProduct = (await store.getSnapshot()).products.find((product) => product.id === baseProduct.id);
+if (!archivedProduct || archivedProduct.active || archivedProduct.showOnPdv || !store.getSales({}).some((item) => item.id === sale.id)) {
+  throw new Error("Arquivamento de produto alterou o historico ou manteve o produto no PDV.");
+}
+
 const corruptDir = path.join(tmp, "corrupt");
 mkdirSync(corruptDir, { recursive: true });
 writeFileSync(path.join(corruptDir, "pdv.sqlite"), "arquivo invalido");

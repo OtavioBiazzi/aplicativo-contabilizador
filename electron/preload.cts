@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("caixa", {
     ipcRenderer.invoke("pdv:updateProducts", ids, patch),
   savePdvCategory: (draft: PdvCategoryDraft) => ipcRenderer.invoke("pdv:saveCategory", draft),
   savePdvProduct: (draft: PdvProductDraft) => ipcRenderer.invoke("pdv:saveProduct", draft),
+  removePdvProduct: (id: string) => ipcRenderer.invoke("pdv:removeProduct", id),
   importCoseProducts: () => ipcRenderer.invoke("pdv:importCoseProducts"),
   previewCoseProducts: () => ipcRenderer.invoke("pdv:previewCoseProducts"),
   removeCoseProducts: () => ipcRenderer.invoke("pdv:removeCoseProducts"),

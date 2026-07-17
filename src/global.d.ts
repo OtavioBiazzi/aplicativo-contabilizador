@@ -13,7 +13,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "./shared/types";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvProductRemovalResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
@@ -22,6 +22,7 @@ export interface CaixaApi {
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
+  removePdvProduct: (id: string) => Promise<PdvProductRemovalResult>;
   importCoseProducts: () => Promise<PdvProductImportResult>;
   previewCoseProducts: () => Promise<PdvProductImportPreview>;
   removeCoseProducts: () => Promise<number>;

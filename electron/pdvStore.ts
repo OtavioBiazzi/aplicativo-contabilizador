@@ -278,6 +278,37 @@ export class PdvStore {
     return this.getProducts().find((product) => product.id === id) || this.getProducts()[0];
   }
 
+  async removeProduct(id: string): Promise<"deleted" | "archived"> {
+    const productId = String(id || "").trim();
+    const db = this.requireDb();
+    const product = selectAll<{ id: string }>(db, "SELECT id FROM products WHERE id = ?", [productId])[0];
+    if (!product) {
+      throw new Error("Produto nao encontrado.");
+    }
+    const saleReferences = selectAll<{ total: number }>(db, "SELECT COUNT(*) AS total FROM sale_items WHERE product_id = ?", [productId])[0]?.total || 0;
+    const tableReferences = selectAll<{ total: number }>(db, "SELECT COUNT(*) AS total FROM table_items WHERE product_id = ?", [productId])[0]?.total || 0;
+    const mode = saleReferences || tableReferences ? "archived" : "deleted";
+    await this.backupSqlite("antes-remover-produto");
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run("DELETE FROM product_complements WHERE product_id = ? OR complement_product_id = ?", [productId, productId]);
+      if (mode === "archived") {
+        db.run(
+          "UPDATE products SET active = 0, show_on_pdv = 0, favorite = 0, can_be_complement = 0, has_complements = 0 WHERE id = ?",
+          [productId]
+        );
+      } else {
+        db.run("DELETE FROM products WHERE id = ?", [productId]);
+      }
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return mode;
+  }
+
   async replaceProducts(categories: PdvCategory[], products: PdvProduct[], filePath: string, importSource = ""): Promise<PdvProductImportResult> {
     await this.backupSqlite("antes-importacao-produtos");
     const db = this.requireDb();

@@ -723,6 +723,12 @@ function registerIpc() {
     return product;
   });
 
+  ipcMain.handle("pdv:removeProduct", async (_event, id: string) => {
+    const mode = await pdvStore.removeProduct(id);
+    publishPdvChanged();
+    return { id, mode };
+  });
+
   ipcMain.handle("pdv:importCoseProducts", async (): Promise<PdvProductImportResult> => {
     const defaultPath = path.join(app.getPath("downloads"), "produtos.xlsx");
     return importPdvProducts(defaultPath, "Cose Dell Abadia");
