@@ -8683,17 +8683,17 @@ input[type="date"] {
 
 .pdv-direct-discount-button {
   min-height: 44px;
-  border-color: color-mix(in srgb, var(--pdv-cart) 72%, #fff) !important;
-  background: color-mix(in srgb, var(--pdv-cart) 88%, #071d30) !important;
-  color: #fff !important;
+  border-color: var(--ui-border) !important;
+  background: var(--ui-surface-soft) !important;
+  color: var(--text) !important;
   font-size: 0.92rem;
   font-weight: 850;
 }
 
 .pdv-direct-discount-button:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--pdv-action) 58%, #fff) !important;
-  background: color-mix(in srgb, var(--pdv-cart) 78%, var(--pdv-action)) !important;
-  color: #fff !important;
+  border-color: color-mix(in srgb, var(--ui-border) 55%, var(--text)) !important;
+  background: var(--panel-2) !important;
+  color: var(--text) !important;
 }
 
 .pdv-direct-cart-actions {
@@ -10058,10 +10058,14 @@ body {
 
 .pdv-payment-methods button > small {
   position: absolute;
-  top: 6px;
-  right: 7px;
+  top: 7px;
+  right: 8px;
+  display: inline-flex;
+  min-width: 25px;
+  align-items: center;
+  justify-content: center;
   border-radius: 4px;
-  padding: 2px 5px;
+  padding: 3px 6px;
   background: rgba(7, 29, 48, 0.82);
   color: #fff !important;
   font-size: 0.68rem;
@@ -10090,8 +10094,13 @@ body {
 }
 
 .pdv-close-menu .pdv-action-row button small {
+  display: inline-flex;
+  min-width: 25px;
+  align-items: center;
+  justify-content: center;
+  margin-left: 7px;
   border-radius: 4px;
-  padding: 2px 5px;
+  padding: 3px 6px;
   background: rgba(7, 29, 48, 0.82);
   color: #fff !important;
 }

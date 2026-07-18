@@ -216,6 +216,11 @@ function useModalConfirmShortcut(onConfirm: () => void, onCancel: () => void, en
   }, [onCancel, onConfirm, enabled]);
 }
 
+export interface PdvAdvancedSettingsActions {
+  save: () => Promise<void>;
+  discard: () => void;
+}
+
 export function PdvApp({
   embedded = false,
   initialTab = "sale",
@@ -225,7 +230,9 @@ export function PdvApp({
   roundingStep = 0.01,
   roundingDirection = "nearest",
   toastDuration = 3200,
-  onDirectCartChange
+  onDirectCartChange,
+  advancedSettingsActionsRef,
+  onAdvancedSettingsDirtyChange
 }: {
   embedded?: boolean;
   initialTab?: PdvTab;
@@ -236,6 +243,8 @@ export function PdvApp({
   roundingDirection?: RoundDirection;
   toastDuration?: number;
   onDirectCartChange?: (hasItems: boolean) => void;
+  advancedSettingsActionsRef?: React.MutableRefObject<PdvAdvancedSettingsActions | null>;
+  onAdvancedSettingsDirtyChange?: (dirty: boolean) => void;
 }) {
   const [snapshot, setSnapshot] = useState<PdvSnapshot | null>(null);
   const [tab, setTab] = useState<PdvTab>(initialTab);
@@ -1250,7 +1259,7 @@ export function PdvApp({
         {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} removePdvProduct={removePdvProduct} />}
         {tab === "history" && <HistoryScreen snapshot={snapshot} readOnly={isRemoteClient} onChanged={load} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
-        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} />}
+        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} externalActionsRef={advancedSettingsActionsRef} onDirtyChange={onAdvancedSettingsDirtyChange} />}
       </main>
 
       {toast && (
@@ -4694,7 +4703,7 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
   );
 }
 
-function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {}, onClientVisualSettingsChange, onImportCose, onPreviewCose, onPreviewImportFile, onImportFile, busy, onSettingsUpdated, savePdvSettings }: { snapshot: PdvSnapshot; readOnly?: boolean; clientVisualSettings?: Partial<PdvClientVisualSettings>; onClientVisualSettingsChange?: (patch: Partial<PdvClientVisualSettings>) => void; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings> }) {
+function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {}, onClientVisualSettingsChange, onImportCose, onPreviewCose, onPreviewImportFile, onImportFile, busy, onSettingsUpdated, savePdvSettings, externalActionsRef, onDirtyChange }: { snapshot: PdvSnapshot; readOnly?: boolean; clientVisualSettings?: Partial<PdvClientVisualSettings>; onClientVisualSettingsChange?: (patch: Partial<PdvClientVisualSettings>) => void; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onSettingsUpdated: () => void; savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>; externalActionsRef?: React.MutableRefObject<PdvAdvancedSettingsActions | null>; onDirtyChange?: (dirty: boolean) => void }) {
   const [section, setSection] = useState<"tables" | "appearance" | "operation" | "data">("tables");
   const [draft, setDraft] = useState<PdvSettings>(snapshot.settings);
   const [dirty, setDirty] = useState(false);
@@ -4716,6 +4725,20 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
       setSaving(false);
     }
   };
+  const discardChanges = () => {
+    setDraft(snapshot.settings);
+    setDirty(false);
+  };
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (!externalActionsRef) return;
+    externalActionsRef.current = { save: saveChanges, discard: discardChanges };
+    return () => {
+      externalActionsRef.current = null;
+    };
+  });
   if (readOnly) {
     return <ClientVisualSettingsScreen snapshot={snapshot} settings={clientVisualSettings} onChange={(patch) => onClientVisualSettingsChange?.(patch)} />;
   }
@@ -4733,12 +4756,12 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
         <div>
           <span className="pdv-eyebrow">Configuracao do PDV</span>
           <h1>Mesas e operacao</h1>
-          <p>Altere os campos e confirme em Salvar. Nada e gravado antes disso.</p>
+          <p>Altere os campos e confirme em Salvar configuracoes no rodape. Nada e gravado antes disso.</p>
         </div>
-        <div className="pdv-action-row">
-          <button className="pdv-ghost-button" disabled={!dirty || saving} onClick={() => { setDraft(snapshot.settings); setDirty(false); }}>Descartar</button>
+        {!externalActionsRef && <div className="pdv-action-row">
+          <button className="pdv-ghost-button" disabled={!dirty || saving} onClick={discardChanges}>Descartar</button>
           <button className="pdv-primary-button" disabled={!dirty || saving} onClick={() => void saveChanges()}>{saving ? "Salvando..." : "Salvar alteracoes"}</button>
-        </div>
+        </div>}
       </div>
       <div className="pdv-settings-nav" role="tablist" aria-label="Configuracoes do PDV">
         <button className={section === "tables" ? "active" : ""} onClick={() => setSection("tables")}>Mesas</button>

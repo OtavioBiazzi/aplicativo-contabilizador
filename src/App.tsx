@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
 import { PdvApp } from "./PdvApp";
+import type { PdvAdvancedSettingsActions } from "./PdvApp";
 import type { PdvSale, PdvSnapshot } from "./shared/pdvTypes";
 import {
   buildReportDataset,
@@ -4921,6 +4922,8 @@ function SettingsPanel({
   const [capturingShortcut, setCapturingShortcut] = useState<ShortcutAction | null>(null);
   const [newProfileName, setNewProfileName] = useState("");
   const [settingsConfirm, setSettingsConfirm] = useState<{ title: string; message: string; action: () => void | Promise<void>; confirmLabel?: string; danger?: boolean } | null>(null);
+  const pdvSettingsActionsRef = useRef<PdvAdvancedSettingsActions | null>(null);
+  const [pdvSettingsDirty, setPdvSettingsDirty] = useState(false);
   const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
   const effectiveSettingsOperationMode = remoteSession?.clientPolicy.operationMode || draft.operationMode;
   const remoteLockedCategoryList: SettingsCategory[] = ["operation", "defaults", "profiles", "files", "server", "advanced"];
@@ -5331,6 +5334,13 @@ function SettingsPanel({
     }
   };
 
+  const persistSettingsDraft = async () => {
+    await onSave(draft);
+    if (pdvSettingsDirty) {
+      await pdvSettingsActionsRef.current?.save();
+    }
+  };
+
   const saveDraft = async () => {
     if (
       remoteClientActive &&
@@ -5346,11 +5356,11 @@ function SettingsPanel({
         title: "Salvar configuracoes sensiveis?",
         message: `Essas configuracoes alteram ${warnings.join(", ")}. Confira antes de aplicar.`,
         confirmLabel: "Salvar mesmo assim",
-        action: () => onSave(draft)
+        action: persistSettingsDraft
       });
       return;
     }
-    await onSave(draft);
+    await persistSettingsDraft();
   };
 
   const settingsCategories: Array<{ key: SettingsCategory; label: string; description: string; icon: typeof Settings }> = [
@@ -5808,7 +5818,7 @@ function SettingsPanel({
         </section>
 
         <section className={categoryClass("pdvTables", "settings-group wide pdv-settings-panel")}>
-          <PdvApp embedded initialTab="advanced" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} />
+          <PdvApp embedded initialTab="advanced" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} advancedSettingsActionsRef={pdvSettingsActionsRef} onAdvancedSettingsDirtyChange={setPdvSettingsDirty} />
         </section>
 
         <section className={categoryClass("privacy", "settings-group wide privacy-settings")}>
@@ -6176,6 +6186,7 @@ function SettingsPanel({
         <button className="primary-button" onClick={saveDraft}><Save size={18} /> Salvar configuracoes</button>
         <button className="ghost-button" onClick={() => {
           setDraft(settings);
+          pdvSettingsActionsRef.current?.discard();
           onToast("info", "Alteracoes descartadas.");
         }}>Descartar</button>
       </div>
