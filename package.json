@@ -71,7 +71,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Contabilizador Caixa"
+      "shortcutName": "Caixa PDV",
+      "include": "build/installer.nsh"
     }
   }
 }
