@@ -181,7 +181,19 @@ export function buildReportDataset(records: ReportRecord[]): ReportDataset {
       }
     });
 
-    record.items.forEach((item) => {
+    const itemRevenueTotal = roundMoney(record.items.reduce((sum, item) => sum + item.total, 0));
+    const unallocatedSaleDiscount = Math.max(0, roundMoney(itemRevenueTotal - record.total));
+    let remainingSaleDiscount = unallocatedSaleDiscount;
+
+    record.items.forEach((item, itemIndex) => {
+      const allocatedSaleDiscount = itemIndex === record.items.length - 1
+        ? remainingSaleDiscount
+        : Math.min(
+            remainingSaleDiscount,
+            roundMoney(unallocatedSaleDiscount * (itemRevenueTotal ? item.total / itemRevenueTotal : 0))
+          );
+      remainingSaleDiscount = roundMoney(remainingSaleDiscount - allocatedSaleDiscount);
+      const netItemRevenue = Math.max(0, roundMoney(item.total - allocatedSaleDiscount));
       const key = item.productId && item.productId !== "legacy" ? item.productId : `${item.categoryName}::${item.productName}`;
       const current = products.get(key) || {
         key,
@@ -195,16 +207,18 @@ export function buildReportDataset(records: ReportRecord[]): ReportDataset {
       };
       current.quantity = roundMoney(current.quantity + item.quantity);
       current.launches += 1;
-      current.revenue = roundMoney(current.revenue + item.total);
-      current.discounts = roundMoney(current.discounts + item.discount);
+      current.revenue = roundMoney(current.revenue + netItemRevenue);
+      current.discounts = roundMoney(current.discounts + item.discount + allocatedSaleDiscount);
       products.set(key, current);
 
-      const categoryName = item.categoryName || "Sem categoria";
-      const category = categories.get(categoryName) || { quantity: 0, revenue: 0, products: new Set<string>() };
-      category.quantity = roundMoney(category.quantity + item.quantity);
-      category.revenue = roundMoney(category.revenue + item.total);
-      category.products.add(key);
-      categories.set(categoryName, category);
+      if (item.productId !== "legacy") {
+        const categoryName = item.categoryName || "Sem categoria";
+        const category = categories.get(categoryName) || { quantity: 0, revenue: 0, products: new Set<string>() };
+        category.quantity = roundMoney(category.quantity + item.quantity);
+        category.revenue = roundMoney(category.revenue + netItemRevenue);
+        category.products.add(key);
+        categories.set(categoryName, category);
+      }
 
       item.complements.forEach((complement) => {
         increment(complements, complement.name, item.quantity);

@@ -3594,7 +3594,10 @@ function ProfessionalReportsPanel({
   const types = useMemo(() => ["Todos", ...new Set(records.map((record) => record.type).filter(Boolean))], [records]);
   const payments = useMemo(() => ["Todos", ...new Set(records.flatMap((record) => record.payments.map((item) => item.method)).filter(Boolean))], [records]);
   const origins = useMemo(() => ["Todos", ...new Set(records.map((record) => record.originDevice).filter(Boolean))], [records]);
-  const categories = useMemo(() => ["Todos", ...new Set(dataset.products.map((product) => product.category).filter(Boolean))], [dataset.products]);
+  const categories = useMemo(() => ["Todos", ...new Set(dataset.products
+    .filter((product) => product.productId !== "legacy")
+    .map((product) => product.category)
+    .filter(Boolean))], [dataset.products]);
   const visibleProducts = useMemo(() => {
     const search = deferredProductQuery.trim().toLocaleLowerCase("pt-BR");
     return dataset.products.filter((product) =>
@@ -3760,7 +3763,7 @@ function ProfessionalReportsPanel({
               value={showTotals ? formatCurrency(productRevenue) : "Restrito"}
               detail={productTotalDifference > 0
                 ? `${formatCurrency(productTotalDifference)} em desconto geral aplicado no fechamento`
-                : "Ja considera descontos aplicados diretamente nos itens"}
+                : "Ja considera descontos dos itens e do fechamento"}
             />
           </div>
           <div className="professional-product-filters">
