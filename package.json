@@ -47,7 +47,7 @@
   },
   "build": {
     "appId": "com.otaviobiazzi.contabilizador",
-    "productName": "Caixa PDV",
+    "productName": "Contabilizador Caixa",
     "directories": {
       "output": "release"
     },
@@ -71,7 +71,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Caixa PDV"
+      "shortcutName": "Contabilizador Caixa"
     }
   }
 }

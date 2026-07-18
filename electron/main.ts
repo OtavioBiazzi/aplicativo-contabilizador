@@ -46,6 +46,7 @@ let gracefulQuitFinished = false;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
+const WINDOWS_APP_USER_MODEL_ID = "com.otaviobiazzi.contabilizador";
 const FLOATING_MIN_WIDTH = 520;
 const FLOATING_MAX_WIDTH = 1240;
 const FLOATING_MIN_HEIGHT = 56;
@@ -88,7 +89,7 @@ async function createWindow() {
     minHeight: 360,
     show: false,
     backgroundColor: "#0f1311",
-    title: "Caixa PDV",
+    title: "Contabilizador Caixa",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -356,7 +357,7 @@ async function downloadUpdateAsset(info: UpdateInfo): Promise<string> {
 
 function defaultInstalledExePath() {
   const localAppData = process.env.LOCALAPPDATA || path.join(app.getPath("home"), "AppData", "Local");
-  return path.join(localAppData, "Programs", "aplicativo-contabilizador", "Caixa PDV.exe");
+  return path.join(localAppData, "Programs", "aplicativo-contabilizador", "Contabilizador Caixa.exe");
 }
 
 async function launchWindowsUpdater(installerPath: string) {
@@ -1358,6 +1359,10 @@ function compareVersions(left: string, right: string) {
     }
   }
   return 0;
+}
+
+if (process.platform === "win32") {
+  app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
 }
 
 app.whenReady().then(bootstrap);
