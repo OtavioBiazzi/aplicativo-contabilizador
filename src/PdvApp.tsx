@@ -2193,7 +2193,13 @@ function PaymentModal({
     }
     if (!paymentEntryMethod && (event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === "ArrowLeft" || event.key === "ArrowUp")) {
       event.preventDefault();
-      const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+      const direction = event.key === "ArrowRight"
+        ? 1
+        : event.key === "ArrowLeft"
+          ? -1
+          : event.key === "ArrowDown"
+            ? 2
+            : -2;
       setFocusedPaymentIndex((current) => (current + direction + PAYMENT_METHODS.length) % PAYMENT_METHODS.length);
       return;
     }

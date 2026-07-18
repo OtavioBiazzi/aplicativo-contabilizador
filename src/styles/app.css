@@ -10317,6 +10317,37 @@ body {
   -webkit-text-fill-color: #fff !important;
 }
 
+/* v0.3.31: consistent page rhythm and compact operational controls. */
+.app-shell:not(.pdv-main-mode) .workspace {
+  padding: 8px 10px 10px;
+}
+
+.pdv-sale-grid .pdv-product-grid button {
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 3px;
+}
+
+.pdv-sale-grid .pdv-product-grid button strong,
+.pdv-sale-grid .pdv-product-grid button span {
+  align-self: center;
+}
+
+.pdv-close-menu > .pdv-action-row > button {
+  position: relative;
+  justify-content: center;
+  padding-inline: 48px;
+  text-align: center;
+}
+
+.pdv-close-menu > .pdv-action-row > button small {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  margin-left: 0;
+  transform: translateY(-50%);
+}
+
 .pdv-payment-modal .pdv-payment-methods button.active span,
 .pdv-payment-modal .pdv-payment-methods button:hover span,
 .pdv-payment-modal .pdv-payment-methods button:focus-visible span {
