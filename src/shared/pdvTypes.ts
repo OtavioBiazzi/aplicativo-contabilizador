@@ -156,6 +156,8 @@ export interface PdvSettings {
   skipPaymentConfirmation?: boolean;
   individualUnitItems?: boolean;
   groupComplementsWithProduct?: boolean;
+  roundingStep?: number;
+  roundingDirection?: "nearest" | "up" | "down";
 }
 
 export interface PdvProductImportResult {

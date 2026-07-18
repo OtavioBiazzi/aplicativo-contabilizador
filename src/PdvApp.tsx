@@ -28,7 +28,7 @@ type PendingRemoteTable = { tableNumber: number; people: number; note: string; i
 type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "productFontSize" | "categoryCardHeight" | "tableCardHeight">;
 type PdvOperationId = ReturnType<typeof crypto.randomUUID>;
 type CheckoutTarget =
-  | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean; operationId?: PdvOperationId }
+  | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean; saleType?: PdvSale["type"]; operationId?: PdvOperationId }
   | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[]; operationId: PdvOperationId }
   | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-subtable"; table: PdvOpenTable; subtableName: string; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
@@ -37,6 +37,7 @@ type CheckoutTarget =
 const PAYMENT_METHODS: PdvPaymentMethod[] = ["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Nao definido"];
 const CLIENT_VISUAL_SETTINGS_KEY = "caixa.pdv.client-visual-settings";
 const LAST_SUBTABLE_STORAGE_PREFIX = "caixa.pdv.last-subtable.";
+const QUICK_VALUE_MODE_STORAGE_KEY = "caixa.pdv.quick-value-mode";
 type PendingProduct = { product: PdvProduct; quantity: number; measureLabel?: string; unitPrice?: number; finalTotal?: number };
 type PendingMeasureProduct = { product: PdvProduct; direct: boolean };
 
@@ -410,13 +411,16 @@ export function PdvApp({
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount = 0, operationId: PdvOperationId = crypto.randomUUID()) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
     : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, operationId);
-  const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[]) => remotePdvActive && remoteSession
+  const cancelPdvTable = (tableNumber: number) => remoteTablesActive && remoteSession
+    ? remotePdvRequest<{ sale: PdvSale | null }>(remoteSession, `/api/pdv/tables/${tableNumber}/cancel`, { method: "POST" }).then((result) => result.sale)
+    : window.caixa.cancelPdvTable(tableNumber);
+  const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[], saleType: PdvSale["type"] = directSaleMode) => remotePdvActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, "/api/pdv/sales/direct", {
         method: "POST",
         headers: { "x-idempotency-key": crypto.randomUUID() },
-        body: JSON.stringify({ items, discount: directDiscount, payments, saleType: directSaleMode })
+        body: JSON.stringify({ items, discount: directDiscount, payments, saleType })
       }).then((result) => result.sale)
-    : window.caixa.saveDirectSale(items, directDiscount, payments, directSaleMode);
+    : window.caixa.saveDirectSale(items, directDiscount, payments, saleType);
   const savePdvTablePartial = (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], partialDiscount = 0, observations = "", operationId: PdvOperationId = crypto.randomUUID()) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/partial`, { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ items, payments, discount: partialDiscount, observations }) }).then((result) => result.sale)
     : window.caixa.savePdvTablePartial(tableNumber, items, payments, partialDiscount, operationId, observations);
@@ -632,15 +636,15 @@ export function PdvApp({
     setCheckoutTarget({ kind: "direct", total: saleFinal });
   };
 
-  const confirmDirectSale = async (payments: PdvPayment[], items = cart) => {
+  const confirmDirectSale = async (payments: PdvPayment[], items = cart, saleType: PdvSale["type"] = directSaleMode) => {
     setBusy(true);
     try {
-      await saveDirectPdvSale(items, discount, payments);
+      await saveDirectPdvSale(items, discount, payments, saleType);
       setCart([]);
       setSelectedDirectItemIds([]);
       setDiscount(0);
       setCheckoutTarget(null);
-      setToast(directSaleMode === "Onibus" ? "Venda de onibus finalizada." : "Venda direta finalizada.");
+      setToast(saleType === "Onibus" ? "Venda de onibus finalizada." : saleType === "Mesa" ? "Mesa avulsa finalizada." : "Venda finalizada.");
       await load();
     } catch (error) {
       setToast(error instanceof Error ? error.message : "Nao foi possivel finalizar a venda.");
@@ -742,10 +746,9 @@ export function PdvApp({
     if (action === "cancel") {
       setConfirmRequest({
         title: `Cancelar mesa ${String(table.number).padStart(3, "0")}?`,
-        message: "A mesa sera liberada e todos os itens ainda nao fechados serao removidos.",
+        message: "A mesa sera liberada. Os itens pendentes ficarao registrados como cancelados no Historico, sem entrar no faturamento ou no Excel.",
         action: async () => {
-          await savePdvTableItems(table.number, []);
-          await setPdvTableStatus(table.number, "Livre");
+          await cancelPdvTable(table.number);
           await load();
         }
       });
@@ -837,6 +840,10 @@ export function PdvApp({
       return;
     }
     if (tableTotal <= 0.009) return;
+    if (snapshot?.settings.subtablesEnabled && currentSubtable) {
+      await requestCloseSubtable(currentSubtable);
+      return;
+    }
     await persistTableBeforeAction();
     await setPdvTableStatus(activeTable.number, "Fechamento");
     setActiveTable((current) => current ? { ...current, status: "Fechamento" } : current);
@@ -1148,7 +1155,7 @@ export function PdvApp({
               </div>
               <div className="pdv-filter-row">
                 {(["Todas", "Livre", "Ocupada", "Fechamento", "Reservada"] as const).map((status) => (
-                  <button className={tableFilter === status ? "active" : ""} key={status} onClick={() => setTableFilter(status)}>
+                  <button className={`${status.toLowerCase()} ${tableFilter === status ? "active" : ""}`} key={status} onClick={() => setTableFilter(status)}>
                     {status}
                   </button>
                 ))}
@@ -1253,6 +1260,13 @@ export function PdvApp({
             openPdvTable={openPdvTable}
             savePdvTableItems={savePdvTableItems}
             transferPdvTableItems={transferPdvTableItems}
+            onCancelWholeTable={async () => {
+              await cancelPdvTable(activeTable.number);
+              setActiveTable(null);
+              setTableCart([]);
+              setSelectedTableItemIds([]);
+              await load();
+            }}
           />
         )}
 
@@ -1299,7 +1313,7 @@ export function PdvApp({
           }}
           onConfirm={(payments, observations) => {
             if (checkoutTarget.kind === "direct") {
-              return confirmDirectSale(payments, checkoutTarget.items || cart);
+              return confirmDirectSale(payments, checkoutTarget.items || cart, checkoutTarget.saleType);
             } else if (checkoutTarget.kind === "table") {
               return confirmCloseTable(payments);
             } else {
@@ -1310,14 +1324,13 @@ export function PdvApp({
       )}
       {tableCloseMenuOpen && activeTable && (
         <TableCloseMenu
-          table={activeTable}
+          table={{ ...activeTable, people: tablePeople }}
           subtotal={tableTotal}
-          roundingStep={remoteSession?.roundingStep ?? roundingStep}
-          roundingDirection={remoteSession?.roundingDirection ?? roundingDirection}
+          roundingStep={snapshot.settings.roundingStep ?? remoteSession?.roundingStep ?? roundingStep}
+          roundingDirection={snapshot.settings.roundingDirection ?? remoteSession?.roundingDirection ?? roundingDirection}
+          onPeopleChange={updateLocalTablePeople}
           onCancel={() => {
             setTableCloseMenuOpen(false);
-            void setPdvTableStatus(activeTable.number, "Ocupada");
-            setActiveTable((current) => current ? { ...current, status: "Ocupada" } : current);
           }}
           onPartialItems={() => {
             setTableCloseMenuOpen(false);
@@ -1360,9 +1373,16 @@ export function PdvApp({
       {quickValueModalOpen && (
         <QuickValueModal
           onCancel={() => setQuickValueModalOpen(false)}
-          onConfirm={(item) => {
+          onConfirm={(item, mode) => {
             setQuickValueModalOpen(false);
-            setCheckoutTarget({ kind: "direct", total: item.total, items: [item], manual: true });
+            setDirectSaleMode(mode === "Onibus" ? "Onibus" : "Venda direta");
+            setCheckoutTarget({
+              kind: "direct",
+              total: item.total,
+              items: [item],
+              manual: true,
+              saleType: mode === "Mesa" ? "Mesa" : mode === "Onibus" ? "Onibus" : "Venda direta"
+            });
           }}
         />
       )}
@@ -1458,6 +1478,7 @@ function PdvSaleScreen(props: {
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
+  onCancelWholeTable?: () => void | Promise<void>;
 }) {
   const visibleCart = props.activeTableNumber && props.settings.subtablesEnabled
     ? props.cart.filter((item) => (item.subtableName || "") === (props.currentSubtable || ""))
@@ -1799,6 +1820,11 @@ function PdvSaleScreen(props: {
               <div>
                 <strong>{index + 1}. {item.productName}</strong>
                 <span>{item.measureLabel || item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}{item.note ? ` | ${item.note}` : ""}{unpaidQuantity(item) <= 0.009 ? " | Pago" : item.paidQuantity ? ` | Restam ${unpaidQuantity(item)}` : ""}</span>
+                {adjustedItemOriginalTotal(item) !== null && (
+                  <small className="pdv-cart-price-adjustment">
+                    Original <s>{money(adjustedItemOriginalTotal(item)!)}</s> | Final {money(item.total)}
+                  </small>
+                )}
               </div>
               <b>{money(props.activeTableNumber ? unpaidItemTotal(item) : item.total)}</b>
             </article>
@@ -1883,7 +1909,7 @@ function PdvSaleScreen(props: {
               Cancelar
             </button>
             <button className="pdv-primary-button" disabled={props.busy || !props.cart.length} onClick={props.onFinish}>
-              {props.cart.some((item) => unpaidQuantity(item) > 0.009) ? "Fechar conta" : "Concluir mesa"}
+              Fechar conta
             </button>
           </div>
         )}
@@ -1972,9 +1998,13 @@ function PdvSaleScreen(props: {
             cart={props.cart}
             onCancel={() => setCancelTableRequest(false)}
             onClear={() => {
-              props.setCart([]);
-              props.setSelectedItemIds?.([]);
-              setCancelTableRequest(false);
+              if (props.activeTableNumber && props.onCancelWholeTable) {
+                void Promise.resolve(props.onCancelWholeTable()).then(() => setCancelTableRequest(false));
+              } else {
+                props.setCart([]);
+                props.setSelectedItemIds?.([]);
+                setCancelTableRequest(false);
+              }
             }}
             onRemove={(item) => {
               selectAfterRemoving(item.id);
@@ -2556,13 +2586,17 @@ function PaymentAmountModal({
   );
 }
 
-function QuickValueModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: (item: PdvCartItem) => void }) {
+function QuickValueModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: (item: PdvCartItem, mode: "Venda" | "Mesa" | "Onibus" | "Outros") => void }) {
   const [valueText, setValueText] = useState("");
-  const [mode, setMode] = useState("Venda avulsa");
-  const [description, setDescription] = useState("Venda avulsa");
+  const [mode, setMode] = useState<"Venda" | "Mesa" | "Onibus" | "Outros">(() => {
+    const saved = window.localStorage.getItem(QUICK_VALUE_MODE_STORAGE_KEY);
+    return saved === "Mesa" || saved === "Onibus" || saved === "Outros" ? saved : "Venda";
+  });
+  const [description, setDescription] = useState("");
   const value = Math.max(0, parseBrazilianNumber(valueText));
   const confirm = () => {
     if (value <= 0) return;
+    window.localStorage.setItem(QUICK_VALUE_MODE_STORAGE_KEY, mode);
     onConfirm({
       id: crypto.randomUUID(),
       productId: `valor-avulso-${mode.toLocaleLowerCase("pt-BR").replace(/[^a-z0-9]+/g, "-")}`,
@@ -2573,11 +2607,16 @@ function QuickValueModal({ onCancel, onConfirm }: { onCancel: () => void; onConf
       baseUnitPrice: roundMoney(value),
       discount: 0,
       total: roundMoney(value),
-      note: `${mode} pelo mapa de mesas`
-    });
+      note: description.trim() || `${mode} pelo mapa de mesas`
+    }, mode);
   };
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === "Enter") { event.preventDefault(); confirm(); }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation();
+      confirm();
+    }
     if (event.key === "Escape") { event.preventDefault(); onCancel(); }
   };
   return (
@@ -2590,14 +2629,14 @@ function QuickValueModal({ onCancel, onConfirm }: { onCancel: () => void; onConf
         <div className="pdv-editor-grid">
           <label>
             <span>Tipo de lancamento</span>
-            <select value={mode} onChange={(event) => { const nextMode = event.target.value; setMode(nextMode); setDescription((current) => current === mode ? nextMode : current); }}>
-              <option>Venda avulsa</option>
-              <option>Mesa avulsa</option>
+            <select value={mode} onChange={(event) => setMode(event.target.value as "Venda" | "Mesa" | "Onibus" | "Outros")}>
+              <option>Venda</option>
+              <option>Mesa</option>
               <option>Onibus</option>
-              <option>Ajuste de valor</option>
+              <option>Outros</option>
             </select>
           </label>
-          <label><span>Descricao</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Onibus ou ajuste" /></label>
+          <label><span>Descricao opcional</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={mode === "Mesa" ? "Ex.: Mesa 12" : "Ex.: identificacao do lancamento"} /></label>
           <label><span>Valor</span><input autoFocus inputMode="decimal" value={valueText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setValueText(event.target.value)} placeholder="0,00" /></label>
         </div>
         <div className="pdv-payment-summary"><Metric title="Valor a receber" value={money(value)} /></div>
@@ -3645,6 +3684,7 @@ function TableCloseMenu({
   subtotal,
   roundingStep: configuredRoundingStep,
   roundingDirection: configuredRoundingDirection,
+  onPeopleChange,
   onCancel,
   onPartialItems,
   onCloseTotal
@@ -3653,6 +3693,7 @@ function TableCloseMenu({
   subtotal: number;
   roundingStep?: number;
   roundingDirection?: RoundDirection;
+  onPeopleChange?: (people: number) => void;
   onCancel: () => void;
   onPartialItems: () => void;
   onCloseTotal: (total: number, discount: number, initialPayments?: PdvPayment[]) => void;
@@ -3670,6 +3711,11 @@ function TableCloseMenu({
     id: `person-${index + 1}`,
     amount: split.perPersonRounded
   }));
+  const changePeople = (next: number) => {
+    const normalized = Math.max(1, Math.floor(next || 1));
+    setPeople(normalized);
+    onPeopleChange?.(normalized);
+  };
 
   useEffect(() => {
     if (configuredRoundingStep || configuredRoundingDirection) {
@@ -3764,9 +3810,9 @@ function TableCloseMenu({
             <span>Aproximacao: {String(roundingStep).replace(".", ",")} / {roundingDirection}</span>
           </div>
           <div className="pdv-inline-stepper">
-            <input type="number" min={1} value={people} onChange={(event) => setPeople(Math.max(1, Number(event.target.value || 1)))} />
-            <button onClick={() => setPeople((current) => Math.max(1, current - 1))}>-</button>
-            <button onClick={() => setPeople((current) => current + 1)}>+</button>
+            <input type="number" min={1} value={people} onChange={(event) => changePeople(Number(event.target.value || 1))} />
+            <button onClick={() => changePeople(people - 1)}>-</button>
+            <button onClick={() => changePeople(people + 1)}>+</button>
           </div>
           <div className="pdv-split-preview">
             <span>Valor por pessoa: <b>{money(split.perPersonRounded)}</b></span>
@@ -4386,6 +4432,7 @@ function HistoryScreen({ snapshot, readOnly = false, onChanged }: { snapshot: Pd
   const [saleMenu, setSaleMenu] = useState<{ x: number; y: number; sale: PdvSale } | null>(null);
   const [editingPaymentsSale, setEditingPaymentsSale] = useState<PdvSale | null>(null);
   const [cancelRequest, setCancelRequest] = useState<PdvSale | null>(null);
+  const [deleteRequest, setDeleteRequest] = useState<PdvSale | null>(null);
   const [notice, setNotice] = useState("");
   const sales = filterSales(snapshot.recentSales, filters);
 
@@ -4424,6 +4471,9 @@ function HistoryScreen({ snapshot, readOnly = false, onChanged }: { snapshot: Pd
     }
     if (action === "payments" && sale.status !== "Cancelada") {
       setEditingPaymentsSale(sale);
+    }
+    if (action === "delete" && sale.status === "Cancelada") {
+      setDeleteRequest(sale);
     }
   };
 
@@ -4481,6 +4531,7 @@ function HistoryScreen({ snapshot, readOnly = false, onChanged }: { snapshot: Pd
           <button onClick={() => runSaleAction("export", saleMenu.sale)}>Exportar dia da venda</button>
           {!readOnly && saleMenu.sale.status !== "Cancelada" && <button onClick={() => runSaleAction("payments", saleMenu.sale)}>Alterar forma de pagamento</button>}
           {!readOnly && saleMenu.sale.status !== "Cancelada" && <button className="danger" onClick={() => runSaleAction("cancel", saleMenu.sale)}>Cancelar/estornar</button>}
+          {!readOnly && saleMenu.sale.status === "Cancelada" && <button className="danger" onClick={() => runSaleAction("delete", saleMenu.sale)}>Excluir registro cancelado</button>}
         </ContextMenu>
       )}
       {selectedSale && <SaleDetailModal sale={selectedSale} onClose={() => setSelectedSale(null)} onCancel={() => readOnly ? undefined : cancelSale(selectedSale)} />}
@@ -4490,6 +4541,20 @@ function HistoryScreen({ snapshot, readOnly = false, onChanged }: { snapshot: Pd
           message={`A venda ${cancelRequest.id.slice(0, 8)} continuara no historico como cancelada. Deseja confirmar?`}
           onCancel={() => setCancelRequest(null)}
           onConfirm={() => { void confirmCancelSale(); }}
+        />
+      )}
+      {deleteRequest && (
+        <PdvConfirmModal
+          title="Excluir registro cancelado?"
+          message="Esta exclusao e definitiva. O registro cancelado sera removido do Historico, sem alterar vendas validas."
+          onCancel={() => setDeleteRequest(null)}
+          onConfirm={() => {
+            void window.caixa.deleteEntry(`pdv-${deleteRequest.id}`).then(() => {
+              setDeleteRequest(null);
+              setSelectedSale(null);
+              onChanged();
+            });
+          }}
         />
       )}
       {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
@@ -4811,9 +4876,9 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
 
         {section === "appearance" && <div className="pdv-settings-form">
           <LayoutGrid size={22} />
-          <div><strong>Tamanho e distribuicao</strong><span>Use uma densidade pronta ou ajuste cada medida.</span></div>
+          <div><strong>Tamanho do PDV</strong><span>Estas medidas controlam somente Venda, Mesas, produtos e categorias.</span></div>
           <div className="pdv-visual-presets" aria-label="Densidade visual padrao do PDV">
-            <span>Densidade</span>
+            <span>Aplicar medidas prontas</span>
             <button onClick={() => applyVisualPreset("compact")}>Compacto</button>
             <button onClick={() => applyVisualPreset("normal")}>Normal</button>
             <button onClick={() => applyVisualPreset("comfortable")}>Confortavel</button>
@@ -4853,6 +4918,25 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           <label className="pdv-switch-line">
             <input type="checkbox" checked={Boolean(draft.skipPaymentConfirmation)} onChange={(event) => changeDraft({ skipPaymentConfirmation: event.target.checked })} />
             Finalizar pagamento sem pedir confirmacao
+          </label>
+          <label className="pdv-setting-line">
+            <span>Aproximacao da divisao</span>
+            <select value={draft.roundingStep || 0.01} onChange={(event) => changeDraft({ roundingStep: Number(event.target.value) })}>
+              <option value={0.01}>Sem aproximacao</option>
+              <option value={0.05}>R$ 0,05</option>
+              <option value={0.1}>R$ 0,10</option>
+              <option value={0.25}>R$ 0,25</option>
+              <option value={0.5}>R$ 0,50</option>
+              <option value={1}>R$ 1,00</option>
+            </select>
+          </label>
+          <label className="pdv-setting-line">
+            <span>Direcao da aproximacao</span>
+            <select value={draft.roundingDirection || "nearest"} onChange={(event) => changeDraft({ roundingDirection: event.target.value as "nearest" | "up" | "down" })}>
+              <option value="nearest">Mais proximo</option>
+              <option value="up">Sempre para cima</option>
+              <option value="down">Sempre para baixo</option>
+            </select>
           </label>
         </div>}
 
@@ -5185,6 +5269,16 @@ function updateCartItem(items: PdvCartItem[], id: string, patch: Partial<Pick<Pd
       total: patch.total ?? (isMeasured ? item.total : Math.max(0, roundMoney(quantity * unitPrice - discount)))
     };
   });
+}
+
+function adjustedItemOriginalTotal(item: PdvCartItem): number | null {
+  if (item.discount > 0.009) {
+    return roundMoney(item.total + item.discount);
+  }
+  if (!item.measureLabel && item.baseUnitPrice !== undefined && Math.abs(item.baseUnitPrice - item.unitPrice) > 0.009) {
+    return roundMoney(item.quantity * item.baseUnitPrice);
+  }
+  return null;
 }
 
 function parseBrazilianNumber(value: string): number {

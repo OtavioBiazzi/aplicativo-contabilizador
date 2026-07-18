@@ -190,7 +190,7 @@ function loadHistoryFilters(rememberPeriod = false): StoredHistoryFilters {
   const defaults: StoredHistoryFilters = {
     query: "",
     type: "Todos",
-    statusFilter: "visiveis",
+    statusFilter: "active",
     paymentFilter: "Todos",
     dateFrom: "",
     dateTo: "",
@@ -201,6 +201,7 @@ function loadHistoryFilters(rememberPeriod = false): StoredHistoryFilters {
   try {
     const stored = JSON.parse(window.localStorage.getItem(HISTORY_FILTERS_STORAGE_KEY) || "{}") as Partial<StoredHistoryFilters>;
     const merged = { ...defaults, ...stored };
+    if (merged.statusFilter === "visiveis") merged.statusFilter = "active";
     return rememberPeriod ? merged : { ...merged, dateFrom: "", dateTo: "" };
   } catch {
     return defaults;
@@ -2984,7 +2985,7 @@ function HistoryPanel({
     }
     setDateFrom(focusDate.date);
     setDateTo(focusDate.date);
-    setStatusFilter("visiveis");
+    setStatusFilter("active");
     setPaymentFilter("Todos");
     setType("Todos");
     setQuery("");
@@ -3084,7 +3085,6 @@ function HistoryPanel({
         <label className="field">
           <span>Status</span>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="visiveis">Visiveis</option>
             <option value="active">Ativos</option>
             <option value="cancelled">Cancelados</option>
             <option value="deleted">Lixeira</option>
@@ -3122,7 +3122,7 @@ function HistoryPanel({
         <button className="ghost-button history-clear-filters" type="button" onClick={() => {
           setQuery("");
           setType("Todos");
-          setStatusFilter("visiveis");
+          setStatusFilter("active");
           setPaymentFilter("Todos");
           setDateFrom("");
           setDateTo("");
@@ -3594,17 +3594,17 @@ function ProfessionalReportsPanel({
   const types = useMemo(() => ["Todos", ...new Set(records.map((record) => record.type).filter(Boolean))], [records]);
   const payments = useMemo(() => ["Todos", ...new Set(records.flatMap((record) => record.payments.map((item) => item.method)).filter(Boolean))], [records]);
   const origins = useMemo(() => ["Todos", ...new Set(records.map((record) => record.originDevice).filter(Boolean))], [records]);
-  const categories = useMemo(() => ["Todos", ...new Set(dataset.products
-    .filter((product) => product.productId !== "legacy")
+  const catalogProducts = useMemo(() => dataset.products.filter((product) => product.productId !== "legacy"), [dataset.products]);
+  const categories = useMemo(() => ["Todos", ...new Set(catalogProducts
     .map((product) => product.category)
-    .filter(Boolean))], [dataset.products]);
+    .filter(Boolean))], [catalogProducts]);
   const visibleProducts = useMemo(() => {
     const search = deferredProductQuery.trim().toLocaleLowerCase("pt-BR");
-    return dataset.products.filter((product) =>
+    return catalogProducts.filter((product) =>
       (category === "Todos" || product.category === category)
       && (!search || `${product.name} ${product.category}`.toLocaleLowerCase("pt-BR").includes(search))
     );
-  }, [dataset.products, category, deferredProductQuery]);
+  }, [catalogProducts, category, deferredProductQuery]);
   const exportIds = filteredRecords.map((record) => record.source === "pdv" ? `pdv-${record.id}` : record.id);
   const exportLabel = [from || "inicio", to || "hoje", type, payment, tab].join("-").replace(/\s+/g, "-").toLowerCase();
 
@@ -3755,8 +3755,8 @@ function ProfessionalReportsPanel({
       {tab === "products" && (
         <div className="professional-report-content">
           <div className="report-kpi-grid">
-            <ProfessionalMetric label="Itens vendidos" value={formatReportQuantity(dataset.products.reduce((sum, product) => sum + product.quantity, 0))} detail={`${dataset.products.length} produto(s) diferente(s)`} />
-            <ProfessionalMetric label="Produto lider" value={dataset.products[0]?.name || "-"} detail={dataset.products[0] ? `${formatReportQuantity(dataset.products[0].quantity)} vendido(s)` : "Sem movimento"} />
+            <ProfessionalMetric label="Itens vendidos" value={formatReportQuantity(catalogProducts.reduce((sum, product) => sum + product.quantity, 0))} detail={`${catalogProducts.length} produto(s) diferente(s)`} />
+            <ProfessionalMetric label="Produto lider" value={catalogProducts[0]?.name || "-"} detail={catalogProducts[0] ? `${formatReportQuantity(catalogProducts[0].quantity)} vendido(s)` : "Sem movimento"} />
             <ProfessionalMetric label="Categorias" value={String(dataset.categories.length)} detail={`${dataset.complements.length} adicional(is) utilizado(s)`} />
             <ProfessionalMetric
               label="Total dos itens"
@@ -5497,7 +5497,7 @@ function SettingsPanel({
               <option value="large">Grande</option>
             </select>
           </label>
-          <label className="field"><span>Densidade</span>
+          <label className="field"><span>Densidade geral dos menus</span>
             <select value={draft.density} onChange={(event) => update("density", event.target.value as AppSettings["density"])}>
               <option value="compact">Compacta</option>
               <option value="normal">Normal</option>
@@ -5523,14 +5523,6 @@ function SettingsPanel({
           <label className="switch-line">
             <input type="checkbox" checked={draft.hideHeaderBrand} onChange={(event) => update("hideHeaderBrand", event.target.checked)} />
             Ocultar marca Caixa PDV no cabecalho
-          </label>
-          <label className="switch-line">
-            <input type="checkbox" checked={draft.rememberHistoryPeriod} onChange={(event) => update("rememberHistoryPeriod", event.target.checked)} />
-            Manter periodo escolhido no Historico
-          </label>
-          <label className="switch-line">
-            <input type="checkbox" checked={draft.rememberReportPeriod} onChange={(event) => update("rememberReportPeriod", event.target.checked)} />
-            Manter periodo escolhido nos Relatorios
           </label>
         </section>
 
@@ -5800,6 +5792,8 @@ function SettingsPanel({
             <label className="switch-line"><input type="checkbox" checked={draft.automaticSpreadsheetEnabled} onChange={(event) => update("automaticSpreadsheetEnabled", event.target.checked)} /> Sincronizar planilha operacional a cada alteracao</label>
             <label className="switch-line"><input type="checkbox" checked={draft.automaticClosingReportEnabled} onChange={(event) => update("automaticClosingReportEnabled", event.target.checked)} /> Gerar fechamento analitico ao encerrar o aplicativo</label>
             <label className="switch-line"><input type="checkbox" checked={draft.backupEnabled} onChange={(event) => update("backupEnabled", event.target.checked)} /> Criar um backup diario ao fechar o aplicativo</label>
+            <label className="switch-line"><input type="checkbox" checked={draft.rememberHistoryPeriod} onChange={(event) => update("rememberHistoryPeriod", event.target.checked)} /> Manter periodo escolhido no Historico</label>
+            <label className="switch-line"><input type="checkbox" checked={draft.rememberReportPeriod} onChange={(event) => update("rememberReportPeriod", event.target.checked)} /> Manter periodo escolhido nos Relatorios</label>
             <p className="settings-note">Relatorios da aba Relatorios sao gerados manualmente. O fechamento automatico, quando ativado, cria apenas um arquivo consolidado no encerramento.</p>
           </div>
           <div className="settings-subsection">

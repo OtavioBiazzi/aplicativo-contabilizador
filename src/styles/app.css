@@ -8832,10 +8832,10 @@ input[type="date"] {
   --ui-border: color-mix(in srgb, var(--line) 88%, transparent);
   --ui-shadow-sm: 0 6px 18px color-mix(in srgb, #000 13%, transparent);
   --ui-shadow-panel: 0 14px 34px color-mix(in srgb, #000 16%, transparent);
-  --ui-free: #2376b9;
-  --ui-occupied: #d84a3a;
-  --ui-closing: #23905a;
-  --ui-reserved: #8b5aa5;
+  --ui-free: #197fd0;
+  --ui-occupied: #eb4035;
+  --ui-closing: #159b57;
+  --ui-reserved: #9a4fba;
   --ui-on-accent: #fff;
   --pdv-open-ink: #f3f8ff;
   --pdv-open-muted: #c1d9e9;
@@ -9396,6 +9396,26 @@ body {
   color: var(--accent-strong);
 }
 
+.pdv-filter-row button.active.livre {
+  border-color: var(--ui-free);
+  color: var(--ui-free);
+}
+
+.pdv-filter-row button.active.ocupada {
+  border-color: var(--ui-occupied);
+  color: var(--ui-occupied);
+}
+
+.pdv-filter-row button.active.fechamento {
+  border-color: var(--ui-closing);
+  color: var(--ui-closing);
+}
+
+.pdv-filter-row button.active.reservada {
+  border-color: var(--ui-reserved);
+  color: var(--ui-reserved);
+}
+
 .pdv-table-grid {
   gap: 7px;
 }
@@ -9463,11 +9483,11 @@ body {
 }
 
 .pdv-table-card.has-subtables {
-  border-color: color-mix(in srgb, #dc5b83 65%, #fff);
+  border-color: color-mix(in srgb, #ff5c91 65%, #fff);
   background: linear-gradient(
     90deg,
     var(--ui-occupied),
-    #dc5b83
+    #ff5c91
   );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
@@ -9487,8 +9507,16 @@ body {
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--ui-occupied) 88%, #5d130d),
-    color-mix(in srgb, #dc5b83 88%, #671d38)
+    color-mix(in srgb, #ff5c91 88%, #671d38)
   );
+}
+
+.pdv-cart-price-adjustment {
+  display: block;
+  margin-top: 2px;
+  color: #8f2c25;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .pdv-table-card.mixed-subtables:hover {
@@ -10200,6 +10228,7 @@ body {
 
 /* Final operational polish: keep header metrics, finance controls and modal
    hierarchy stable regardless of screen density or active theme. */
+.sidebar,
 .app-shell.pdv-main-mode .sidebar {
   min-height: 82px;
 }

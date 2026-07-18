@@ -42,7 +42,9 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   partialPaymentDescriptionEnabled: false,
   skipPaymentConfirmation: false,
   individualUnitItems: false,
-  groupComplementsWithProduct: true
+  groupComplementsWithProduct: true,
+  roundingStep: 0.01,
+  roundingDirection: "nearest"
 };
 const PDV_BACKUP_DIRECTORY = "pdv-backups";
 
@@ -714,6 +716,47 @@ export class PdvStore {
     return table.sessionId ? this.getSales({}).find((item) => item.tableSessionId === table.sessionId) || sale : sale;
   }
 
+  async cancelTable(tableNumber: number, originDevice = "Este computador"): Promise<PdvSale | null> {
+    tableNumber = this.normalizeTableNumber(tableNumber);
+    const table = this.getTables().find((item) => item.number === tableNumber);
+    if (!table) return null;
+    const pendingItems = table.items.flatMap((item) => {
+      const quantity = unpaidQuantity(item);
+      if (quantity <= 0.009) return [];
+      const ratio = item.quantity ? quantity / item.quantity : 1;
+      return [{ ...item, quantity, paidQuantity: 0, discount: roundMoney(item.discount * ratio), total: unpaidItemTotal(item) }];
+    });
+    const db = this.requireDb();
+    const sale = pendingItems.length
+      ? {
+          ...createSale({
+          type: "Mesa",
+          tableNumber,
+          tableSessionId: table.sessionId,
+          status: "Cancelada",
+          items: pendingItems,
+          discount: 0,
+          payments: [],
+          originDevice,
+          observations: table.note
+          }),
+          payments: []
+        }
+      : null;
+    db.run("BEGIN IMMEDIATE");
+    try {
+      if (sale) insertSale(db, sale);
+      db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
+      db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return sale;
+  }
+
   async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string, observations = ""): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     if (operationId) {
@@ -1145,7 +1188,11 @@ export class PdvStore {
       partialPaymentDescriptionEnabled: parseBooleanSetting(map.get("partial_payment_description_enabled"), DEFAULT_PDV_SETTINGS.partialPaymentDescriptionEnabled || false),
       skipPaymentConfirmation: parseBooleanSetting(map.get("skip_payment_confirmation"), DEFAULT_PDV_SETTINGS.skipPaymentConfirmation || false),
       individualUnitItems: parseBooleanSetting(map.get("individual_unit_items"), DEFAULT_PDV_SETTINGS.individualUnitItems || false),
-      groupComplementsWithProduct: parseBooleanSetting(map.get("group_complements_with_product"), DEFAULT_PDV_SETTINGS.groupComplementsWithProduct ?? true)
+      groupComplementsWithProduct: parseBooleanSetting(map.get("group_complements_with_product"), DEFAULT_PDV_SETTINGS.groupComplementsWithProduct ?? true),
+      roundingStep: normalizeRoundingStep(Number(map.get("rounding_step") || DEFAULT_PDV_SETTINGS.roundingStep || 0.01)),
+      roundingDirection: map.get("rounding_direction") === "up" || map.get("rounding_direction") === "down"
+        ? map.get("rounding_direction") as "up" | "down"
+        : "nearest"
     };
   }
 
@@ -1332,7 +1379,7 @@ function createSale(input: { type: PdvSale["type"]; tableNumber?: number; tableS
     subtotal,
     discount,
     total,
-    description: input.tableNumber ? `Mesa ${input.tableNumber}` : input.type === "Onibus" ? "Venda de onibus" : "Venda direta",
+    description: input.tableNumber ? `Mesa ${input.tableNumber}` : input.type === "Mesa" ? "Mesa" : input.type === "Onibus" ? "Venda de onibus" : "Venda",
     observations: input.observations?.trim() || "",
     originDevice: input.originDevice || "Este computador",
     operationId: input.operationId,
@@ -1526,6 +1573,10 @@ function parseBooleanSetting(value: string | undefined, fallback: boolean): bool
 function parseIntegerSetting(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value || "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeRoundingStep(value: number): number {
+  return [0.01, 0.05, 0.1, 0.25, 0.5, 1].includes(value) ? value : 0.01;
 }
 
 function snakeCase(value: string): string {

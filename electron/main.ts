@@ -601,7 +601,7 @@ async function bootstrap() {
     },
     getPdvSnapshot: () => pdvStore.getSnapshot(),
     savePdvDirectSale: async (items, discount, payments, originDevice, operationId, saleType) => {
-      const sale = await pdvStore.saveSale({ type: saleType === "Onibus" ? "Onibus" : "Venda direta", items, discount, payments, originDevice, operationId });
+      const sale = await pdvStore.saveSale({ type: saleType === "Mesa" ? "Mesa" : saleType === "Onibus" ? "Onibus" : "Venda direta", items, discount, payments, originDevice, operationId });
       await exportLedgerIfEnabled();
       sendToAll("entries:changed");
       return sale;
@@ -618,6 +618,12 @@ async function bootstrap() {
     removePdvPreset: () => pdvStore.removeImportedProducts("Cose Dell Abadia"),
     closePdvTable: async (tableNumber, payments, discount, originDevice, operationId) => {
       const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice, operationId);
+      await exportLedgerIfEnabled();
+      sendToAll("entries:changed");
+      return sale;
+    },
+    cancelPdvTable: async (tableNumber, originDevice) => {
+      const sale = await pdvStore.cancelTable(tableNumber, originDevice);
       await exportLedgerIfEnabled();
       sendToAll("entries:changed");
       return sale;
@@ -786,8 +792,8 @@ function registerIpc() {
     return importPdvProducts(result.filePaths[0]);
   });
 
-  ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[]; saleType?: "Venda direta" | "Onibus" }): Promise<PdvSale> => {
-    const sale = await pdvStore.saveSale({ type: input.saleType === "Onibus" ? "Onibus" : "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
+  ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[]; saleType?: PdvSale["type"] }): Promise<PdvSale> => {
+    const sale = await pdvStore.saveSale({ type: input.saleType === "Mesa" ? "Mesa" : input.saleType === "Onibus" ? "Onibus" : "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
     await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
@@ -817,6 +823,14 @@ function registerIpc() {
 
   ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
     const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Este computador", operationId || randomUUID());
+    await exportLedgerIfEnabled();
+    sendToAll("entries:changed");
+    publishPdvChanged();
+    return sale;
+  });
+
+  ipcMain.handle("pdv:cancelTable", async (_event, tableNumber: number): Promise<PdvSale | null> => {
+    const sale = await pdvStore.cancelTable(tableNumber, "Este computador");
     await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();

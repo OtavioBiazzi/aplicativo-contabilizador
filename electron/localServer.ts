@@ -19,12 +19,13 @@ interface LocalServerOptions {
   removeEntry: (id: string) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
   getPdvSnapshot: () => Promise<PdvSnapshot>;
-  savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string, saleType?: "Venda direta" | "Onibus") => Promise<PdvSale>;
+  savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string, saleType?: PdvSale["type"]) => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
+  cancelPdvTable: (tableNumber: number, originDevice?: string) => Promise<PdvSale | null>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string, observations?: string) => Promise<PdvSale>;
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
@@ -181,7 +182,7 @@ export class LocalServer {
           Array.isArray(request.body?.payments) ? request.body.payments : [],
           device,
           operationId,
-          request.body?.saleType === "Onibus" ? "Onibus" : "Venda direta"
+          request.body?.saleType === "Mesa" ? "Mesa" : request.body?.saleType === "Onibus" ? "Onibus" : "Venda direta"
         );
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
@@ -319,6 +320,20 @@ export class LocalServer {
         response.json({ sale });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel fechar a mesa." });
+      }
+    });
+
+    app.post("/api/pdv/tables/:number/cancel", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const sale = await this.options.cancelPdvTable(
+          Number(request.params.number),
+          String(request.header("x-device-name") || "Cliente remoto")
+        );
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true, sale });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel cancelar a mesa." });
       }
     });
 

@@ -43,7 +43,8 @@ export class PdvExporter {
       await fs.mkdir(this.outputDirectory, { recursive: true });
       const reportToken = sanitizeFilePart(fileLabel) || `pdv-relatorio-${periodToken(filters)}`;
       const filePath = path.join(this.outputDirectory, replaceExisting ? `${reportToken}.xlsx` : `${reportToken}-${timestampToken()}.xlsx`);
-      const integratedSales = [...sales, ...legacyEntries.filter((entry) => matchesLegacyFilters(entry, filters)).map(legacyEntryToSale)];
+      const integratedSales = [...sales, ...legacyEntries.filter((entry) => matchesLegacyFilters(entry, filters)).map(legacyEntryToSale)]
+        .filter((sale) => sale.status !== "Cancelada" && sale.status !== "deleted");
       await writeXlsx(filePath, buildSheets(integratedSales, filters, reportSections));
       return {
         ok: true,
@@ -139,9 +140,7 @@ function buildSheets(sales: PdvSale[], filters: PdvExportFilters, reportSections
     { Indicador: "Ticket medio", Valor: dataset.average },
     { Indicador: "Maior venda", Valor: dataset.biggestSale },
     { Indicador: "Total cancelado", Valor: dataset.cancelledTotal },
-    { Indicador: "Descontos", Valor: dataset.discounts },
-    { Indicador: "Dinheiro recebido", Valor: dataset.receivedInCash },
-    { Indicador: "Troco devolvido", Valor: dataset.change }
+    { Indicador: "Descontos", Valor: dataset.discounts }
   ];
   dataset.byPayment.forEach(([method, amount]) => summaryRows.push({ Indicador: `Pagamento - ${method}`, Valor: amount }));
 
@@ -260,8 +259,6 @@ function paymentRows(sale: PdvSale): Record<string, unknown>[] {
     "Status venda": sale.status,
     Forma: payment.method,
     Valor: roundMoney(payment.amount),
-    Recebido: payment.received ? roundMoney(payment.received) : "",
-    Troco: payment.change ? roundMoney(payment.change) : "",
     Descricao: payment.description || sale.observations || ""
   }));
 }

@@ -195,6 +195,25 @@ const cancelled = await store.saveSale({
   payments: [{ id: crypto.randomUUID(), method: "Pix", amount: 5 }]
 });
 await store.cancelSale(cancelled.id);
+await store.openTable(11, 1, "Cancelamento auditavel");
+await store.saveTableItems(11, [{
+  id: crypto.randomUUID(),
+  productId: baseProduct.id,
+  productName: "Item cancelado na mesa",
+  categoryName: category.name,
+  quantity: 1,
+  baseUnitPrice: 9,
+  unitPrice: 9,
+  discount: 0,
+  total: 9
+}]);
+const cancelledTableSale = await store.cancelTable(11, "smoke");
+if (!cancelledTableSale || cancelledTableSale.status !== "Cancelada" || cancelledTableSale.payments.length !== 0) {
+  throw new Error("Cancelamento da mesa nao gerou auditoria sem pagamento ficticio.");
+}
+if ((await store.getSnapshot()).tables.find((table) => table.number === 11)?.status !== "Livre") {
+  throw new Error("Cancelamento auditavel nao liberou a mesa.");
+}
 
 await store.openTable(7, 2, "Smoke mesa");
 await store.saveTableItems(7, [{
@@ -310,7 +329,7 @@ if (!savedSale || savedSale.items[0].complements?.[0]?.name !== complement.name)
 if (snapshot.recentSales.find((item) => item.id === cancelled.id)?.status !== "Cancelada") {
   throw new Error("Cancelamento nao foi persistido corretamente.");
 }
-if (store.getSales({ status: "Cancelada" }).length !== 1 || store.getSales({ status: "Finalizada" }).some((item) => item.id === cancelled.id)) {
+if (store.getSales({ status: "Cancelada" }).length !== 2 || store.getSales({ status: "Finalizada" }).some((item) => item.id === cancelled.id)) {
   throw new Error("Filtro de status das vendas PDV nao funcionou corretamente.");
 }
 
@@ -383,7 +402,7 @@ if (!["Resumo", "Vendas", "Itens", "Pagamentos", "Produtos", "Categorias", "Mesa
 }
 const paymentsSheet = await zip.file("xl/worksheets/sheet4.xml").async("string");
 if (!paymentsSheet.includes("Pix") || !paymentsSheet.includes("<v>12</v>")) {
-  throw new Error("XLSX PDV nao registrou pagamento/recebido/troco como esperado.");
+  throw new Error("XLSX PDV nao registrou os pagamentos como esperado.");
 }
 const consolidatedPaymentRows = paymentsSheet.split(consolidatedTableSale[0].id).length - 1;
 const salesSheet = await zip.file("xl/worksheets/sheet2.xml").async("string");
@@ -394,6 +413,9 @@ if (consolidatedPaymentRows !== 4 || consolidatedSaleRows !== 2 || !paymentsShee
 }
 if (!salesSheet.includes("Onibus") || !salesSheet.includes("Venda de onibus")) {
   throw new Error("XLSX nao exportou a venda de onibus integrada.");
+}
+if (salesSheet.includes(cancelled.id) || salesSheet.includes(cancelledTableSale.id) || paymentsSheet.includes("Recebido") || paymentsSheet.includes("Troco")) {
+  throw new Error("XLSX exportou cancelamento, valor recebido ou troco indevidamente.");
 }
 
 const integratedExportStatus = await new PdvExporter(exportDir).exportSales(store.getSales({}), {}, [{

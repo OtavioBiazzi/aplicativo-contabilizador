@@ -9,14 +9,6 @@ function pdvPaymentToLegacyMethod(method: PdvPaymentMethod): PaymentMethod {
   return method;
 }
 
-function buildItemNames(sale: PdvSale): string {
-  return sale.items.map((item) => {
-    const quantity = item.measureLabel || (item.quantity !== 1 ? `x${String(item.quantity).replace(".", ",")}` : "");
-    const complements = item.complements?.length ? ` (${item.complements.map((complement) => complement.name).join(" + ")})` : "";
-    return `${item.productName}${complements}${quantity ? ` ${quantity}` : ""}`;
-  }).join(", ");
-}
-
 function buildPaymentsDescription(payments: PdvPayment[]): string {
   return payments.length
     ? payments.map((payment) => `${payment.method}: ${formatCurrency(payment.amount)}`).join(" | ")
@@ -27,7 +19,6 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
   // O resumo geral usa a primeira forma apenas como compatibilidade. A divisao
   // real fica em paymentBreakdown e e a fonte dos filtros, relatorios e Excel.
   const paymentMethod = pdvPaymentToLegacyMethod(sale.payments[0]?.method || "Nao definido");
-  const itemNames = buildItemNames(sale);
   const paymentsDescription = buildPaymentsDescription(sale.payments);
 
   return {
@@ -48,7 +39,7 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
     paymentMethod,
     paidWith: sale.payments.reduce((total, payment) => total + (payment.received || payment.amount), 0),
     change: sale.payments.reduce((total, payment) => total + (payment.change || 0), 0),
-    observations: `${sale.observations ? `${sale.observations} ` : ""}${sale.status === "Parcial" ? "Fechamento parcial de mesa. " : ""}${itemNames ? `Itens: ${itemNames}. ` : ""}${paymentsDescription}`,
+    observations: `${sale.observations ? `${sale.observations} ` : ""}${sale.status === "Parcial" ? "Fechamento parcial de mesa. " : ""}${paymentsDescription}`,
     originDevice: sale.originDevice || "PDV local",
     status: sale.status === "Cancelada" ? "cancelled" : sale.status === "deleted" ? "deleted" : "active",
     customType: sale.status === "Parcial" ? "Mesa parcial" : sale.type,

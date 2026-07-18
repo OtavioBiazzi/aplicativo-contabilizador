@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings, EntryDraft, LedgerEntry, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProductDraft, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProductDraft, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 contextBridge.exposeInMainWorld("caixa", {
   getSnapshot: () => ipcRenderer.invoke("app:getSnapshot"),
@@ -16,7 +16,7 @@ contextBridge.exposeInMainWorld("caixa", {
   removeCoseProducts: () => ipcRenderer.invoke("pdv:removeCoseProducts"),
   previewPdvProductsFile: () => ipcRenderer.invoke("pdv:previewProductsFile"),
   importPdvProductsFile: (filePath?: string) => ipcRenderer.invoke("pdv:importProductsFile", filePath),
-  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], saleType?: "Venda direta" | "Onibus") =>
+  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], saleType?: PdvSale["type"]) =>
     ipcRenderer.invoke("pdv:saveDirectSale", { items, discount, payments, saleType }),
   openPdvTable: (tableNumber: number, people?: number, note?: string) => ipcRenderer.invoke("pdv:openTable", tableNumber, people, note),
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => ipcRenderer.invoke("pdv:setTableStatus", tableNumber, status),
@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("caixa", {
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) =>
     ipcRenderer.invoke("pdv:transferTableItems", sourceTableNumber, targetTableNumber, selections),
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => ipcRenderer.invoke("pdv:closeTable", tableNumber, payments, discount, operationId),
+  cancelPdvTable: (tableNumber: number) => ipcRenderer.invoke("pdv:cancelTable", tableNumber),
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string) =>
     ipcRenderer.invoke("pdv:saveTablePartial", tableNumber, items, payments, discount, operationId, observations),
   cancelPdvSale: (id: string) => ipcRenderer.invoke("pdv:cancelSale", id),
