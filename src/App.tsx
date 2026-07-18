@@ -3589,6 +3589,8 @@ function ProfessionalReportsPanel({
     query: deferredQuery
   })), [records, previousRange.from, previousRange.to, type, payment, table, origin, deferredQuery]);
   const showTotals = canViewTotals && showSensitive;
+  const productRevenue = roundMoney(dataset.products.reduce((sum, product) => sum + product.revenue, 0));
+  const productTotalDifference = roundMoney(productRevenue - dataset.total);
   const types = useMemo(() => ["Todos", ...new Set(records.map((record) => record.type).filter(Boolean))], [records]);
   const payments = useMemo(() => ["Todos", ...new Set(records.flatMap((record) => record.payments.map((item) => item.method)).filter(Boolean))], [records]);
   const origins = useMemo(() => ["Todos", ...new Set(records.map((record) => record.originDevice).filter(Boolean))], [records]);
@@ -3721,7 +3723,7 @@ function ProfessionalReportsPanel({
       {tab === "overview" && (
         <div className="professional-report-content">
           <div className="report-kpi-grid">
-            <ProfessionalMetric label="Total vendido" value={showTotals ? formatCurrency(dataset.total) : "Restrito"} detail={comparisonLabel(dataset.total, previousDataset.total, showTotals)} />
+            <ProfessionalMetric label="Total vendido liquido" value={showTotals ? formatCurrency(dataset.total) : "Restrito"} detail={comparisonLabel(dataset.total, previousDataset.total, showTotals)} />
             <ProfessionalMetric label="Vendas" value={String(dataset.count)} detail={comparisonLabel(dataset.count, previousDataset.count, true)} />
             <ProfessionalMetric label="Ticket medio" value={showTotals ? formatCurrency(dataset.average) : "Restrito"} detail={`${dataset.activeRecords.filter((record) => record.type === "Mesa").length} fechamento(s) de mesa`} />
             <ProfessionalMetric label="Maior venda" value={showTotals ? formatCurrency(dataset.biggestSale) : "Restrito"} detail={`${dataset.partialCount} fechamento(s) parcial(is)`} />
@@ -3753,7 +3755,13 @@ function ProfessionalReportsPanel({
             <ProfessionalMetric label="Itens vendidos" value={formatReportQuantity(dataset.products.reduce((sum, product) => sum + product.quantity, 0))} detail={`${dataset.products.length} produto(s) diferente(s)`} />
             <ProfessionalMetric label="Produto lider" value={dataset.products[0]?.name || "-"} detail={dataset.products[0] ? `${formatReportQuantity(dataset.products[0].quantity)} vendido(s)` : "Sem movimento"} />
             <ProfessionalMetric label="Categorias" value={String(dataset.categories.length)} detail={`${dataset.complements.length} adicional(is) utilizado(s)`} />
-            <ProfessionalMetric label="Receita dos itens" value={showTotals ? formatCurrency(dataset.products.reduce((sum, product) => sum + product.revenue, 0)) : "Restrito"} detail="Inclui adicionais e descontos aplicados" />
+            <ProfessionalMetric
+              label="Total dos itens"
+              value={showTotals ? formatCurrency(productRevenue) : "Restrito"}
+              detail={productTotalDifference > 0
+                ? `${formatCurrency(productTotalDifference)} em desconto geral aplicado no fechamento`
+                : "Ja considera descontos aplicados diretamente nos itens"}
+            />
           </div>
           <div className="professional-product-filters">
             <label className="field"><span>Pesquisar produto</span><input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Nome do produto" /></label>
@@ -3924,7 +3932,7 @@ function ProductReportTable({ products, showValues }: { products: ReportProductS
       <div className="section-title"><strong>Todos os produtos do recorte</strong><span>{products.length} produto(s)</span></div>
       <div className="product-report-table-wrap">
         <table className="professional-data-table">
-          <thead><tr><th>Produto</th><th>Categoria</th><th>Quantidade</th><th>Lancamentos</th><th>Preco medio</th><th>Descontos</th><th>Faturamento</th></tr></thead>
+          <thead><tr><th>Produto</th><th>Categoria</th><th>Quantidade</th><th>Lancamentos</th><th>Preco medio</th><th>Descontos</th><th>Total dos itens</th></tr></thead>
           <tbody>
             {products.map((product) => (
               <tr key={product.key}>
