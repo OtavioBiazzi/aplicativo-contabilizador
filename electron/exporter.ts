@@ -42,7 +42,6 @@ export class LedgerExporter {
           writtenFiles.push(target.filePath);
           continue;
         }
-        await this.backupIfNeeded(target.filePath, settings.backupEnabled);
         if (settings.fileFormat === "xlsx") {
           await this.writeXlsx(target.filePath, target.sheets);
         } else {
@@ -158,7 +157,6 @@ export class LedgerExporter {
       ];
       const rows = entries.filter((entry) => entry.status !== "deleted").map((entry) => toRow(entry, reportColumns));
 
-      await this.backupIfNeeded(filePath, settings.backupEnabled);
       if (settings.fileFormat === "xlsx") {
         await this.writeXlsx(filePath, [{ name: "Relatorio", rows }]);
       } else {
@@ -198,7 +196,7 @@ export class LedgerExporter {
     if (settings.fileStrategy === "daily" || (settings.fileStrategy === "monthlyTabs" && settings.fileFormat !== "xlsx")) {
       const grouped = groupBy(exportableEntries, (entry) => formatDateToken(entryDate(entry), settings));
       return Object.entries(grouped).sort(([left], [right]) => left.localeCompare(right)).map(([date, rows]) => ({
-        filePath: path.join(settings.outputDirectory, `vendas-${date}.${extension}`),
+        filePath: path.join(settings.outputDirectory, "Vendas diarias", `vendas-${date}.${extension}`),
         sheets: [{ name: "Lancamentos", rows: rowsFor(rows) }]
       }));
     }
@@ -210,7 +208,7 @@ export class LedgerExporter {
         return `${type}-${date}`;
       });
       return Object.entries(grouped).sort(([left], [right]) => left.localeCompare(right)).map(([filePart, rows]) => ({
-        filePath: path.join(settings.outputDirectory, `${filePart}.${extension}`),
+        filePath: path.join(settings.outputDirectory, "Por tipo", `${filePart}.${extension}`),
         sheets: [{ name: "Lancamentos", rows: rowsFor(rows) }]
       }));
     }
@@ -220,7 +218,7 @@ export class LedgerExporter {
       return Object.entries(groupedByMonth).sort(([left], [right]) => left.localeCompare(right)).map(([month, monthRows]) => {
         const groupedByDay = groupBy(monthRows, (entry) => formatDateToken(entryDate(entry), settings));
         return {
-          filePath: path.join(settings.outputDirectory, `caixa-${month}.${extension}`),
+          filePath: path.join(settings.outputDirectory, "Fechamentos mensais", `caixa-${month}.${extension}`),
           sheets: Object.entries(groupedByDay).sort(([left], [right]) => left.localeCompare(right)).map(([date, rows]) => ({
             name: date.slice(0, 31),
             rows: rowsFor(rows)
@@ -231,7 +229,7 @@ export class LedgerExporter {
 
     return [
       {
-        filePath: path.join(settings.outputDirectory, `caixa-geral.${extension}`),
+        filePath: path.join(settings.outputDirectory, "Exportacoes", `caixa-geral.${extension}`),
         sheets: [{ name: "Lancamentos", rows: rowsFor(exportableEntries) }]
       }
     ];
@@ -248,9 +246,8 @@ export class LedgerExporter {
           ? settings.visibleColumns
           : DEFAULT_COLUMNS;
     const rows = todayEntries.map((entry) => toRow(entry, visibleColumns));
-    const filePath = path.join(settings.outputDirectory, `caixa-resgate-${dateToken}.${extension}`);
+    const filePath = path.join(settings.outputDirectory, "Resgate", `caixa-resgate-${dateToken}.${extension}`);
 
-    await this.backupIfNeeded(filePath, settings.backupEnabled);
     if (settings.fileFormat === "xlsx") {
       await this.writeXlsx(filePath, [{ name: "Lancamentos", rows }]);
     } else {
@@ -305,7 +302,6 @@ export class LedgerExporter {
       if (expected.has(normalizePath(filePath))) {
         continue;
       }
-      await this.backupIfNeeded(filePath, settings.backupEnabled);
       try {
         await fs.unlink(filePath);
       } catch (error) {
@@ -314,24 +310,6 @@ export class LedgerExporter {
         }
       }
     }
-  }
-
-  private async backupIfNeeded(filePath: string, enabled: boolean) {
-    if (!enabled) {
-      return;
-    }
-
-    try {
-      await fs.access(filePath);
-    } catch {
-      return;
-    }
-
-    const backupDirectory = path.join(path.dirname(filePath), "backups");
-    await fs.mkdir(backupDirectory, { recursive: true });
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const backupPath = path.join(backupDirectory, `${path.basename(filePath)}.${timestamp}.bak`);
-    await fs.copyFile(filePath, backupPath);
   }
 
   private async readState(): Promise<ExportState> {

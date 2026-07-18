@@ -31,12 +31,22 @@ type CheckoutTarget =
   | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean; operationId?: PdvOperationId }
   | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[]; operationId: PdvOperationId }
   | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
+  | { kind: "table-subtable"; table: PdvOpenTable; subtableName: string; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-partial-manual"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId };
 
 const PAYMENT_METHODS: PdvPaymentMethod[] = ["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Nao definido"];
 const CLIENT_VISUAL_SETTINGS_KEY = "caixa.pdv.client-visual-settings";
+const LAST_SUBTABLE_STORAGE_PREFIX = "caixa.pdv.last-subtable.";
 type PendingProduct = { product: PdvProduct; quantity: number; measureLabel?: string; unitPrice?: number; finalTotal?: number };
 type PendingMeasureProduct = { product: PdvProduct; direct: boolean };
+
+function preferredSubtable(tableNumber: number, names: string[], enabled: boolean): string {
+  if (!enabled) {
+    return "";
+  }
+  const saved = window.localStorage.getItem(`${LAST_SUBTABLE_STORAGE_PREFIX}${tableNumber}`) || "";
+  return names.includes(saved) ? saved : "";
+}
 
 function money(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
@@ -645,7 +655,7 @@ export function PdvApp({
         setSubtableNames(opened.subtables || []);
         setTableSaveState("idle");
         setSelectedTableItemIds([]);
-        setCurrentSubtable("");
+        setCurrentSubtable(preferredSubtable(table.number, opened.subtables || [], Boolean(snapshot?.settings.rememberLastSubtable)));
         lastPersistedTableMeta.current = { number: table.number, people: opened.people || 1, note: opened.note || "" };
         return;
       }
@@ -657,13 +667,25 @@ export function PdvApp({
       setSubtableNames(table.subtables || []);
       setTableSaveState("idle");
       setSelectedTableItemIds([]);
-      setCurrentSubtable("");
+      setCurrentSubtable(preferredSubtable(table.number, table.subtables || [], Boolean(snapshot?.settings.rememberLastSubtable)));
       lastPersistedTableMeta.current = { number: table.number, people: table.people || 1, note: table.note || "" };
     } catch (error) {
       setTableSaveState("error");
       setToast(error instanceof Error ? error.message : "Nao foi possivel abrir a mesa no servidor.");
     }
   };
+
+  useEffect(() => {
+    if (!activeTable) {
+      return;
+    }
+    const key = `${LAST_SUBTABLE_STORAGE_PREFIX}${activeTable.number}`;
+    if (snapshot?.settings.rememberLastSubtable && currentSubtable) {
+      window.localStorage.setItem(key, currentSubtable);
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  }, [activeTable?.number, currentSubtable, snapshot?.settings.rememberLastSubtable]);
 
   const runTableAction = async (action: string, table: PdvOpenTable) => {
     setTableMenu(null);
@@ -854,7 +876,7 @@ export function PdvApp({
       return;
     }
     await persistTableBeforeAction();
-    setCheckoutTarget({ kind: "table-partial-items", table: activeTable, total: roundMoney(selected.reduce((total, item) => total + item.total, 0)), items: selected, operationId: crypto.randomUUID() });
+    setCheckoutTarget({ kind: "table-subtable", table: activeTable, subtableName: name, total: roundMoney(selected.reduce((total, item) => total + item.total, 0)), items: selected, operationId: crypto.randomUUID() });
   };
 
   const deleteSubtable = async (name: string) => {
@@ -977,10 +999,31 @@ export function PdvApp({
     await load();
   };
 
-  const confirmPartialTable = async (target: Extract<CheckoutTarget, { kind: "table-partial-items" | "table-partial-manual" }>, payments: PdvPayment[], observations = "") => {
+  const confirmPartialTable = async (target: Extract<CheckoutTarget, { kind: "table-partial-items" | "table-subtable" | "table-partial-manual" }>, payments: PdvPayment[], observations = "") => {
     setBusy(true);
     try {
       await savePdvTablePartial(target.table.number, target.items, payments, 0, observations, target.operationId);
+      if (target.kind === "table-subtable") {
+        const remainingItems = tableCart.filter((item) => (item.subtableName || "") !== target.subtableName);
+        const remainingSubtables = subtableNames.filter((name) => name !== target.subtableName);
+        const nextStatus: PdvTableStatus = remainingItems.length ? "Ocupada" : "Livre";
+        await savePdvTableItems(target.table.number, remainingItems, remainingSubtables);
+        await setPdvTableStatus(target.table.number, nextStatus);
+        setTableCart(remainingItems);
+        setSubtableNames(remainingSubtables);
+        setCurrentSubtable("");
+        setSelectedTableItemIds([]);
+        setPartialSelectedItemIds([]);
+        setCheckoutTarget(null);
+        setToast(`Submesa ${target.subtableName} fechada.`);
+        const refreshed = await load();
+        if (remainingItems.length) {
+          applyFreshOpenTable(refreshed, target.table.number);
+        } else {
+          setActiveTable(null);
+        }
+        return;
+      }
       if (target.kind === "table-partial-items") {
         const selectedById = new Map(target.items.map((item) => [item.id, item.quantity]));
         setTableCart((current) => current.map((item) => selectedById.has(item.id) ? {
@@ -1044,7 +1087,7 @@ export function PdvApp({
           <div className="pdv-brand">
             <img src="/cda-icon.png" alt="" />
             <div>
-              <strong>Contabilizador PDV</strong>
+              <strong>Caixa PDV</strong>
               <span>Venda local, mesas e produtos</span>
             </div>
           </div>
@@ -1113,7 +1156,7 @@ export function PdvApp({
                 .filter((table) => tableFilter === "Todas" || table.status === tableFilter)
                 .map((table) => (
                   <article
-                    className={`pdv-table-card ${table.status.toLowerCase()} ${table.items.some((item) => item.subtableName) ? "has-subtables" : ""} ${table.items.some((item) => item.subtableName) && table.items.some((item) => !item.subtableName) ? "mixed-subtables" : ""}`}
+                    className={`pdv-table-card ${table.status.toLowerCase()} ${Boolean(table.subtables?.length || table.items.some((item) => item.subtableName)) ? "has-subtables" : ""} ${table.items.some((item) => item.subtableName) && table.items.some((item) => !item.subtableName) ? "mixed-subtables" : ""}`}
                     key={table.id}
                     role="button"
                     tabIndex={0}
@@ -1804,7 +1847,7 @@ function PdvSaleScreen(props: {
           </div>
         )}
         {!props.activeTableNumber && (
-<div className="pdv-action-row">
+          <div className="pdv-action-row pdv-table-cart-actions pdv-direct-cart-actions">
             <button
               className="pdv-danger-button"
               disabled={!props.cart.length}
@@ -2195,7 +2238,8 @@ function PaymentModal({
         <div className="pdv-payment-methods">
           {PAYMENT_METHODS.map((item, index) => (
             <button key={item} className={focusedPaymentIndex === index ? "active" : ""} aria-selected={focusedPaymentIndex === index} disabled={remaining <= 0.009} onClick={() => { setFocusedPaymentIndex(index); openPaymentMethod(item); }}>
-              {item}
+              <span>{item}</span>
+              <small>F{index + 1}</small>
             </button>
           ))}
         </div>
@@ -4011,6 +4055,7 @@ function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCos
           product={editingProduct === "new" ? null : editingProduct}
           categories={snapshot.categories}
           products={snapshot.products}
+          complementsEnabled={snapshot.settings.complementsEnabled}
           onCancel={() => setEditingProduct(null)}
           onSave={saveProduct}
         />
@@ -4043,7 +4088,7 @@ function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCos
   );
 }
 
-function ProductEditorModal({ product, categories, products, onCancel, onSave }: { product: PdvProduct | null; categories: PdvCategory[]; products: PdvProduct[]; onCancel: () => void; onSave: (draft: PdvProductDraft) => void }) {
+function ProductEditorModal({ product, categories, products, complementsEnabled, onCancel, onSave }: { product: PdvProduct | null; categories: PdvCategory[]; products: PdvProduct[]; complementsEnabled: boolean; onCancel: () => void; onSave: (draft: PdvProductDraft) => void }) {
   const [draft, setDraft] = useState<PdvProductDraft>({
     id: product?.id,
     name: product?.name || "",
@@ -4064,7 +4109,7 @@ function ProductEditorModal({ product, categories, products, onCancel, onSave }:
   const saveDraft = () => onSave({ ...draft, price: roundMoney(parseBrazilianNumber(priceText || String(draft.price))) });
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-editor-modal">
+      <section className="pdv-payment-modal pdv-editor-modal pdv-product-editor-modal">
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Cadastro</span>
@@ -4072,7 +4117,12 @@ function ProductEditorModal({ product, categories, products, onCancel, onSave }:
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
-        <div className="pdv-editor-grid">
+        <section className="pdv-editor-section">
+          <div className="pdv-editor-section-title">
+            <strong>Informacoes principais</strong>
+            <small>Nome, categoria, preco e forma de venda.</small>
+          </div>
+          <div className="pdv-editor-grid pdv-product-basics-grid">
           <label><span>Nome</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
           <label><span>Categoria</span><select value={draft.categoryId} onChange={(event) => setDraft({ ...draft, categoryId: event.target.value })}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
           <label><span>Preco venda</span><input inputMode="decimal" value={priceText} onChange={(event) => setPriceText(event.target.value)} placeholder="Ex.: 4,50" /></label>
@@ -4087,15 +4137,26 @@ function ProductEditorModal({ product, categories, products, onCancel, onSave }:
               <option value="grama">Grama</option>
             </select>
           </label>
+          </div>
+        </section>
+        <section className="pdv-editor-section">
+          <div className="pdv-editor-section-title">
+            <strong>Disponibilidade</strong>
+            <small>Controle onde o produto aparece sem alterar vendas antigas.</small>
+          </div>
+          <div className="pdv-product-toggle-grid">
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Ativo</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.showOnPdv} onChange={(event) => setDraft({ ...draft, showOnPdv: event.target.checked })} /> Exibir no PDV</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.favorite} onChange={(event) => setDraft({ ...draft, favorite: event.target.checked })} /> Favorito no topo</label>
-          <label className="pdv-switch-line"><input type="checkbox" checked={draft.canBeComplement} onChange={(event) => setDraft({ ...draft, canBeComplement: event.target.checked })} /> Pode ser adicional</label>
-          <label className="pdv-switch-line"><input type="checkbox" checked={draft.hasComplements} onChange={(event) => setDraft({ ...draft, hasComplements: event.target.checked })} /> Abre tela de adicionais</label>
-        </div>
-        <div className="pdv-complement-config">
-          <strong>Adicionais permitidos neste produto</strong>
-          <small>Somente produtos marcados como "Pode ser adicional" aparecem aqui.</small>
+          {complementsEnabled && <label className="pdv-switch-line"><input type="checkbox" checked={draft.canBeComplement} onChange={(event) => setDraft({ ...draft, canBeComplement: event.target.checked })} /> Pode ser adicional</label>}
+          {complementsEnabled && <label className="pdv-switch-line"><input type="checkbox" checked={draft.hasComplements} onChange={(event) => setDraft({ ...draft, hasComplements: event.target.checked })} /> Abre tela de adicionais</label>}
+          </div>
+        </section>
+        {complementsEnabled && draft.hasComplements && <section className="pdv-complement-config pdv-editor-section">
+          <div className="pdv-editor-section-title">
+            <strong>Adicionais permitidos</strong>
+            <small>Somente produtos marcados como "Pode ser adicional" aparecem aqui.</small>
+          </div>
           <div className="pdv-complement-config-list">
             {complementOptions.map((item) => (
               <label key={item.id} className="pdv-switch-line">
@@ -4117,7 +4178,7 @@ function ProductEditorModal({ product, categories, products, onCancel, onSave }:
             ))}
             {!complementOptions.length && <p className="pdv-empty">Marque produtos como adicionais para vincular aqui.</p>}
           </div>
-        </div>
+        </section>}
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" disabled={!draft.name.trim() || !draft.categoryId} onClick={saveDraft}>Salvar produto</button>
@@ -4367,8 +4428,8 @@ function HistoryScreen({ snapshot, readOnly = false, onChanged }: { snapshot: Pd
         </div>
       </div>
       <div className="pdv-history-filters">
-        <label><span>De</span><input type="date" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
-        <label><span>Ate</span><input type="date" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
+        <label><span>De</span><input type="date" title="Clique para abrir o calendario" value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} /></label>
+        <label><span>Ate</span><input type="date" title="Clique para abrir o calendario" value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} /></label>
         <label><span>Busca</span><input value={filters.query} onChange={(event) => setFilters({ ...filters, query: event.target.value })} placeholder="Produto, mesa, pagamento..." /></label>
         <label><span>Tipo</span><select value={filters.type} onChange={(event) => setFilters({ ...filters, type: event.target.value })}><option>Todos</option><option>Venda direta</option><option>Onibus</option><option>Mesa</option></select></label>
         <label><span>Pagamento</span><select value={filters.payment} onChange={(event) => setFilters({ ...filters, payment: event.target.value })}><option>Todos</option>{PAYMENT_METHODS.map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -4704,6 +4765,10 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           <label className="pdv-switch-line">
             <input type="checkbox" checked={draft.subtablesEnabled} onChange={(event) => changeDraft({ subtablesEnabled: event.target.checked })} />
             Ativar submesas/contas separadas
+          </label>
+          <label className="pdv-switch-line">
+            <input type="checkbox" checked={Boolean(draft.rememberLastSubtable)} onChange={(event) => changeDraft({ rememberLastSubtable: event.target.checked })} />
+            Reabrir cada mesa na ultima submesa selecionada
           </label>
           <label className="pdv-switch-line">
             <input type="checkbox" checked={draft.tablePeopleEnabled} onChange={(event) => changeDraft({ tablePeopleEnabled: event.target.checked })} />

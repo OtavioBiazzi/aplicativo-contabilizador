@@ -11,6 +11,7 @@ import { LocalServer } from "./localServer.js";
 import { PdvExporter } from "./pdvExporter.js";
 import { configureCoseDellAbadiaComplements, normalizeImportedProducts, readPdvProductsFromXlsx } from "./productImporter.js";
 import { PdvStore } from "./pdvStore.js";
+import { getLocalDateKey } from "../src/shared/calculations.js";
 import { pdvSalesToLedgerEntries } from "../src/shared/pdvLedger.js";
 import { LedgerStore } from "./storage.js";
 import type {
@@ -40,6 +41,8 @@ let logger: DiagnosticLogger;
 let floatingBoundsSaveTimer: NodeJS.Timeout | null = null;
 let floatingRememberBounds = true;
 let restoringFloatingBounds = false;
+let gracefulQuitStarted = false;
+let gracefulQuitFinished = false;
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
@@ -85,7 +88,7 @@ async function createWindow() {
     minHeight: 360,
     show: false,
     backgroundColor: "#0f1311",
-    title: "Contabilizador Caixa",
+    title: "Caixa PDV",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -353,7 +356,7 @@ async function downloadUpdateAsset(info: UpdateInfo): Promise<string> {
 
 function defaultInstalledExePath() {
   const localAppData = process.env.LOCALAPPDATA || path.join(app.getPath("home"), "AppData", "Local");
-  return path.join(localAppData, "Programs", "aplicativo-contabilizador", "Contabilizador Caixa.exe");
+  return path.join(localAppData, "Programs", "aplicativo-contabilizador", "Caixa PDV.exe");
 }
 
 async function launchWindowsUpdater(installerPath: string) {
@@ -554,51 +557,51 @@ async function bootstrap() {
     getEntries: () => getIntegratedLedgerEntries(),
     addEntry: async (draft: EntryDraft) => {
       const entry = await store.addEntry(draft);
-      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await exportLedgerIfEnabled();
       return entry;
     },
     updateEntry: async (id, patch) => {
       if (id.startsWith("pdv-")) {
         await pdvStore.updateSale(id.slice(4), patch);
-        await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+        await exportLedgerIfEnabled();
         return (await getIntegratedLedgerEntries()).find((entry) => entry.id === id) || (() => { throw new Error("Venda PDV nao encontrada."); })();
       }
       const entry = await store.updateEntry(id, patch);
-      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await exportLedgerIfEnabled();
       return entry;
     },
     cancelEntry: async (id) => {
       if (id.startsWith("pdv-")) {
         await pdvStore.cancelSale(id.slice(4));
-        await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+        await exportLedgerIfEnabled();
         return (await getIntegratedLedgerEntries()).find((entry) => entry.id === id) || (() => { throw new Error("Venda PDV nao encontrada."); })();
       }
       const entry = await store.cancelEntry(id);
-      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await exportLedgerIfEnabled();
       return entry;
     },
     removeEntry: async (id) => {
       if (id.startsWith("pdv-")) {
         await pdvStore.updateSale(id.slice(4), { status: "deleted" });
-        await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+        await exportLedgerIfEnabled();
         return;
       }
       await store.removeEntry(id);
-      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await exportLedgerIfEnabled();
     },
     deleteEntry: async (id) => {
       if (id.startsWith("pdv-")) {
         await pdvStore.deleteSale(id.slice(4));
-        await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+        await exportLedgerIfEnabled();
         return;
       }
       await store.deleteEntry(id);
-      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await exportLedgerIfEnabled();
     },
     getPdvSnapshot: () => pdvStore.getSnapshot(),
     savePdvDirectSale: async (items, discount, payments, originDevice, operationId, saleType) => {
       const sale = await pdvStore.saveSale({ type: saleType === "Onibus" ? "Onibus" : "Venda direta", items, discount, payments, originDevice, operationId });
-      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await exportLedgerIfEnabled();
       sendToAll("entries:changed");
       return sale;
     },
@@ -614,13 +617,13 @@ async function bootstrap() {
     removePdvPreset: () => pdvStore.removeImportedProducts("Cose Dell Abadia"),
     closePdvTable: async (tableNumber, payments, discount, originDevice, operationId) => {
       const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice, operationId);
-      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await exportLedgerIfEnabled();
       sendToAll("entries:changed");
       return sale;
     },
     savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId, observations) => {
       const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId, observations);
-      await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      await exportLedgerIfEnabled();
       sendToAll("entries:changed");
       return sale;
     },
@@ -688,6 +691,18 @@ async function getIntegratedLedgerEntries() {
     ...(await store.getEntries()),
     ...pdvSalesToLedgerEntries(pdvSnapshot.recentSales)
   ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+}
+
+async function exportLedgerIfEnabled(settingsOverride?: AppSettings): Promise<ExportStatus> {
+  const settings = settingsOverride || await store.getSettings();
+  if (!settings.automaticSpreadsheetEnabled) {
+    return {
+      ok: true,
+      pendingCount: 0,
+      message: "Sincronizacao automatica desativada. Use a exportacao manual quando desejar."
+    };
+  }
+  return exporter.export(await getIntegratedLedgerEntries(), settings);
 }
 
 function registerIpc() {
@@ -772,7 +787,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[]; saleType?: "Venda direta" | "Onibus" }): Promise<PdvSale> => {
     const sale = await pdvStore.saveSale({ type: input.saleType === "Onibus" ? "Onibus" : "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
-    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -801,7 +816,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
     const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Este computador", operationId || randomUUID());
-    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -809,7 +824,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string): Promise<PdvSale> => {
     const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Este computador", operationId || randomUUID(), observations);
-    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -817,14 +832,14 @@ function registerIpc() {
 
   ipcMain.handle("pdv:cancelSale", async (_event, id: string) => {
     await pdvStore.cancelSale(id);
-    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
   });
 
   ipcMain.handle("pdv:updateSalePayments", async (_event, id: string, payments: PdvPayment[]): Promise<PdvSale> => {
     const sale = await pdvStore.updateSalePayments(id, payments);
-    await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -832,14 +847,20 @@ function registerIpc() {
 
   ipcMain.handle("pdv:exportSales", async (_event, filters: PdvExportFilters = {}) => {
     const settings = await store.getSettings();
-    const status = await new PdvExporter(settings.outputDirectory).exportSales(pdvStore.getSales(filters), filters, await store.getEntries());
+    const status = await new PdvExporter(path.join(settings.outputDirectory, "Relatorios")).exportSales(
+      pdvStore.getSales(filters),
+      filters,
+      await store.getEntries(),
+      "",
+      settings.reportExportSections
+    );
     await logExportStatus("exportacao PDV", status);
     return status;
   });
 
   ipcMain.handle("entries:add", async (_event, draft: EntryDraft) => {
     const entry = await store.addEntry(draft);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    const exportStatus = await exportLedgerIfEnabled();
     await logExportStatus("novo lancamento", exportStatus);
     localServer.broadcast({ type: "entry-added", entry });
     sendToAll("entries:changed");
@@ -850,14 +871,14 @@ function registerIpc() {
     if (id.startsWith("pdv-")) {
       const saleId = id.replace("pdv-", "");
       await pdvStore.updateSale(saleId, patch);
-      const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      const exportStatus = await exportLedgerIfEnabled();
       await logExportStatus("edicao de lancamento pdv", exportStatus);
       sendToAll("entries:changed");
       publishPdvChanged();
       return { entry: null, exportStatus };
     }
     const entry = await store.updateEntry(id, patch);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    const exportStatus = await exportLedgerIfEnabled();
     await logExportStatus("edicao de lancamento", exportStatus);
     localServer.broadcast({ type: "entry-updated", entry });
     sendToAll("entries:changed");
@@ -868,14 +889,14 @@ function registerIpc() {
     if (id.startsWith("pdv-")) {
       const saleId = id.replace("pdv-", "");
       await pdvStore.updateSale(saleId, { status: "deleted" });
-      const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      const exportStatus = await exportLedgerIfEnabled();
       await logExportStatus("lixeira pdv", exportStatus);
       sendToAll("entries:changed");
       publishPdvChanged();
       return { exportStatus };
     }
     await store.removeEntry(id);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    const exportStatus = await exportLedgerIfEnabled();
     await logExportStatus("lixeira", exportStatus);
     localServer.broadcast({ type: "entry-removed", id });
     sendToAll("entries:changed");
@@ -886,14 +907,14 @@ function registerIpc() {
     if (id.startsWith("pdv-")) {
       const saleId = id.replace("pdv-", "");
       await pdvStore.deleteSale(saleId);
-      const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      const exportStatus = await exportLedgerIfEnabled();
       await logExportStatus("exclusao definitiva pdv", exportStatus);
       sendToAll("entries:changed");
       publishPdvChanged();
       return { exportStatus };
     }
     await store.deleteEntry(id);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    const exportStatus = await exportLedgerIfEnabled();
     await logExportStatus("exclusao definitiva", exportStatus);
     localServer.broadcast({ type: "entry-deleted", id });
     sendToAll("entries:changed");
@@ -905,7 +926,7 @@ function registerIpc() {
       throw new Error("Duplicacao de venda do PDV nao suportada.");
     }
     const entry = await store.duplicateEntry(id);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    const exportStatus = await exportLedgerIfEnabled();
     await logExportStatus("duplicacao", exportStatus);
     localServer.broadcast({ type: "entry-added", entry });
     sendToAll("entries:changed");
@@ -916,14 +937,14 @@ function registerIpc() {
     if (id.startsWith("pdv-")) {
       const saleId = id.replace("pdv-", "");
       await pdvStore.cancelSale(saleId);
-      const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+      const exportStatus = await exportLedgerIfEnabled();
       await logExportStatus("cancelamento pdv", exportStatus);
       sendToAll("entries:changed");
       publishPdvChanged();
       return { entry: null, exportStatus };
     }
     const entry = await store.cancelEntry(id);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), await store.getSettings());
+    const exportStatus = await exportLedgerIfEnabled();
     await logExportStatus("cancelamento", exportStatus);
     localServer.broadcast({ type: "entry-cancelled", entry });
     sendToAll("entries:changed");
@@ -937,7 +958,7 @@ function registerIpc() {
       opacity: saved.floating.opacity,
       lockPosition: saved.floating.lockPosition
     }, saved);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), saved);
+    const exportStatus = await exportLedgerIfEnabled(saved);
     await logExportStatus("salvar configuracoes", exportStatus);
     sendToAll("settings:changed", saved);
     sendToAll("server:changed", localServer.getState());
@@ -1017,8 +1038,12 @@ function registerIpc() {
 
   ipcMain.handle("reports:exportFiltered", async (_event, ids: string[], label: string) => {
     const idSet = new Set(ids);
-    const entries = (await getIntegratedLedgerEntries()).filter((entry) => idSet.has(entry.id));
-    const status = await exporter.exportReport(entries, await store.getSettings(), label);
+    const settings = await store.getSettings();
+    const saleIds = new Set(ids.filter((id) => id.startsWith("pdv-")).map((id) => id.slice(4)));
+    const sales = pdvStore.getSales({}).filter((sale) => saleIds.has(sale.id));
+    const entries = (await store.getEntries()).filter((entry) => idSet.has(entry.id));
+    const reportDirectory = path.join(settings.outputDirectory, label.includes("products") ? "Produtos" : "Relatorios");
+    const status = await new PdvExporter(reportDirectory).exportSales(sales, {}, entries, label || "relatorio", settings.reportExportSections);
     await logExportStatus("relatorio filtrado", status);
     if (status.filePath) {
       shell.showItemInFolder(status.filePath);
@@ -1092,7 +1117,7 @@ function registerIpc() {
     const settings = await store.getSettings();
     const parsed = await readLedgerImport(filePath, settings);
     const imported = await store.importEntries(parsed.entries);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), settings);
+    const exportStatus = await exportLedgerIfEnabled(settings);
     await logExportStatus("importacao de planilha", exportStatus);
     if (imported.imported) {
       await logger.info("Planilha importada", `${imported.imported} novo(s), ${imported.skipped + parsed.skippedRows} pulado(s): ${path.basename(filePath)}`);
@@ -1150,7 +1175,7 @@ function registerIpc() {
       }
     }
 
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), settings);
+    const exportStatus = await exportLedgerIfEnabled(settings);
     await logExportStatus("importacao de pasta", exportStatus);
     if (importedCount) {
       await logger.info("Pasta de planilhas importada", `${importedCount} novo(s), ${skippedCount} pulado(s), ${files.length} arquivo(s): ${folderPath}`);
@@ -1210,7 +1235,7 @@ function registerIpc() {
     }
     const settings = await store.getSettings();
     localServer.setPermissions(settings.server.permissions);
-    const exportStatus = await exporter.export(await getIntegratedLedgerEntries(), settings);
+    const exportStatus = await exportLedgerIfEnabled(settings);
     await logExportStatus("restauracao de backup", exportStatus);
     await logger.warn("Backup restaurado", `${restored.backup.fileName}; backup de seguranca: ${restored.safetyBackup.fileName}`);
     sendToAll("settings:changed", settings);
@@ -1336,6 +1361,43 @@ function compareVersions(left: string, right: string) {
 }
 
 app.whenReady().then(bootstrap);
+
+app.on("before-quit", (event) => {
+  if (gracefulQuitFinished || !store || !pdvStore) {
+    return;
+  }
+  event.preventDefault();
+  if (gracefulQuitStarted) {
+    return;
+  }
+  gracefulQuitStarted = true;
+  void (async () => {
+    try {
+      const settings = await store.getSettings();
+      const today = getLocalDateKey();
+      if (settings.automaticClosingReportEnabled) {
+        const status = await new PdvExporter(path.join(settings.outputDirectory, "Fechamentos diarios")).exportSales(
+          pdvStore.getSales({ from: today, to: today }),
+          { from: today, to: today, type: "Todos", payment: "Todos", status: "Todos" },
+          await store.getEntries(),
+          `fechamento-diario-${today}`,
+          settings.reportExportSections,
+          true
+        );
+        await logExportStatus("fechamento automatico do dia", status);
+      }
+      if (settings.backupEnabled) {
+        const backup = await store.createDailyDataBackup("fechamento-do-dia", await pdvStore.exportBackupBase64());
+        await logger.info("Backup diario atualizado", backup.fileName);
+      }
+    } catch (error) {
+      await logger?.error("Falha no fechamento automatico", error instanceof Error ? error.message : String(error));
+    } finally {
+      gracefulQuitFinished = true;
+      app.quit();
+    }
+  })();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

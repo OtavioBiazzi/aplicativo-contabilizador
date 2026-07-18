@@ -139,6 +139,7 @@ export interface PdvSettings {
   tableCount: number;
   complementsEnabled: boolean;
   subtablesEnabled: boolean;
+  rememberLastSubtable?: boolean;
   tablePeopleEnabled: boolean;
   activePreset: string;
   gridColumns?: number;

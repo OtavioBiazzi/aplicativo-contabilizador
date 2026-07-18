@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import { PdvExporter } from "../dist-electron/electron/pdvExporter.js";
 import { configureCoseDellAbadiaComplements, normalizeImportedProducts } from "../dist-electron/electron/productImporter.js";
 import { PdvStore } from "../dist-electron/electron/pdvStore.js";
+import { LedgerStore } from "../dist-electron/electron/storage.js";
 import { pdvSaleToLedgerEntry } from "../dist-electron/src/shared/pdvLedger.js";
 
 const root = process.cwd();
@@ -356,8 +357,19 @@ const backupDir = path.join(dataDir, "pdv-backups");
 if (!existsSync(backupDir) || !readdirSync(backupDir).some((file) => file.includes("antes-importacao-produtos"))) {
   throw new Error("Backup automatico do SQLite nao foi criado antes da importacao.");
 }
-if (!readdirSync(backupDir).some((file) => file.includes("automatico"))) {
-  throw new Error("Backup diario automatico do SQLite nao foi criado.");
+if (readdirSync(backupDir).some((file) => file.includes("automatico"))) {
+  throw new Error("Inicializacao ainda criou backup automatico redundante do SQLite.");
+}
+const ledgerStore = new LedgerStore({ dataDirectory: dataDir, defaultOutputDirectory: exportDir });
+await ledgerStore.initialize();
+const dailyBackupFirst = await ledgerStore.createDailyDataBackup("fechamento-do-dia", await store.exportBackupBase64());
+const dailyBackupSecond = await ledgerStore.createDailyDataBackup("fechamento-do-dia", await store.exportBackupBase64());
+if (dailyBackupFirst.filePath !== dailyBackupSecond.filePath) {
+  throw new Error("Backup diario criou mais de um arquivo para a mesma data.");
+}
+const combinedBackups = await ledgerStore.listDataBackups();
+if (combinedBackups.filter((backup) => backup.fileName.includes("backup-diario")).length !== 1 || !dailyBackupSecond.includesPdv) {
+  throw new Error("Backup diario combinado nao preservou o banco SQLite.");
 }
 
 const exportStatus = await new PdvExporter(exportDir).exportSales(store.getSales({}), {});
@@ -366,7 +378,7 @@ if (!exportStatus.ok || !exportStatus.filePath) {
 }
 const zip = await JSZip.loadAsync(readFileSync(exportStatus.filePath));
 const workbook = await zip.file("xl/workbook.xml").async("string");
-if (!["Resumo", "Vendas", "Itens", "Pagamentos"].every((sheet) => workbook.includes(sheet))) {
+if (!["Resumo", "Vendas", "Itens", "Pagamentos", "Produtos", "Categorias", "Mesas", "Horarios"].every((sheet) => workbook.includes(sheet))) {
   throw new Error("XLSX PDV nao contem as abas esperadas.");
 }
 const paymentsSheet = await zip.file("xl/worksheets/sheet4.xml").async("string");

@@ -2,7 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
 import type { PdvExportFilters, PdvPaymentMethod, PdvSale } from "../src/shared/pdvTypes.js";
-import type { ExportStatus, LedgerEntry } from "../src/shared/types.js";
+import { buildReportDataset, createReportRecords } from "../src/shared/reporting.js";
+import type { ExportStatus, LedgerEntry, ReportExportSection } from "../src/shared/types.js";
 
 interface Sheet {
   name: string;
@@ -21,18 +22,29 @@ const MONEY_COLUMNS = new Set([
   "Desconto item",
   "Total item",
   "Recebido",
-  "Troco"
+  "Troco",
+  "Faturamento",
+  "Preco medio",
+  "Total vendido"
 ]);
 
 export class PdvExporter {
   constructor(private readonly outputDirectory: string) {}
 
-  async exportSales(sales: PdvSale[], filters: PdvExportFilters = {}, legacyEntries: LedgerEntry[] = []): Promise<ExportStatus> {
+  async exportSales(
+    sales: PdvSale[],
+    filters: PdvExportFilters = {},
+    legacyEntries: LedgerEntry[] = [],
+    fileLabel = "",
+    reportSections: ReportExportSection[] = ["products", "categories", "tables", "times"],
+    replaceExisting = false
+  ): Promise<ExportStatus> {
     try {
       await fs.mkdir(this.outputDirectory, { recursive: true });
-      const filePath = path.join(this.outputDirectory, `pdv-relatorio-${periodToken(filters)}-${timestampToken()}.xlsx`);
+      const reportToken = sanitizeFilePart(fileLabel) || `pdv-relatorio-${periodToken(filters)}`;
+      const filePath = path.join(this.outputDirectory, replaceExisting ? `${reportToken}.xlsx` : `${reportToken}-${timestampToken()}.xlsx`);
       const integratedSales = [...sales, ...legacyEntries.filter((entry) => matchesLegacyFilters(entry, filters)).map(legacyEntryToSale)];
-      await writeXlsx(filePath, buildSheets(integratedSales, filters));
+      await writeXlsx(filePath, buildSheets(integratedSales, filters, reportSections));
       return {
         ok: true,
         filePath,
@@ -112,12 +124,8 @@ function matchesLegacyFilters(entry: LedgerEntry, filters: PdvExportFilters): bo
   return true;
 }
 
-function buildSheets(sales: PdvSale[], filters: PdvExportFilters): Sheet[] {
-  const validSales = sales.filter((sale) => sale.status !== "Cancelada");
-  const cancelledSales = sales.filter((sale) => sale.status === "Cancelada");
-  const itemDiscounts = validSales.reduce((sum, sale) => sum + sale.items.reduce((inner, item) => inner + item.discount, 0), 0);
-  const saleDiscounts = validSales.reduce((sum, sale) => sum + sale.discount, 0);
-  const paymentsTotal = validSales.reduce((sum, sale) => sum + sale.payments.reduce((inner, payment) => inner + payment.amount, 0), 0);
+function buildSheets(sales: PdvSale[], filters: PdvExportFilters, reportSections: ReportExportSection[]): Sheet[] {
+  const dataset = buildReportDataset(createReportRecords([], sales));
   const summaryRows: Record<string, unknown>[] = [
     { Indicador: "Periodo inicial", Valor: filters.from || "Tudo" },
     { Indicador: "Periodo final", Valor: filters.to || "Tudo" },
@@ -125,22 +133,71 @@ function buildSheets(sales: PdvSale[], filters: PdvExportFilters): Sheet[] {
     { Indicador: "Pagamento", Valor: filters.payment || "Todos" },
     { Indicador: "Status", Valor: filters.status || "Todos" },
     { Indicador: "Mesa", Valor: filters.table || "Todas" },
-    { Indicador: "Vendas validas", Valor: validSales.length },
-    { Indicador: "Vendas canceladas", Valor: cancelledSales.length },
-    { Indicador: "Total vendido", Valor: roundMoney(validSales.reduce((sum, sale) => sum + sale.total, 0)) },
-    { Indicador: "Total cancelado", Valor: roundMoney(cancelledSales.reduce((sum, sale) => sum + sale.total, 0)) },
-    { Indicador: "Descontos de venda", Valor: roundMoney(saleDiscounts) },
-    { Indicador: "Descontos de itens", Valor: roundMoney(itemDiscounts) },
-    { Indicador: "Pagamentos registrados", Valor: roundMoney(paymentsTotal) }
+    { Indicador: "Vendas validas", Valor: dataset.count },
+    { Indicador: "Vendas canceladas", Valor: dataset.cancelledCount },
+    { Indicador: "Total vendido", Valor: dataset.total },
+    { Indicador: "Ticket medio", Valor: dataset.average },
+    { Indicador: "Maior venda", Valor: dataset.biggestSale },
+    { Indicador: "Total cancelado", Valor: dataset.cancelledTotal },
+    { Indicador: "Descontos", Valor: dataset.discounts },
+    { Indicador: "Dinheiro recebido", Valor: dataset.receivedInCash },
+    { Indicador: "Troco devolvido", Valor: dataset.change }
   ];
-  paymentTotals(validSales).forEach(([method, amount]) => summaryRows.push({ Indicador: `Pagamento - ${method}`, Valor: amount }));
+  dataset.byPayment.forEach(([method, amount]) => summaryRows.push({ Indicador: `Pagamento - ${method}`, Valor: amount }));
 
-  return [
+  const sheets: Sheet[] = [
     { name: "Resumo", rows: summaryRows },
     { name: "Vendas", rows: sales.map(saleRow) },
     { name: "Itens", rows: sales.flatMap(itemRows) },
     { name: "Pagamentos", rows: sales.flatMap(paymentRows) }
   ];
+  if (reportSections.includes("products")) {
+    sheets.push({
+      name: "Produtos",
+      rows: dataset.products.map((product, index) => ({
+        Posicao: index + 1,
+        Produto: product.name,
+        Categoria: product.category,
+        Quantidade: product.quantity,
+        Lancamentos: product.launches,
+        "Preco medio": product.averagePrice,
+        Descontos: product.discounts,
+        Faturamento: product.revenue
+      }))
+    });
+  }
+  if (reportSections.includes("categories")) {
+    sheets.push({
+      name: "Categorias",
+      rows: dataset.categories.map((category, index) => ({
+        Posicao: index + 1,
+        Categoria: category.name,
+        Quantidade: category.quantity,
+        Produtos: category.products,
+        Faturamento: category.revenue
+      }))
+    });
+  }
+  if (reportSections.includes("tables")) {
+    sheets.push({
+      name: "Mesas",
+      rows: dataset.byTable.map(([table, total], index) => ({
+        Posicao: index + 1,
+        Mesa: table,
+        "Total vendido": total
+      }))
+    });
+  }
+  if (reportSections.includes("times")) {
+    sheets.push({
+      name: "Horarios",
+      rows: dataset.byHour.map(([hour, total]) => ({
+        Hora: hour,
+        "Total vendido": total
+      }))
+    });
+  }
+  return sheets;
 }
 
 function saleRow(sale: PdvSale): Record<string, unknown> {

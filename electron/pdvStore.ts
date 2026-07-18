@@ -26,6 +26,7 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   tableCount: 47,
   complementsEnabled: true,
   subtablesEnabled: true,
+  rememberLastSubtable: false,
   tablePeopleEnabled: false,
   activePreset: "Cose Dell Abadia",
   gridColumns: 5,
@@ -87,7 +88,9 @@ export class PdvStore {
         throw new Error("Banco PDV ainda nao existe.");
       }
       this.db = new this.sql.Database(await fs.readFile(this.dbFilePath));
-      await this.backupSqlite("antes-migracao");
+      if (this.databaseUserVersion() < 1) {
+        await this.backupSqliteDaily("antes-migracao-v1");
+      }
     } catch (error) {
       if (existingDatabase) {
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -110,8 +113,8 @@ export class PdvStore {
       }
       throw error;
     }
+    this.requireDb().run("PRAGMA user_version = 1");
     await this.persist();
-    await this.backupSqliteDaily("automatico");
   }
 
   getDataFile() {
@@ -1126,6 +1129,7 @@ export class PdvStore {
       tableCount: parseIntegerSetting(map.get("table_count"), DEFAULT_PDV_SETTINGS.tableCount),
       complementsEnabled: parseBooleanSetting(map.get("complements_enabled"), DEFAULT_PDV_SETTINGS.complementsEnabled),
       subtablesEnabled: parseBooleanSetting(map.get("subtables_enabled"), DEFAULT_PDV_SETTINGS.subtablesEnabled),
+      rememberLastSubtable: parseBooleanSetting(map.get("remember_last_subtable"), DEFAULT_PDV_SETTINGS.rememberLastSubtable || false),
       tablePeopleEnabled: parseBooleanSetting(map.get("table_people_enabled"), DEFAULT_PDV_SETTINGS.tablePeopleEnabled),
       activePreset: map.get("active_preset") || DEFAULT_PDV_SETTINGS.activePreset,
       gridColumns: Math.max(4, Math.min(10, parseIntegerSetting(map.get("grid_columns"), DEFAULT_PDV_SETTINGS.gridColumns || 5))),
@@ -1197,6 +1201,11 @@ export class PdvStore {
     } catch {
       await fs.copyFile(this.dbFilePath, target);
     }
+  }
+
+  private databaseUserVersion(): number {
+    const result = this.requireDb().exec("PRAGMA user_version");
+    return Number(result[0]?.values?.[0]?.[0] || 0);
   }
 
   private requireDb(): Database {

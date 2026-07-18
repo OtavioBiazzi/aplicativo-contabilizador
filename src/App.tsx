@@ -43,6 +43,13 @@ import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_
 import { PdvApp } from "./PdvApp";
 import type { PdvSale, PdvSnapshot } from "./shared/pdvTypes";
 import {
+  buildReportDataset,
+  createReportRecords,
+  filterReportRecords,
+  type ReportDataset,
+  type ReportProductSummary
+} from "./shared/reporting";
+import {
   calculateCash,
   calculateSplit,
   filterEntriesByLocalDate,
@@ -161,8 +168,63 @@ const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floa
 const CDA_ICON_SRC = "/cda-icon.png";
 const REMOTE_SESSION_STORAGE_KEY = "caixaRemoteSession";
 const QUICK_ENTRY_MODE_STORAGE_PREFIX = "caixaQuickEntryMode";
+const HISTORY_FILTERS_STORAGE_KEY = "caixaHistoryFiltersV2";
+const REPORT_PERIOD_STORAGE_KEY = "caixaReportPeriodV1";
 const REMOTE_ENTRY_LIMIT = 0;
 const HISTORY_PAGE_SIZE = 160;
+
+interface StoredHistoryFilters {
+  query: string;
+  type: string;
+  statusFilter: string;
+  paymentFilter: string;
+  dateFrom: string;
+  dateTo: string;
+  minimumValue: string;
+  maximumValue: string;
+  originFilter: string;
+}
+
+function loadHistoryFilters(rememberPeriod = false): StoredHistoryFilters {
+  const defaults: StoredHistoryFilters = {
+    query: "",
+    type: "Todos",
+    statusFilter: "visiveis",
+    paymentFilter: "Todos",
+    dateFrom: "",
+    dateTo: "",
+    minimumValue: "",
+    maximumValue: "",
+    originFilter: "Todos"
+  };
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(HISTORY_FILTERS_STORAGE_KEY) || "{}") as Partial<StoredHistoryFilters>;
+    const merged = { ...defaults, ...stored };
+    return rememberPeriod ? merged : { ...merged, dateFrom: "", dateTo: "" };
+  } catch {
+    return defaults;
+  }
+}
+
+function loadReportPeriod(rememberPeriod: boolean): { from: string; to: string } {
+  const fallback = currentMonthPeriod();
+  if (!rememberPeriod) return fallback;
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(REPORT_PERIOD_STORAGE_KEY) || "{}") as Partial<{ from: string; to: string }>;
+    return {
+      from: typeof stored.from === "string" ? stored.from : fallback.from,
+      to: typeof stored.to === "string" ? stored.to : fallback.to
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function parseOptionalHistoryValue(value: string): number | null {
+  if (!value.trim()) return null;
+  const parsed = parseMoney(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: "Mesa", label: "Mesa" },
@@ -905,15 +967,15 @@ function filePreviewForSettings(settings: AppSettings): string {
   const extension = settings.fileFormat;
   const date = dateTokenForFormat(now, settings.dateFormat);
   if (settings.fileStrategy === "monthlyTabs" && settings.fileFormat === "xlsx") {
-    return `caixa-${getLocalDateKey(now).slice(0, 7)}.${extension}`;
+    return `Fechamentos mensais / caixa-${getLocalDateKey(now).slice(0, 7)}.${extension}`;
   }
   if (settings.fileStrategy === "fixedAll") {
-    return `caixa-geral.${extension}`;
+    return `Exportacoes / caixa-geral.${extension}`;
   }
   if (settings.fileStrategy === "byType") {
-    return `venda-${date}.${extension}`;
+    return `Por tipo / venda-${date}.${extension}`;
   }
-  return `vendas-${date}.${extension}`;
+  return `Vendas diarias / vendas-${date}.${extension}`;
 }
 
 function profileSummary(profile: Partial<AppSettings>): string {
@@ -960,6 +1022,9 @@ function remoteLockedSettingsSnapshot(settings: AppSettings, allowClientCustomiz
     csvSeparator: settings.csvSeparator,
     visibleColumns: settings.visibleColumns,
     backupEnabled: settings.backupEnabled,
+    automaticSpreadsheetEnabled: settings.automaticSpreadsheetEnabled,
+    automaticClosingReportEnabled: settings.automaticClosingReportEnabled,
+    reportExportSections: settings.reportExportSections,
     server: settings.server
   };
   if (!allowClientCustomization) {
@@ -1004,6 +1069,7 @@ export function App() {
   const [importingPreview, setImportingPreview] = useState(false);
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey());
   const [totalMenuOpen, setTotalMenuOpen] = useState(false);
+  const totalMenuRef = useRef<HTMLDivElement | null>(null);
   const [reportFocus, setReportFocus] = useState<ReportFocusPeriod | null>(null);
   const [historyFocus, setHistoryFocus] = useState<HistoryFocusDate | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<{ category: SettingsCategory; nonce: number } | null>(null);
@@ -1019,6 +1085,19 @@ export function App() {
   const remotePdvRefreshTimer = useRef<number | null>(null);
   const remotePdvSignature = useRef("");
   const autoConnectionAttemptKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!totalMenuOpen) {
+      return;
+    }
+    const closeTotalMenu = (event: PointerEvent) => {
+      if (!totalMenuRef.current?.contains(event.target as Node)) {
+        setTotalMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", closeTotalMenu);
+    return () => window.removeEventListener("pointerdown", closeTotalMenu);
+  }, [totalMenuOpen]);
   const combinedEntries = useMemo(() => [...entries].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()), [entries]);
   const todayEntries = useMemo(() => filterEntriesByLocalDate(combinedEntries, currentDateKey), [combinedEntries, currentDateKey]);
   const summary = useMemo(() => summarizeEntries(todayEntries), [todayEntries]);
@@ -1734,7 +1813,7 @@ export function App() {
     return (
       <div className="boot-screen">
         <div className="pulse-mark" />
-        <strong>Carregando Contabilizador Caixa...</strong>
+        <strong>Carregando Caixa PDV...</strong>
       </div>
     );
   }
@@ -1789,17 +1868,19 @@ export function App() {
       : null;
 
   return (
-    <div className={`app-shell ${pdvMainTab ? "pdv-main-mode" : ""}`}>
+    <div className={`app-shell ${pdvMainTab ? "pdv-main-mode" : ""} ${settings.hideHeaderBrand ? "header-brand-hidden" : ""}`}>
       <aside className="sidebar app-topbar">
-        <div className="brand-block">
-          <div className="brand-mark">
-            <img src={CDA_ICON_SRC} alt="CDA" draggable={false} />
+        {!settings.hideHeaderBrand && (
+          <div className="brand-block">
+            <div className="brand-mark">
+              <img src={CDA_ICON_SRC} alt="Caixa PDV" draggable={false} />
+            </div>
+            <div>
+              <strong>Caixa PDV</strong>
+              <span>{legacyMode ? "Caixa classico" : remoteSession ? "Cliente do caixa principal" : "PDV local rapido"}</span>
+            </div>
           </div>
-          <div>
-            <strong>Contabilizador</strong>
-            <span>{legacyMode ? "Caixa classico" : remoteSession ? "Cliente do caixa principal" : "PDV local rapido"}</span>
-          </div>
-        </div>
+        )}
 
         <nav className="tabs">
           {visibleTabItems.map((item) => {
@@ -1817,7 +1898,7 @@ export function App() {
           })}
         </nav>
 
-        <div className="total-menu-wrap">
+        <div className="total-menu-wrap" ref={totalMenuRef}>
           <button
             type="button"
             className="sidebar-card topbar-card topbar-card-button"
@@ -1941,6 +2022,7 @@ export function App() {
         {activeTab === "history" && !pdvMainTab && (
           <HistoryPanel
             entries={remoteSession ? displayEntries : combinedEntries}
+            settings={settings}
             focusDate={historyFocus}
             onChange={async () => {
               await reload();
@@ -1960,7 +2042,7 @@ export function App() {
         )}
 
         {activeTab === "reports" && (
-            <ReportsPanel entries={remoteSession ? displayEntries : combinedEntries} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
+            <ProfessionalReportsPanel entries={remoteSession ? displayEntries : combinedEntries} pdvSales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
               if (remoteSession) {
                 showToast("info", "A pasta de Excel deve ser aberta no computador servidor.");
                 return;
@@ -2856,6 +2938,7 @@ function TodayPanel({
 
 function HistoryPanel({
   entries,
+  settings,
   focusDate,
   onChange,
   onToast,
@@ -2866,6 +2949,7 @@ function HistoryPanel({
   pdvSales
 }: {
   entries: LedgerEntry[];
+  settings: AppSettings;
   focusDate?: HistoryFocusDate | null;
   onChange: () => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
@@ -2875,24 +2959,30 @@ function HistoryPanel({
   onRestoreRemote?: (entry: LedgerEntry) => Promise<void>;
   pdvSales: PdvSale[];
 }) {
-  const [query, setQuery] = useState("");
-  const [type, setType] = useState("Todos");
-  const [statusFilter, setStatusFilter] = useState("visiveis");
-  const [paymentFilter, setPaymentFilter] = useState("Todos");
-  const [date, setDate] = useState("");
-  const [originFilter, setOriginFilter] = useState("Todos");
+  const savedFilters = useMemo(() => loadHistoryFilters(settings.rememberHistoryPeriod), []);
+  const [query, setQuery] = useState(savedFilters.query);
+  const [type, setType] = useState(savedFilters.type);
+  const [statusFilter, setStatusFilter] = useState(savedFilters.statusFilter);
+  const [paymentFilter, setPaymentFilter] = useState(savedFilters.paymentFilter);
+  const [dateFrom, setDateFrom] = useState(savedFilters.dateFrom);
+  const [dateTo, setDateTo] = useState(savedFilters.dateTo);
+  const [minimumValue, setMinimumValue] = useState(savedFilters.minimumValue);
+  const [maximumValue, setMaximumValue] = useState(savedFilters.maximumValue);
+  const [originFilter, setOriginFilter] = useState(savedFilters.originFilter);
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const [details, setDetails] = useState<PdvSale | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ entry: LedgerEntry; permanent: boolean } | null>(null);
   const [visibleCount, setVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const deferredQuery = useDeferredValue(query);
   const originOptions = useMemo(() => ["Todos", ...new Set(entries.map((entry) => entry.originDevice).filter(Boolean))], [entries]);
+  const pdvSaleById = useMemo(() => new Map(pdvSales.map((sale) => [sale.id, sale])), [pdvSales]);
 
   useEffect(() => {
     if (!focusDate) {
       return;
     }
-    setDate(focusDate.date);
+    setDateFrom(focusDate.date);
+    setDateTo(focusDate.date);
     setStatusFilter("visiveis");
     setPaymentFilter("Todos");
     setType("Todos");
@@ -2900,10 +2990,36 @@ function HistoryPanel({
     setVisibleCount(HISTORY_PAGE_SIZE);
   }, [focusDate?.nonce]);
 
+  useEffect(() => {
+    window.localStorage.setItem(HISTORY_FILTERS_STORAGE_KEY, JSON.stringify({
+      query,
+      type,
+      statusFilter,
+      paymentFilter,
+      dateFrom: settings.rememberHistoryPeriod ? dateFrom : "",
+      dateTo: settings.rememberHistoryPeriod ? dateTo : "",
+      minimumValue,
+      maximumValue,
+      originFilter
+    }));
+  }, [query, type, statusFilter, paymentFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, settings.rememberHistoryPeriod]);
+
   const filtered = useMemo(() => {
-    const search = deferredQuery.toLowerCase();
+    const search = deferredQuery.trim().toLocaleLowerCase("pt-BR");
+    const minimum = parseOptionalHistoryValue(minimumValue);
+    const maximum = parseOptionalHistoryValue(maximumValue);
     return entries.filter((entry) => {
-      const haystack = `${entry.description} ${entry.tableNumber} ${entry.busNumber} ${paymentLabelForEntry(entry)}`.toLowerCase();
+      const sale = entry.sourceSaleId ? pdvSaleById.get(entry.sourceSaleId) : undefined;
+      const haystack = [
+        entry.description,
+        entry.tableNumber ? `Mesa ${entry.tableNumber}` : "",
+        entry.busNumber ? `Onibus ${entry.busNumber}` : "",
+        entry.observations,
+        entry.originDevice,
+        paymentLabelForEntry(entry),
+        ...(sale?.items.flatMap((item) => [item.productName, item.categoryName, item.note, item.subtableName, ...(item.complements || []).map((part) => part.name)]) || []),
+        ...(sale?.payments.flatMap((item) => [item.method, item.description]) || [])
+      ].join(" ").toLocaleLowerCase("pt-BR");
       const sameType = type === "Todos" || entry.type === type;
       const sameStatus =
         statusFilter === "todos" ||
@@ -2911,17 +3027,25 @@ function HistoryPanel({
         (statusFilter === "active" && entry.status === "active") ||
         (statusFilter === "cancelled" && entry.status === "cancelled") ||
         (statusFilter === "deleted" && entry.status === "deleted");
-      const sameDate = !date || getLocalDateKey(entry.createdAt) === date;
+      const dateKey = getLocalDateKey(entry.createdAt);
+      const sameDate = (!dateFrom || dateKey >= dateFrom) && (!dateTo || dateKey <= dateTo);
       const sameOrigin = originFilter === "Todos" || entry.originDevice === originFilter;
       const samePayment = paymentFilter === "Todos" || entry.paymentMethod === paymentFilter || Boolean(entry.paymentBreakdown?.some((item) => item.method === paymentFilter));
-      return sameType && sameStatus && sameDate && sameOrigin && samePayment && haystack.includes(search);
+      const sameValue = (minimum === null || entry.finalValue >= minimum) && (maximum === null || entry.finalValue <= maximum);
+      return sameType && sameStatus && sameDate && sameOrigin && samePayment && sameValue && haystack.includes(search);
     });
-  }, [entries, deferredQuery, type, statusFilter, date, originFilter, paymentFilter]);
+  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, pdvSaleById]);
   const visibleRows = filtered.slice(0, visibleCount);
+  const filteredSummary = useMemo(() => ({
+    active: filtered.filter((entry) => entry.status === "active"),
+    cancelled: filtered.filter((entry) => entry.status === "cancelled").length,
+    deleted: filtered.filter((entry) => entry.status === "deleted").length
+  }), [filtered]);
+  const filteredTotal = useMemo(() => roundMoney(filteredSummary.active.reduce((sum, entry) => sum + entry.finalValue, 0)), [filteredSummary.active]);
 
   useEffect(() => {
     setVisibleCount(HISTORY_PAGE_SIZE);
-  }, [deferredQuery, type, statusFilter, date, paymentFilter]);
+  }, [deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, paymentFilter, originFilter]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     try {
@@ -2943,11 +3067,11 @@ function HistoryPanel({
   };
 
   return (
-    <section className="panel">
-      <div className="filter-bar">
-        <label className="field">
+    <section className="panel professional-history-panel">
+      <div className="filter-bar professional-history-filters">
+        <label className="field history-search-field">
           <span>Buscar</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, mesa, onibus..." />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Produto, descricao, mesa, pagamento..." />
         </label>
         <label className="field">
           <span>Tipo</span>
@@ -2967,8 +3091,12 @@ function HistoryPanel({
           </select>
         </label>
         <label className="field">
-          <span>Data</span>
-          <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          <span>De</span>
+          <input type="date" title="Clique para abrir o calendario" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+        </label>
+        <label className="field">
+          <span>Ate</span>
+          <input type="date" title="Clique para abrir o calendario" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
         </label>
         <label className="field">
           <span>Origem</span>
@@ -2982,6 +3110,33 @@ function HistoryPanel({
             {['Todos', 'Dinheiro', 'Debito', 'Credito', 'Pix', 'Outros', 'Nao informado'].map((method) => <option key={method}>{method}</option>)}
           </select>
         </label>
+        <label className="field">
+          <span>Valor minimo</span>
+          <input inputMode="decimal" value={minimumValue} onChange={(event) => setMinimumValue(event.target.value)} placeholder="R$ 0,00" />
+        </label>
+        <label className="field">
+          <span>Valor maximo</span>
+          <input inputMode="decimal" value={maximumValue} onChange={(event) => setMaximumValue(event.target.value)} placeholder="Sem limite" />
+        </label>
+        <button className="ghost-button history-clear-filters" type="button" onClick={() => {
+          setQuery("");
+          setType("Todos");
+          setStatusFilter("visiveis");
+          setPaymentFilter("Todos");
+          setDateFrom("");
+          setDateTo("");
+          setMinimumValue("");
+          setMaximumValue("");
+          setOriginFilter("Todos");
+        }}><RotateCcw size={15} /> Limpar</button>
+      </div>
+
+      <div className="history-summary-strip">
+        <div><span>Resultados</span><strong>{filtered.length}</strong></div>
+        <div><span>Ativos</span><strong>{filteredSummary.active.length}</strong></div>
+        <div><span>Total filtrado</span><strong>{formatCurrency(filteredTotal)}</strong></div>
+        <div><span>Cancelados</span><strong>{filteredSummary.cancelled}</strong></div>
+        <div><span>Lixeira</span><strong>{filteredSummary.deleted}</strong></div>
       </div>
 
       <div className="table-wrap">
@@ -3305,12 +3460,19 @@ function EditEntryModal({
 
   return (
     <div className="modal-backdrop">
-      <div className="modal">
+      <div className="modal entry-editor-modal">
         <div className="modal-head">
-          <strong>Editar lancamento</strong>
+          <div>
+            <span className="settings-overline">Historico</span>
+            <strong>Editar lancamento</strong>
+          </div>
           <button className="icon-button" onClick={onClose}><X size={18} /></button>
         </div>
-        <div className="entry-grid">
+        <div className="entry-editor-intro">
+          <strong>Dados da operacao</strong>
+          <span>Corrija descricao, valor e identificacao sem perder o registro original.</span>
+        </div>
+        <div className="entry-grid entry-editor-grid">
           <label className="field">
             <span>Tipo / categoria</span>
             <select value={type} onChange={(event) => setType(event.target.value as EntryType)}>
@@ -3358,6 +3520,459 @@ function EditEntryModal({
       </div>
     </div>
   );
+}
+
+type ProfessionalReportTab = "overview" | "products" | "payments" | "tables" | "times" | "audit";
+
+function ProfessionalReportsPanel({
+  entries,
+  pdvSales,
+  settings,
+  exportStatus,
+  remoteClientActive = false,
+  canViewTotals = true,
+  canViewEntryValues = true,
+  focusPeriod,
+  onFocusConsumed,
+  onOpenOutputDirectory,
+  onExport,
+  onExportFiltered
+}: {
+  entries: LedgerEntry[];
+  pdvSales: PdvSale[];
+  settings: AppSettings;
+  summary: DaySummary;
+  exportStatus: ExportStatus | null;
+  remoteClientActive?: boolean;
+  canViewTotals?: boolean;
+  canViewEntryValues?: boolean;
+  focusPeriod?: ReportFocusPeriod | null;
+  onFocusConsumed?: () => void;
+  onOpenOutputDirectory: () => Promise<void>;
+  onExport: () => Promise<void>;
+  onExportFiltered: (ids: string[], label: string) => Promise<void>;
+}) {
+  const initialPeriod = useMemo(() => loadReportPeriod(settings.rememberReportPeriod), []);
+  const [tab, setTab] = useState<ProfessionalReportTab>("overview");
+  const [from, setFrom] = useState(initialPeriod.from);
+  const [to, setTo] = useState(initialPeriod.to);
+  const [type, setType] = useState("Todos");
+  const [payment, setPayment] = useState("Todos");
+  const [table, setTable] = useState("");
+  const [origin, setOrigin] = useState("Todos");
+  const [query, setQuery] = useState("");
+  const [productQuery, setProductQuery] = useState("");
+  const [category, setCategory] = useState("Todos");
+  const [showSensitive, setShowSensitive] = useState(canViewTotals && !settings.privacy.hideReportTotals);
+  const deferredQuery = useDeferredValue(query);
+  const deferredProductQuery = useDeferredValue(productQuery);
+  const records = useMemo(() => createReportRecords(entries, pdvSales), [entries, pdvSales]);
+  const filteredRecords = useMemo(() => filterReportRecords(records, {
+    from,
+    to,
+    type,
+    payment,
+    table,
+    origin,
+    query: deferredQuery
+  }), [records, from, to, type, payment, table, origin, deferredQuery]);
+  const dataset = useMemo(() => buildReportDataset(filteredRecords), [filteredRecords]);
+  const previousRange = useMemo(() => previousReportPeriod(from, to), [from, to]);
+  const previousDataset = useMemo(() => buildReportDataset(filterReportRecords(records, {
+    from: previousRange.from,
+    to: previousRange.to,
+    type,
+    payment,
+    table,
+    origin,
+    query: deferredQuery
+  })), [records, previousRange.from, previousRange.to, type, payment, table, origin, deferredQuery]);
+  const showTotals = canViewTotals && showSensitive;
+  const types = useMemo(() => ["Todos", ...new Set(records.map((record) => record.type).filter(Boolean))], [records]);
+  const payments = useMemo(() => ["Todos", ...new Set(records.flatMap((record) => record.payments.map((item) => item.method)).filter(Boolean))], [records]);
+  const origins = useMemo(() => ["Todos", ...new Set(records.map((record) => record.originDevice).filter(Boolean))], [records]);
+  const categories = useMemo(() => ["Todos", ...new Set(dataset.products.map((product) => product.category).filter(Boolean))], [dataset.products]);
+  const visibleProducts = useMemo(() => {
+    const search = deferredProductQuery.trim().toLocaleLowerCase("pt-BR");
+    return dataset.products.filter((product) =>
+      (category === "Todos" || product.category === category)
+      && (!search || `${product.name} ${product.category}`.toLocaleLowerCase("pt-BR").includes(search))
+    );
+  }, [dataset.products, category, deferredProductQuery]);
+  const exportIds = filteredRecords.map((record) => record.source === "pdv" ? `pdv-${record.id}` : record.id);
+  const exportLabel = [from || "inicio", to || "hoje", type, payment, tab].join("-").replace(/\s+/g, "-").toLowerCase();
+
+  useEffect(() => {
+    setShowSensitive(canViewTotals && !settings.privacy.hideReportTotals);
+  }, [canViewTotals, settings.privacy.hideReportTotals]);
+
+  useEffect(() => {
+    if (settings.rememberReportPeriod) {
+      window.localStorage.setItem(REPORT_PERIOD_STORAGE_KEY, JSON.stringify({ from, to }));
+    } else {
+      window.localStorage.removeItem(REPORT_PERIOD_STORAGE_KEY);
+    }
+  }, [from, to, settings.rememberReportPeriod]);
+
+  useEffect(() => {
+    if (!focusPeriod) return;
+    setFrom(focusPeriod.from);
+    setTo(focusPeriod.to);
+    setType("Todos");
+    setPayment("Todos");
+    setTable("");
+    setOrigin("Todos");
+    setQuery("");
+    onFocusConsumed?.();
+  }, [focusPeriod?.nonce]);
+
+  const setPeriod = (period: "today" | "yesterday" | "week" | "month") => {
+    const today = new Date();
+    const end = getLocalDateKey(today);
+    if (period === "today") {
+      setFrom(end);
+      setTo(end);
+      return;
+    }
+    if (period === "yesterday") {
+      const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+      const key = getLocalDateKey(date);
+      setFrom(key);
+      setTo(key);
+      return;
+    }
+    if (period === "week") {
+      const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6);
+      setFrom(getLocalDateKey(start));
+      setTo(end);
+      return;
+    }
+    const current = currentMonthPeriod();
+    setFrom(current.from);
+    setTo(current.to);
+  };
+
+  return (
+    <section className="panel professional-report-panel">
+      <header className="professional-report-head">
+        <div>
+          <span className="eyebrow">Inteligencia do caixa</span>
+          <h2>Painel do periodo</h2>
+          <p className="muted-copy">Venda, Mesas e Onibus analisados na mesma base. Os totais abaixo usam o mesmo recorte da exportacao.</p>
+        </div>
+        <div className="report-actions">
+          <label className="switch-line">
+            <input type="checkbox" checked={showTotals} disabled={!canViewTotals} onChange={(event) => setShowSensitive(event.target.checked)} />
+            {canViewTotals ? "Mostrar valores" : "Valores bloqueados"}
+          </label>
+          <button className="ghost-button" onClick={onOpenOutputDirectory} disabled={remoteClientActive}><FolderOpen size={17} /> Pasta</button>
+          <button className="ghost-button" onClick={onExport} disabled={remoteClientActive}><FileSpreadsheet size={17} /> Planilha operacional</button>
+          <button className="primary-button" onClick={() => onExportFiltered(exportIds, exportLabel)} disabled={remoteClientActive || !filteredRecords.length}><Download size={17} /> Exportar recorte</button>
+        </div>
+      </header>
+
+      {!canViewTotals && (
+        <section className="remote-report-lock">
+          <ShieldCheck size={18} />
+          <div><strong>Totais protegidos pelo servidor</strong><span>Filtros e quantidades continuam disponiveis sem revelar valores.</span></div>
+        </section>
+      )}
+
+      <div className="professional-report-filters">
+        <div className="report-period-buttons">
+          <button onClick={() => setPeriod("today")}>Hoje</button>
+          <button onClick={() => setPeriod("yesterday")}>Ontem</button>
+          <button onClick={() => setPeriod("week")}>7 dias</button>
+          <button onClick={() => setPeriod("month")}>Mes</button>
+        </div>
+        <label className="field"><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+        <label className="field"><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+        <label className="field"><span>Tipo</span><select value={type} onChange={(event) => setType(event.target.value)}>{types.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label className="field"><span>Pagamento</span><select value={payment} onChange={(event) => setPayment(event.target.value)}>{payments.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label className="field"><span>Mesa</span><input value={table} onChange={(event) => setTable(event.target.value)} placeholder="Todas" /></label>
+        <label className="field"><span>Origem</span><select value={origin} onChange={(event) => setOrigin(event.target.value)}>{origins.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label className="field report-wide-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Produto, descricao, mesa..." /></label>
+        <button className="ghost-button report-clear-button" onClick={() => {
+          const current = currentMonthPeriod();
+          setFrom(current.from);
+          setTo(current.to);
+          setType("Todos");
+          setPayment("Todos");
+          setTable("");
+          setOrigin("Todos");
+          setQuery("");
+        }}><RotateCcw size={15} /> Limpar</button>
+      </div>
+
+      <nav className="professional-report-tabs" aria-label="Tipos de relatorio">
+        {([
+          ["overview", "Visao geral"],
+          ["products", "Produtos"],
+          ["payments", "Pagamentos"],
+          ["tables", "Mesas e vendas"],
+          ["times", "Horarios"],
+          ["audit", "Auditoria"]
+        ] as Array<[ProfessionalReportTab, string]>).map(([key, label]) => (
+          <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
+        ))}
+      </nav>
+
+      {tab === "overview" && (
+        <div className="professional-report-content">
+          <div className="report-kpi-grid">
+            <ProfessionalMetric label="Total vendido" value={showTotals ? formatCurrency(dataset.total) : "Restrito"} detail={comparisonLabel(dataset.total, previousDataset.total, showTotals)} />
+            <ProfessionalMetric label="Vendas" value={String(dataset.count)} detail={comparisonLabel(dataset.count, previousDataset.count, true)} />
+            <ProfessionalMetric label="Ticket medio" value={showTotals ? formatCurrency(dataset.average) : "Restrito"} detail={`${dataset.activeRecords.filter((record) => record.type === "Mesa").length} fechamento(s) de mesa`} />
+            <ProfessionalMetric label="Maior venda" value={showTotals ? formatCurrency(dataset.biggestSale) : "Restrito"} detail={`${dataset.partialCount} fechamento(s) parcial(is)`} />
+            <ProfessionalMetric label="Descontos" value={showTotals ? formatCurrency(dataset.discounts) : "Restrito"} detail={`${dataset.cancelledCount} cancelamento(s)`} tone={dataset.discounts ? "warning" : "normal"} />
+          </div>
+          <div className="professional-report-chart-grid">
+            <ReportTrendChart rows={dataset.daily} showValues={showTotals} />
+            <ReportBars title="Faturamento por tipo" rows={dataset.byType} showValues={showTotals} />
+            <ReportBars title="Formas de pagamento" rows={dataset.byPayment} showValues={showTotals} />
+          </div>
+          <section className="professional-report-section">
+            <div className="section-title"><strong>Ultimas vendas do recorte</strong><span>{dataset.activeRecords.length} valida(s)</span></div>
+            <div className="professional-report-records">
+              {dataset.activeRecords.slice(0, 10).map((record) => (
+                <article key={record.id}>
+                  <div><strong>{record.description}</strong><span>{new Date(record.createdAt).toLocaleString("pt-BR")} | {record.type} | {record.payments.map((item) => item.method).join(" + ")}</span></div>
+                  <b>{canViewEntryValues ? formatCurrency(record.total) : "Restrito"}</b>
+                </article>
+              ))}
+              {!dataset.activeRecords.length && <p className="empty-text">Sem vendas neste recorte.</p>}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {tab === "products" && (
+        <div className="professional-report-content">
+          <div className="report-kpi-grid">
+            <ProfessionalMetric label="Itens vendidos" value={formatReportQuantity(dataset.products.reduce((sum, product) => sum + product.quantity, 0))} detail={`${dataset.products.length} produto(s) diferente(s)`} />
+            <ProfessionalMetric label="Produto lider" value={dataset.products[0]?.name || "-"} detail={dataset.products[0] ? `${formatReportQuantity(dataset.products[0].quantity)} vendido(s)` : "Sem movimento"} />
+            <ProfessionalMetric label="Categorias" value={String(dataset.categories.length)} detail={`${dataset.complements.length} adicional(is) utilizado(s)`} />
+            <ProfessionalMetric label="Receita dos itens" value={showTotals ? formatCurrency(dataset.products.reduce((sum, product) => sum + product.revenue, 0)) : "Restrito"} detail="Inclui adicionais e descontos aplicados" />
+          </div>
+          <div className="professional-product-filters">
+            <label className="field"><span>Pesquisar produto</span><input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Nome do produto" /></label>
+            <label className="field"><span>Categoria</span><select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <span>{visibleProducts.length} produto(s)</span>
+          </div>
+          <div className="professional-report-chart-grid">
+            <ReportBars title="Mais vendidos" rows={visibleProducts.slice(0, 10).map((product) => [product.name, product.quantity])} showValues valueFormatter={formatReportQuantity} />
+            <ReportBars title="Maior faturamento" rows={[...visibleProducts].sort((left, right) => right.revenue - left.revenue).slice(0, 10).map((product) => [product.name, product.revenue])} showValues={showTotals} />
+            <ReportBars title="Adicionais mais usados" rows={dataset.complements.slice(0, 10)} showValues valueFormatter={formatReportQuantity} />
+          </div>
+          <ProductReportTable products={visibleProducts} showValues={showTotals} />
+          <section className="professional-report-section">
+            <div className="section-title"><strong>Desempenho por categoria</strong><span>{dataset.categories.length} categoria(s)</span></div>
+            <div className="category-performance-grid">
+              {dataset.categories.map((item) => (
+                <article key={item.name}>
+                  <div><strong>{item.name}</strong><span>{formatReportQuantity(item.quantity)} item(ns) | {item.products} produto(s)</span></div>
+                  <b>{showTotals ? formatCurrency(item.revenue) : "Restrito"}</b>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {tab === "payments" && (
+        <div className="professional-report-content">
+          <div className="report-kpi-grid">
+            <ProfessionalMetric label="Pagamentos" value={String(dataset.activeRecords.reduce((sum, record) => sum + record.payments.length, 0))} detail={`${dataset.byPayment.length} forma(s) utilizada(s)`} />
+            <ProfessionalMetric label="Dinheiro recebido" value={showTotals ? formatCurrency(dataset.receivedInCash) : "Restrito"} detail="Valor entregue pelo cliente" />
+            <ProfessionalMetric label="Troco devolvido" value={showTotals ? formatCurrency(dataset.change) : "Restrito"} detail="Nao entra no faturamento" />
+            <ProfessionalMetric label="Pagamentos mistos" value={String(dataset.activeRecords.filter((record) => record.payments.length > 1).length)} detail="Vendas com mais de uma forma" />
+          </div>
+          <div className="professional-report-chart-grid">
+            <ReportBars title="Total por forma" rows={dataset.byPayment} showValues={showTotals} />
+            <ReportBars title="Quantidade de usos" rows={paymentUsageRows(dataset)} showValues valueFormatter={(value) => `${value} uso(s)`} />
+          </div>
+          <section className="professional-report-section">
+            <div className="section-title"><strong>Composicao dos pagamentos</strong><span>Partes registradas individualmente</span></div>
+            <div className="payment-report-table-wrap">
+              <table className="professional-data-table">
+                <thead><tr><th>Data</th><th>Venda</th><th>Forma</th><th>Descricao</th><th>Recebido</th><th>Troco</th><th>Valor</th></tr></thead>
+                <tbody>
+                  {dataset.activeRecords.flatMap((record) => record.payments.map((item, index) => (
+                    <tr key={`${record.id}-${index}`}>
+                      <td>{new Date(record.createdAt).toLocaleString("pt-BR")}</td>
+                      <td>{record.description}</td>
+                      <td>{item.method}</td>
+                      <td>{item.description || "-"}</td>
+                      <td>{showTotals ? formatCurrency(item.received) : "Restrito"}</td>
+                      <td>{showTotals ? formatCurrency(item.change) : "Restrito"}</td>
+                      <td><strong>{showTotals ? formatCurrency(item.amount) : "Restrito"}</strong></td>
+                    </tr>
+                  )))}
+                  {!dataset.activeRecords.length && <tr><td colSpan={7}>Sem pagamentos neste recorte.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {tab === "tables" && (
+        <div className="professional-report-content">
+          <div className="report-kpi-grid">
+            <ProfessionalMetric label="Mesas fechadas" value={String(dataset.activeRecords.filter((record) => record.type === "Mesa").length)} detail={`${dataset.partialCount} parcial(is)`} />
+            <ProfessionalMetric label="Vendas diretas" value={String(dataset.activeRecords.filter((record) => record.type === "Venda" || record.type === "Venda direta").length)} detail="Atendimentos fora de mesa" />
+            <ProfessionalMetric label="Onibus" value={String(dataset.activeRecords.filter((record) => record.type === "Onibus").length)} detail="Lancamentos identificados como onibus" />
+            <ProfessionalMetric label="Canceladas" value={String(dataset.cancelledCount)} detail={showTotals ? formatCurrency(dataset.cancelledTotal) : "Valor restrito"} tone={dataset.cancelledCount ? "warning" : "normal"} />
+          </div>
+          <div className="professional-report-chart-grid">
+            <ReportBars title="Faturamento por mesa" rows={dataset.byTable.slice(0, 15)} showValues={showTotals} />
+            <ReportBars title="Venda por origem/caixa" rows={dataset.byOrigin} showValues={showTotals} />
+            <ReportBars title="Tipos de atendimento" rows={dataset.byType} showValues={showTotals} />
+          </div>
+        </div>
+      )}
+
+      {tab === "times" && (
+        <div className="professional-report-content">
+          <div className="professional-report-chart-grid wide">
+            <ReportBars title="Faturamento por hora" rows={dataset.byHour} showValues={showTotals} />
+            <ReportBars title="Dias da semana" rows={dataset.byWeekday} showValues={showTotals} />
+          </div>
+          <ReportTrendChart rows={dataset.daily} showValues={showTotals} expanded />
+        </div>
+      )}
+
+      {tab === "audit" && (
+        <div className="professional-report-content">
+          <div className="report-kpi-grid">
+            <ProfessionalMetric label="Cancelamentos" value={String(dataset.cancelledCount)} detail={showTotals ? formatCurrency(dataset.cancelledTotal) : "Valor restrito"} tone={dataset.cancelledCount ? "warning" : "normal"} />
+            <ProfessionalMetric label="Na lixeira" value={String(dataset.deletedCount)} detail="Registros fora dos totais" tone={dataset.deletedCount ? "warning" : "normal"} />
+            <ProfessionalMetric label="Descontos" value={showTotals ? formatCurrency(dataset.discounts) : "Restrito"} detail="Venda e itens somados" tone={dataset.discounts ? "warning" : "normal"} />
+            <ProfessionalMetric label="Planilha" value={exportStatus?.pendingCount ? `${exportStatus.pendingCount} pendente(s)` : "Sincronizada"} detail={exportStatus?.message || "Sem erro registrado"} tone={exportStatus?.pendingCount ? "warning" : "normal"} />
+          </div>
+          <section className="professional-report-section">
+            <div className="section-title"><strong>Ocorrencias do recorte</strong><span>Cancelados, removidos e parciais</span></div>
+            <div className="professional-report-records">
+              {dataset.records.filter((record) => record.status !== "active" || record.type === "Mesa parcial").map((record) => (
+                <article key={record.id} className={record.status !== "active" ? "warning" : ""}>
+                  <div><strong>{record.description}</strong><span>{new Date(record.createdAt).toLocaleString("pt-BR")} | {record.type} | {record.status}</span></div>
+                  <b>{showTotals ? formatCurrency(record.total) : "Restrito"}</b>
+                </article>
+              ))}
+              {!dataset.records.some((record) => record.status !== "active" || record.type === "Mesa parcial") && <p className="empty-text">Nenhuma ocorrencia neste recorte.</p>}
+            </div>
+          </section>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProfessionalMetric({ label, value, detail, tone = "normal" }: { label: string; value: string; detail: string; tone?: "normal" | "warning" }) {
+  return (
+    <article className={`professional-metric ${tone}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </article>
+  );
+}
+
+function ReportBars({ title, rows, showValues, valueFormatter }: { title: string; rows: Array<[string, number]>; showValues: boolean; valueFormatter?: (value: number) => string }) {
+  const max = Math.max(0, ...rows.map((row) => Math.abs(row[1])));
+  return (
+    <section className="professional-chart-card">
+      <div className="section-title"><strong>{title}</strong><span>{rows.length} linha(s)</span></div>
+      <div className="professional-bar-list">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <span title={label}>{label}</span>
+            <div><i style={{ width: `${Math.max(value ? 3 : 0, max ? (Math.abs(value) / max) * 100 : 0)}%` }} /></div>
+            <strong>{showValues ? (valueFormatter ? valueFormatter(value) : formatCurrency(value)) : "Restrito"}</strong>
+          </div>
+        ))}
+        {!rows.length && <p className="empty-text">Sem dados.</p>}
+      </div>
+    </section>
+  );
+}
+
+function ReportTrendChart({ rows, showValues, expanded = false }: { rows: ReportDataset["daily"]; showValues: boolean; expanded?: boolean }) {
+  const visible = expanded ? rows.slice(-31) : rows.slice(-14);
+  const max = Math.max(0, ...visible.map((row) => row.total));
+  return (
+    <section className={`professional-chart-card trend ${expanded ? "expanded" : ""}`}>
+      <div className="section-title"><strong>Movimento por dia</strong><span>{visible.length} dia(s)</span></div>
+      <div className="professional-column-chart">
+        {visible.map((row) => (
+          <div key={row.dateKey} title={`${formatReportDate(row.dateKey)} | ${row.count} venda(s) | ${formatCurrency(row.total)}`}>
+            <strong>{showValues ? formatCompactMoney(row.total) : `${row.count}`}</strong>
+            <i style={{ height: `${Math.max(row.total ? 5 : 0, max ? (row.total / max) * 100 : 0)}%` }} />
+            <span>{row.dateKey.slice(8, 10)}</span>
+          </div>
+        ))}
+        {!visible.length && <p className="empty-text">Sem movimento no periodo.</p>}
+      </div>
+    </section>
+  );
+}
+
+function ProductReportTable({ products, showValues }: { products: ReportProductSummary[]; showValues: boolean }) {
+  return (
+    <section className="professional-report-section">
+      <div className="section-title"><strong>Todos os produtos do recorte</strong><span>{products.length} produto(s)</span></div>
+      <div className="product-report-table-wrap">
+        <table className="professional-data-table">
+          <thead><tr><th>Produto</th><th>Categoria</th><th>Quantidade</th><th>Lancamentos</th><th>Preco medio</th><th>Descontos</th><th>Faturamento</th></tr></thead>
+          <tbody>
+            {products.map((product) => (
+              <tr key={product.key}>
+                <td><strong>{product.name}</strong></td>
+                <td>{product.category}</td>
+                <td>{formatReportQuantity(product.quantity)}</td>
+                <td>{product.launches}</td>
+                <td>{showValues ? formatCurrency(product.averagePrice) : "Restrito"}</td>
+                <td>{showValues ? formatCurrency(product.discounts) : "Restrito"}</td>
+                <td><strong>{showValues ? formatCurrency(product.revenue) : "Restrito"}</strong></td>
+              </tr>
+            ))}
+            {!products.length && <tr><td colSpan={7}>Nenhum produto encontrado.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function previousReportPeriod(from: string, to: string): { from: string; to: string } {
+  const start = new Date(`${from || getLocalDateKey()}T12:00:00`);
+  const end = new Date(`${to || from || getLocalDateKey()}T12:00:00`);
+  const duration = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1);
+  const previousEnd = new Date(start.getFullYear(), start.getMonth(), start.getDate() - 1);
+  const previousStart = new Date(previousEnd.getFullYear(), previousEnd.getMonth(), previousEnd.getDate() - duration + 1);
+  return { from: getLocalDateKey(previousStart), to: getLocalDateKey(previousEnd) };
+}
+
+function comparisonLabel(current: number, previous: number, visible: boolean): string {
+  if (!visible) return "Comparacao restrita";
+  if (!previous) return current ? "Sem movimento no periodo anterior" : "Sem movimento";
+  const percent = Math.round(((current - previous) / Math.abs(previous)) * 100);
+  return `${percent >= 0 ? "+" : ""}${percent}% vs. periodo anterior`;
+}
+
+function formatReportQuantity(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toLocaleString("pt-BR", { maximumFractionDigits: 3 });
+}
+
+function formatCompactMoney(value: number): string {
+  if (Math.abs(value) >= 1000) return `R$ ${(value / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} mil`;
+  return formatCurrency(value);
+}
+
+function paymentUsageRows(dataset: ReportDataset): Array<[string, number]> {
+  const counts = new Map<string, number>();
+  dataset.activeRecords.forEach((record) => record.payments.forEach((payment) => counts.set(payment.method, (counts.get(payment.method) || 0) + 1)));
+  return [...counts.entries()].sort((left, right) => right[1] - left[1]);
 }
 
 function ReportsPanel({
@@ -4624,7 +5239,10 @@ function SettingsPanel({
           accentColor: defaults.accentColor,
           fieldSize: defaults.fieldSize,
           density: defaults.density,
-          layout: defaults.layout
+          layout: defaults.layout,
+          hideHeaderBrand: defaults.hideHeaderBrand,
+          rememberHistoryPeriod: defaults.rememberHistoryPeriod,
+          rememberReportPeriod: defaults.rememberReportPeriod
         };
       }
       if (target === "operation") {
@@ -4663,7 +5281,10 @@ function SettingsPanel({
           dateFormat: defaults.dateFormat,
           csvSeparator: defaults.csvSeparator,
           visibleColumns: defaults.visibleColumns,
-          backupEnabled: defaults.backupEnabled
+          backupEnabled: defaults.backupEnabled,
+          automaticSpreadsheetEnabled: defaults.automaticSpreadsheetEnabled,
+          automaticClosingReportEnabled: defaults.automaticClosingReportEnabled,
+          reportExportSections: defaults.reportExportSections
         };
       }
       if (target === "server") {
@@ -4877,6 +5498,18 @@ function SettingsPanel({
               <option value={5000}>Demorado (5 s)</option>
               <option value={8000}>Lento (8 s)</option>
             </select>
+          </label>
+          <label className="switch-line">
+            <input type="checkbox" checked={draft.hideHeaderBrand} onChange={(event) => update("hideHeaderBrand", event.target.checked)} />
+            Ocultar marca Caixa PDV no cabecalho
+          </label>
+          <label className="switch-line">
+            <input type="checkbox" checked={draft.rememberHistoryPeriod} onChange={(event) => update("rememberHistoryPeriod", event.target.checked)} />
+            Manter periodo escolhido no Historico
+          </label>
+          <label className="switch-line">
+            <input type="checkbox" checked={draft.rememberReportPeriod} onChange={(event) => update("rememberReportPeriod", event.target.checked)} />
+            Manter periodo escolhido nos Relatorios
           </label>
         </section>
 
@@ -5141,7 +5774,33 @@ function SettingsPanel({
               <option value="\t">Tab</option>
             </select>
           </label>
-          <label className="switch-line"><input type="checkbox" checked={draft.backupEnabled} onChange={(event) => update("backupEnabled", event.target.checked)} /> Criar backup automatico</label>
+          <div className="settings-subsection">
+            <h4>Automacao</h4>
+            <label className="switch-line"><input type="checkbox" checked={draft.automaticSpreadsheetEnabled} onChange={(event) => update("automaticSpreadsheetEnabled", event.target.checked)} /> Sincronizar planilha operacional a cada alteracao</label>
+            <label className="switch-line"><input type="checkbox" checked={draft.automaticClosingReportEnabled} onChange={(event) => update("automaticClosingReportEnabled", event.target.checked)} /> Gerar fechamento analitico ao encerrar o aplicativo</label>
+            <label className="switch-line"><input type="checkbox" checked={draft.backupEnabled} onChange={(event) => update("backupEnabled", event.target.checked)} /> Criar um backup diario ao fechar o aplicativo</label>
+            <p className="settings-note">Relatorios da aba Relatorios sao gerados manualmente. O fechamento automatico, quando ativado, cria apenas um arquivo consolidado no encerramento.</p>
+          </div>
+          <div className="settings-subsection">
+            <h4>Abas dos relatorios Excel</h4>
+            {([
+              ["products", "Produtos"],
+              ["categories", "Categorias"],
+              ["tables", "Mesas"],
+              ["times", "Horarios"]
+            ] as const).map(([section, label]) => (
+              <label className="switch-line" key={section}>
+                <input
+                  type="checkbox"
+                  checked={draft.reportExportSections.includes(section)}
+                  onChange={() => update("reportExportSections", draft.reportExportSections.includes(section)
+                    ? draft.reportExportSections.filter((item) => item !== section)
+                    : [...draft.reportExportSections, section])}
+                />
+                Incluir aba {label}
+              </label>
+            ))}
+          </div>
         </section>
 
         <section className={categoryClass("pdv", "settings-group wide pdv-settings-panel")}>

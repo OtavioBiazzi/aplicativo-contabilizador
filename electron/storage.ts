@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DEFAULT_QUICK_TABS, ENTRY_TYPES, SIMPLE_COLUMNS, createDefaultSettings } from "../src/shared/defaults.js";
-import { calculateCash, roundMoney } from "../src/shared/calculations.js";
+import { calculateCash, getLocalDateKey, roundMoney } from "../src/shared/calculations.js";
 import type { AppSettings, DataBackupInfo, EntryDraft, EntryType, LedgerEntry, QuickTabSettings } from "../src/shared/types.js";
 
 const SETTINGS_FILE = "settings.json";
@@ -198,21 +198,24 @@ export class LedgerStore {
   }
 
   async createDataBackup(reason = "manual", pdvDatabaseBase64 = ""): Promise<DataBackupInfo> {
-    const settings = await this.getSettings();
-    const entries = await this.getEntries();
     const createdAt = new Date().toISOString();
     const directory = this.backupDirectory();
     await fs.mkdir(directory, { recursive: true });
     const filePath = path.join(directory, `contabilizador-backup-${createdAt.replace(/[:.]/g, "-")}.json`);
-    await writeJsonAtomic(filePath, {
-      app: "Contabilizador Caixa",
-      createdAt,
-      reason,
-      entryCount: entries.length,
-      settings,
-      entries,
-      pdvDatabaseBase64: pdvDatabaseBase64 || undefined
-    });
+    await this.writeDataBackup(filePath, createdAt, reason, pdvDatabaseBase64);
+    const info = await backupInfoFromFile(filePath);
+    if (!info) {
+      throw new Error("Nao foi possivel criar o backup.");
+    }
+    return info;
+  }
+
+  async createDailyDataBackup(reason = "fechamento-do-dia", pdvDatabaseBase64 = ""): Promise<DataBackupInfo> {
+    const createdAt = new Date().toISOString();
+    const directory = this.backupDirectory();
+    await fs.mkdir(directory, { recursive: true });
+    const filePath = path.join(directory, `contabilizador-backup-diario-${getLocalDateKey()}.json`);
+    await this.writeDataBackup(filePath, createdAt, reason, pdvDatabaseBase64);
     const info = await backupInfoFromFile(filePath);
     if (!info) {
       throw new Error("Nao foi possivel criar o backup.");
@@ -246,6 +249,20 @@ export class LedgerStore {
 
   private async persistEntries() {
     await writeJsonAtomic(this.ledgerPath(), this.entries || []);
+  }
+
+  private async writeDataBackup(filePath: string, createdAt: string, reason: string, pdvDatabaseBase64: string) {
+    const settings = await this.getSettings();
+    const entries = await this.getEntries();
+    await writeJsonAtomic(filePath, {
+      app: "Contabilizador Caixa",
+      createdAt,
+      reason,
+      entryCount: entries.length,
+      settings,
+      entries,
+      pdvDatabaseBase64: pdvDatabaseBase64 || undefined
+    });
   }
 
   private backupDirectory() {

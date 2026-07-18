@@ -1,6 +1,6 @@
 {
   "name": "aplicativo-contabilizador",
-  "version": "0.3.29",
+  "version": "0.3.30",
   "description": "Aplicativo desktop para registrar vendas, mesas, onibus, pagamentos, divisoes e relatorios locais.",
   "author": "OtavioBiazzi",
   "license": "MIT",
@@ -47,7 +47,7 @@
   },
   "build": {
     "appId": "com.otaviobiazzi.contabilizador",
-    "productName": "Contabilizador Caixa",
+    "productName": "Caixa PDV",
     "directories": {
       "output": "release"
     },
@@ -71,7 +71,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Contabilizador Caixa"
+      "shortcutName": "Caixa PDV"
     }
   }
 }
