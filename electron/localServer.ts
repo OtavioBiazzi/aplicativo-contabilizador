@@ -49,6 +49,7 @@ interface LocalServerOptions {
   onRemoteChange: () => void;
   onRemoteSettingsChange: () => void;
   onRemotePdvChange: () => void;
+  onServerStateChange: () => void;
   onRemotePrintResult?: (result: { jobId: string; ok: boolean; message: string; deviceName: string }) => void;
 }
 
@@ -515,6 +516,7 @@ export class LocalServer {
       receivable?: PdvReceivable;
       customerName?: string;
       customerDocument?: string;
+      receiptSettings?: PdvSettings;
     }
   ): { ok: boolean; message: string } {
     const client = this.clients.get(deviceId);
@@ -582,6 +584,7 @@ export class LocalServer {
       socket
     };
     this.clients.set(id, device);
+    this.options.onServerStateChange();
     socket.on("message", (raw) => {
       device.lastSeen = new Date().toISOString();
       try {
@@ -606,6 +609,7 @@ export class LocalServer {
     });
     socket.on("close", () => {
       this.clients.delete(id);
+      this.options.onServerStateChange();
     });
     socket.send(JSON.stringify({ type: "connected", id, state: this.getState() }));
   }

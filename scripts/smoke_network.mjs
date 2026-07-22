@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
+import { WebSocket } from "ws";
 import { PdvStore } from "../dist-electron/electron/pdvStore.js";
 import { LocalServer } from "../dist-electron/electron/localServer.js";
 import { pdvSalesToLedgerEntries } from "../dist-electron/src/shared/pdvLedger.js";
@@ -28,6 +29,8 @@ settings.server.permissions = {
   allowClientCustomization: false
 };
 let remotePrintRequests = 0;
+let serverStateChanges = 0;
+let resolveNextServerStateChange = null;
 
 const integratedEntries = async () => pdvSalesToLedgerEntries((await pdvStore.getSnapshot()).recentSales);
 const server = new LocalServer({
@@ -69,10 +72,26 @@ const server = new LocalServer({
   importPdvPreset: async () => ({ filePath: "smoke.xlsx", importedProducts: 0, importedCategories: 0, skippedRows: 0 }),
   onRemoteChange: () => undefined,
   onRemoteSettingsChange: () => undefined,
-  onRemotePdvChange: () => undefined
+  onRemotePdvChange: () => undefined,
+  onServerStateChange: () => {
+    serverStateChanges += 1;
+    resolveNextServerStateChange?.();
+    resolveNextServerStateChange = null;
+  }
 });
 
 await server.start(43991, "smoke-password");
+const printClientSocket = new WebSocket("ws://127.0.0.1:43991/sync?password=smoke-password&device=Impressora%20smoke");
+const printClientConnected = new Promise((resolve) => printClientSocket.once("message", resolve));
+await new Promise((resolve, reject) => {
+  printClientSocket.once("open", resolve);
+  printClientSocket.once("error", reject);
+});
+await printClientConnected;
+const printClient = server.getState().devices.find((device) => device.name === "Impressora smoke");
+if (!printClient || serverStateChanges < 1) {
+  throw new Error("Servidor nao identificou o cliente imediatamente ao conectar.");
+}
 const headers = { "content-type": "application/json", "x-caixa-password": "smoke-password", "x-device-name": "Cliente smoke" };
 const readEntries = () => fetch("http://127.0.0.1:43991/api/entries", { headers });
 const initial = await (await readEntries()).json();
@@ -156,6 +175,17 @@ const printOnServer = await fetch("http://127.0.0.1:43991/api/pdv/print-receipt"
 });
 if (!printOnServer.ok || remotePrintRequests !== 1) {
   throw new Error(`Cliente nao conseguiu solicitar impressao no servidor: ${await printOnServer.text()}`);
+}
+const serverReceiptSettings = (await pdvStore.getSnapshot()).settings;
+const remoteReceiptJob = new Promise((resolve) => printClientSocket.once("message", (raw) => resolve(JSON.parse(String(raw)))));
+const remotePrintResult = server.requestReceiptPrint(printClient.id, {
+  jobId: crypto.randomUUID(),
+  sale: directSale,
+  receiptSettings: serverReceiptSettings
+});
+const remotePrintPayload = await remoteReceiptJob;
+if (!remotePrintResult.ok || remotePrintPayload.type !== "receipt-print-request" || remotePrintPayload.receiptSettings?.receiptFooter !== serverReceiptSettings.receiptFooter) {
+  throw new Error("Impressao no cliente nao recebeu as configuracoes de identidade do servidor.");
 }
 
 const customerResponse = await fetch("http://127.0.0.1:43991/api/pdv/customers", {
@@ -259,6 +289,13 @@ if (legacyPolicy.clientPolicy.operationMode !== "legacy") {
   throw new Error("Cliente nao recebeu a troca remota para o modo Classico.");
 }
 
+const printClientClosed = new Promise((resolve) => printClientSocket.once("close", resolve));
+const serverSawPrintClientClose = new Promise((resolve) => { resolveNextServerStateChange = resolve; });
+printClientSocket.close();
+await Promise.all([printClientClosed, serverSawPrintClientClose]);
+if (server.getState().devices.some((device) => device.id === printClient.id) || serverStateChanges < 2) {
+  throw new Error("Servidor nao atualizou a lista depois que o cliente desconectou.");
+}
 await server.stop();
 if (!existsSync(path.join(dataDir, "pdv.sqlite"))) throw new Error("SQLite nao foi preservado.");
 rmSync(tmp, { recursive: true, force: true });

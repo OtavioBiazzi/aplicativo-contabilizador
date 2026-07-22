@@ -671,6 +671,9 @@ async function bootstrap() {
       sendToAll("pdv:changed");
       sendToAll("server:changed", localServer.getState());
     },
+    onServerStateChange: () => {
+      sendToAll("server:changed", localServer.getState());
+    },
     onRemotePrintResult: (result) => {
       sendToAll("receipt-print:result", result);
     }
@@ -1516,10 +1519,14 @@ function registerIpc() {
       customerName?: string;
       customerDocument?: string;
     }
-  ) => localServer.requestReceiptPrint(deviceId, {
-    jobId: randomUUID(),
-    ...payload
-  }));
+  ) => {
+    const snapshot = await pdvStore.getSnapshot();
+    return localServer.requestReceiptPrint(deviceId, {
+      jobId: randomUUID(),
+      ...payload,
+      receiptSettings: snapshot.settings
+    });
+  });
 
   ipcMain.handle("window:setPinned", async (_event, enabled: boolean, options?: { opacity?: number; borderless?: boolean; lockPosition?: boolean }) => {
     if (enabled) {

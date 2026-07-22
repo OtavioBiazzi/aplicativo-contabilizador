@@ -118,7 +118,9 @@ export function buildPdvReceiptHtml(
   customerDocumentOverride?: string
 ): string {
   const paper = receiptPaper(settings);
-  const width = settings.receiptPaperWidth === "a4" ? "190mm" : `${Math.max(36, paper.widthMm - 3)}mm`;
+  const horizontalMarginMm = settings.receiptPaperWidth === "a4" ? 10 : paper.widthMm >= 80 ? 4 : 2;
+  const width = `${Math.max(36, paper.widthMm - horizontalMarginMm * 2)}mm`;
+  const bodyPadding = settings.receiptPaperWidth === "a4" ? "8mm 0 12mm" : "4mm 0 5mm";
   const pageSize = `${paper.widthMm}mm ${paper.heightMm}mm`;
   const accentColor = settings.receiptUseColor ? "#0f5f96" : "#111";
   const paidTotal = sale.payments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -158,7 +160,8 @@ export function buildPdvReceiptHtml(
   <html><head><meta charset="utf-8"><style>
     @page { margin: 0; size: ${pageSize}; }
     * { box-sizing: border-box; }
-    body { width: ${width}; margin: 0 auto; padding: 3mm 2.4mm 5mm; color: #080808; font: 11.5px/1.25 Arial, sans-serif; }
+    html, body { overflow-x: hidden; }
+    body { width: ${width}; margin: 0 auto; padding: ${bodyPadding}; color: #080808; font: 11.5px/1.25 Arial, sans-serif; }
     h1, p { margin: 0; text-align: center; }
     h1 { font-size: 15px; line-height: 1.05; text-transform: uppercase; }
     h2 { margin: 5px 0 2px; font-size: 11px; text-transform: uppercase; }
@@ -172,7 +175,8 @@ export function buildPdvReceiptHtml(
     .divider { border-top: 1px solid #111; margin: 5px 0; }
     .dashed { border-top-style: dashed; }
     .row, .subrow { display: flex; justify-content: space-between; gap: 8px; }
-    .row span, .subrow span { min-width: 0; overflow-wrap: anywhere; }
+    .row span, .subrow span { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+    .row b, .subrow b { flex: 0 0 auto; white-space: nowrap; }
     .subrow { padding-left: 8px; font-size: 10px; color: #222; }
     .status { margin: 4px 0; padding: 3px; border: 1.5px solid ${accentColor}; color: ${accentColor}; text-align: center; font-size: 12px; font-weight: 900; letter-spacing: .4px; }
     .columns { display: grid; grid-template-columns: 10mm minmax(0, 1fr) 18mm; gap: 3px; font-weight: 800; border-bottom: 1px solid #111; padding: 3px 4px; }
@@ -227,7 +231,8 @@ function money(value: number): string {
 }
 
 function formatQuantity(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(value).replace(".", ",");
+  const rounded = Math.round((Number(value) + Number.EPSILON) * 1000) / 1000;
+  return rounded.toLocaleString("pt-BR", { maximumFractionDigits: 3, useGrouping: false });
 }
 
 function escapeHtml(value: unknown): string {

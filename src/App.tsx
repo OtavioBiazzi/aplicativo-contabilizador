@@ -201,6 +201,7 @@ interface RemoteSocketMessage {
   receivable?: PdvReceivable;
   customerName?: string;
   customerDocument?: string;
+  receiptSettings?: PdvSettings;
 }
 
 function formatCpfCnpj(value: string): string {
@@ -1565,7 +1566,8 @@ export function App() {
                 customerName: job.customerName,
                 customerDocument: job.customerDocument,
                 action: "print",
-                printerName: printer.name
+                printerName: printer.name,
+                receiptSettings: job.receiptSettings
               });
               ok = result.ok;
               resultMessage = result.message;
@@ -3124,7 +3126,7 @@ function CashBox({
         <div className="breakdown">
           {cash.breakdown.length ? (
             cash.breakdown.map((item) => (
-              <span key={item.label}>{item.quantity}x {item.label}</span>
+              <span key={item.label}>{formatReportQuantity(item.quantity)}x {item.label}</span>
             ))
           ) : (
             <span>Sem troco calculado.</span>
@@ -3599,7 +3601,7 @@ function HistorySaleDetailModal({ sale, onClose, onReceipt }: { sale: PdvSale; o
             {sale.items.map((item) => (
               <div key={item.id}>
                 <span>
-                  {item.quantity}x {item.productName}{item.complements?.length ? ` + ${item.complements.map((part) => part.name).join(" + ")}` : ""}
+                  {formatReportQuantity(item.quantity)}x {item.productName}{item.complements?.length ? ` + ${item.complements.map((part) => part.name).join(" + ")}` : ""}
                   {(item.discount > 0 || (item.baseUnitPrice && Math.abs(item.baseUnitPrice - item.unitPrice) > 0.009)) && (
                     <small>Original {formatCurrency((item.baseUnitPrice || item.unitPrice) * item.quantity)} | Desconto {formatCurrency(Math.max(0, (item.baseUnitPrice || item.unitPrice) * item.quantity - item.total))}</small>
                   )}

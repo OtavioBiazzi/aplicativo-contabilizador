@@ -190,7 +190,7 @@ await store.saveTableItems(5, [{
   total: 2
 }]);
 const exactMeasuredTable = (await store.getSnapshot()).tables.find((table) => table.number === 5);
-if (exactMeasuredTable?.total !== 2 || exactMeasuredTable.items[0]?.total !== 2) {
+if (exactMeasuredTable?.total !== 2 || exactMeasuredTable.items[0]?.total !== 2 || exactMeasuredTable.items[0]?.quantity !== 0.051) {
   throw new Error("Mesa recalculou o valor final de produto por peso.");
 }
 const exactMeasuredTableSale = await store.closeTable(5, [{ id: crypto.randomUUID(), method: "Pix", amount: 2 }]);

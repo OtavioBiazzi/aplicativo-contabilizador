@@ -2069,9 +2069,11 @@ function addColumnIfMissing(db: Database, table: string, column: string, definit
 
 function normalizeCartItem(row: PdvCartItem & { complementsJson?: string }): PdvCartItem {
   const { complementsJson, ...item } = row;
+  const quantity = roundQuantity(Number(item.quantity) || 0);
   return {
     ...item,
-    paidQuantity: Math.min(Number(item.quantity) || 0, Math.max(0, Number(item.paidQuantity) || 0)),
+    quantity,
+    paidQuantity: Math.min(quantity, roundQuantity(Math.max(0, Number(item.paidQuantity) || 0))),
     complements: parseComplements(complementsJson)
   };
 }
@@ -2157,13 +2159,13 @@ function tableItemsPersistenceKey(items: PdvCartItem[]): string {
     productId: item.productId,
     productName: item.productName,
     categoryName: item.categoryName,
-    quantity: Number(item.quantity),
+    quantity: roundQuantity(Number(item.quantity)),
     measureLabel: item.measureLabel || "",
     unitPrice: Number(item.unitPrice),
     baseUnitPrice: Number(item.baseUnitPrice ?? item.unitPrice),
     discount: Number(item.discount),
     total: Number(item.total),
-    paidQuantity: Math.min(Number(item.quantity) || 0, Math.max(0, Number(item.paidQuantity) || 0)),
+    paidQuantity: Math.min(roundQuantity(Number(item.quantity) || 0), roundQuantity(Math.max(0, Number(item.paidQuantity) || 0))),
     subtableName: item.subtableName || "",
     note: item.note || "",
     complements: item.complements || []
@@ -2183,6 +2185,6 @@ function roundMoney(value: number): number {
 }
 
 function roundQuantity(value: number): number {
-  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+  return Math.round((value + Number.EPSILON) * 1_000) / 1_000;
 }
 

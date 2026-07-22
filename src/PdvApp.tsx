@@ -113,7 +113,11 @@ function roundMoney(value: number): number {
 }
 
 function roundQuantity(value: number): number {
-  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+  return Math.round((value + Number.EPSILON) * 1_000) / 1_000;
+}
+
+function formatQuantity(value: number): string {
+  return roundQuantity(Number(value) || 0).toLocaleString("pt-BR", { maximumFractionDigits: 3, useGrouping: false });
 }
 
 function formatCpfCnpj(value: string): string {
@@ -167,7 +171,7 @@ function writePendingRemoteTables(baseUrl: string, tables: PendingRemoteTable[])
 }
 
 function createCartItem(product: PdvProduct, quantity: number, complements: PdvCartItem["complements"] = [], customUnitPrice?: number, subtableName = "", measureLabel = "", customTotal?: number): PdvCartItem {
-  const safeQuantity = Math.max(0.01, quantity || 1);
+  const safeQuantity = Math.max(0.001, roundQuantity(quantity || 1));
   const complementTotal = roundMoney((complements || []).reduce((total, item) => total + item.price, 0));
   const unitPrice = roundMoney((customUnitPrice ?? product.price) + complementTotal);
   return {
@@ -1953,7 +1957,7 @@ function PdvSaleScreen(props: {
             >
               <div>
                 <strong>{index + 1}. {item.productName}</strong>
-                <span>{item.measureLabel || item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}{item.note ? ` | ${item.note}` : ""}{unpaidQuantity(item) <= 0.009 ? " | Pago" : item.paidQuantity ? ` | Restam ${unpaidQuantity(item)}` : ""}</span>
+                <span>{item.measureLabel || formatQuantity(item.quantity)} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}{item.note ? ` | ${item.note}` : ""}{unpaidQuantity(item) <= 0.009 ? " | Pago" : item.paidQuantity ? ` | Restam ${formatQuantity(unpaidQuantity(item))}` : ""}</span>
                 {adjustedItemOriginalTotal(item) !== null && (
                   <small className="pdv-cart-price-adjustment">
                     Original <s>{money(adjustedItemOriginalTotal(item)!)}</s> | Final {money(item.total)}
@@ -3353,12 +3357,12 @@ function ItemEditModal({
       const typedQuantity = Math.max(0.01, parseBrazilianNumber(quantityText));
       if (isMeasured) {
         onConfirm({
-          quantity: measuredInKg ? typedQuantity / 1000 : typedQuantity,
+          quantity: roundQuantity(measuredInKg ? typedQuantity / 1000 : typedQuantity),
           measureLabel: `${typedQuantity} g`,
           total: item.total
         });
       } else {
-        onConfirm({ quantity: typedQuantity });
+        onConfirm({ quantity: roundQuantity(typedQuantity) });
       }
       return;
     }
@@ -3429,7 +3433,7 @@ function ItemEditModal({
           )}
         </div>
         <div className="pdv-payment-summary">
-          <Metric title={isMeasured ? "Peso" : "Quantidade"} value={isMeasured ? item.measureLabel || String(item.quantity).replace(".", ",") : String(item.quantity).replace(".", ",")} />
+          <Metric title={isMeasured ? "Peso" : "Quantidade"} value={isMeasured ? item.measureLabel || formatQuantity(item.quantity) : formatQuantity(item.quantity)} />
           <Metric title={isMeasured ? "Preco por kg/g" : "Unitario"} value={money(item.unitPrice)} />
           <Metric title="Total final" value={money(mode === "price" && isMeasured ? parseBrazilianNumber(priceText) : mode === "discount" ? previewTotal : item.total)} />
         </div>
@@ -3551,10 +3555,10 @@ function TransferListModal({
             <button className={selectedIds.includes(item.id) ? "selected" : ""} key={item.id} onClick={() => toggle(item.id)}>
               <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggle(item.id)} onClick={(event) => event.stopPropagation()} />
               <span>{index + 1}. {item.productName}</span>
-              <small>{item.measureLabel || item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}</small>
+              <small>{item.measureLabel || formatQuantity(item.quantity)} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}</small>
               <label className="pdv-transfer-qty" onClick={(event) => event.stopPropagation()}>
                 Qtde
-                <input value={quantities[item.id] ?? String(item.quantity).replace(".", ",")} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} />
+                <input value={quantities[item.id] ?? formatQuantity(item.quantity)} onChange={(event) => setQuantities((current) => ({ ...current, [item.id]: event.target.value }))} />
               </label>
               <strong>{money(roundMoney(isMeasuredCartItem(item)
                 ? item.total * (item.quantity > 0 ? transferQuantity(item, quantities[item.id]) / item.quantity : 1)
@@ -3594,7 +3598,7 @@ function PartialItemsModal({
   onConfirm: (items: PdvCartItem[]) => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultSelectedIds.filter((id) => cart.some((item) => item.id === id && unpaidQuantity(item) > 0.009)));
-  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, String(item.quantity).replace(".", ",")])));
+  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, formatQuantity(item.quantity)])));
 
   const updateSelected = (next: string[] | ((current: string[]) => string[])) => {
     setSelectedIds((current) => {
@@ -3706,7 +3710,7 @@ function PartialItemsModal({
                   onClick={(event) => event.stopPropagation()}
                 />
                 <span>{index + 1}. {item.productName}</span>
-                <small>{item.measureLabel || item.quantity} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}{isPaid ? " | Pago" : item.paidQuantity ? ` | Restam ${remainingQuantity}` : ""}</small>
+                <small>{item.measureLabel || formatQuantity(item.quantity)} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}{isPaid ? " | Pago" : item.paidQuantity ? ` | Restam ${formatQuantity(remainingQuantity)}` : ""}</small>
                 {isSelected && (
                   <label className="pdv-transfer-qty" onClick={(event) => event.stopPropagation()}>
                     Qtde
@@ -3760,12 +3764,12 @@ function TransferItemModal({
 }) {
   const [targetTableNumber, setTargetTableNumber] = useState(sourceTableNumber);
   const [targetSubtable, setTargetSubtable] = useState(item.subtableName || "");
-  const [quantityText, setQuantityText] = useState(String(item.quantity).replace(".", ","));
+  const [quantityText, setQuantityText] = useState(formatQuantity(item.quantity));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const targetTable = tables.find((table) => table.number === targetTableNumber);
   const existingSubtables = [...new Set([...(targetTable?.subtables || []), ...(targetTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
-  const quantity = Math.min(item.quantity, Math.max(0.01, parseBrazilianNumber(quantityText)));
+  const quantity = roundQuantity(Math.min(item.quantity, Math.max(0.001, parseBrazilianNumber(quantityText))));
 
   const confirm = async () => {
     if (busy) {
@@ -3867,14 +3871,15 @@ function QuantityPriceModal({
   const [notice, setNotice] = useState("");
   const rawQuantity = Math.max(0, parseBrazilianNumber(quantityText));
   const typedValue = roundMoney(Math.max(0, parseBrazilianNumber(valueText)));
+  const calculatedMeasuredQuantity = product.price > 0 ? typedValue / product.price : 1;
+  const shownGrams = isMeasured ? Math.max(1, Math.round(isKg ? calculatedMeasuredQuantity * 1000 : calculatedMeasuredQuantity)) : rawQuantity;
   const saleQuantity = isMeasured
-    ? (product.price > 0 ? typedValue / product.price : 1)
-    : rawQuantity;
+    ? roundQuantity(isKg ? shownGrams / 1000 : shownGrams)
+    : roundQuantity(rawQuantity);
   const finalPrice = isMeasured
     ? typedValue
     : roundMoney(typedValue * Math.max(0, saleQuantity));
   const unitPrice = isMeasured ? product.price : typedValue;
-  const shownGrams = isMeasured ? Math.max(1, Math.round(isKg ? saleQuantity * 1000 : saleQuantity)) : rawQuantity;
   const unitLabel = isMeasured ? "g" : product.unit || "UNID";
   const append = (value: string) => {
     if (isMeasured || activeField === "value") {
@@ -5787,7 +5792,7 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
                   <tr key={name}>
                     <td><strong>{name}</strong></td>
                     <td>{product.category || "Sem categoria"}</td>
-                    <td>{product.quantity}</td>
+                    <td>{formatQuantity(product.quantity)}</td>
                     <td>{money(product.quantity ? product.revenue / product.quantity : 0)}</td>
                     <td><strong>{money(product.revenue)}</strong></td>
                   </tr>
@@ -6098,7 +6103,7 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
                 </div>
               </div>
               <i />
-              <b>RECIBO NAO FISCAL</b>
+              <b>MODELO DO RECIBO</b>
               <div><span>1x Produto de exemplo</span><strong>R$ 10,00</strong></div>
               <i />
               <div className="total"><span>Total</span><strong>R$ 10,00</strong></div>
@@ -6215,7 +6220,7 @@ function SaleDetailModal({ sale, onClose, onCancel, canCancel = true }: { sale: 
               {sale.items.map((item) => (
                 <article key={item.id}>
                   <strong>{item.productName}</strong>
-                  <span>{item.quantity} x {money(item.unitPrice)} | {item.categoryName}{item.subtableName ? ` | ${item.subtableName}` : ""}</span>
+                  <span>{formatQuantity(item.quantity)} x {money(item.unitPrice)} | {item.categoryName}{item.subtableName ? ` | ${item.subtableName}` : ""}</span>
                   {adjustedItemOriginalTotal(item) !== null && (
                     <small className="pdv-detail-price-adjustment">
                       Original <s>{money(adjustedItemOriginalTotal(item)!)}</s> | Desconto {money(Math.max(0, adjustedItemOriginalTotal(item)! - item.total))} | Final {money(item.total)}
@@ -6339,7 +6344,7 @@ function mergeCartItem(items: PdvCartItem[], incoming: PdvCartItem, stackIdentic
     if (item.id !== existing.id) {
       return item;
     }
-    const quantity = roundMoney(item.quantity + incoming.quantity);
+    const quantity = roundQuantity(item.quantity + incoming.quantity);
     return {
       ...item,
       quantity,
@@ -6397,7 +6402,7 @@ function moveCartItemNear(items: PdvCartItem[], id: string, referenceIndex: numb
 
 function transferQuantity(item: PdvCartItem, rawValue?: string): number {
   const parsed = parseBrazilianNumber(rawValue || String(item.quantity));
-  return Math.min(item.quantity, Math.max(0.01, parsed || item.quantity));
+  return roundQuantity(Math.min(item.quantity, Math.max(0.001, parsed || item.quantity)));
 }
 function splitCartItemForTransfer(item: PdvCartItem, quantity: number, subtableName: string): PdvCartItem {
   const ratio = item.quantity > 0 ? quantity / item.quantity : 1;
@@ -6405,7 +6410,7 @@ function splitCartItemForTransfer(item: PdvCartItem, quantity: number, subtableN
   return {
     ...item,
     id: crypto.randomUUID(),
-    quantity,
+    quantity: roundQuantity(quantity),
     subtableName,
     discount,
     total: isMeasuredCartItem(item)
@@ -6431,7 +6436,7 @@ function subtractCartItemQuantity(items: PdvCartItem[], id: string, quantity: nu
     if (item.id !== id) {
       return [item];
     }
-    const nextQuantity = roundMoney(item.quantity - quantity);
+    const nextQuantity = roundQuantity(item.quantity - quantity);
     if (nextQuantity <= 0.0001) {
       return [];
     }
@@ -6453,7 +6458,7 @@ function updateCartItem(items: PdvCartItem[], id: string, patch: Partial<Pick<Pd
     if (item.id !== id) {
       return item;
     }
-    const quantity = patch.quantity ?? item.quantity;
+    const quantity = roundQuantity(patch.quantity ?? item.quantity);
     const discount = Math.max(0, patch.discount ?? item.discount);
     const unitPrice = patch.unitPrice ?? item.unitPrice;
     const measureLabel = patch.measureLabel ?? item.measureLabel;
