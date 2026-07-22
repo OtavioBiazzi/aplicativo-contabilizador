@@ -45,6 +45,7 @@ import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_
 import { PdvApp } from "./PdvApp";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
 import type { PdvCustomer, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
+import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
 import {
   buildReportDataset,
   createReportRecords,
@@ -1428,9 +1429,19 @@ export function App() {
   };
 
   const saveSettings = async (next: AppSettings) => {
+    const currentRemote = remoteSessionRef.current;
+    if (currentRemote?.permissions.allowClientCustomization && settings) {
+      const serverPatch = remoteServerSettingsPatch(settings, next);
+      if (Object.keys(serverPatch).length) {
+        await remoteRequest<{ settings: AppSettings }>(currentRemote, "/api/settings", {
+          method: "PATCH",
+          body: JSON.stringify(serverPatch)
+        });
+      }
+    }
     const saved = await window.caixa.saveSettings(next);
     setSettings(saved);
-    showToast("success", "Configuracoes salvas.");
+    showToast("success", currentRemote?.permissions.allowClientCustomization ? "Configuracoes salvas neste cliente e no servidor." : "Configuracoes salvas.");
   };
 
   const toggleHeaderPrivacy = async () => {
@@ -3614,6 +3625,29 @@ function HistorySaleDetailModal({ sale, onClose, onReceipt }: { sale: PdvSale; o
   );
 }
 
+function remoteServerSettingsPatch(previous: AppSettings, next: AppSettings): Partial<AppSettings> {
+  const patch: Partial<AppSettings> = {};
+  const editableFields: Array<keyof AppSettings> = [
+    "operationMode",
+    "defaultType",
+    "defaultPeople",
+    "defaultRoundingStep",
+    "defaultRoundingDirection",
+    "tableNumberEnabled",
+    "busNumberEnabled",
+    "quickTabs"
+  ];
+  for (const field of editableFields) {
+    if (JSON.stringify(previous[field]) !== JSON.stringify(next[field])) {
+      (patch as Record<string, unknown>)[field] = next[field];
+    }
+  }
+  if (JSON.stringify(previous.floating.visibleFields) !== JSON.stringify(next.floating.visibleFields)) {
+    patch.floating = { ...previous.floating, visibleFields: next.floating.visibleFields };
+  }
+  return patch;
+}
+
 function HistoryReceiptModal({
   sale,
   customers,
@@ -3641,7 +3675,12 @@ function HistoryReceiptModal({
   const [previewHtml, setPreviewHtml] = useState("");
   const [printers, setPrinters] = useState<Array<{ name: string; displayName: string; isDefault: boolean }>>([]);
   const [printerName, setPrinterName] = useState("");
-  const [printDestination, setPrintDestination] = useState("local");
+  const availablePrintTargets: ReceiptPrintTarget[] = [
+    { id: "local", label: "Este computador" },
+    ...(onPrintServer ? [{ id: "server", label: "Computador servidor" }] : []),
+    ...printDevices.map((device) => ({ id: device.id, label: device.name }))
+  ];
+  const [printDestination, setPrintDestination] = useState(() => readReceiptPrintDestination(availablePrintTargets));
   const selectedCustomer = customers.find((item) => item.id === customerId);
 
   useEffect(() => {
@@ -3764,7 +3803,7 @@ function HistoryReceiptModal({
             </label>
             <label className="field">
               <span>Imprimir em</span>
-              <select value={printDestination} onChange={(event) => setPrintDestination(event.target.value)}>
+              <select value={printDestination} onChange={(event) => { setPrintDestination(event.target.value); saveReceiptPrintDestination(event.target.value, availablePrintTargets); }}>
                 <option value="local">Este computador</option>
                 {onPrintServer && <option value="server">Computador servidor</option>}
                 {printDevices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
@@ -5516,7 +5555,8 @@ function SettingsPanel({
   const effectiveSettingsOperationMode = remoteSession?.clientPolicy.operationMode || draft.operationMode;
   const remoteLockedCategoryList: SettingsCategory[] = ["operation", "defaults", "profiles", "files", "pdv", "pdvTables", "pdvOperation", "printing", "server", "advanced"];
   const remoteLockedCategories = new Set<SettingsCategory>(remoteLockedCategoryList);
-  const remoteLockMessage = "So o computador servidor pode editar essa parte enquanto este app esta conectado como cliente. Desconecte do servidor para editar as configuracoes locais deste PC.";
+  const remoteServerEditableCategories = new Set<SettingsCategory>(["operation", "defaults", "pdvTables", "pdvOperation", "printing"]);
+  const remoteLockMessage = "Esta parte continua restrita ao computador servidor. Ative a permissao de personalizacao para os ajustes operacionais e de impressao.";
 
   useEffect(() => setDraft(settings), [settings]);
 
@@ -5537,7 +5577,9 @@ function SettingsPanel({
     setDraft((current) => ({ ...current, [key]: value }));
   };
 
-  const isRemoteLockedCategory = (target: SettingsCategory) => remoteClientActive && remoteLockedCategories.has(target);
+  const isRemoteLockedCategory = (target: SettingsCategory) => remoteClientActive
+    && remoteLockedCategories.has(target)
+    && !(remoteCustomizationAllowed && remoteServerEditableCategories.has(target));
 
   const notifyRemoteLock = () => {
     onToast("info", remoteLockMessage);
@@ -7048,7 +7090,7 @@ function permissionLabel(key: keyof ServerPermissions): string {
     viewEntryValues: "Ver valores das vendas",
     viewTotals: "Ver totais vendidos",
     printReceipts: "Imprimir recibos neste cliente",
-    allowClientCustomization: "Acesso local completo do cliente"
+    allowClientCustomization: "Cliente pode editar configuracoes do servidor"
   }[key];
 }
 

@@ -12,6 +12,7 @@ import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, su
 interface LocalServerOptions {
   permissions: ServerPermissions;
   getSettings: () => Promise<AppSettings>;
+  saveSettings: (settings: AppSettings) => Promise<AppSettings>;
   getEntries: () => Promise<LedgerEntry[]>;
   addEntry: (draft: EntryDraft) => Promise<LedgerEntry>;
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => Promise<LedgerEntry>;
@@ -46,6 +47,7 @@ interface LocalServerOptions {
   importPdvPreset: () => Promise<PdvProductImportResult>;
   removePdvPreset: () => Promise<number>;
   onRemoteChange: () => void;
+  onRemoteSettingsChange: () => void;
   onRemotePdvChange: () => void;
   onRemotePrintResult?: (result: { jobId: string; ok: boolean; message: string; deviceName: string }) => void;
 }
@@ -104,6 +106,18 @@ export class LocalServer {
     app.post("/api/login", (request, response) => {
       const ok = request.body?.password === this.password;
       response.status(ok ? 200 : 401).json({ ok });
+    });
+
+    app.patch("/api/settings", this.authorize("allowClientCustomization"), async (request, response) => {
+      try {
+        const current = await this.options.getSettings();
+        const settings = await this.options.saveSettings(applyRemoteSettingsPatch(current, request.body || {}));
+        this.broadcast({ type: "settings-changed" });
+        this.options.onRemoteSettingsChange();
+        response.json({ settings });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar as configuracoes do servidor." });
+      }
     });
 
     app.get("/api/entries", this.authorize("view"), async (request, response) => {
@@ -239,7 +253,7 @@ export class LocalServer {
       }
     });
 
-    app.patch("/api/pdv/settings", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
+    app.patch("/api/pdv/settings", this.authorize("allowClientCustomization"), async (request, response) => {
       try {
         const settings = await this.options.savePdvSettings(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -595,6 +609,32 @@ export class LocalServer {
     });
     socket.send(JSON.stringify({ type: "connected", id, state: this.getState() }));
   }
+}
+
+function applyRemoteSettingsPatch(current: AppSettings, patch: Record<string, unknown>): AppSettings {
+  const next = { ...current };
+  const editableFields: Array<keyof AppSettings> = [
+    "operationMode",
+    "defaultType",
+    "defaultPeople",
+    "defaultRoundingStep",
+    "defaultRoundingDirection",
+    "tableNumberEnabled",
+    "busNumberEnabled",
+    "quickTabs"
+  ];
+  for (const field of editableFields) {
+    if (Object.prototype.hasOwnProperty.call(patch, field)) {
+      (next as unknown as Record<string, unknown>)[field] = patch[field];
+    }
+  }
+  if (patch.floating && typeof patch.floating === "object") {
+    const floating = patch.floating as Partial<AppSettings["floating"]>;
+    if (Array.isArray(floating.visibleFields)) {
+      next.floating = { ...current.floating, visibleFields: floating.visibleFields.map(String) };
+    }
+  }
+  return next;
 }
 
 function getLocalIps(): string[] {

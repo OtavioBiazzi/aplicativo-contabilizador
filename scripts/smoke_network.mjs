@@ -33,6 +33,10 @@ const integratedEntries = async () => pdvSalesToLedgerEntries((await pdvStore.ge
 const server = new LocalServer({
   permissions: settings.server.permissions,
   getSettings: async () => settings,
+  saveSettings: async (next) => {
+    Object.assign(settings, next);
+    return settings;
+  },
   getEntries: integratedEntries,
   addEntry: async () => { throw new Error("Nao usado neste smoke."); },
   updateEntry: async () => { throw new Error("Nao usado neste smoke."); },
@@ -64,6 +68,7 @@ const server = new LocalServer({
   },
   importPdvPreset: async () => ({ filePath: "smoke.xlsx", importedProducts: 0, importedCategories: 0, skippedRows: 0 }),
   onRemoteChange: () => undefined,
+  onRemoteSettingsChange: () => undefined,
   onRemotePdvChange: () => undefined
 });
 
@@ -73,6 +78,32 @@ const readEntries = () => fetch("http://127.0.0.1:43991/api/entries", { headers 
 const initial = await (await readEntries()).json();
 if (initial.clientPolicy.operationMode !== "pdv") {
   throw new Error("Politica remota nao informou modo PDV.");
+}
+
+const blockedSettings = await fetch("http://127.0.0.1:43991/api/settings", {
+  method: "PATCH",
+  headers,
+  body: JSON.stringify({ defaultPeople: 4 })
+});
+if (blockedSettings.status !== 403) throw new Error("Cliente alterou configuracoes sem permissao.");
+
+settings.server.permissions.allowClientCustomization = true;
+server.setPermissions(settings.server.permissions);
+const allowedSettings = await fetch("http://127.0.0.1:43991/api/settings", {
+  method: "PATCH",
+  headers,
+  body: JSON.stringify({ defaultPeople: 4, outputDirectory: "nao-deve-alterar" })
+});
+if (!allowedSettings.ok || settings.defaultPeople !== 4 || settings.outputDirectory === "nao-deve-alterar") {
+  throw new Error(`Configuracoes remotas nao foram filtradas e salvas corretamente: ${await allowedSettings.text()}`);
+}
+const allowedPdvSettings = await fetch("http://127.0.0.1:43991/api/pdv/settings", {
+  method: "PATCH",
+  headers,
+  body: JSON.stringify({ receiptPaperWidth: "80", receiptFooter: "Smoke remoto" })
+});
+if (!allowedPdvSettings.ok || (await pdvStore.getSnapshot()).settings.receiptFooter !== "Smoke remoto") {
+  throw new Error(`Ajustes de impressao do cliente nao chegaram ao servidor: ${await allowedPdvSettings.text()}`);
 }
 
 const category = await pdvStore.saveCategory({ name: "Smoke rede", active: true, favorite: false, sortOrder: 1 });

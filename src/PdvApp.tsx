@@ -22,10 +22,11 @@ import {
 import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 import type { RoundDirection } from "./shared/types";
 import { calculateSplit } from "./shared/calculations";
+import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
 
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 export type PdvAdvancedSection = "tables" | "appearance" | "operation" | "printing" | "data";
-type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; roundingStep?: number; roundingDirection?: RoundDirection; allowPrint?: boolean; allowEdit?: boolean; snapshot?: PdvSnapshot | null };
+type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; roundingStep?: number; roundingDirection?: RoundDirection; allowPrint?: boolean; allowEdit?: boolean; snapshot?: PdvSnapshot | null; permissions?: { allowClientCustomization: boolean } };
 type PendingRemoteTable = { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; updatedAt: string };
 type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "productFontSize" | "categoryCardHeight" | "tableCardHeight">;
 type PdvOperationId = ReturnType<typeof crypto.randomUUID>;
@@ -327,6 +328,7 @@ export function PdvApp({
   const snapshotLoadQueued = useRef(false);
   const lastPersistedTableMeta = useRef<{ number: number; people: number; note: string } | null>(null);
   const isRemoteClient = Boolean(remoteSession);
+  const canConfigureServer = !isRemoteClient || Boolean(remoteSession?.permissions?.allowClientCustomization);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
   // O cliente usa o mesmo catalogo e as mesmas mesas do servidor em todas as abas do PDV.
   // A venda direta continua sendo finalizada localmente, mas nunca pode ficar sem produtos por ler um catalogo local vazio.
@@ -477,8 +479,10 @@ export function PdvApp({
   const removePdvProduct = (id: string) => isRemoteClient
     ? clientConfigurationBlocked() as ReturnType<typeof window.caixa.removePdvProduct>
     : window.caixa.removePdvProduct(id);
-  const savePdvSettings = (patch: Partial<PdvSettings>) => isRemoteClient
-    ? clientConfigurationBlocked() as Promise<PdvSettings>
+  const savePdvSettings = (patch: Partial<PdvSettings>) => isRemoteClient && remoteSession
+    ? canConfigureServer
+      ? remotePdvRequest<{ settings: PdvSettings }>(remoteSession, "/api/pdv/settings", { method: "PATCH", body: JSON.stringify(patch) }).then((result) => result.settings)
+      : clientConfigurationBlocked() as Promise<PdvSettings>
     : window.caixa.savePdvSettings(patch);
   const savePdvCustomer = (draft: PdvCustomerDraft) => remotePdvActive && remoteSession
     ? remotePdvRequest<{ customer: PdvCustomer }>(remoteSession, "/api/pdv/customers", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.customer)
@@ -1395,7 +1399,7 @@ export function PdvApp({
         {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} removePdvProduct={removePdvProduct} />}
         {tab === "history" && <HistoryScreen snapshot={snapshot} initialView={initialHistoryView} readOnly={isRemoteClient} onChanged={load} saveCustomer={savePdvCustomer} receiveReceivable={receivePdvReceivable} updateReceivable={updatePdvReceivable} cancelReceivable={cancelPdvReceivable} allowPrint={!isRemoteClient || (snapshot.settings.receiptAllowClientPrint !== false && remoteSession?.allowPrint !== false)} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} onNavigateMain={onNavigateMain} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
-        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={isRemoteClient} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} externalActionsRef={advancedSettingsActionsRef} onDirtyChange={onAdvancedSettingsDirtyChange} forcedSection={advancedSection} hideNavigation={hideAdvancedNavigation} />}
+        {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={!canConfigureServer} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} externalActionsRef={advancedSettingsActionsRef} onDirtyChange={onAdvancedSettingsDirtyChange} forcedSection={advancedSection} hideNavigation={hideAdvancedNavigation} />}
       </main>
 
       {toast && (
@@ -2356,7 +2360,11 @@ function PdvReceiptDraftModal({
   const [previewHtml, setPreviewHtml] = useState("");
   const [printers, setPrinters] = useState<Array<{ name: string; displayName: string; isDefault: boolean }>>([]);
   const [printerName, setPrinterName] = useState("");
-  const [printDestination, setPrintDestination] = useState("local");
+  const availablePrintTargets: ReceiptPrintTarget[] = [
+    { id: "local", label: "Este computador" },
+    ...printTargets
+  ];
+  const [printDestination, setPrintDestination] = useState(() => readReceiptPrintDestination(availablePrintTargets));
   const [busy, setBusy] = useState(false);
   const selectedCustomer = customers.find((item) => item.id === customerId);
 
@@ -2447,7 +2455,7 @@ function PdvReceiptDraftModal({
             }}><option value="">Consumidor nao identificado</option>{customers.filter((item) => item.active).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
             {!customerId && <label className="field"><span>Nome somente neste recibo</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Opcional" /></label>}
             {!customerId && <label className="field"><span>CPF/CNPJ somente neste recibo</span><input value={customerDocument} onChange={(event) => setCustomerDocument(formatCpfCnpj(event.target.value))} placeholder="Opcional" inputMode="numeric" /></label>}
-            <label className="field"><span>Imprimir em</span><select value={printDestination} onChange={(event) => setPrintDestination(event.target.value)}><option value="local">Este computador</option>{printTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></label>
+            <label className="field"><span>Imprimir em</span><select value={printDestination} onChange={(event) => { setPrintDestination(event.target.value); saveReceiptPrintDestination(event.target.value, availablePrintTargets); }}><option value="local">Este computador</option>{printTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></label>
             {printDestination === "local" && <label className="field"><span>Impressora deste computador</span><select value={printerName} onChange={(event) => setPrinterName(event.target.value)}><option value="">Escolha uma impressora</option>{printers.map((printer) => <option key={printer.name} value={printer.name}>{printer.displayName}{printer.isDefault ? " (Padrao)" : ""}</option>)}</select></label>}
             {!allowPrint && <p className="receipt-printer-warning">O servidor nao permitiu impressao neste cliente. O PDF continua disponivel.</p>}
             {printDestination === "local" && !printers.length && <p className="receipt-printer-warning">O Windows nao informou impressoras disponiveis. Atualize a lista em Ajuste &gt; Impressao.</p>}

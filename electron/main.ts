@@ -557,6 +557,7 @@ async function bootstrap() {
   localServer = new LocalServer({
     permissions: (await store.getSettings()).server.permissions,
     getSettings: () => store.getSettings(),
+    saveSettings: (settings) => store.saveSettings(settings),
     getEntries: () => getIntegratedLedgerEntries(),
     addEntry: async (draft: EntryDraft) => {
       const entry = await store.addEntry(draft);
@@ -662,6 +663,9 @@ async function bootstrap() {
     onRemoteChange: () => {
       sendToAll("entries:changed");
       sendToAll("server:changed", localServer.getState());
+    },
+    onRemoteSettingsChange: () => {
+      sendToAll("settings:changed");
     },
     onRemotePdvChange: () => {
       sendToAll("pdv:changed");

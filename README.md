@@ -212,7 +212,7 @@ Cada computador escolhe seu modo de trabalho localmente. Por exemplo, o servidor
 
 Mudancas de permissoes, campos da barra e modos permitidos sao enviadas em tempo real para os clientes conectados. Se o servidor ocultar Mesa, Onibus, pagamento, descricao ou totais vendidos, a tela principal, a barra fixada e os relatorios do cliente atualizam sem reiniciar.
 
-Se a permissao **Acesso local completo do cliente** estiver ativada, o cliente pode ajustar aparencia, vendas, perfis, barra fixada e barra rapida para caber melhor naquele PC. Mesmo assim, o servidor continua mandando nas regras que afetam a planilha: modos permitidos, campos aceitos, mesa/onibus, pagamento, descricao, arquivos, backup, servidor, avancado e permissoes sensiveis.
+Se a permissao **Cliente pode editar configuracoes do servidor** estiver ativada, o cliente pode alterar os ajustes operacionais da calculadora e do PDV, incluindo mesas, operacao e impressao; essas mudancas sao gravadas no computador servidor. Aparencia e preferencias puramente visuais continuam locais, enquanto arquivos, backup, conexao do servidor, avancado e permissoes sensiveis permanecem protegidos.
 
 Para PCs mais fracos, o cliente remoto trabalha em modo leve por padrao: baixa os lancamentos mais recentes para historico/operacao e recebe do servidor a contagem do dia e os totais permitidos. O computador servidor continua mantendo o historico completo e a planilha principal.
 

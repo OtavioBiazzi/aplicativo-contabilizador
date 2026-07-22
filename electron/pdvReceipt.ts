@@ -71,15 +71,17 @@ export async function printPdvReceiptDirect(
   });
   try {
     await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildPdvReceiptHtml(sale, settings, customer, receivable, customerName, customerDocumentOverride))}`);
+    let directHeightMm = paper.heightMm;
     if (settings.receiptPaperWidth !== "a4") {
       const contentHeight = await window.webContents.executeJavaScript(
         "document.fonts.ready.then(() => Math.ceil(Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, 240)))"
       ) as number;
-      const dynamicHeightMm = Math.max(60, Math.ceil((contentHeight / 96) * 25.4 + 4));
+      directHeightMm = Math.max(60, Math.ceil((contentHeight / 96) * 25.4 + 4));
+      window.setContentSize(paper.viewportWidth, Math.max(240, contentHeight + 8));
       await window.webContents.executeJavaScript(`
         (() => {
           const style = document.createElement("style");
-          style.textContent = "@page { margin: 0; size: ${paper.widthMm}mm ${dynamicHeightMm}mm; }";
+          style.textContent = "@page { margin: 0; size: ${paper.widthMm}mm ${directHeightMm}mm; }";
           document.head.appendChild(style);
         })()
       `);
@@ -89,6 +91,12 @@ export async function printPdvReceiptDirect(
         silent: true,
         deviceName: printerName,
         printBackground: true,
+        color: Boolean(settings.receiptUseColor),
+        landscape: false,
+        scaleFactor: 100,
+        pageSize: settings.receiptPaperWidth === "a4"
+          ? "A4"
+          : { width: Math.round(paper.widthMm * 1000), height: Math.round(directHeightMm * 1000) },
         copies: Math.max(1, Math.min(5, settings.receiptCopies || 1)),
         margins: { marginType: "none" }
       }, (success, reason) => resolve({
@@ -241,5 +249,5 @@ function receiptPaper(settings: PdvSettings): { widthMm: number; heightMm: numbe
   const heightMm = settings.receiptPaperWidth === "custom"
     ? Math.max(80, Math.min(1000, Number(settings.receiptCustomPaperHeightMm) || 200))
     : 200;
-  return { widthMm, heightMm, viewportWidth: Math.max(300, Math.round(widthMm * 5.25)) };
+  return { widthMm, heightMm, viewportWidth: Math.max(220, Math.round((widthMm / 25.4) * 96)) };
 }
