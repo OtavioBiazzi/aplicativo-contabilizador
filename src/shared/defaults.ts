@@ -175,6 +175,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
         delete: false,
         viewEntryValues: true,
         viewTotals: true,
+        printReceipts: true,
         allowClientCustomization: false
       }
     },

@@ -1,10 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings, EntryDraft, LedgerEntry, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProductDraft, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayment, PdvProductDraft, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 contextBridge.exposeInMainWorld("caixa", {
   getSnapshot: () => ipcRenderer.invoke("app:getSnapshot"),
-  getPdvSnapshot: () => ipcRenderer.invoke("pdv:getSnapshot"),
+  getPdvSnapshot: (salesLimit?: number) => ipcRenderer.invoke("pdv:getSnapshot", salesLimit),
   savePdvSettings: (patch: Partial<PdvSettings>) => ipcRenderer.invoke("pdv:saveSettings", patch),
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) =>
     ipcRenderer.invoke("pdv:updateProducts", ids, patch),
@@ -16,8 +16,8 @@ contextBridge.exposeInMainWorld("caixa", {
   removeCoseProducts: () => ipcRenderer.invoke("pdv:removeCoseProducts"),
   previewPdvProductsFile: () => ipcRenderer.invoke("pdv:previewProductsFile"),
   importPdvProductsFile: (filePath?: string) => ipcRenderer.invoke("pdv:importProductsFile", filePath),
-  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], saleType?: PdvSale["type"]) =>
-    ipcRenderer.invoke("pdv:saveDirectSale", { items, discount, payments, saleType }),
+  saveDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], saleType?: PdvSale["type"], operationId?: string) =>
+    ipcRenderer.invoke("pdv:saveDirectSale", { items, discount, payments, saleType, operationId }),
   openPdvTable: (tableNumber: number, people?: number, note?: string) => ipcRenderer.invoke("pdv:openTable", tableNumber, people, note),
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => ipcRenderer.invoke("pdv:setTableStatus", tableNumber, status),
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => ipcRenderer.invoke("pdv:saveTableItems", tableNumber, items, subtables),
@@ -29,6 +29,19 @@ contextBridge.exposeInMainWorld("caixa", {
     ipcRenderer.invoke("pdv:saveTablePartial", tableNumber, items, payments, discount, operationId, observations),
   cancelPdvSale: (id: string) => ipcRenderer.invoke("pdv:cancelSale", id),
   updatePdvSalePayments: (id: string, payments: PdvPayment[]) => ipcRenderer.invoke("pdv:updateSalePayments", id, payments),
+  savePdvCustomer: (draft: PdvCustomerDraft) => ipcRenderer.invoke("pdv:saveCustomer", draft),
+  receivePdvReceivable: (id: string, payment: PdvReceivablePayment, operationId?: string) => ipcRenderer.invoke("pdv:receiveReceivable", id, payment, operationId),
+  updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => ipcRenderer.invoke("pdv:updateReceivable", id, patch),
+  cancelPdvReceivable: (id: string) => ipcRenderer.invoke("pdv:cancelReceivable", id),
+  printPdvReceipt: (
+    sale: PdvSale,
+    customer?: PdvCustomer,
+    receivable?: PdvReceivable,
+    options?: { customerName?: string; customerDocument?: string; action?: "open" | "save" | "print"; printerName?: string; receiptSettings?: PdvSettings }
+  ) => ipcRenderer.invoke("pdv:printReceipt", sale, customer, receivable, options),
+  getPdvReceiptPreview: (sale: PdvSale, customer?: PdvCustomer, receivable?: PdvReceivable, customerName?: string, customerDocument?: string, receiptSettings?: PdvSettings) => ipcRenderer.invoke("pdv:receiptPreview", sale, customer, receivable, customerName, customerDocument, receiptSettings),
+  listPdvPrinters: () => ipcRenderer.invoke("pdv:listPrinters"),
+  choosePdvReceiptLogo: () => ipcRenderer.invoke("pdv:chooseReceiptLogo"),
   exportPdvSales: (filters?: PdvExportFilters) => ipcRenderer.invoke("pdv:exportSales", filters),
   addEntry: (draft: EntryDraft) => ipcRenderer.invoke("entries:add", draft),
   updateEntry: (id: string, patch: Partial<LedgerEntry>) => ipcRenderer.invoke("entries:update", id, patch),
@@ -56,6 +69,10 @@ contextBridge.exposeInMainWorld("caixa", {
   startServer: (port: number, password: string) => ipcRenderer.invoke("server:start", port, password),
   stopServer: () => ipcRenderer.invoke("server:stop"),
   disconnectDevice: (id: string) => ipcRenderer.invoke("server:disconnectDevice", id),
+  requestRemotePdvReceiptPrint: (
+    deviceId: string,
+    payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }
+  ) => ipcRenderer.invoke("server:printPdvReceipt", deviceId, payload),
   setPinned: (pinned: boolean, options?: { opacity?: number; borderless?: boolean; lockPosition?: boolean }) =>
     ipcRenderer.invoke("window:setPinned", pinned, options),
   getPinned: () => ipcRenderer.invoke("window:getPinned"),
@@ -68,6 +85,11 @@ contextBridge.exposeInMainWorld("caixa", {
     const handler = (_event: Electron.IpcRendererEvent, state: ServerState) => callback(state);
     ipcRenderer.on("server:changed", handler);
     return () => ipcRenderer.removeListener("server:changed", handler);
+  },
+  onRemoteReceiptPrintResult: (callback: (result: { jobId: string; ok: boolean; message: string; deviceName: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, result: { jobId: string; ok: boolean; message: string; deviceName: string }) => callback(result);
+    ipcRenderer.on("receipt-print:result", handler);
+    return () => ipcRenderer.removeListener("receipt-print:result", handler);
   },
   onPinnedChanged: (callback: (pinned: boolean) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, pinned: boolean) => callback(pinned);

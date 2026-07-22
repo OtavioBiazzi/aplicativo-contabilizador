@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
-import type { PdvExportFilters, PdvPaymentMethod, PdvSale } from "../src/shared/pdvTypes.js";
+import type { PdvCustomer, PdvExportFilters, PdvPaymentMethod, PdvReceivable, PdvSale } from "../src/shared/pdvTypes.js";
 import { buildReportDataset, createReportRecords } from "../src/shared/reporting.js";
 import type { ExportStatus, LedgerEntry, ReportExportSection } from "../src/shared/types.js";
 
@@ -12,6 +12,7 @@ interface Sheet {
 
 const MONEY_COLUMNS = new Set([
   "Valor",
+  "Valor original",
   "Subtotal",
   "Desconto venda",
   "Desconto itens",
@@ -22,6 +23,7 @@ const MONEY_COLUMNS = new Set([
   "Desconto item",
   "Total item",
   "Recebido",
+  "Saldo",
   "Troco",
   "Faturamento",
   "Preco medio",
@@ -37,7 +39,9 @@ export class PdvExporter {
     legacyEntries: LedgerEntry[] = [],
     fileLabel = "",
     reportSections: ReportExportSection[] = ["products", "categories", "tables", "times"],
-    replaceExisting = false
+    replaceExisting = false,
+    customers: PdvCustomer[] = [],
+    receivables: PdvReceivable[] = []
   ): Promise<ExportStatus> {
     try {
       await fs.mkdir(this.outputDirectory, { recursive: true });
@@ -45,7 +49,7 @@ export class PdvExporter {
       const filePath = path.join(this.outputDirectory, replaceExisting ? `${reportToken}.xlsx` : `${reportToken}-${timestampToken()}.xlsx`);
       const integratedSales = [...sales, ...legacyEntries.filter((entry) => matchesLegacyFilters(entry, filters)).map(legacyEntryToSale)]
         .filter((sale) => sale.status !== "Cancelada" && sale.status !== "deleted");
-      await writeXlsx(filePath, buildSheets(integratedSales, filters, reportSections));
+      await writeXlsx(filePath, buildSheets(integratedSales, filters, reportSections, customers, receivables));
       return {
         ok: true,
         filePath,
@@ -102,6 +106,7 @@ function normalizePaymentMethod(value: string): PdvPaymentMethod {
   if (normalized.includes("debito")) return "Debito";
   if (normalized.includes("credito")) return "Credito";
   if (normalized.includes("pix") || normalized.includes("instant")) return "Pix";
+  if (normalized.includes("receber") || normalized.includes("fiado")) return "Conta a receber";
   if (!normalized || normalized.includes("nao definido")) return "Nao definido";
   return "Outros";
 }
@@ -125,7 +130,7 @@ function matchesLegacyFilters(entry: LedgerEntry, filters: PdvExportFilters): bo
   return true;
 }
 
-function buildSheets(sales: PdvSale[], filters: PdvExportFilters, reportSections: ReportExportSection[]): Sheet[] {
+function buildSheets(sales: PdvSale[], filters: PdvExportFilters, reportSections: ReportExportSection[], customers: PdvCustomer[], receivables: PdvReceivable[]): Sheet[] {
   const dataset = buildReportDataset(createReportRecords([], sales));
   const summaryRows: Record<string, unknown>[] = [
     { Indicador: "Periodo inicial", Valor: filters.from || "Tudo" },
@@ -150,6 +155,53 @@ function buildSheets(sales: PdvSale[], filters: PdvExportFilters, reportSections
     { name: "Itens", rows: sales.flatMap(itemRows) },
     { name: "Pagamentos", rows: sales.flatMap(paymentRows) }
   ];
+  if (receivables.length) {
+    sheets.push({
+      name: "Contas a receber",
+      rows: receivables.map((item) => ({
+        "ID conta": item.id,
+        "ID venda": item.saleId,
+        Cliente: item.customerName,
+        Mesa: item.tableNumber || "",
+        Submesa: item.subtableName || "",
+        Data: splitDateTime(item.createdAt).date,
+        Vencimento: item.dueDate || "",
+        "Valor original": item.originalAmount,
+        Recebido: item.receivedAmount,
+        Saldo: item.balance,
+        Status: item.status,
+        Observacao: item.note
+      }))
+    });
+    sheets.push({
+      name: "Recebimentos",
+      rows: receivables.flatMap((item) => item.payments.map((payment) => ({
+        "ID conta": item.id,
+        "ID venda": item.saleId,
+        Cliente: item.customerName,
+        Data: splitDateTime(payment.createdAt).date,
+        Hora: splitDateTime(payment.createdAt).time,
+        Forma: payment.method,
+        Valor: payment.amount,
+        Descricao: payment.description || ""
+      })))
+    });
+  }
+  if (customers.length) {
+    sheets.push({
+      name: "Clientes",
+      rows: customers.map((customer) => ({
+        "ID cliente": customer.id,
+        Nome: customer.name,
+        "CPF CNPJ": customer.document,
+        Telefone: customer.phone,
+        Email: customer.email,
+        Endereco: customer.address,
+        Ativo: customer.active ? "Sim" : "Nao",
+        Observacao: customer.note
+      }))
+    });
+  }
   if (reportSections.includes("products")) {
     sheets.push({
       name: "Produtos",

@@ -7,6 +7,8 @@ import type {
   PdvCartItem,
   PdvCategory,
   PdvCategoryDraft,
+  PdvCustomer,
+  PdvCustomerDraft,
   PdvExportFilters,
   PdvOpenTable,
   PdvPayment,
@@ -14,6 +16,9 @@ import type {
   PdvProductDraft,
   PdvProductImportPreview,
   PdvProductImportResult,
+  PdvReceivable,
+  PdvReceivablePatch,
+  PdvReceivablePayment,
   PdvSettings,
   PdvSale,
   PdvSnapshot,
@@ -44,7 +49,24 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   individualUnitItems: false,
   groupComplementsWithProduct: true,
   roundingStep: 0.01,
-  roundingDirection: "nearest"
+  roundingDirection: "nearest",
+  receiptPaperWidth: "80",
+  receiptCustomPaperWidthMm: 80,
+  receiptCustomPaperHeightMm: 200,
+  receiptAutoPrint: false,
+  receiptPrinterName: "",
+  receiptCopies: 1,
+  receiptLogoDataUrl: "",
+  receiptShowLogo: true,
+  receiptBusinessName: "RECIBO",
+  receiptBusinessDocument: "",
+  receiptBusinessStateRegistration: "",
+  receiptBusinessAddress: "",
+  receiptBusinessPhone: "",
+  receiptFooter: "Obrigado pela preferencia.",
+  receiptAllowClientPrint: true,
+  receiptGroupIdenticalItems: true,
+  receiptUseColor: false
 };
 const PDV_BACKUP_DIRECTORY = "pdv-backups";
 
@@ -90,8 +112,8 @@ export class PdvStore {
         throw new Error("Banco PDV ainda nao existe.");
       }
       this.db = new this.sql.Database(await fs.readFile(this.dbFilePath));
-      if (this.databaseUserVersion() < 1) {
-        await this.backupSqliteDaily("antes-migracao-v1");
+      if (this.databaseUserVersion() < 2) {
+        await this.backupSqliteDaily("antes-migracao-v2");
       }
     } catch (error) {
       if (existingDatabase) {
@@ -115,7 +137,7 @@ export class PdvStore {
       }
       throw error;
     }
-    this.requireDb().run("PRAGMA user_version = 1");
+    this.requireDb().run("PRAGMA user_version = 2");
     await this.persist();
   }
 
@@ -145,15 +167,245 @@ export class PdvStore {
     await this.backupSqliteDaily("pos-restauracao");
   }
 
-  async getSnapshot(): Promise<PdvSnapshot> {
+  async getSnapshot(salesLimit?: number): Promise<PdvSnapshot> {
     return {
       categories: this.getCategories(),
       products: this.getProducts(),
       tables: this.getTables(),
-      recentSales: this.getRecentSales(),
+      recentSales: this.getRecentSales(salesLimit),
+      customers: this.getCustomers(),
+      receivables: this.getReceivables(),
       settings: this.getSettings(),
       dataFile: this.dbFilePath
     };
+  }
+
+  getCustomers(): PdvCustomer[] {
+    return selectAll<PdvCustomer>(
+      this.requireDb(),
+      `SELECT id, name, document, phone, email, address, note, active, created_at AS createdAt
+       FROM customers ORDER BY active DESC, name COLLATE NOCASE`
+    ).map((customer) => ({ ...customer, active: Boolean(customer.active) }));
+  }
+
+  async saveCustomer(draft: PdvCustomerDraft): Promise<PdvCustomer> {
+    const name = String(draft.name || "").trim();
+    if (!name) throw new Error("Informe o nome do cliente.");
+    const id = draft.id || randomUUID();
+    const createdAt = draft.id
+      ? selectAll<{ createdAt: string }>(this.requireDb(), "SELECT created_at AS createdAt FROM customers WHERE id = ?", [id])[0]?.createdAt || new Date().toISOString()
+      : new Date().toISOString();
+    this.requireDb().run(
+      `INSERT INTO customers (id, name, document, phone, email, address, note, active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name=excluded.name, document=excluded.document, phone=excluded.phone,
+       email=excluded.email, address=excluded.address, note=excluded.note, active=excluded.active`,
+      [
+        id,
+        name,
+        String(draft.document || "").trim(),
+        String(draft.phone || "").trim(),
+        String(draft.email || "").trim(),
+        String(draft.address || "").trim(),
+        String(draft.note || "").trim(),
+        draft.active === false ? 0 : 1,
+        createdAt
+      ]
+    );
+    await this.persist();
+    return this.getCustomers().find((customer) => customer.id === id)!;
+  }
+
+  getReceivables(): PdvReceivable[] {
+    const today = new Date().toISOString().slice(0, 10);
+    return selectAll<{
+      id: string;
+      saleId: string;
+      customerId: string;
+      customerName: string;
+      tableNumber?: number;
+      subtableName?: string;
+      createdAt: string;
+      dueDate?: string;
+      originalAmount: number;
+      status: PdvReceivable["status"];
+      note: string;
+    }>(
+      this.requireDb(),
+      `SELECT r.id, r.sale_id AS saleId, r.customer_id AS customerId, c.name AS customerName,
+       s.table_number AS tableNumber, r.subtable_name AS subtableName, r.created_at AS createdAt,
+       r.due_date AS dueDate, r.original_amount AS originalAmount, r.status, r.note
+       FROM receivables r
+       JOIN customers c ON c.id = r.customer_id
+       JOIN sales s ON s.id = r.sale_id
+       ORDER BY r.created_at DESC`
+    ).map((row) => {
+      const payments = selectAll<PdvReceivablePayment>(
+        this.requireDb(),
+        `SELECT id, receivable_id AS receivableId, created_at AS createdAt, method, amount, received,
+         change, description, origin_device AS originDevice, operation_id AS operationId
+         FROM receivable_payments WHERE receivable_id = ? ORDER BY created_at, rowid`,
+        [row.id]
+      );
+      const receivedAmount = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
+      const balance = roundMoney(Math.max(0, row.originalAmount - receivedAmount));
+      const status = row.status === "Cancelada"
+        ? "Cancelada"
+        : balance <= 0.009
+          ? "Recebida"
+          : receivedAmount > 0
+            ? "Parcialmente recebida"
+            : row.dueDate && row.dueDate < today
+              ? "Vencida"
+              : "Em aberto";
+      return { ...row, status, payments, receivedAmount, balance };
+    });
+  }
+
+  async receiveReceivable(
+    receivableId: string,
+    payment: PdvReceivablePayment,
+    originDevice = "Este computador",
+    operationId?: string
+  ): Promise<PdvReceivable> {
+    const receivable = this.getReceivables().find((item) => item.id === receivableId);
+    if (!receivable || receivable.status === "Cancelada") throw new Error("Conta a receber nao encontrada ou cancelada.");
+    if (operationId) {
+      const existing = selectAll<{ id: string }>(this.requireDb(), "SELECT id FROM receivable_payments WHERE operation_id = ?", [operationId])[0];
+      if (existing) return this.getReceivables().find((item) => item.id === receivableId)!;
+    }
+    const amount = roundMoney(Number(payment.amount));
+    const received = payment.received === undefined ? undefined : roundMoney(Number(payment.received));
+    if (!Number.isFinite(amount) || amount <= 0 || amount - receivable.balance > 0.009) {
+      throw new Error(`O pagamento deve ser maior que zero e nao pode ultrapassar ${receivable.balance.toFixed(2)}.`);
+    }
+    if (payment.method === "Dinheiro" && received !== undefined && received + 0.009 < amount) {
+      throw new Error("O valor entregue em dinheiro nao cobre o pagamento.");
+    }
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run(
+        `INSERT INTO receivable_payments
+         (id, receivable_id, created_at, method, amount, received, change, description, origin_device, operation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          payment.id || randomUUID(),
+          receivableId,
+          new Date().toISOString(),
+          payment.method,
+          amount,
+          received ?? null,
+          payment.method === "Dinheiro" && received !== undefined ? roundMoney(Math.max(0, received - amount)) : 0,
+          String(payment.description || "").trim(),
+          originDevice,
+          operationId || payment.operationId || null
+        ]
+      );
+      const nextBalance = roundMoney(receivable.balance - amount);
+      db.run("UPDATE receivables SET status = ? WHERE id = ?", [nextBalance <= 0.009 ? "Recebida" : "Parcialmente recebida", receivableId]);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return this.getReceivables().find((item) => item.id === receivableId)!;
+  }
+
+  async cancelReceivable(id: string): Promise<void> {
+    const receivable = this.getReceivables().find((item) => item.id === id);
+    if (!receivable) throw new Error("Conta a receber nao encontrada.");
+    if (receivable.receivedAmount > 0.009) throw new Error("Uma conta com recebimentos nao pode ser cancelada sem estornar os pagamentos.");
+    this.requireDb().run("UPDATE receivables SET status = 'Cancelada' WHERE id = ?", [id]);
+    await this.persist();
+  }
+
+  async updateReceivable(id: string, patch: PdvReceivablePatch): Promise<PdvReceivable> {
+    const receivable = this.getReceivables().find((item) => item.id === id);
+    if (!receivable) throw new Error("Conta a receber nao encontrada.");
+    if (receivable.status === "Cancelada") throw new Error("Uma pendencia cancelada nao pode ser editada.");
+    const sale = this.getSaleById(receivable.saleId);
+    if (!sale) throw new Error("A venda vinculada a pendencia nao foi encontrada.");
+    const productModes = new Map(this.getProducts().map((product) => [product.id, product.unitMode]));
+    const nextItems = patch.items === undefined
+      ? sale.items
+      : patch.items.map((item) => normalizeEditedCartItem(item, productModes.get(item.productId)));
+    if (!nextItems.length) throw new Error("A pendencia precisa manter pelo menos um produto.");
+    validateCartItems(nextItems);
+    const nextPayments = patch.payments === undefined
+      ? receivable.payments
+      : patch.payments.map((payment) => normalizeEditedReceivablePayment(payment, id));
+    const receivedAmount = roundMoney(nextPayments.reduce((sum, payment) => sum + payment.amount, 0));
+    const otherSalePayments = sale.payments.filter((payment) => payment.method !== "Conta a receber");
+    const otherPaid = roundMoney(otherSalePayments.reduce((sum, payment) => sum + payment.amount, 0));
+    const saleTotal = roundMoney(nextItems.reduce((sum, item) => sum + item.total, 0));
+    const originalAmount = roundMoney(saleTotal - otherPaid);
+    if (originalAmount <= 0) throw new Error("O total dos produtos precisa ser maior que os outros pagamentos da venda.");
+    if (receivedAmount - originalAmount > 0.009) {
+      throw new Error(`O total da pendencia nao pode ficar abaixo dos ${receivedAmount.toFixed(2)} ja recebidos.`);
+    }
+    const saleSubtotal = roundMoney(nextItems.reduce((sum, item) => {
+      const originalUnitPrice = item.baseUnitPrice ?? item.unitPrice;
+      return sum + Math.max(item.total, item.quantity * originalUnitPrice);
+    }, 0));
+    const saleDiscount = roundMoney(saleSubtotal - saleTotal);
+    const nextBalance = roundMoney(originalAmount - receivedAmount);
+    const nextStatus: PdvReceivable["status"] = nextBalance <= 0.009
+      ? "Recebida"
+      : receivedAmount > 0.009
+        ? "Parcialmente recebida"
+        : "Em aberto";
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run(
+        "UPDATE receivables SET due_date = ?, note = ?, original_amount = ?, status = ? WHERE id = ?",
+        [
+          patch.dueDate === undefined ? receivable.dueDate || null : String(patch.dueDate || "").trim() || null,
+          patch.note === undefined ? receivable.note : String(patch.note || "").trim(),
+          originalAmount,
+          nextStatus,
+          id
+        ]
+      );
+      if (patch.items !== undefined) {
+        db.run("UPDATE sales SET subtotal = ?, discount = ?, total = ? WHERE id = ?", [saleSubtotal, saleDiscount, saleTotal, sale.id]);
+        db.run("DELETE FROM sale_items WHERE sale_id = ?", [sale.id]);
+        writeSaleItems(db, sale.id, nextItems);
+        const linkedPayment = selectAll<{ paymentId: string }>(db, "SELECT payment_id AS paymentId FROM receivables WHERE id = ?", [id])[0];
+        if (linkedPayment?.paymentId) {
+          db.run("UPDATE sale_payments SET amount = ?, received = ?, change = 0 WHERE id = ?", [originalAmount, originalAmount, linkedPayment.paymentId]);
+        }
+      }
+      if (patch.payments !== undefined) {
+        db.run("DELETE FROM receivable_payments WHERE receivable_id = ?", [id]);
+        const statement = db.prepare(
+          `INSERT INTO receivable_payments
+           (id, receivable_id, created_at, method, amount, received, change, description, origin_device, operation_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        nextPayments.forEach((payment) => statement.run([
+          payment.id,
+          id,
+          payment.createdAt,
+          payment.method,
+          payment.amount,
+          payment.received ?? null,
+          payment.change ?? 0,
+          payment.description?.trim() || "",
+          payment.originDevice || "Este computador",
+          payment.operationId || null
+        ]));
+        statement.free();
+      }
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return this.getReceivables().find((item) => item.id === id)!;
   }
 
   getSales(filters: PdvExportFilters = {}, limit?: number): PdvSale[] {
@@ -163,7 +415,7 @@ export class PdvStore {
       `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, table_session_id AS tableSessionId, COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations, origin_device AS originDevice, operation_id AS operationId
        FROM sales ORDER BY created_at DESC${limitSql}`
     );
-    return sales.map((sale) => this.hydrateSale(sale)).filter((sale) => matchesSaleFilters(sale, filters));
+    return this.hydrateSales(sales).filter((sale) => matchesSaleFilters(sale, filters));
   }
 
   async saveSettings(patch: Partial<PdvSettings>): Promise<PdvSettings> {
@@ -474,7 +726,7 @@ export class PdvStore {
   async saveSale(input: { type: PdvSale["type"]; tableNumber?: number; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string }): Promise<PdvSale> {
     validateCartItems(input.items);
     if (input.operationId) {
-      const existing = this.getSales({}).find((sale) => sale.operationId === input.operationId);
+      const existing = this.getSaleByOperationId(input.operationId);
       if (existing) {
         return existing;
       }
@@ -497,12 +749,21 @@ export class PdvStore {
     tableNumber = this.normalizeTableNumber(tableNumber);
     const safePeople = Number.isFinite(people) ? Math.max(1, Math.floor(people)) : 1;
     const db = this.requireDb();
+    const safeNote = String(note || "").trim();
+    const current = selectAll<{ status: PdvTableStatus; people: number; note: string }>(
+      db,
+      "SELECT status, people, note FROM table_sessions WHERE table_number = ? LIMIT 1",
+      [tableNumber]
+    )[0];
+    if (current?.status === "Ocupada" && Number(current.people) === safePeople && String(current.note || "") === safeNote) {
+      return;
+    }
     const id = randomUUID();
     db.run(
       `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
        VALUES (?, ?, 'Ocupada', ?, ?, ?)
        ON CONFLICT(table_number) DO UPDATE SET status='Ocupada', opened_at=COALESCE(opened_at, excluded.opened_at), people=excluded.people, note=excluded.note`,
-      [id, tableNumber, new Date().toISOString(), safePeople, String(note || "").trim()]
+      [id, tableNumber, new Date().toISOString(), safePeople, safeNote]
     );
     await this.persist();
   }
@@ -513,6 +774,14 @@ export class PdvStore {
       throw new Error("Status de mesa invalido.");
     }
     const db = this.requireDb();
+    const current = selectAll<{ status: PdvTableStatus }>(
+      db,
+      "SELECT status FROM table_sessions WHERE table_number = ? LIMIT 1",
+      [tableNumber]
+    )[0];
+    if (current?.status === status) {
+      return;
+    }
     db.run(
       `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note)
        VALUES (?, ?, ?, NULL, 1, '')
@@ -526,6 +795,20 @@ export class PdvStore {
     tableNumber = this.normalizeTableNumber(tableNumber);
     validateCartItems(items);
     const db = this.requireDb();
+    const currentSession = selectAll<{ status: PdvTableStatus; subtablesJson: string }>(
+      db,
+      "SELECT status, subtables_json AS subtablesJson FROM table_sessions WHERE table_number = ? LIMIT 1",
+      [tableNumber]
+    )[0];
+    const currentItems = this.getTableItems(tableNumber);
+    const nextSubtables = subtables === undefined ? parseSubtableNames(currentSession?.subtablesJson) : normalizeSubtableNames(subtables);
+    if (
+      (items.length > 0 || !currentSession || currentSession.status === "Reservada") &&
+      tableItemsPersistenceKey(currentItems) === tableItemsPersistenceKey(items) &&
+      JSON.stringify(parseSubtableNames(currentSession?.subtablesJson)) === JSON.stringify(nextSubtables)
+    ) {
+      return;
+    }
     if (!items.length && !subtables?.length) {
       db.run("BEGIN IMMEDIATE");
       try {
@@ -677,12 +960,12 @@ export class PdvStore {
   async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     if (operationId) {
-      const existing = this.getSales({}).find((sale) => sale.operationId === operationId);
+      const existing = this.getSaleByOperationId(operationId);
       if (existing) {
         return existing;
       }
       const mapped = selectAll<{ saleId: string }>(this.requireDb(), "SELECT sale_id AS saleId FROM partial_operations WHERE operation_id = ?", [operationId])[0];
-      if (mapped) return this.getSales({}).find((sale) => sale.id === mapped.saleId) || this.getSales({})[0];
+      if (mapped) return this.getSaleById(mapped.saleId) || this.getSales({}, 1)[0];
     }
     const table = this.getTables().find((item) => item.number === tableNumber);
     const pendingItems = table?.items.flatMap((item) => {
@@ -698,7 +981,7 @@ export class PdvStore {
     const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, items: pendingItems, discount, payments, originDevice, operationId });
     db.run("BEGIN IMMEDIATE");
     try {
-      const existingPartial = table.sessionId ? this.getSales({}).find((item) => item.tableSessionId === table.sessionId && item.status === "Parcial") : undefined;
+      const existingPartial = table.sessionId ? this.getSaleByTableSession(table.sessionId, "Parcial") : undefined;
       if (existingPartial) {
         appendSaleSegment(db, existingPartial, sale, "Finalizada");
         if (operationId) db.run("INSERT OR IGNORE INTO partial_operations (operation_id, sale_id) VALUES (?, ?)", [operationId, existingPartial.id]);
@@ -713,7 +996,7 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
-    return table.sessionId ? this.getSales({}).find((item) => item.tableSessionId === table.sessionId) || sale : sale;
+    return table.sessionId ? this.getSaleByTableSession(table.sessionId) || sale : sale;
   }
 
   async cancelTable(tableNumber: number, originDevice = "Este computador"): Promise<PdvSale | null> {
@@ -761,7 +1044,7 @@ export class PdvStore {
     tableNumber = this.normalizeTableNumber(tableNumber);
     if (operationId) {
       const operation = selectAll<{ saleId: string }>(this.requireDb(), "SELECT sale_id AS saleId FROM partial_operations WHERE operation_id = ?", [operationId])[0];
-      if (operation) return this.getSales({}).find((sale) => sale.id === operation.saleId) || this.getSales({})[0];
+      if (operation) return this.getSaleById(operation.saleId) || this.getSales({}, 1)[0];
     }
     const table = this.getTables().find((item) => item.number === tableNumber);
     if (!table || !table.items.length) {
@@ -790,7 +1073,7 @@ export class PdvStore {
       return { ...item, paidQuantity: item.measureLabel ? roundQuantity(paidQuantity) : roundMoney(paidQuantity) };
     });
     const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, status: "Parcial", items: selectedItems, discount, payments, originDevice, operationId, observations });
-    const existingPartial = table.sessionId ? this.getSales({}).find((item) => item.tableSessionId === table.sessionId && item.status === "Parcial") : undefined;
+    const existingPartial = table.sessionId ? this.getSaleByTableSession(table.sessionId, "Parcial") : undefined;
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
@@ -810,7 +1093,7 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
-    return existingPartial ? this.getSales({}).find((item) => item.id === existingPartial.id) || sale : sale;
+    return existingPartial ? this.getSaleById(existingPartial.id) || sale : sale;
   }
 
   async cancelSale(id: string): Promise<void> {
@@ -818,7 +1101,23 @@ export class PdvStore {
     if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
       throw new Error("Venda nao encontrada.");
     }
-    db.run("UPDATE sales SET status = 'Cancelada' WHERE id = ?", [id]);
+    const received = selectAll<{ total: number }>(
+      db,
+      `SELECT COALESCE(SUM(rp.amount), 0) AS total
+       FROM receivables r LEFT JOIN receivable_payments rp ON rp.receivable_id = r.id
+       WHERE r.sale_id = ?`,
+      [id]
+    )[0]?.total || 0;
+    if (received > 0.009) throw new Error("Esta venda possui recebimentos de conta. Estorne-os antes de cancelar.");
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run("UPDATE sales SET status = 'Cancelada' WHERE id = ?", [id]);
+      db.run("UPDATE receivables SET status = 'Cancelada' WHERE sale_id = ?", [id]);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
     await this.persist();
   }
 
@@ -868,10 +1167,12 @@ export class PdvStore {
         db.run("UPDATE sales SET observations = ? WHERE id = ?", [patch.observations.trim(), id]);
       }
       if (nextPayments) {
+        if (selectAll<{ id: string }>(db, "SELECT id FROM receivables WHERE sale_id = ?", [id]).length) {
+          throw new Error("A venda possui conta a receber. Corrija os recebimentos pela tela de contas.");
+        }
         db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
-        const statement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        nextPayments.forEach((payment) => statement.run([payment.id || randomUUID(), id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null, payment.description?.trim() || ""]));
-        statement.free();
+        writeSalePayments(db, id, nextPayments);
+        createReceivablesForPayments(db, id, currentSale.tableNumber, currentSale.createdAt, currentSale.items, nextPayments);
       }
       db.run("COMMIT");
     } catch (error) {
@@ -905,16 +1206,16 @@ export class PdvStore {
     if (sale.status === "Cancelada") {
       throw new Error("Venda cancelada nao pode ter pagamento alterado.");
     }
+    if (selectAll<{ id: string }>(this.requireDb(), "SELECT id FROM receivables WHERE sale_id = ?", [id]).length) {
+      throw new Error("A venda possui conta a receber. Use a tela de contas para registrar ou corrigir recebimentos.");
+    }
     const normalizedPayments = normalizePaymentsForTotal(payments, sale.total);
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
       db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
-      const statement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
-      normalizedPayments.forEach((payment) => {
-        statement.run([payment.id || randomUUID(), id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null, payment.description?.trim() || ""]);
-      });
-      statement.free();
+      writeSalePayments(db, id, normalizedPayments);
+      createReceivablesForPayments(db, id, sale.tableNumber, sale.createdAt, sale.items, normalizedPayments);
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -970,10 +1271,21 @@ export class PdvStore {
       "SELECT id, table_number AS tableNumber, status, opened_at AS openedAt, people, note, subtables_json AS subtablesJson FROM table_sessions"
     );
     const byNumber = new Map(sessions.map((session) => [session.tableNumber, session]));
+    const itemsByTable = new Map<number, PdvCartItem[]>();
+    selectAll<PdvCartItem & { tableNumber: number }>(
+      this.requireDb(),
+      `SELECT id, table_number AS tableNumber, product_id AS productId, product_name AS productName, category_name AS categoryName,
+        quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total,
+        paid_quantity AS paidQuantity, subtable_name AS subtableName, note, complements_json AS complementsJson
+       FROM table_items ORDER BY table_number, sort_order, rowid`
+    ).forEach((row) => {
+      const item = normalizeCartItem(row);
+      itemsByTable.set(row.tableNumber, [...(itemsByTable.get(row.tableNumber) || []), item]);
+    });
     return Array.from({ length: tableCount }, (_, index) => {
       const number = index + 1;
       const session = byNumber.get(number);
-      const items = this.getTableItems(number);
+      const items = itemsByTable.get(number) || [];
       const remainingTotal = roundMoney(items.reduce((total, item) => total + unpaidItemTotal(item), 0));
       const visualStatus = items.length
         ? (remainingTotal <= 0.009 || session?.status === "Fechamento" ? "Fechamento" : "Ocupada")
@@ -1006,27 +1318,69 @@ export class PdvStore {
     ).map(normalizeCartItem);
   }
 
-  private getRecentSales(): PdvSale[] {
-    return this.getSales({});
+  private getRecentSales(limit?: number): PdvSale[] {
+    return this.getSales({}, limit);
   }
 
-  private hydrateSale(sale: Omit<PdvSale, "items" | "payments">): PdvSale {
-    return {
+  private getSaleById(id: string): PdvSale | undefined {
+    return this.getSaleWhere("id = ?", [id]);
+  }
+
+  private getSaleByOperationId(operationId: string): PdvSale | undefined {
+    return this.getSaleWhere("operation_id = ?", [operationId]);
+  }
+
+  private getSaleByTableSession(tableSessionId: string, status?: PdvSale["status"]): PdvSale | undefined {
+    return status
+      ? this.getSaleWhere("table_session_id = ? AND COALESCE(status, 'Finalizada') = ?", [tableSessionId, status])
+      : this.getSaleWhere("table_session_id = ?", [tableSessionId]);
+  }
+
+  private getSaleWhere(where: string, parameters: Array<string | number>): PdvSale | undefined {
+    const sale = selectAll<Omit<PdvSale, "items" | "payments">>(
+      this.requireDb(),
+      `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, table_session_id AS tableSessionId,
+        COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations,
+        origin_device AS originDevice, operation_id AS operationId
+       FROM sales WHERE ${where} ORDER BY created_at DESC LIMIT 1`,
+      parameters
+    )[0];
+    return sale ? this.hydrateSales([sale])[0] : undefined;
+  }
+
+  private hydrateSales(sales: Array<Omit<PdvSale, "items" | "payments">>): PdvSale[] {
+    if (!sales.length) return [];
+    const saleIds = new Set(sales.map((sale) => sale.id));
+    const itemsBySale = new Map<string, PdvCartItem[]>();
+    const paymentsBySale = new Map<string, PdvPayment[]>();
+
+    selectAll<PdvCartItem & { saleId: string }>(
+      this.requireDb(),
+      `SELECT id, sale_id AS saleId, product_id AS productId, product_name AS productName, category_name AS categoryName,
+        quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total,
+        subtable_name AS subtableName, note, complements_json AS complementsJson
+       FROM sale_items ORDER BY rowid`
+    ).forEach((row) => {
+      if (!saleIds.has(row.saleId)) return;
+      itemsBySale.set(row.saleId, [...(itemsBySale.get(row.saleId) || []), normalizeCartItem(row)]);
+    });
+
+    selectAll<PdvPayment & { saleId: string }>(
+      this.requireDb(),
+      `SELECT id, sale_id AS saleId, method, amount, received, change, description, customer_id AS customerId,
+       customer_name AS customerName, due_date AS dueDate
+       FROM sale_payments ORDER BY rowid`
+    ).forEach((row) => {
+      if (!saleIds.has(row.saleId)) return;
+      const { saleId, ...payment } = row;
+      paymentsBySale.set(saleId, [...(paymentsBySale.get(saleId) || []), payment]);
+    });
+
+    return sales.map((sale) => ({
       ...sale,
-      items: selectAll<PdvCartItem>(
-        this.requireDb(),
-        `SELECT id, product_id AS productId, product_name AS productName, category_name AS categoryName,
-          quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total, subtable_name AS subtableName, note,
-          complements_json AS complementsJson
-         FROM sale_items WHERE sale_id = ? ORDER BY rowid`,
-        [sale.id]
-      ).map(normalizeCartItem),
-      payments: selectAll<PdvPayment>(
-        this.requireDb(),
-        "SELECT id, method, amount, received, change, description FROM sale_payments WHERE sale_id = ? ORDER BY rowid",
-        [sale.id]
-      )
-    };
+      items: itemsBySale.get(sale.id) || [],
+      payments: paymentsBySale.get(sale.id) || []
+    }));
   }
 
   private migrate() {
@@ -1136,6 +1490,41 @@ export class PdvStore {
         operation_id TEXT PRIMARY KEY,
         sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE
       );
+      CREATE TABLE IF NOT EXISTS customers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        document TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        address TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS receivables (
+        id TEXT PRIMARY KEY,
+        sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+        customer_id TEXT NOT NULL REFERENCES customers(id),
+        payment_id TEXT NOT NULL UNIQUE,
+        subtable_name TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        due_date TEXT,
+        original_amount REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Em aberto',
+        note TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS receivable_payments (
+        id TEXT PRIMARY KEY,
+        receivable_id TEXT NOT NULL REFERENCES receivables(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        method TEXT NOT NULL,
+        amount REAL NOT NULL,
+        received REAL,
+        change REAL,
+        description TEXT NOT NULL DEFAULT '',
+        origin_device TEXT NOT NULL DEFAULT 'Este computador',
+        operation_id TEXT UNIQUE
+      );
     `);
     addColumnIfMissing(db, "products", "can_be_complement", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "has_complements", "INTEGER NOT NULL DEFAULT 0");
@@ -1158,7 +1547,19 @@ export class PdvStore {
     addColumnIfMissing(db, "sales", "origin_device", "TEXT NOT NULL DEFAULT 'Este computador'");
     addColumnIfMissing(db, "sales", "operation_id", "TEXT");
     addColumnIfMissing(db, "sale_payments", "description", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "sale_payments", "customer_id", "TEXT");
+    addColumnIfMissing(db, "sale_payments", "customer_name", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "sale_payments", "due_date", "TEXT");
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_operation_id ON sales(operation_id) WHERE operation_id IS NOT NULL");
+    db.run("CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at DESC)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_sales_status ON sales(status)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_sales_table_number ON sales(table_number, created_at DESC)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_sales_table_session ON sales(table_session_id)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_sale_payments_sale_id ON sale_payments(sale_id)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_table_items_table_number ON table_items(table_number, sort_order)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_receivables_customer ON receivables(customer_id, status)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_receivables_due_date ON receivables(due_date, status)");
     const defaults = this.getSettings();
     const statement = db.prepare("INSERT INTO pdv_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING");
     Object.entries(defaults).forEach(([key, value]) => statement.run([snakeCase(key), String(value)]));
@@ -1168,6 +1569,10 @@ export class PdvStore {
   private getSettings(): PdvSettings {
     const rows = selectAll<{ key: string; value: string }>(this.requireDb(), "SELECT key, value FROM pdv_settings");
     const map = new Map(rows.map((row) => [row.key, row.value]));
+    const storedReceiptBusinessName = map.get("receipt_business_name")?.trim() || "";
+    const receiptBusinessName = storedReceiptBusinessName.toLocaleLowerCase("pt-BR") === "contabilizador caixa"
+      ? "RECIBO"
+      : storedReceiptBusinessName || DEFAULT_PDV_SETTINGS.receiptBusinessName;
     return {
       tableCount: parseIntegerSetting(map.get("table_count"), DEFAULT_PDV_SETTINGS.tableCount),
       complementsEnabled: parseBooleanSetting(map.get("complements_enabled"), DEFAULT_PDV_SETTINGS.complementsEnabled),
@@ -1192,7 +1597,24 @@ export class PdvStore {
       roundingStep: normalizeRoundingStep(Number(map.get("rounding_step") || DEFAULT_PDV_SETTINGS.roundingStep || 0.01)),
       roundingDirection: map.get("rounding_direction") === "up" || map.get("rounding_direction") === "down"
         ? map.get("rounding_direction") as "up" | "down"
-        : "nearest"
+        : "nearest",
+      receiptPaperWidth: ["58", "80", "a4", "custom"].includes(map.get("receipt_paper_width") || "") ? map.get("receipt_paper_width") as "58" | "80" | "a4" | "custom" : "80",
+      receiptCustomPaperWidthMm: Math.max(40, Math.min(300, parseIntegerSetting(map.get("receipt_custom_paper_width_mm"), 80))),
+      receiptCustomPaperHeightMm: Math.max(80, Math.min(1000, parseIntegerSetting(map.get("receipt_custom_paper_height_mm"), 200))),
+      receiptAutoPrint: parseBooleanSetting(map.get("receipt_auto_print"), DEFAULT_PDV_SETTINGS.receiptAutoPrint || false),
+      receiptPrinterName: map.get("receipt_printer_name") || "",
+      receiptCopies: Math.max(1, Math.min(5, parseIntegerSetting(map.get("receipt_copies"), 1))),
+      receiptLogoDataUrl: map.get("receipt_logo_data_url") || "",
+      receiptShowLogo: parseBooleanSetting(map.get("receipt_show_logo"), true),
+      receiptBusinessName,
+      receiptBusinessDocument: map.get("receipt_business_document") || "",
+      receiptBusinessStateRegistration: map.get("receipt_business_state_registration") || "",
+      receiptBusinessAddress: map.get("receipt_business_address") || "",
+      receiptBusinessPhone: map.get("receipt_business_phone") || "",
+      receiptFooter: map.get("receipt_footer") || DEFAULT_PDV_SETTINGS.receiptFooter,
+      receiptAllowClientPrint: parseBooleanSetting(map.get("receipt_allow_client_print"), true),
+      receiptGroupIdenticalItems: parseBooleanSetting(map.get("receipt_group_identical_items"), true),
+      receiptUseColor: parseBooleanSetting(map.get("receipt_use_color"), false)
     };
   }
 
@@ -1312,11 +1734,27 @@ function insertSale(db: Database, sale: PdvSale) {
   );
   itemStatement.free();
 
-  const paymentStatement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  const paymentStatement = db.prepare(
+    `INSERT INTO sale_payments
+     (id, sale_id, method, amount, received, change, description, customer_id, customer_name, due_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
   sale.payments.forEach((payment) =>
-    paymentStatement.run([payment.id, sale.id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null, payment.description?.trim() || ""])
+    paymentStatement.run([
+      payment.id,
+      sale.id,
+      payment.method,
+      payment.amount,
+      payment.received ?? null,
+      payment.change ?? null,
+      payment.description?.trim() || "",
+      payment.customerId || null,
+      payment.customerName?.trim() || "",
+      payment.dueDate || null
+    ])
   );
   paymentStatement.free();
+  createReceivablesForPayments(db, sale.id, sale.tableNumber, sale.createdAt, sale.items, sale.payments);
 }
 
 function appendSaleSegment(db: Database, existing: PdvSale, segment: PdvSale, status: PdvSale["status"]) {
@@ -1331,9 +1769,143 @@ function appendSaleSegment(db: Database, existing: PdvSale, segment: PdvSale, st
   );
   merged.items.forEach((item) => itemStatement.run([randomUUID(), existing.id, item.productId, item.productName, item.categoryName, item.quantity, item.measureLabel || "", item.unitPrice, item.baseUnitPrice ?? item.unitPrice, item.discount, item.total, item.subtableName || "", item.note || "", JSON.stringify(item.complements || [])]));
   itemStatement.free();
-  const paymentStatement = db.prepare("INSERT INTO sale_payments (id, sale_id, method, amount, received, change, description) VALUES (?, ?, ?, ?, ?, ?, ?)");
-  merged.payments.forEach((payment) => paymentStatement.run([payment.id, existing.id, payment.method, payment.amount, payment.received ?? null, payment.change ?? null, payment.description?.trim() || ""]));
+  const paymentStatement = db.prepare(
+    `INSERT INTO sale_payments
+     (id, sale_id, method, amount, received, change, description, customer_id, customer_name, due_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  merged.payments.forEach((payment) => paymentStatement.run([
+    payment.id,
+    existing.id,
+    payment.method,
+    payment.amount,
+    payment.received ?? null,
+    payment.change ?? null,
+    payment.description?.trim() || "",
+    payment.customerId || null,
+    payment.customerName?.trim() || "",
+    payment.dueDate || null
+  ]));
   paymentStatement.free();
+  createReceivablesForPayments(db, existing.id, existing.tableNumber, segment.createdAt, segment.items, segment.payments);
+}
+
+function createReceivablesForPayments(
+  db: Database,
+  saleId: string,
+  tableNumber: number | undefined,
+  createdAt: string,
+  items: PdvCartItem[],
+  payments: PdvPayment[]
+) {
+  const subtableNames = [...new Set(items.map((item) => item.subtableName || "").filter(Boolean))];
+  const subtableName = subtableNames.length === 1 ? subtableNames[0] : "";
+  const statement = db.prepare(
+    `INSERT OR IGNORE INTO receivables
+     (id, sale_id, customer_id, payment_id, subtable_name, created_at, due_date, original_amount, status, note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Em aberto', ?)`
+  );
+  payments.filter((payment) => payment.method === "Conta a receber").forEach((payment) => {
+    if (!payment.customerId) throw new Error("Selecione um cliente para a conta a receber.");
+    statement.run([
+      randomUUID(),
+      saleId,
+      payment.customerId,
+      payment.id,
+      subtableName,
+      createdAt,
+      payment.dueDate || null,
+      payment.amount,
+      payment.description?.trim() || (tableNumber ? `Mesa ${tableNumber}` : "")
+    ]);
+  });
+  statement.free();
+}
+
+function writeSalePayments(db: Database, saleId: string, payments: PdvPayment[]) {
+  const statement = db.prepare(
+    `INSERT INTO sale_payments
+     (id, sale_id, method, amount, received, change, description, customer_id, customer_name, due_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  payments.forEach((payment) => statement.run([
+    payment.id || randomUUID(),
+    saleId,
+    payment.method,
+    payment.amount,
+    payment.received ?? null,
+    payment.change ?? null,
+    payment.description?.trim() || "",
+    payment.customerId || null,
+    payment.customerName?.trim() || "",
+    payment.dueDate || null
+  ]));
+  statement.free();
+}
+
+function writeSaleItems(db: Database, saleId: string, items: PdvCartItem[]) {
+  const statement = db.prepare(
+    `INSERT INTO sale_items
+     (id, sale_id, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  items.forEach((item) => statement.run([
+    item.id || randomUUID(),
+    saleId,
+    item.productId,
+    item.productName,
+    item.categoryName,
+    item.quantity,
+    item.measureLabel || "",
+    item.unitPrice,
+    item.baseUnitPrice ?? item.unitPrice,
+    item.discount,
+    item.total,
+    item.subtableName || "",
+    item.note || "",
+    JSON.stringify(item.complements || [])
+  ]));
+  statement.free();
+}
+
+function normalizeEditedCartItem(item: PdvCartItem, unitMode?: PdvProduct["unitMode"]): PdvCartItem {
+  const quantity = Number(item.quantity);
+  const total = roundMoney(Number(item.total));
+  if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(total) || total < 0) {
+    throw new Error(`Quantidade ou valor invalido em ${item.productName || "produto"}.`);
+  }
+  const measured = unitMode === "kg" || unitMode === "grama" || Boolean(item.measureLabel);
+  if (!measured && !Number.isInteger(quantity)) {
+    throw new Error(`${item.productName || "Produto"} e vendido por unidade e precisa ter quantidade inteira.`);
+  }
+  return {
+    ...item,
+    id: item.id || randomUUID(),
+    quantity,
+    unitPrice: quantity > 0 ? roundMoney(total / quantity) : total,
+    discount: Math.max(0, roundMoney(Number(item.discount) || 0)),
+    total
+  };
+}
+
+function normalizeEditedReceivablePayment(payment: PdvReceivablePayment, receivableId: string): PdvReceivablePayment {
+  const amount = roundMoney(Number(payment.amount));
+  const received = payment.received === undefined ? undefined : roundMoney(Number(payment.received));
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Todo recebimento precisa ter um valor maior que zero.");
+  if (payment.method === "Nao definido") throw new Error("Selecione uma forma de pagamento valida.");
+  if (payment.method === "Dinheiro" && received !== undefined && received + 0.009 < amount) {
+    throw new Error("O valor entregue em dinheiro nao cobre o recebimento.");
+  }
+  return {
+    ...payment,
+    id: payment.id || randomUUID(),
+    receivableId,
+    createdAt: payment.createdAt || new Date().toISOString(),
+    amount,
+    received,
+    change: payment.method === "Dinheiro" && received !== undefined ? roundMoney(Math.max(0, received - amount)) : 0,
+    description: String(payment.description || "").trim()
+  };
 }
 
 function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]) {
@@ -1447,6 +2019,9 @@ function normalizePaymentsForTotal(payments: PdvPayment[], total: number): PdvPa
         if (payment.method === "Dinheiro" && received !== undefined && received < amount - 0.01) {
           throw new Error("O valor recebido em dinheiro nao pode ser menor que o pagamento.");
         }
+        if (payment.method === "Conta a receber" && !payment.customerId) {
+          throw new Error("Selecione um cliente para registrar a conta a receber.");
+        }
         return {
           ...payment,
           id: payment.id || randomUUID(),
@@ -1469,6 +2044,7 @@ function normalizePdvPaymentMethod(value: unknown): PdvPayment["method"] {
   if (normalized.includes("debito")) return "Debito";
   if (normalized.includes("credito")) return "Credito";
   if (normalized.includes("pix")) return "Pix";
+  if (normalized.includes("receber") || normalized.includes("fiado")) return "Conta a receber";
   if (!normalized || normalized.includes("nao informado") || normalized.includes("nao definido")) return "Nao definido";
   return "Outros";
 }
@@ -1573,6 +2149,25 @@ function parseBooleanSetting(value: string | undefined, fallback: boolean): bool
 function parseIntegerSetting(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value || "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function tableItemsPersistenceKey(items: PdvCartItem[]): string {
+  return JSON.stringify(items.map((item) => ({
+    id: item.id,
+    productId: item.productId,
+    productName: item.productName,
+    categoryName: item.categoryName,
+    quantity: Number(item.quantity),
+    measureLabel: item.measureLabel || "",
+    unitPrice: Number(item.unitPrice),
+    baseUnitPrice: Number(item.baseUnitPrice ?? item.unitPrice),
+    discount: Number(item.discount),
+    total: Number(item.total),
+    paidQuantity: Math.min(Number(item.quantity) || 0, Math.max(0, Number(item.paidQuantity) || 0)),
+    subtableName: item.subtableName || "",
+    note: item.note || "",
+    complements: item.complements || []
+  })));
 }
 
 function normalizeRoundingStep(value: number): number {

@@ -1,5 +1,6 @@
 ﻿import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
+import { nativeImage } from "electron";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
@@ -9,6 +10,7 @@ import { LedgerExporter } from "./exporter.js";
 import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
 import { PdvExporter } from "./pdvExporter.js";
+import { buildPdvReceiptHtml, printPdvReceipt, printPdvReceiptDirect } from "./pdvReceipt.js";
 import { configureCoseDellAbadiaComplements, normalizeImportedProducts, readPdvProductsFromXlsx } from "./productImporter.js";
 import { PdvStore } from "./pdvStore.js";
 import { getLocalDateKey } from "../src/shared/calculations.js";
@@ -27,7 +29,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -599,7 +601,7 @@ async function bootstrap() {
       await store.deleteEntry(id);
       await exportLedgerIfEnabled();
     },
-    getPdvSnapshot: () => pdvStore.getSnapshot(),
+    getPdvSnapshot: (salesLimit) => pdvStore.getSnapshot(salesLimit),
     savePdvDirectSale: async (items, discount, payments, originDevice, operationId, saleType) => {
       const sale = await pdvStore.saveSale({ type: saleType === "Mesa" ? "Mesa" : saleType === "Onibus" ? "Onibus" : "Venda direta", items, discount, payments, originDevice, operationId });
       await exportLedgerIfEnabled();
@@ -614,6 +616,23 @@ async function bootstrap() {
     savePdvCategory: (draft) => pdvStore.saveCategory(draft),
     savePdvProduct: (draft) => pdvStore.saveProduct(draft),
     savePdvSettings: (patch) => pdvStore.saveSettings(patch),
+    savePdvCustomer: (draft) => pdvStore.saveCustomer(draft),
+    receivePdvReceivable: (id, payment, originDevice, operationId) => pdvStore.receiveReceivable(id, payment, originDevice, operationId),
+    updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
+    cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
+    printPdvReceipt: async ({ sale, customer, receivable, customerName, customerDocument }) => {
+      const snapshot = await pdvStore.getSnapshot();
+      const hostWindow = mainWindow || BrowserWindow.getAllWindows()[0];
+      const printers = hostWindow ? await hostWindow.webContents.getPrintersAsync() : [];
+      const configured = snapshot.settings.receiptPrinterName;
+      const printer = printers.find((item) => item.name === configured)
+        || printers.find((item) => item.isDefault)
+        || printers[0];
+      if (!printer) {
+        throw new Error("Nenhuma impressora foi encontrada no computador servidor.");
+      }
+      return printPdvReceiptDirect(sale, snapshot.settings, printer.name, customer, receivable, customerName, customerDocument);
+    },
     importPdvPreset: () => importPdvProducts(path.join(app.getPath("downloads"), "produtos.xlsx"), "Cose Dell Abadia"),
     removePdvPreset: () => pdvStore.removeImportedProducts("Cose Dell Abadia"),
     closePdvTable: async (tableNumber, payments, discount, originDevice, operationId) => {
@@ -634,6 +653,12 @@ async function bootstrap() {
       sendToAll("entries:changed");
       return sale;
     },
+    updatePdvSalePayments: async (saleId, payments) => {
+      const sale = await pdvStore.updateSalePayments(saleId, payments);
+      await exportLedgerIfEnabled();
+      sendToAll("entries:changed");
+      return sale;
+    },
     onRemoteChange: () => {
       sendToAll("entries:changed");
       sendToAll("server:changed", localServer.getState());
@@ -641,6 +666,9 @@ async function bootstrap() {
     onRemotePdvChange: () => {
       sendToAll("pdv:changed");
       sendToAll("server:changed", localServer.getState());
+    },
+    onRemotePrintResult: (result) => {
+      sendToAll("receipt-print:result", result);
     }
   });
 
@@ -693,10 +721,9 @@ async function logExportStatus(action: string, status: ExportStatus) {
 }
 
 async function getIntegratedLedgerEntries() {
-  const pdvSnapshot = await pdvStore.getSnapshot();
   return [
     ...(await store.getEntries()),
-    ...pdvSalesToLedgerEntries(pdvSnapshot.recentSales)
+    ...pdvSalesToLedgerEntries(pdvStore.getSales({}))
   ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 }
 
@@ -720,7 +747,7 @@ function registerIpc() {
     exportStatus: await exporter.getStatus()
   }));
 
-  ipcMain.handle("pdv:getSnapshot", async () => pdvStore.getSnapshot());
+  ipcMain.handle("pdv:getSnapshot", async (_event, salesLimit?: number) => pdvStore.getSnapshot(salesLimit));
 
   ipcMain.handle("pdv:saveSettings", async (_event, patch: Partial<PdvSettings>) => {
     const settings = await pdvStore.saveSettings(patch);
@@ -792,8 +819,14 @@ function registerIpc() {
     return importPdvProducts(result.filePaths[0]);
   });
 
-  ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[]; saleType?: PdvSale["type"] }): Promise<PdvSale> => {
-    const sale = await pdvStore.saveSale({ type: input.saleType === "Mesa" ? "Mesa" : input.saleType === "Onibus" ? "Onibus" : "Venda direta", items: input.items, discount: input.discount, payments: input.payments });
+  ipcMain.handle("pdv:saveDirectSale", async (_event, input: { items: PdvCartItem[]; discount: number; payments: PdvPayment[]; saleType?: PdvSale["type"]; operationId?: string }): Promise<PdvSale> => {
+    const sale = await pdvStore.saveSale({
+      type: input.saleType === "Mesa" ? "Mesa" : input.saleType === "Onibus" ? "Onibus" : "Venda direta",
+      items: input.items,
+      discount: input.discount,
+      payments: input.payments,
+      operationId: input.operationId || randomUUID()
+    });
     await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
@@ -860,14 +893,139 @@ function registerIpc() {
     return sale;
   });
 
+  ipcMain.handle("pdv:saveCustomer", async (_event, draft: PdvCustomerDraft): Promise<PdvCustomer> => {
+    const customer = await pdvStore.saveCustomer(draft);
+    publishPdvChanged();
+    return customer;
+  });
+
+  ipcMain.handle("pdv:receiveReceivable", async (_event, id: string, payment: PdvReceivablePayment, operationId?: string): Promise<PdvReceivable> => {
+    const receivable = await pdvStore.receiveReceivable(id, payment, "Este computador", operationId || randomUUID());
+    publishPdvChanged();
+    return receivable;
+  });
+
+  ipcMain.handle("pdv:updateReceivable", async (_event, id: string, patch: PdvReceivablePatch): Promise<PdvReceivable> => {
+    const receivable = await pdvStore.updateReceivable(id, patch);
+    publishPdvChanged();
+    return receivable;
+  });
+
+  ipcMain.handle("pdv:cancelReceivable", async (_event, id: string) => {
+    await pdvStore.cancelReceivable(id);
+    publishPdvChanged();
+  });
+
+  ipcMain.handle("pdv:printReceipt", async (
+    _event,
+    sale: PdvSale,
+    customer?: PdvCustomer,
+    receivable?: PdvReceivable,
+    options?: { customerName?: string; customerDocument?: string; action?: "open" | "save" | "print"; printerName?: string; receiptSettings?: PdvSettings }
+  ) => {
+    try {
+      const appSettings = await store.getSettings();
+      const snapshot = await pdvStore.getSnapshot();
+      const receiptSettings = options?.receiptSettings ? { ...snapshot.settings, ...options.receiptSettings } : snapshot.settings;
+      if (options?.action === "print") {
+        const printerName = options.printerName || snapshot.settings.receiptPrinterName || "";
+        if (printerName) {
+          const directResult = await printPdvReceiptDirect(sale, receiptSettings, printerName, customer, receivable, options.customerName, options.customerDocument);
+          if (directResult.ok) return directResult;
+        }
+      }
+      const pdf = await printPdvReceipt(sale, receiptSettings, customer, receivable, options?.customerName, options?.customerDocument);
+      const safeId = sale.id.replace(/[^a-z0-9_-]+/gi, "-").slice(0, 48);
+      const date = new Date(sale.createdAt);
+      const stamp = `${date.toISOString().slice(0, 10)}-${String(date.getHours()).padStart(2, "0")}${String(date.getMinutes()).padStart(2, "0")}`;
+      const defaultDirectory = path.join(appSettings.outputDirectory, "Recibos");
+      const defaultPath = path.join(defaultDirectory, `recibo-${stamp}-${safeId}.pdf`);
+      let filePath = defaultPath;
+      if (options?.action === "save") {
+        const dialogOptions = {
+          title: "Salvar recibo em PDF",
+          defaultPath,
+          filters: [{ name: "Documento PDF", extensions: ["pdf"] }]
+        };
+        const selected = mainWindow
+          ? await dialog.showSaveDialog(mainWindow, dialogOptions)
+          : await dialog.showSaveDialog(dialogOptions);
+        if (selected.canceled || !selected.filePath) {
+          return { ok: false, message: "Salvamento do recibo cancelado." };
+        }
+        filePath = selected.filePath;
+      }
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, pdf);
+      if (options?.action !== "save") {
+        const openError = await shell.openPath(filePath);
+        if (openError) {
+          return { ok: false, message: "O recibo foi criado, mas o Windows nao conseguiu abri-lo.", filePath };
+        }
+      }
+      return {
+        ok: true,
+        message: options?.action === "save"
+          ? "Recibo salvo em PDF."
+          : options?.action === "print"
+            ? "A impressora configurada nao respondeu. O recibo foi aberto em PDF."
+            : "Recibo aberto. Use a opcao Imprimir do visualizador.",
+        filePath
+      };
+    } catch (error) {
+      await logger.error("Falha ao gerar recibo", error instanceof Error ? error.message : String(error));
+      return { ok: false, message: "Nao foi possivel gerar o recibo. Confira a pasta de exportacao e tente novamente." };
+    }
+  });
+
+  ipcMain.handle("pdv:receiptPreview", async (
+    _event,
+    sale: PdvSale,
+    customer?: PdvCustomer,
+    receivable?: PdvReceivable,
+    customerName?: string,
+    customerDocument?: string,
+    receiptSettings?: PdvSettings
+  ) => buildPdvReceiptHtml(sale, receiptSettings || (await pdvStore.getSnapshot()).settings, customer, receivable, customerName, customerDocument));
+
+  ipcMain.handle("pdv:listPrinters", async () => {
+    try {
+      const printers = await mainWindow?.webContents.getPrintersAsync() || [];
+      return printers.map((printer) => ({
+        name: printer.name,
+        displayName: printer.displayName || printer.name,
+        isDefault: Boolean(printer.isDefault)
+      }));
+    } catch (error) {
+      await logger.warn("Impressoras indisponiveis", error instanceof Error ? error.message : String(error));
+      return [];
+    }
+  });
+
+  ipcMain.handle("pdv:chooseReceiptLogo", async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: "Escolher logotipo do recibo",
+      properties: ["openFile"],
+      filters: [{ name: "Imagens", extensions: ["png", "jpg", "jpeg", "webp"] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return "";
+    const image = nativeImage.createFromPath(result.filePaths[0]);
+    if (image.isEmpty()) throw new Error("A imagem selecionada nao pode ser lida.");
+    return image.resize({ width: 320, quality: "best" }).toDataURL();
+  });
+
   ipcMain.handle("pdv:exportSales", async (_event, filters: PdvExportFilters = {}) => {
     const settings = await store.getSettings();
+    const snapshot = await pdvStore.getSnapshot();
     const status = await new PdvExporter(path.join(settings.outputDirectory, "Relatorios")).exportSales(
       pdvStore.getSales(filters),
       filters,
       await store.getEntries(),
       "",
-      settings.reportExportSections
+      settings.reportExportSections,
+      false,
+      snapshot.customers,
+      snapshot.receivables
     );
     await logExportStatus("exportacao PDV", status);
     return status;
@@ -1058,7 +1216,10 @@ function registerIpc() {
     const sales = pdvStore.getSales({}).filter((sale) => saleIds.has(sale.id));
     const entries = (await store.getEntries()).filter((entry) => idSet.has(entry.id));
     const reportDirectory = path.join(settings.outputDirectory, label.includes("products") ? "Produtos" : "Relatorios");
-    const status = await new PdvExporter(reportDirectory).exportSales(sales, {}, entries, label || "relatorio", settings.reportExportSections);
+    const snapshot = await pdvStore.getSnapshot();
+    const selectedReceivables = snapshot.receivables.filter((item) => saleIds.has(item.saleId));
+    const selectedCustomerIds = new Set(selectedReceivables.map((item) => item.customerId));
+    const status = await new PdvExporter(reportDirectory).exportSales(sales, {}, entries, label || "relatorio", settings.reportExportSections, false, snapshot.customers.filter((item) => selectedCustomerIds.has(item.id)), selectedReceivables);
     await logExportStatus("relatorio filtrado", status);
     if (status.filePath) {
       shell.showItemInFolder(status.filePath);
@@ -1341,6 +1502,21 @@ function registerIpc() {
     return state;
   });
 
+  ipcMain.handle("server:printPdvReceipt", async (
+    _event,
+    deviceId: string,
+    payload: {
+      sale: PdvSale;
+      customer?: PdvCustomer;
+      receivable?: PdvReceivable;
+      customerName?: string;
+      customerDocument?: string;
+    }
+  ) => localServer.requestReceiptPrint(deviceId, {
+    jobId: randomUUID(),
+    ...payload
+  }));
+
   ipcMain.handle("window:setPinned", async (_event, enabled: boolean, options?: { opacity?: number; borderless?: boolean; lockPosition?: boolean }) => {
     if (enabled) {
       await createFloatingWindow(options, await store.getSettings());
@@ -1395,13 +1571,16 @@ app.on("before-quit", (event) => {
       const settings = await store.getSettings();
       const today = getLocalDateKey();
       if (settings.automaticClosingReportEnabled) {
+        const snapshot = await pdvStore.getSnapshot();
         const status = await new PdvExporter(path.join(settings.outputDirectory, "Fechamentos diarios")).exportSales(
           pdvStore.getSales({ from: today, to: today }),
           { from: today, to: today, type: "Todos", payment: "Todos", status: "Todos" },
           await store.getEntries(),
           `fechamento-diario-${today}`,
           settings.reportExportSections,
-          true
+          true,
+          snapshot.customers,
+          snapshot.receivables.filter((item) => item.createdAt.slice(0, 10) === today || item.payments.some((payment) => payment.createdAt.slice(0, 10) === today))
         );
         await logExportStatus("fechamento automatico do dia", status);
       }

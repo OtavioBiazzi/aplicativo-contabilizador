@@ -6,6 +6,7 @@ import { configureCoseDellAbadiaComplements, normalizeImportedProducts } from ".
 import { PdvStore } from "../dist-electron/electron/pdvStore.js";
 import { LedgerStore } from "../dist-electron/electron/storage.js";
 import { pdvSaleToLedgerEntry } from "../dist-electron/src/shared/pdvLedger.js";
+import { groupPdvReceiptItems } from "../dist-electron/src/shared/pdvReceipt.js";
 
 const root = process.cwd();
 const tmp = path.join(root, ".tmp-pdv-smoke");
@@ -18,6 +19,26 @@ mkdirSync(exportDir, { recursive: true });
 
 const store = new PdvStore(dataDir);
 await store.initialize();
+
+const receiptBaseItem = {
+  id: "receipt-1",
+  productId: "coffee",
+  productName: "Cafe",
+  categoryName: "Bebidas",
+  quantity: 1,
+  unitPrice: 10,
+  discount: 0,
+  total: 10,
+  complements: [{ productId: "milk", name: "Leite", price: 2 }]
+};
+const groupedReceiptItems = groupPdvReceiptItems([
+  receiptBaseItem,
+  { ...receiptBaseItem, id: "receipt-2", productName: " CAFE " },
+  { ...receiptBaseItem, id: "receipt-3", total: 9 }
+]);
+if (groupedReceiptItems.length !== 2 || groupedReceiptItems[0].quantity !== 2 || groupedReceiptItems[0].total !== 20) {
+  throw new Error("Agrupamento do recibo nao consolidou produtos realmente iguais ou misturou precos finais diferentes.");
+}
 
 const cosePreset = normalizeImportedProducts([
   { name: "CUSCUZ NORDESTINO", categoryName: "CAFE", price: 10, unit: "UNID", active: true, showOnPdv: true },
@@ -175,6 +196,154 @@ if (exactMeasuredTable?.total !== 2 || exactMeasuredTable.items[0]?.total !== 2)
 const exactMeasuredTableSale = await store.closeTable(5, [{ id: crypto.randomUUID(), method: "Pix", amount: 2 }]);
 if (exactMeasuredTableSale.total !== 2 || exactMeasuredTableSale.items[0]?.total !== 2) {
   throw new Error("Fechamento da mesa alterou o valor final de produto por peso.");
+}
+
+const receivableCustomer = await store.saveCustomer({
+  name: "Cliente conta smoke",
+  document: "12345678900",
+  phone: "11999990000",
+  active: true
+});
+const receivableSale = await store.saveSale({
+  type: "Venda direta",
+  items: [{
+    ...exactAmountSale.items[0],
+    id: crypto.randomUUID(),
+    productName: "Produto conta a receber",
+    baseUnitPrice: 30,
+    unitPrice: 30,
+    total: 30
+  }],
+  discount: 0,
+  payments: [
+    { id: crypto.randomUUID(), method: "Pix", amount: 10 },
+    {
+      id: crypto.randomUUID(),
+      method: "Conta a receber",
+      amount: 20,
+      customerId: receivableCustomer.id,
+      customerName: receivableCustomer.name,
+      dueDate: "2099-12-31",
+      description: "Conta smoke"
+    }
+  ]
+});
+let smokeReceivable = (await store.getSnapshot()).receivables.find((item) => item.saleId === receivableSale.id);
+if (!smokeReceivable || smokeReceivable.originalAmount !== 20 || smokeReceivable.balance !== 20 || smokeReceivable.customerId !== receivableCustomer.id) {
+  throw new Error("Conta a receber nao foi criada e vinculada a venda corretamente.");
+}
+const firstReceiptOperation = crypto.randomUUID();
+smokeReceivable = await store.receiveReceivable(smokeReceivable.id, {
+  id: crypto.randomUUID(),
+  receivableId: smokeReceivable.id,
+  createdAt: new Date().toISOString(),
+  method: "Debito",
+  amount: 5,
+  description: "Entrada smoke"
+}, "Smoke", firstReceiptOperation);
+const idempotentReceipt = await store.receiveReceivable(smokeReceivable.id, {
+  id: crypto.randomUUID(),
+  receivableId: smokeReceivable.id,
+  createdAt: new Date().toISOString(),
+  method: "Debito",
+  amount: 5
+}, "Smoke", firstReceiptOperation);
+if (idempotentReceipt.receivedAmount !== 5 || idempotentReceipt.balance !== 15 || idempotentReceipt.payments.length !== 1) {
+  throw new Error("Recebimento idempotente duplicou o pagamento da conta.");
+}
+let overpaymentRejected = false;
+try {
+  await store.receiveReceivable(smokeReceivable.id, {
+    id: crypto.randomUUID(),
+    receivableId: smokeReceivable.id,
+    createdAt: new Date().toISOString(),
+    method: "Credito",
+    amount: 16
+  });
+} catch {
+  overpaymentRejected = true;
+}
+if (!overpaymentRejected) throw new Error("Conta a receber aceitou pagamento acima do saldo.");
+smokeReceivable = await store.receiveReceivable(smokeReceivable.id, {
+  id: crypto.randomUUID(),
+  receivableId: smokeReceivable.id,
+  createdAt: new Date().toISOString(),
+  method: "Dinheiro",
+  amount: 15,
+  received: 20,
+  description: "Quitacao smoke"
+});
+if (smokeReceivable.status !== "Recebida" || smokeReceivable.balance !== 0 || smokeReceivable.receivedAmount !== 20 || smokeReceivable.payments[1]?.change !== 5) {
+  throw new Error("Quitacao da conta ou calculo de troco ficou incorreto.");
+}
+
+const editableReceivableSale = await store.saveSale({
+  type: "Venda direta",
+  items: [1, 2].map((index) => ({
+    ...exactAmountSale.items[0],
+    id: crypto.randomUUID(),
+    productName: "Cafe editavel",
+    quantity: 1,
+    baseUnitPrice: 10,
+    unitPrice: 10,
+    total: 10,
+    note: `Unidade ${index}`
+  })),
+  discount: 0,
+  payments: [{
+    id: crypto.randomUUID(),
+    method: "Conta a receber",
+    amount: 20,
+    customerId: receivableCustomer.id,
+    customerName: receivableCustomer.name,
+    description: "Conta editavel smoke"
+  }]
+});
+let editableReceivable = (await store.getSnapshot()).receivables.find((item) => item.saleId === editableReceivableSale.id);
+if (!editableReceivable) throw new Error("Conta editavel smoke nao foi criada.");
+let fractionalUnitRejected = false;
+try {
+  await store.updateReceivable(editableReceivable.id, {
+    items: editableReceivableSale.items.map((item, index) => ({ ...item, quantity: index === 0 ? 1.0001 : 1 }))
+  });
+} catch (error) {
+  fractionalUnitRejected = String(error?.message || error).includes("quantidade inteira");
+}
+if (!fractionalUnitRejected) {
+  throw new Error("Edicao da pendencia aceitou fracao de produto vendido por unidade.");
+}
+editableReceivable = await store.updateReceivable(editableReceivable.id, {
+  dueDate: "2099-11-30",
+  note: "Pendencia revisada",
+  items: editableReceivableSale.items.map((item, index) => ({ ...item, total: index === 0 ? 12 : 8 })),
+  payments: [{
+    id: crypto.randomUUID(),
+    receivableId: editableReceivable.id,
+    createdAt: new Date().toISOString(),
+    method: "Pix",
+    amount: 7,
+    description: "Pagamento editado smoke"
+  }]
+});
+const editedSale = store.getSaleById(editableReceivableSale.id);
+if (
+  editableReceivable.originalAmount !== 20
+  || editableReceivable.receivedAmount !== 7
+  || editableReceivable.balance !== 13
+  || editableReceivable.status !== "Parcialmente recebida"
+  || editableReceivable.dueDate !== "2099-11-30"
+  || editedSale?.items[0]?.total !== 12
+  || editedSale?.items[1]?.total !== 8
+) {
+  throw new Error("Edicao completa da pendencia nao preservou produtos, recebimento e saldo.");
+}
+editableReceivable = await store.updateReceivable(editableReceivable.id, { payments: [] });
+if (editableReceivable.receivedAmount !== 0 || editableReceivable.balance !== 20 || editableReceivable.status !== "Em aberto") {
+  throw new Error("Remocao de recebimento da pendencia nao recalculou o saldo.");
+}
+await store.cancelReceivable(editableReceivable.id);
+if ((await store.getSnapshot()).receivables.find((item) => item.id === editableReceivable.id)?.status !== "Cancelada") {
+  throw new Error("Cancelamento auditavel da pendencia nao foi persistido.");
 }
 
 const cancelled = await store.saveSale({
@@ -416,6 +585,36 @@ if (!salesSheet.includes("Onibus") || !salesSheet.includes("Venda de onibus")) {
 }
 if (salesSheet.includes(cancelled.id) || salesSheet.includes(cancelledTableSale.id) || paymentsSheet.includes("Recebido") || paymentsSheet.includes("Troco")) {
   throw new Error("XLSX exportou cancelamento, valor recebido ou troco indevidamente.");
+}
+
+const financialSnapshot = await store.getSnapshot();
+const financialExportStatus = await new PdvExporter(exportDir).exportSales(
+  store.getSales({}),
+  {},
+  [],
+  "contas-smoke",
+  ["products", "categories", "tables", "times"],
+  false,
+  financialSnapshot.customers,
+  financialSnapshot.receivables
+);
+if (!financialExportStatus.ok || !financialExportStatus.filePath) {
+  throw new Error(financialExportStatus.message || "Exportacao de contas a receber falhou.");
+}
+const financialZip = await JSZip.loadAsync(readFileSync(financialExportStatus.filePath));
+const financialWorkbook = await financialZip.file("xl/workbook.xml").async("string");
+if (!["Contas a receber", "Recebimentos", "Clientes"].every((sheet) => financialWorkbook.includes(sheet))) {
+  throw new Error("XLSX nao criou as abas financeiras de clientes e contas.");
+}
+const financialWorksheetText = (
+  await Promise.all(
+    Object.keys(financialZip.files)
+      .filter((name) => name.startsWith("xl/worksheets/") && name.endsWith(".xml"))
+      .map((name) => financialZip.file(name).async("string"))
+  )
+).join("\n");
+if (!financialWorksheetText.includes(receivableCustomer.name) || !financialWorksheetText.includes("Quitacao smoke")) {
+  throw new Error("XLSX nao registrou cliente e recebimentos da conta.");
 }
 
 const integratedExportStatus = await new PdvExporter(exportDir).exportSales(store.getSales({}), {}, [{

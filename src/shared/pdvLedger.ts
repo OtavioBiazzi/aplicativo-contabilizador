@@ -3,7 +3,7 @@ import type { LedgerEntry, PaymentMethod } from "./types.js";
 import { formatCurrency } from "./calculations.js";
 
 function pdvPaymentToLegacyMethod(method: PdvPaymentMethod): PaymentMethod {
-  if (method === "Nao definido" || method === "Outros") {
+  if (method === "Nao definido" || method === "Outros" || method === "Conta a receber") {
     return "Nao informado";
   }
   return method;

@@ -1,4 +1,4 @@
-export type PdvPaymentMethod = "Dinheiro" | "Debito" | "Credito" | "Pix" | "Outros" | "Nao definido";
+export type PdvPaymentMethod = "Dinheiro" | "Debito" | "Credito" | "Pix" | "Outros" | "Nao definido" | "Conta a receber";
 export type PdvTableStatus = "Livre" | "Ocupada" | "Fechamento" | "Reservada";
 export type PdvUnitMode = "unidade" | "kg" | "grama";
 
@@ -87,6 +87,69 @@ export interface PdvPayment {
   received?: number;
   change?: number;
   description?: string;
+  customerId?: string;
+  customerName?: string;
+  dueDate?: string;
+}
+
+export interface PdvCustomer {
+  id: string;
+  name: string;
+  document: string;
+  phone: string;
+  email: string;
+  address: string;
+  note: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface PdvCustomerDraft {
+  id?: string;
+  name: string;
+  document?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  note?: string;
+  active?: boolean;
+}
+
+export interface PdvReceivablePayment {
+  id: string;
+  receivableId: string;
+  createdAt: string;
+  method: Exclude<PdvPaymentMethod, "Conta a receber">;
+  amount: number;
+  received?: number;
+  change?: number;
+  description?: string;
+  originDevice?: string;
+  operationId?: string;
+}
+
+export interface PdvReceivable {
+  id: string;
+  saleId: string;
+  customerId: string;
+  customerName: string;
+  tableNumber?: number;
+  subtableName?: string;
+  createdAt: string;
+  dueDate?: string;
+  originalAmount: number;
+  receivedAmount: number;
+  balance: number;
+  status: "Em aberto" | "Parcialmente recebida" | "Recebida" | "Vencida" | "Cancelada";
+  note: string;
+  payments: PdvReceivablePayment[];
+}
+
+export interface PdvReceivablePatch {
+  dueDate?: string;
+  note?: string;
+  items?: PdvCartItem[];
+  payments?: PdvReceivablePayment[];
 }
 
 export interface PdvTransferSelection {
@@ -131,6 +194,8 @@ export interface PdvSnapshot {
   products: PdvProduct[];
   tables: PdvOpenTable[];
   recentSales: PdvSale[];
+  customers: PdvCustomer[];
+  receivables: PdvReceivable[];
   settings: PdvSettings;
   dataFile: string;
 }
@@ -158,6 +223,23 @@ export interface PdvSettings {
   groupComplementsWithProduct?: boolean;
   roundingStep?: number;
   roundingDirection?: "nearest" | "up" | "down";
+  receiptPaperWidth?: "58" | "80" | "a4" | "custom";
+  receiptCustomPaperWidthMm?: number;
+  receiptCustomPaperHeightMm?: number;
+  receiptAutoPrint?: boolean;
+  receiptPrinterName?: string;
+  receiptCopies?: number;
+  receiptLogoDataUrl?: string;
+  receiptShowLogo?: boolean;
+  receiptBusinessName?: string;
+  receiptBusinessDocument?: string;
+  receiptBusinessStateRegistration?: string;
+  receiptBusinessAddress?: string;
+  receiptBusinessPhone?: string;
+  receiptFooter?: string;
+  receiptAllowClientPrint?: boolean;
+  receiptGroupIdenticalItems?: boolean;
+  receiptUseColor?: boolean;
 }
 
 export interface PdvProductImportResult {

@@ -24,6 +24,7 @@ import {
   PlugZap,
   Plus,
   RadioTower,
+  ReceiptText,
   RefreshCw,
   RotateCcw,
   Save,
@@ -34,6 +35,7 @@ import {
   Trash2,
   Undo2,
   Upload,
+  Users,
   Utensils,
   Wallet,
   Wifi,
@@ -41,8 +43,8 @@ import {
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
 import { PdvApp } from "./PdvApp";
-import type { PdvAdvancedSettingsActions } from "./PdvApp";
-import type { PdvSale, PdvSnapshot } from "./shared/pdvTypes";
+import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
+import type { PdvCustomer, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
 import {
   buildReportDataset,
   createReportRecords,
@@ -76,12 +78,13 @@ import type {
   QuickTabSettings,
   RemoteClientPolicy,
   RoundDirection,
+  ServerDevice,
   ServerPermissions,
   ServerState,
   UpdateInfo
 } from "./shared/types";
 
-type TabKey = "sale" | "tables" | "history" | "reports" | "server" | "settings";
+type TabKey = "sale" | "tables" | "history" | "clients" | "reports" | "server" | "settings";
 type SettingsCategory =
   | "appearance"
   | "operation"
@@ -92,6 +95,8 @@ type SettingsCategory =
   | "files"
   | "pdv"
   | "pdvTables"
+  | "pdvOperation"
+  | "printing"
   | "privacy"
   | "server"
   | "shortcuts"
@@ -160,6 +165,7 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
   { key: "sale", label: "Venda", icon: Send },
   { key: "tables", label: "Mesas", icon: LayoutPanelTop },
   { key: "history", label: "Historico", icon: History },
+  { key: "clients", label: "Clientes", icon: Users },
   { key: "reports", label: "Relatorios", icon: BarChart3 },
   { key: "server", label: "Rede", icon: Server },
   { key: "settings", label: "Ajuste", icon: Settings }
@@ -184,6 +190,31 @@ interface StoredHistoryFilters {
   minimumValue: string;
   maximumValue: string;
   originFilter: string;
+}
+
+interface RemoteSocketMessage {
+  type?: string;
+  jobId?: string;
+  sale?: PdvSale;
+  customer?: PdvCustomer;
+  receivable?: PdvReceivable;
+  customerName?: string;
+  customerDocument?: string;
+}
+
+function formatCpfCnpj(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 14);
+  if (digits.length <= 11) {
+    return digits
+      .replace(/^(\d{3})(\d)/, "$1.$2")
+      .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+      .replace(/\.(\d{3})(\d)/, ".$1-$2");
+  }
+  return digits
+    .replace(/^(\d{2})(\d)/, "$1.$2")
+    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1/$2")
+    .replace(/(\d{4})(\d)/, "$1-$2");
 }
 
 function loadHistoryFilters(rememberPeriod = false): StoredHistoryFilters {
@@ -1059,6 +1090,10 @@ export function App() {
   const [server, setServer] = useState<ServerState | null>(null);
   const [pdvSnapshot, setPdvSnapshot] = useState<PdvSnapshot | null>(null);
   const [remotePdvSales, setRemotePdvSales] = useState<PdvSale[]>([]);
+  const [remotePdvCustomers, setRemotePdvCustomers] = useState<PdvCustomer[]>([]);
+  const [remotePdvReceivables, setRemotePdvReceivables] = useState<PdvReceivable[]>([]);
+  const [remotePdvSnapshot, setRemotePdvSnapshot] = useState<PdvSnapshot | null>(null);
+  const remotePdvSalesRef = useRef<PdvSale[]>([]);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sale");
   const [pdvViewNonce, setPdvViewNonce] = useState(0);
@@ -1078,14 +1113,20 @@ export function App() {
   const [remoteSession, setRemoteSession] = useState<RemoteClientSession | null>(null);
   const [remoteMessage, setRemoteMessage] = useState("");
   const [remoteLoading, setRemoteLoading] = useState(false);
-  const [remotePdvNonce, setRemotePdvNonce] = useState(0);
   const remoteSocket = useRef<WebSocket | null>(null);
   const remoteSessionRef = useRef<RemoteClientSession | null>(null);
   const remoteManualDisconnect = useRef(false);
   const remoteReconnectTimer = useRef<number | null>(null);
   const remoteReconnectAttempt = useRef(0);
   const remotePdvRefreshTimer = useRef<number | null>(null);
-  const remotePdvSignature = useRef("");
+  const appReloadInFlight = useRef<Promise<void> | null>(null);
+  const appReloadQueued = useRef(false);
+  const appReloadTimer = useRef<number | null>(null);
+  const pdvReloadInFlight = useRef<Promise<void> | null>(null);
+  const pdvReloadQueued = useRef(false);
+  const pdvReloadTimer = useRef<number | null>(null);
+  const remotePdvRefreshInFlight = useRef<Promise<void> | null>(null);
+  const remotePdvRefreshQueued = useRef(false);
   const autoConnectionAttemptKey = useRef<string | null>(null);
 
   useEffect(() => {
@@ -1105,28 +1146,97 @@ export function App() {
   const summary = useMemo(() => summarizeEntries(todayEntries), [todayEntries]);
 
   const reload = async () => {
-    const [snapshot, pdv] = await Promise.all([
+    if (appReloadInFlight.current) {
+      appReloadQueued.current = true;
+      return appReloadInFlight.current;
+    }
+    const request = Promise.all([
       window.caixa.getSnapshot(),
-      window.caixa.getPdvSnapshot()
-    ]);
-    setEntries(snapshot.entries);
-    setPdvSnapshot(pdv);
-    setSettings((current) =>
-      current && JSON.stringify(current) === JSON.stringify(snapshot.settings) ? current : snapshot.settings
-    );
-    setServer(snapshot.server);
-    setExportStatus(snapshot.exportStatus);
-    setPinnedState(await window.caixa.getPinned());
+      window.caixa.getPdvSnapshot(),
+      window.caixa.getPinned()
+    ]).then(([snapshot, pdv, nextPinned]) => {
+      setEntries(snapshot.entries);
+      setPdvSnapshot(pdv);
+      setSettings((current) =>
+        current && JSON.stringify(current) === JSON.stringify(snapshot.settings) ? current : snapshot.settings
+      );
+      setServer(snapshot.server);
+      setExportStatus(snapshot.exportStatus);
+      setPinnedState(nextPinned);
+    });
+    appReloadInFlight.current = request;
+    try {
+      await request;
+    } finally {
+      appReloadInFlight.current = null;
+      if (appReloadQueued.current) {
+        appReloadQueued.current = false;
+        void reload();
+      }
+    }
+  };
+
+  const scheduleReload = () => {
+    if (appReloadTimer.current !== null) {
+      window.clearTimeout(appReloadTimer.current);
+    }
+    appReloadTimer.current = window.setTimeout(() => {
+      appReloadTimer.current = null;
+      void reload();
+    }, 50);
+  };
+
+  const reloadPdv = async () => {
+    if (pdvReloadInFlight.current) {
+      pdvReloadQueued.current = true;
+      return pdvReloadInFlight.current;
+    }
+    const request = window.caixa.getPdvSnapshot(300).then((next) => {
+      setPdvSnapshot((current) => {
+        if (!current) return next;
+        const recentSales = [...new Map([...current.recentSales, ...next.recentSales].map((sale) => [sale.id, sale])).values()]
+          .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+        return { ...next, recentSales };
+      });
+    });
+    pdvReloadInFlight.current = request;
+    try {
+      await request;
+    } finally {
+      pdvReloadInFlight.current = null;
+      if (pdvReloadQueued.current) {
+        pdvReloadQueued.current = false;
+        void reloadPdv();
+      }
+    }
+  };
+
+  const schedulePdvReload = () => {
+    if (pdvReloadTimer.current !== null) {
+      window.clearTimeout(pdvReloadTimer.current);
+    }
+    pdvReloadTimer.current = window.setTimeout(() => {
+      pdvReloadTimer.current = null;
+      void reloadPdv();
+    }, 50);
   };
 
   useEffect(() => {
     reload();
-    const offEntries = window.caixa.onEntriesChanged(reload);
+    const offEntries = window.caixa.onEntriesChanged(scheduleReload);
     const offServer = window.caixa.onServerChanged((state) => setServer(state));
     const offPinned = window.caixa.onPinnedChanged((nextPinned) => setPinnedState(nextPinned));
     const offSettings = window.caixa.onSettingsChanged((nextSettings) => setSettings(nextSettings));
-    const offPdv = window.caixa.onPdvChanged(reload);
+    const offPdv = window.caixa.onPdvChanged(schedulePdvReload);
     return () => {
+      if (appReloadTimer.current !== null) {
+        window.clearTimeout(appReloadTimer.current);
+        appReloadTimer.current = null;
+      }
+      if (pdvReloadTimer.current !== null) {
+        window.clearTimeout(pdvReloadTimer.current);
+        pdvReloadTimer.current = null;
+      }
       offEntries();
       offServer();
       offPinned();
@@ -1138,6 +1248,10 @@ export function App() {
   useEffect(() => {
     remoteSessionRef.current = remoteSession;
   }, [remoteSession]);
+
+  useEffect(() => window.caixa.onRemoteReceiptPrintResult((result) => {
+    showToast(result.ok ? "success" : "error", `${result.deviceName}: ${result.message}`);
+  }), []);
 
   useEffect(() => {
     setTotalMenuOpen(false);
@@ -1402,16 +1516,65 @@ export function App() {
     };
     remoteSocket.current.onmessage = (event) => {
       let isPdvChange = false;
+      let receiptJob: RemoteSocketMessage | null = null;
       try {
-        const message = JSON.parse(String(event.data || "{}")) as { type?: string };
+        const message = JSON.parse(String(event.data || "{}")) as RemoteSocketMessage;
         if (message.type === "pdv-changed") {
           isPdvChange = true;
+        } else if (message.type === "receipt-print-request") {
+          receiptJob = message;
         }
       } catch {
         // Mensagens antigas podem nao ser JSON valido.
       }
       const current = remoteSessionRef.current;
       if (current) {
+        if (receiptJob?.jobId && receiptJob.sale) {
+          const socket = remoteSocket.current;
+          const job = receiptJob;
+          void (async () => {
+            let ok = false;
+            let resultMessage = "Nao foi possivel imprimir o recibo.";
+            try {
+              if (!current.permissions.printReceipts) {
+                throw new Error("O servidor nao permitiu impressao neste cliente.");
+              }
+              const [printers, localPdv] = await Promise.all([
+                window.caixa.listPdvPrinters(),
+                window.caixa.getPdvSnapshot()
+              ]);
+              const configured = localPdv.settings.receiptPrinterName;
+              const printer = printers.find((item) => item.name === configured)
+                || printers.find((item) => item.isDefault)
+                || printers[0];
+              if (!printer) {
+                throw new Error("Nenhuma impressora foi encontrada neste computador.");
+              }
+              const result = await window.caixa.printPdvReceipt(job.sale!, job.customer, job.receivable, {
+                customerName: job.customerName,
+                customerDocument: job.customerDocument,
+                action: "print",
+                printerName: printer.name
+              });
+              ok = result.ok;
+              resultMessage = result.message;
+              showToast(result.ok ? "success" : "error", result.message);
+            } catch (error) {
+              resultMessage = error instanceof Error ? error.message : resultMessage;
+              showToast("error", resultMessage);
+            }
+            if (socket?.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({
+                type: "receipt-print-result",
+                jobId: job.jobId,
+                ok,
+                message: resultMessage,
+                deviceName: current.deviceName
+              }));
+            }
+          })();
+          return;
+        }
         if (isPdvChange) {
           if (remotePdvRefreshTimer.current !== null) {
             window.clearTimeout(remotePdvRefreshTimer.current);
@@ -1419,7 +1582,7 @@ export function App() {
           // Agrupa eventos consecutivos de mesa sem mudar o protocolo da conexao.
           remotePdvRefreshTimer.current = window.setTimeout(() => {
             remotePdvRefreshTimer.current = null;
-            void refreshRemote(current).catch((error) => {
+            void refreshRemotePdv(current).catch((error) => {
               setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar o cliente remoto.");
             });
           }, 80);
@@ -1441,18 +1604,49 @@ export function App() {
     };
   };
 
+  const applyRemotePdvSnapshot = (pdv: PdvSnapshot, incremental = false) => {
+    const sales = incremental
+      ? [...new Map([...pdv.recentSales, ...remotePdvSalesRef.current].map((sale) => [sale.id, sale])).values()]
+      : pdv.recentSales;
+    const snapshotWithSales = { ...pdv, recentSales: sales };
+    remotePdvSalesRef.current = sales;
+    setRemotePdvSnapshot(snapshotWithSales);
+    setRemotePdvSales(sales);
+    setRemotePdvCustomers(pdv.customers);
+    setRemotePdvReceivables(pdv.receivables);
+  };
+
+  const refreshRemotePdv = async (session = remoteSessionRef.current) => {
+    if (!session) return;
+    if (remotePdvRefreshInFlight.current) {
+      remotePdvRefreshQueued.current = true;
+      return remotePdvRefreshInFlight.current;
+    }
+    const request = remoteRequest<PdvSnapshot>(session, "/api/pdv/snapshot?salesLimit=300")
+      .then((pdv) => applyRemotePdvSnapshot(pdv, true));
+    remotePdvRefreshInFlight.current = request;
+    try {
+      await request;
+    } finally {
+      remotePdvRefreshInFlight.current = null;
+      if (remotePdvRefreshQueued.current) {
+        remotePdvRefreshQueued.current = false;
+        void refreshRemotePdv(remoteSessionRef.current).catch((error) => {
+          setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel concluir a atualizacao remota.");
+        });
+      }
+    }
+  };
+
   const refreshRemote = async (session = remoteSessionRef.current) => {
     if (!session || !settings) {
       return;
     }
-    const data = await remoteRequest<RemoteEntriesResponse>(session, REMOTE_ENTRY_LIMIT ? `/api/entries?limit=${REMOTE_ENTRY_LIMIT}` : "/api/entries");
-    const pdv = await remoteRequest<PdvSnapshot>(session, "/api/pdv/snapshot");
-    const signature = JSON.stringify(pdv);
-    if (signature !== remotePdvSignature.current) {
-      remotePdvSignature.current = signature;
-      setRemotePdvNonce((nonce) => nonce + 1);
-    }
-    setRemotePdvSales(pdv.recentSales);
+    const [data, pdv] = await Promise.all([
+      remoteRequest<RemoteEntriesResponse>(session, REMOTE_ENTRY_LIMIT ? `/api/entries?limit=${REMOTE_ENTRY_LIMIT}` : "/api/entries"),
+      remoteRequest<PdvSnapshot>(session, "/api/pdv/snapshot")
+    ]);
+    applyRemotePdvSnapshot(pdv);
     const nextSession = {
       ...session,
       entries: data.entries,
@@ -1470,12 +1664,13 @@ export function App() {
   useEffect(() => {
     if (!remoteSession) return;
     const interval = window.setInterval(() => {
+      if (remoteSocket.current?.readyState === WebSocket.OPEN) return;
       const current = remoteSessionRef.current;
       if (!current) return;
       void refreshRemote(current).catch((error) => {
         setRemoteMessage(error instanceof Error ? error.message : "Sincronizacao em tempo real temporariamente indisponivel.");
       });
-    }, 3000);
+    }, 5000);
     return () => window.clearInterval(interval);
   }, [remoteSession?.baseUrl, remoteSession?.password]);
 
@@ -1518,6 +1713,7 @@ export function App() {
           delete: false,
           viewEntryValues: false,
           viewTotals: false,
+          printReceipts: false,
           allowClientCustomization: false
         },
         clientPolicy: clientPolicyFromSettings(settings),
@@ -1525,8 +1721,7 @@ export function App() {
       };
       const data = await remoteRequest<RemoteEntriesResponse>(pendingSession, `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`);
       const remotePdv = await remoteRequest<PdvSnapshot>(pendingSession, "/api/pdv/snapshot");
-      remotePdvSignature.current = JSON.stringify(remotePdv);
-      setRemotePdvSales(remotePdv.recentSales);
+      applyRemotePdvSnapshot(remotePdv);
       const connectedSession: RemoteClientSession = {
         ...pendingSession,
         entries: data.entries,
@@ -1576,10 +1771,15 @@ export function App() {
       window.clearTimeout(remotePdvRefreshTimer.current);
       remotePdvRefreshTimer.current = null;
     }
+    remotePdvRefreshQueued.current = false;
     socket?.close();
     remoteSocket.current = null;
     remoteSessionRef.current = null;
-    remotePdvSignature.current = "";
+    remotePdvSalesRef.current = [];
+    setRemotePdvSales([]);
+    setRemotePdvCustomers([]);
+    setRemotePdvReceivables([]);
+    setRemotePdvSnapshot(null);
     setRemoteSession(null);
     remoteReconnectAttempt.current = 0;
     setRemoteMessage("");
@@ -1858,7 +2058,7 @@ export function App() {
   const effectiveOperationMode = remoteSession?.clientPolicy.operationMode || settings.operationMode;
   const legacyMode = effectiveOperationMode === "legacy";
   const visibleTabItems = TAB_ITEMS.filter((item) => {
-    if (legacyMode && item.key === "tables") {
+    if (legacyMode && (item.key === "tables" || item.key === "clients")) {
       return false;
     }
     return true;
@@ -1966,7 +2166,7 @@ export function App() {
 
       </aside>
 
-      <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : ""}`}>
+      <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>
         {!pdvMainTab && <header className="workspace-header">
           <div>
             <span className="eyebrow">{header.eyebrow}</span>
@@ -1988,13 +2188,23 @@ export function App() {
               remoteSession={remoteSession ? {
                 ...remoteSession,
                 roundingStep: effectiveRemotePolicy?.defaultRoundingStep,
-                roundingDirection: effectiveRemotePolicy?.defaultRoundingDirection
+                roundingDirection: effectiveRemotePolicy?.defaultRoundingDirection,
+                allowPrint: remoteSession.permissions.printReceipts,
+                allowEdit: remoteSession.permissions.edit,
+                snapshot: remotePdvSnapshot
               } : null}
               roundingStep={settings.defaultRoundingStep}
               roundingDirection={settings.defaultRoundingDirection}
               toastDuration={settings.notificationDurationMs}
               onDirectCartChange={setPdvDirectCartActive}
-              reloadToken={remotePdvNonce}
+              snapshotOverride={remoteSession ? remotePdvSnapshot : pdvSnapshot}
+              receiptPrintTargets={remoteSession
+                ? (remoteSession.permissions.printReceipts ? [{ id: "server", label: "Computador servidor" }] : [])
+                : server.devices.filter((device) => device.permissions.printReceipts).map((device) => ({ id: device.id, label: device.name }))}
+              onRemoteReceiptPrint={remoteSession
+                ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) })
+                : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)}
+              onNavigateMain={(tab) => requestNavigation(tab)}
             />
           </div>
         )}
@@ -2031,6 +2241,14 @@ export function App() {
             }}
             onToast={showToast}
             pdvSales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []}
+            pdvCustomers={remoteSession ? remotePdvCustomers : pdvSnapshot?.customers || []}
+            pdvReceivables={remoteSession ? remotePdvReceivables : pdvSnapshot?.receivables || []}
+            pdvSettings={remoteSession ? remotePdvSnapshot?.settings : pdvSnapshot?.settings}
+            printDevices={remoteSession ? [] : server.devices.filter((device) => device.permissions.printReceipts)}
+            onPrintServer={remoteSession?.permissions.printReceipts ? (payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", {
+              method: "POST",
+              body: JSON.stringify(payload)
+            }) : undefined}
             onEditRemote={remoteSession ? editRemoteEntry : undefined}
             onCancelRemote={remoteSession ? cancelRemoteEntry : undefined}
             onDeleteRemote={remoteSession ? deleteRemoteEntry : undefined}
@@ -2043,8 +2261,36 @@ export function App() {
           />
         )}
 
+        {activeTab === "clients" && (
+          <div className="pdv-module-panel clients-main-panel">
+            <PdvApp
+              embedded
+              initialTab="history"
+              initialHistoryView="customers"
+              hideTopbar
+              snapshotOverride={remoteSession ? remotePdvSnapshot : pdvSnapshot}
+              remoteSession={remoteSession ? {
+                ...remoteSession,
+                roundingStep: effectiveRemotePolicy?.defaultRoundingStep,
+                roundingDirection: effectiveRemotePolicy?.defaultRoundingDirection,
+                allowPrint: remoteSession.permissions.printReceipts,
+                allowEdit: remoteSession.permissions.edit,
+                snapshot: remotePdvSnapshot
+              } : null}
+              toastDuration={settings.notificationDurationMs}
+              receiptPrintTargets={remoteSession
+                ? (remoteSession.permissions.printReceipts ? [{ id: "server", label: "Computador servidor" }] : [])
+                : server.devices.filter((device) => device.permissions.printReceipts).map((device) => ({ id: device.id, label: device.name }))}
+              onRemoteReceiptPrint={remoteSession
+                ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) })
+                : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)}
+              onNavigateMain={(tab) => requestNavigation(tab)}
+            />
+          </div>
+        )}
+
         {activeTab === "reports" && (
-            <ProfessionalReportsPanel entries={remoteSession ? displayEntries : combinedEntries} pdvSales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
+            <ProfessionalReportsPanel entries={remoteSession ? displayEntries : combinedEntries} pdvSales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []} receivables={remoteSession ? remotePdvReceivables : pdvSnapshot?.receivables || []} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
               if (remoteSession) {
                 showToast("info", "A pasta de Excel deve ser aberta no computador servidor.");
                 return;
@@ -2948,7 +3194,12 @@ function HistoryPanel({
   onCancelRemote,
   onDeleteRemote,
   onRestoreRemote,
-  pdvSales
+  pdvSales,
+  pdvCustomers,
+  pdvReceivables,
+  pdvSettings,
+  printDevices = [],
+  onPrintServer
 }: {
   entries: LedgerEntry[];
   settings: AppSettings;
@@ -2960,6 +3211,11 @@ function HistoryPanel({
   onDeleteRemote?: (entry: LedgerEntry, permanent?: boolean) => Promise<void>;
   onRestoreRemote?: (entry: LedgerEntry) => Promise<void>;
   pdvSales: PdvSale[];
+  pdvCustomers: PdvCustomer[];
+  pdvReceivables: PdvReceivable[];
+  pdvSettings?: PdvSettings;
+  printDevices?: ServerDevice[];
+  onPrintServer?: (payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
 }) {
   const savedFilters = useMemo(() => loadHistoryFilters(settings.rememberHistoryPeriod), []);
   const [query, setQuery] = useState(savedFilters.query);
@@ -2973,6 +3229,7 @@ function HistoryPanel({
   const [originFilter, setOriginFilter] = useState(savedFilters.originFilter);
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const [details, setDetails] = useState<PdvSale | null>(null);
+  const [receiptSale, setReceiptSale] = useState<PdvSale | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ entry: LedgerEntry; permanent: boolean } | null>(null);
   const [visibleCount, setVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const deferredQuery = useDeferredValue(query);
@@ -3012,16 +3269,6 @@ function HistoryPanel({
     const maximum = parseOptionalHistoryValue(maximumValue);
     return entries.filter((entry) => {
       const sale = entry.sourceSaleId ? pdvSaleById.get(entry.sourceSaleId) : undefined;
-      const haystack = [
-        entry.description,
-        entry.tableNumber ? `Mesa ${entry.tableNumber}` : "",
-        entry.busNumber ? `Onibus ${entry.busNumber}` : "",
-        entry.observations,
-        entry.originDevice,
-        paymentLabelForEntry(entry),
-        ...(sale?.items.flatMap((item) => [item.productName, item.categoryName, item.note, item.subtableName, ...(item.complements || []).map((part) => part.name)]) || []),
-        ...(sale?.payments.flatMap((item) => [item.method, item.description]) || [])
-      ].join(" ").toLocaleLowerCase("pt-BR");
       const sameType = type === "Todos" || entry.type === type;
       const sameStatus =
         statusFilter === "todos" ||
@@ -3034,16 +3281,38 @@ function HistoryPanel({
       const sameOrigin = originFilter === "Todos" || entry.originDevice === originFilter;
       const samePayment = paymentFilter === "Todos" || entry.paymentMethod === paymentFilter || Boolean(entry.paymentBreakdown?.some((item) => item.method === paymentFilter));
       const sameValue = (minimum === null || entry.finalValue >= minimum) && (maximum === null || entry.finalValue <= maximum);
-      return sameType && sameStatus && sameDate && sameOrigin && samePayment && sameValue && haystack.includes(search);
+      if (!sameType || !sameStatus || !sameDate || !sameOrigin || !samePayment || !sameValue) {
+        return false;
+      }
+      if (!search) {
+        return true;
+      }
+      const haystack = [
+        entry.description,
+        entry.tableNumber ? `Mesa ${entry.tableNumber}` : "",
+        entry.busNumber ? `Onibus ${entry.busNumber}` : "",
+        entry.observations,
+        entry.originDevice,
+        paymentLabelForEntry(entry),
+        ...(sale?.items.flatMap((item) => [item.productName, item.categoryName, item.note, item.subtableName, ...(item.complements || []).map((part) => part.name)]) || []),
+        ...(sale?.payments.flatMap((item) => [item.method, item.description]) || [])
+      ].join(" ").toLocaleLowerCase("pt-BR");
+      return haystack.includes(search);
     });
   }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, pdvSaleById]);
   const visibleRows = filtered.slice(0, visibleCount);
-  const filteredSummary = useMemo(() => ({
-    active: filtered.filter((entry) => entry.status === "active"),
-    cancelled: filtered.filter((entry) => entry.status === "cancelled").length,
-    deleted: filtered.filter((entry) => entry.status === "deleted").length
-  }), [filtered]);
-  const filteredTotal = useMemo(() => roundMoney(filteredSummary.active.reduce((sum, entry) => sum + entry.finalValue, 0)), [filteredSummary.active]);
+  const filteredSummary = useMemo(() => filtered.reduce((summary, entry) => {
+    if (entry.status === "active") {
+      summary.active += 1;
+      summary.activeTotal += entry.finalValue;
+    } else if (entry.status === "cancelled") {
+      summary.cancelled += 1;
+    } else if (entry.status === "deleted") {
+      summary.deleted += 1;
+    }
+    return summary;
+  }, { active: 0, activeTotal: 0, cancelled: 0, deleted: 0 }), [filtered]);
+  const filteredTotal = roundMoney(filteredSummary.activeTotal);
 
   useEffect(() => {
     setVisibleCount(HISTORY_PAGE_SIZE);
@@ -3060,12 +3329,17 @@ function HistoryPanel({
   };
 
   const openSaleDetails = (entry: LedgerEntry) => {
-    const sale = pdvSales.find((item) => item.id === entry.sourceSaleId);
+    const sale = entry.sourceSaleId ? pdvSaleById.get(entry.sourceSaleId) : undefined;
     if (!sale) {
       onToast("info", "Os detalhes dessa venda ainda nao foram carregados. Atualize o Historico e tente novamente.");
       return;
     }
     setDetails(sale);
+  };
+
+  const openReceipt = (entry: LedgerEntry) => {
+    const sale = entry.sourceSaleId ? pdvSaleById.get(entry.sourceSaleId) : undefined;
+    setReceiptSale(sale || ledgerEntryToReceiptSale(entry));
   };
 
   return (
@@ -3134,7 +3408,7 @@ function HistoryPanel({
 
       <div className="history-summary-strip">
         <div><span>Resultados</span><strong>{filtered.length}</strong></div>
-        <div><span>Ativos</span><strong>{filteredSummary.active.length}</strong></div>
+        <div><span>Ativos</span><strong>{filteredSummary.active}</strong></div>
         <div><span>Total filtrado</span><strong>{formatCurrency(filteredTotal)}</strong></div>
         <div><span>Cancelados</span><strong>{filteredSummary.cancelled}</strong></div>
         <div><span>Lixeira</span><strong>{filteredSummary.deleted}</strong></div>
@@ -3174,6 +3448,7 @@ function HistoryPanel({
                     <div className="row-actions">
                       <button title="Editar" onClick={() => onEditRemote ? void onEditRemote(entry) : setEditing(entry)}><Edit3 size={15} /></button>
                       {entry.sourceSaleId && <button className="history-sale-details-button" title="Ver produtos e pagamentos" aria-label="Ver produtos e pagamentos" onClick={() => openSaleDetails(entry)}><Eye size={15} /></button>}
+                      <button className="history-receipt-button" title="Gerar recibo ou cupom" aria-label="Gerar recibo ou cupom" onClick={() => openReceipt(entry)}><ReceiptText size={15} /></button>
                       <button title="Duplicar" onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
                       {entry.status === "deleted" || entry.status === "cancelled" ? (
                          <button title="Restaurar" onClick={() => run(() => onRestoreRemote ? onRestoreRemote(entry) : window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
@@ -3218,7 +3493,19 @@ function HistoryPanel({
           }}
         />
       )}
-      {details && <HistorySaleDetailModal sale={details} onClose={() => setDetails(null)} />}
+      {details && <HistorySaleDetailModal sale={details} onClose={() => setDetails(null)} onReceipt={() => setReceiptSale(details)} />}
+      {receiptSale && (
+        <HistoryReceiptModal
+          sale={receiptSale}
+          customers={pdvCustomers}
+          receivable={pdvReceivables.find((item) => item.saleId === receiptSale.id)}
+          receiptSettings={pdvSettings}
+          printDevices={printDevices}
+          onPrintServer={onPrintServer}
+          onClose={() => setReceiptSale(null)}
+          onToast={onToast}
+        />
+      )}
       {confirmDelete && (
         <HistoryDeleteConfirmModal
           permanent={confirmDelete.permanent}
@@ -3262,7 +3549,7 @@ function HistoryDeleteConfirmModal({ permanent, onCancel, onConfirm }: { permane
   );
 }
 
-function HistorySaleDetailModal({ sale, onClose }: { sale: PdvSale; onClose: () => void }) {
+function HistorySaleDetailModal({ sale, onClose, onReceipt }: { sale: PdvSale; onClose: () => void; onReceipt: () => void }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -3300,7 +3587,12 @@ function HistorySaleDetailModal({ sale, onClose }: { sale: PdvSale; onClose: () 
             <strong>Itens</strong>
             {sale.items.map((item) => (
               <div key={item.id}>
-                <span>{item.quantity}x {item.productName}{item.complements?.length ? ` + ${item.complements.map((part) => part.name).join(" + ")}` : ""}</span>
+                <span>
+                  {item.quantity}x {item.productName}{item.complements?.length ? ` + ${item.complements.map((part) => part.name).join(" + ")}` : ""}
+                  {(item.discount > 0 || (item.baseUnitPrice && Math.abs(item.baseUnitPrice - item.unitPrice) > 0.009)) && (
+                    <small>Original {formatCurrency((item.baseUnitPrice || item.unitPrice) * item.quantity)} | Desconto {formatCurrency(Math.max(0, (item.baseUnitPrice || item.unitPrice) * item.quantity - item.total))}</small>
+                  )}
+                </span>
                 <b>{formatCurrency(item.total)}</b>
               </div>
             ))}
@@ -3313,10 +3605,236 @@ function HistorySaleDetailModal({ sale, onClose }: { sale: PdvSale; onClose: () 
             ))}
           </div>
         </div>
-        <div className="submit-row"><button className="primary-button" onClick={onClose}>Fechar</button></div>
+        <div className="submit-row">
+          <button className="ghost-button" onClick={onReceipt}><ReceiptText size={16} /> Recibo</button>
+          <button className="primary-button" onClick={onClose}>Fechar</button>
+        </div>
       </div>
     </div>
   );
+}
+
+function HistoryReceiptModal({
+  sale,
+  customers,
+  receivable,
+  receiptSettings,
+  printDevices = [],
+  onPrintServer,
+  onClose,
+  onToast
+}: {
+  sale: PdvSale;
+  customers: PdvCustomer[];
+  receivable?: PdvReceivable;
+  receiptSettings?: PdvSettings;
+  printDevices?: ServerDevice[];
+  onPrintServer?: (payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
+  onClose: () => void;
+  onToast: (tone: ToastState["tone"], message: string) => void;
+}) {
+  const linkedCustomer = receivable ? customers.find((item) => item.id === receivable.customerId) : undefined;
+  const [customerId, setCustomerId] = useState(linkedCustomer?.id || "");
+  const [customerName, setCustomerName] = useState("");
+  const [customerDocument, setCustomerDocument] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [printers, setPrinters] = useState<Array<{ name: string; displayName: string; isDefault: boolean }>>([]);
+  const [printerName, setPrinterName] = useState("");
+  const [printDestination, setPrintDestination] = useState("local");
+  const selectedCustomer = customers.find((item) => item.id === customerId);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      window.caixa.getPdvReceiptPreview(sale, selectedCustomer, receivable, customerName.trim(), customerDocument.trim(), receiptSettings),
+      window.caixa.listPdvPrinters(),
+      window.caixa.getPdvSnapshot()
+    ]).then(([html, availablePrinters, snapshot]) => {
+      if (!active) return;
+      setPreviewHtml(html);
+      setPrinters(availablePrinters);
+      setPrinterName((current) => current || snapshot.settings.receiptPrinterName || availablePrinters.find((item) => item.isDefault)?.name || "");
+    });
+    return () => {
+      active = false;
+    };
+  }, [sale, selectedCustomer, receivable, customerName, customerDocument, receiptSettings]);
+
+  const generate = async (action: "open" | "save" | "print") => {
+    setBusy(true);
+    try {
+      if (action === "print" && printDestination !== "local") {
+        const payload = {
+          sale,
+          customer: selectedCustomer,
+          receivable,
+          customerName: customerName.trim(),
+          customerDocument: customerDocument.trim()
+        };
+        const result = printDestination === "server" && onPrintServer
+          ? await onPrintServer(payload)
+          : await window.caixa.requestRemotePdvReceiptPrint(printDestination, payload);
+        onToast(result.ok ? "success" : "error", result.message);
+        if (result.ok) onClose();
+        return;
+      }
+      const result = await window.caixa.printPdvReceipt(
+        sale,
+        selectedCustomer,
+        receivable,
+        { customerName: customerName.trim(), customerDocument: customerDocument.trim(), action, printerName, receiptSettings }
+      );
+      onToast(result.ok ? "success" : "error", result.message);
+      if (result.ok) onClose();
+    } catch (error) {
+      onToast("error", error instanceof Error ? error.message : "Nao foi possivel gerar o recibo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) {
+        event.preventDefault();
+        onClose();
+      } else if (event.key === "Enter" && !busy && !(event.target instanceof HTMLTextAreaElement)) {
+        event.preventDefault();
+        void generate("open");
+      }
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  });
+
+  return (
+    <div className="modal-backdrop receipt-modal-backdrop">
+      <div className="modal history-receipt-modal receipt-viewer-modal" role="dialog" aria-modal="true" aria-label="Gerar recibo">
+        <div className="modal-head">
+          <div>
+            <span className="settings-overline">Recibo nao fiscal</span>
+            <strong>{sale.tableNumber ? `Mesa ${String(sale.tableNumber).padStart(3, "0")}` : "Venda"}</strong>
+            <p>{new Date(sale.createdAt).toLocaleString("pt-BR")} | {formatCurrency(sale.total)}</p>
+          </div>
+          <button className="icon-button" onClick={onClose} disabled={busy}><X size={18} /></button>
+        </div>
+        <div className="history-receipt-body receipt-viewer-body">
+          <div className="receipt-preview-shell">
+            {previewHtml
+              ? <iframe title="Pre-visualizacao do recibo" srcDoc={previewHtml} className="receipt-preview-frame" />
+              : <div className="receipt-preview-loading">Gerando visualizacao...</div>}
+          </div>
+          <div className="receipt-viewer-options">
+            <label className="field">
+              <span>Cliente cadastrado (opcional)</span>
+              <select value={customerId} onChange={(event) => {
+                setCustomerId(event.target.value);
+                if (event.target.value) {
+                  setCustomerName("");
+                  setCustomerDocument("");
+                }
+              }}>
+                <option value="">Consumidor nao identificado</option>
+                {customers.filter((item) => item.active || item.id === linkedCustomer?.id).map((customer) => (
+                  <option value={customer.id} key={customer.id}>{customer.name}</option>
+                ))}
+              </select>
+            </label>
+            {!customerId && <label className="field">
+              <span>CPF/CNPJ somente neste recibo</span>
+              <input
+                value={customerDocument}
+                onChange={(event) => setCustomerDocument(formatCpfCnpj(event.target.value))}
+                inputMode="numeric"
+                placeholder="Opcional"
+              />
+            </label>}
+            <label className="field">
+              <span>Ou informe somente um nome</span>
+              <input
+                value={customerName}
+                onChange={(event) => {
+                  setCustomerName(event.target.value);
+                  if (event.target.value) setCustomerId("");
+                }}
+                placeholder="Ex.: Joao, Familia Silva..."
+                autoFocus={!linkedCustomer}
+              />
+            </label>
+            <label className="field">
+              <span>Imprimir em</span>
+              <select value={printDestination} onChange={(event) => setPrintDestination(event.target.value)}>
+                <option value="local">Este computador</option>
+                {onPrintServer && <option value="server">Computador servidor</option>}
+                {printDevices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+              </select>
+            </label>
+            {printDestination === "local" && <label className="field">
+              <span>Impressora</span>
+              <select value={printerName} onChange={(event) => setPrinterName(event.target.value)}>
+                <option value="">Nenhuma impressora configurada</option>
+                {printers.map((printer) => <option key={printer.name} value={printer.name}>{printer.displayName}{printer.isDefault ? " (Padrao)" : ""}</option>)}
+              </select>
+            </label>}
+            {printDestination === "local" && !printers.length && <p className="receipt-printer-warning">O Windows nao informou impressoras disponíveis. O PDF continua funcionando normalmente.</p>}
+            <p className="settings-note">O recibo inclui itens, pagamentos, troco e dados da conta a receber quando existirem.</p>
+          </div>
+        </div>
+        <div className="modal-actions receipt-modal-actions">
+          <button className="ghost-button" onClick={onClose} disabled={busy}>Cancelar</button>
+          <button className="ghost-button" onClick={() => void generate("save")} disabled={busy}><Download size={16} /> Salvar PDF</button>
+          <button className="ghost-button" onClick={() => void generate("open")} disabled={busy}><Eye size={16} /> Abrir PDF</button>
+          <button className="primary-button" onClick={() => void generate("print")} disabled={busy || (printDestination === "local" && !printerName)}><ReceiptText size={16} /> {busy ? "Enviando..." : "Imprimir agora"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ledgerEntryToReceiptSale(entry: LedgerEntry): PdvSale {
+  const paymentMethod = (value: PaymentMethod): PdvPaymentMethod => {
+    if (value === "Nao informado") return "Nao definido";
+    if (value === "Voucher" || value === "Misto") return "Outros";
+    return value;
+  };
+  const payments = entry.paymentBreakdown?.length
+    ? entry.paymentBreakdown.map((part, index) => ({
+        id: `${entry.id}-payment-${index}`,
+        method: paymentMethod(part.method),
+        amount: part.amount
+      }))
+    : [{
+        id: `${entry.id}-payment`,
+        method: paymentMethod(entry.paymentMethod),
+        amount: entry.finalValue,
+        received: entry.paymentMethod === "Dinheiro" ? entry.paidWith || entry.finalValue : undefined,
+        change: entry.paymentMethod === "Dinheiro" ? entry.change || undefined : undefined
+      }];
+  return {
+    id: entry.id,
+    createdAt: entry.createdAt,
+    type: entry.type === "Mesa" ? "Mesa" : entry.type === "Onibus" ? "Onibus" : "Venda direta",
+    tableNumber: Number(entry.tableNumber) || undefined,
+    status: entry.status === "cancelled" ? "Cancelada" : entry.status === "deleted" ? "deleted" : "Finalizada",
+    subtotal: entry.originalValue,
+    discount: Math.max(0, entry.originalValue - entry.finalValue),
+    total: entry.finalValue,
+    description: entry.description,
+    observations: entry.observations,
+    originDevice: entry.originDevice,
+    payments,
+    items: [{
+      id: `${entry.id}-item`,
+      productId: "legacy-entry",
+      productName: entry.description || entry.customType || entry.type,
+      categoryName: "Lancamento anterior",
+      quantity: 1,
+      unitPrice: entry.finalValue,
+      discount: 0,
+      total: entry.finalValue
+    }]
+  };
 }
 
 function ImportPreviewModal({
@@ -3523,11 +4041,12 @@ function EditEntryModal({
   );
 }
 
-type ProfessionalReportTab = "overview" | "products" | "payments" | "tables" | "times" | "audit";
+type ProfessionalReportTab = "overview" | "products" | "payments" | "accounts" | "tables" | "times" | "audit";
 
 function ProfessionalReportsPanel({
   entries,
   pdvSales,
+  receivables,
   settings,
   exportStatus,
   remoteClientActive = false,
@@ -3541,6 +4060,7 @@ function ProfessionalReportsPanel({
 }: {
   entries: LedgerEntry[];
   pdvSales: PdvSale[];
+  receivables: PdvReceivable[];
   settings: AppSettings;
   summary: DaySummary;
   exportStatus: ExportStatus | null;
@@ -3607,6 +4127,16 @@ function ProfessionalReportsPanel({
   }, [catalogProducts, category, deferredProductQuery]);
   const exportIds = filteredRecords.map((record) => record.source === "pdv" ? `pdv-${record.id}` : record.id);
   const exportLabel = [from || "inicio", to || "hoje", type, payment, tab].join("-").replace(/\s+/g, "-").toLowerCase();
+  const dateIsInRange = (value: string) => {
+    const key = getLocalDateKey(new Date(value));
+    return (!from || key >= from) && (!to || key <= to);
+  };
+  const periodReceivables = receivables.filter((item) => dateIsInRange(item.createdAt));
+  const periodReceipts = receivables.flatMap((item) => item.payments.map((receipt) => ({ ...receipt, receivable: item }))).filter((item) => dateIsInRange(item.createdAt));
+  const receivableIssued = roundMoney(periodReceivables.reduce((sum, item) => sum + item.originalAmount, 0));
+  const receivableBalance = roundMoney(receivables.filter((item) => item.status !== "Cancelada").reduce((sum, item) => sum + item.balance, 0));
+  const receivableReceived = roundMoney(periodReceipts.reduce((sum, item) => sum + item.amount, 0));
+  const overdueBalance = roundMoney(receivables.filter((item) => item.status === "Vencida").reduce((sum, item) => sum + item.balance, 0));
 
   useEffect(() => {
     setShowSensitive(canViewTotals && !settings.privacy.hideReportTotals);
@@ -3715,6 +4245,7 @@ function ProfessionalReportsPanel({
           ["overview", "Visao geral"],
           ["products", "Produtos"],
           ["payments", "Pagamentos"],
+          ["accounts", "Contas a receber"],
           ["tables", "Mesas e vendas"],
           ["times", "Horarios"],
           ["audit", "Auditoria"]
@@ -3841,6 +4372,52 @@ function ProfessionalReportsPanel({
             <ReportBars title="Venda por origem/caixa" rows={dataset.byOrigin} showValues={showTotals} />
             <ReportBars title="Tipos de atendimento" rows={dataset.byType} showValues={showTotals} />
           </div>
+        </div>
+      )}
+
+      {tab === "accounts" && (
+        <div className="professional-report-content">
+          <div className="report-kpi-grid">
+            <ProfessionalMetric label="Contas geradas" value={showTotals ? formatCurrency(receivableIssued) : "Restrito"} detail={`${periodReceivables.length} conta(s) no periodo`} />
+            <ProfessionalMetric label="Recebido no periodo" value={showTotals ? formatCurrency(receivableReceived) : "Restrito"} detail={`${periodReceipts.length} recebimento(s)`} />
+            <ProfessionalMetric label="Saldo em aberto" value={showTotals ? formatCurrency(receivableBalance) : "Restrito"} detail="Posicao atual da carteira" />
+            <ProfessionalMetric label="Saldo vencido" value={showTotals ? formatCurrency(overdueBalance) : "Restrito"} detail={`${receivables.filter((item) => item.status === "Vencida").length} conta(s) vencida(s)`} tone={overdueBalance ? "warning" : "normal"} />
+          </div>
+          <section className="professional-report-section">
+            <div className="section-title"><strong>Contas geradas no recorte</strong><span>Cliente, vencimento, recebido e saldo</span></div>
+            <div className="table-scroll">
+              <table className="professional-report-table">
+                <thead><tr><th>Data</th><th>Cliente</th><th>Origem</th><th>Vencimento</th><th>Status</th><th>Original</th><th>Recebido</th><th>Saldo</th></tr></thead>
+                <tbody>
+                  {periodReceivables.map((item) => (
+                    <tr key={item.id}>
+                      <td>{new Date(item.createdAt).toLocaleDateString("pt-BR")}</td>
+                      <td>{item.customerName}</td>
+                      <td>{item.tableNumber ? `Mesa ${item.tableNumber}${item.subtableName ? ` / ${item.subtableName}` : ""}` : "Venda"}</td>
+                      <td>{item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "-"}</td>
+                      <td>{item.status}</td>
+                      <td>{showTotals ? formatCurrency(item.originalAmount) : "Restrito"}</td>
+                      <td>{showTotals ? formatCurrency(item.receivedAmount) : "Restrito"}</td>
+                      <td><strong>{showTotals ? formatCurrency(item.balance) : "Restrito"}</strong></td>
+                    </tr>
+                  ))}
+                  {!periodReceivables.length && <tr><td colSpan={8}>Nenhuma conta criada neste periodo.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section className="professional-report-section">
+            <div className="section-title"><strong>Recebimentos do recorte</strong><span>Entradas efetivas por forma de pagamento</span></div>
+            <div className="professional-report-records">
+              {periodReceipts.map((item) => (
+                <article key={item.id}>
+                  <div><strong>{item.receivable.customerName}</strong><span>{new Date(item.createdAt).toLocaleString("pt-BR")} | {item.method}{item.description ? ` | ${item.description}` : ""}</span></div>
+                  <b>{showTotals ? formatCurrency(item.amount) : "Restrito"}</b>
+                </article>
+              ))}
+              {!periodReceipts.length && <p className="empty-text">Nenhum recebimento neste periodo.</p>}
+            </div>
+          </section>
         </div>
       )}
 
@@ -4693,7 +5270,7 @@ function ServerPanel({
             <span>Controla o que a pagina remota pode fazer</span>
           </div>
           <div className="permission-box permission-grid">
-            {(["view", "create", "manageTables", "manageProducts", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
+            {(["view", "create", "manageTables", "manageProducts", "edit", "delete", "viewEntryValues", "viewTotals", "printReceipts", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -4937,7 +5514,7 @@ function SettingsPanel({
   const [pdvSettingsDirty, setPdvSettingsDirty] = useState(false);
   const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
   const effectiveSettingsOperationMode = remoteSession?.clientPolicy.operationMode || draft.operationMode;
-  const remoteLockedCategoryList: SettingsCategory[] = ["operation", "defaults", "profiles", "files", "server", "advanced"];
+  const remoteLockedCategoryList: SettingsCategory[] = ["operation", "defaults", "profiles", "files", "pdv", "pdvTables", "pdvOperation", "printing", "server", "advanced"];
   const remoteLockedCategories = new Set<SettingsCategory>(remoteLockedCategoryList);
   const remoteLockMessage = "So o computador servidor pode editar essa parte enquanto este app esta conectado como cliente. Desconecte do servidor para editar as configuracoes locais deste PC.";
 
@@ -5382,7 +5959,9 @@ function SettingsPanel({
     { key: "floating", label: "Barra fixa", description: "Janela flutuante, tamanho, posicao, campos e tema do Caixa Classico.", icon: Pin },
     { key: "quick", label: "Barra rapida", description: "Abas e atalhos visuais usados dentro da barra fixa classica.", icon: LayoutPanelTop },
     { key: "pdv", label: "Produtos", description: "Produtos, categorias, importacao, favoritos, unidade, kg, grama e adicionais.", icon: LayoutPanelTop },
-    { key: "pdvTables", label: "Mesas", description: "Quantidade de mesas, submesas, complementos e comportamento do fechamento.", icon: Utensils },
+    { key: "pdvTables", label: "Mesas", description: "Quantidade de mesas, submesas e contas separadas.", icon: Utensils },
+    { key: "pdvOperation", label: "Operacoes", description: "Lancamentos, agrupamento, complementos, divisao e fechamento.", icon: Wallet },
+    { key: "printing", label: "Impressao", description: "Recibo, impressora, papel, logotipo e PDF.", icon: ReceiptText },
     { key: "files", label: "Planilha e backup", description: "Exportacao Excel/CSV, pasta, colunas e backups gerados a partir do banco local.", icon: FileSpreadsheet },
     { key: "privacy", label: "Privacidade", description: "Controle o que aparece na tela quando ha cliente por perto.", icon: ShieldCheck },
     { key: "server", label: "Servidor", description: "Porta, senha e permissoes para outro dispositivo.", icon: RadioTower },
@@ -5392,7 +5971,7 @@ function SettingsPanel({
   ];
   const visibleSettingsCategories = settingsCategories.filter((item) => {
     if (effectiveSettingsOperationMode === "legacy") {
-      if (item.key === "pdv" || item.key === "pdvTables") {
+      if (["pdv", "pdvTables", "pdvOperation", "printing"].includes(item.key)) {
         return false;
       }
       // Em cliente remoto restrito, a ordem das abas vem do servidor. A
@@ -5403,6 +5982,14 @@ function SettingsPanel({
   });
   const activeCategory = visibleSettingsCategories.find((item) => item.key === category) || visibleSettingsCategories[0];
   const filePreview = filePreviewForSettings(draft);
+  const pdvAdvancedSectionByCategory: Partial<Record<SettingsCategory, PdvAdvancedSection>> = {
+    appearance: "appearance",
+    pdvTables: "tables",
+    pdvOperation: "operation",
+    printing: "printing",
+    files: "data"
+  };
+  const activePdvAdvancedSection = pdvAdvancedSectionByCategory[category];
 
   useEffect(() => {
     if (!visibleSettingsCategories.some((item) => item.key === category)) {
@@ -5465,7 +6052,12 @@ function SettingsPanel({
               )}
             </div>
             <div className="preset-row settings-presets" aria-label="Acoes da categoria">
-              <button className="ghost-button" type="button" onClick={() => lockedClick(category, () => resetCategory(category))}><RotateCcw size={16} /> Restaurar categoria</button>
+              <button className="ghost-button" type="button" onClick={() => lockedClick(category, () => {
+                resetCategory(category);
+                if (activePdvAdvancedSection) {
+                  pdvSettingsActionsRef.current?.discard();
+                }
+              })}><RotateCcw size={16} /> Restaurar categoria</button>
             </div>
           </div>
 
@@ -5707,7 +6299,7 @@ function SettingsPanel({
           </div>
         </section>
 
-        <section className={categoryClass("files", "settings-group wide")} {...remoteSectionProps("files")}>
+        <section className={categoryClass("files", "settings-group wide files-settings")} {...remoteSectionProps("files")}>
           <h3>Arquivos</h3>
           <div className="file-preview-card">
             <FileSpreadsheet size={20} />
@@ -5820,10 +6412,6 @@ function SettingsPanel({
 
         <section className={categoryClass("pdv", "settings-group wide pdv-settings-panel")}>
           <PdvApp embedded initialTab="products" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} />
-        </section>
-
-        <section className={categoryClass("pdvTables", "settings-group wide pdv-settings-panel")}>
-          <PdvApp embedded initialTab="advanced" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} advancedSettingsActionsRef={pdvSettingsActionsRef} onAdvancedSettingsDirtyChange={setPdvSettingsDirty} />
         </section>
 
         <section className={categoryClass("privacy", "settings-group wide privacy-settings")}>
@@ -5972,7 +6560,7 @@ function SettingsPanel({
           <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
           <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
           <div className="permission-box permission-grid">
-            {(["view", "create", "manageTables", "manageProducts", "edit", "delete", "viewEntryValues", "viewTotals", "allowClientCustomization"] as const).map((key) => (
+            {(["view", "create", "manageTables", "manageProducts", "edit", "delete", "viewEntryValues", "viewTotals", "printReceipts", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
                 <input
                   type="checkbox"
@@ -6183,6 +6771,23 @@ function SettingsPanel({
             ))}
           </div>
         </section>
+
+        <section
+          className={`settings-group wide pdv-settings-panel ${activePdvAdvancedSection ? "active-category" : "hidden-category"} ${isRemoteLockedCategory(category) ? "remote-locked-section" : ""}`}
+          {...remoteSectionProps(category)}
+        >
+          <PdvApp
+            embedded
+            initialTab="advanced"
+            hideTopbar
+            remoteSession={remoteSession}
+            toastDuration={settings.notificationDurationMs}
+            advancedSection={activePdvAdvancedSection || "tables"}
+            hideAdvancedNavigation
+            advancedSettingsActionsRef={pdvSettingsActionsRef}
+            onAdvancedSettingsDirtyChange={setPdvSettingsDirty}
+          />
+        </section>
       </div>
         </div>
       </div>
@@ -6349,6 +6954,7 @@ function titleForTab(tab: TabKey): string {
     sale: "Venda",
     tables: "Mesas",
     history: "Historico editavel",
+    clients: "Clientes e contas",
     reports: "Relatorios",
     server: "Servidor local",
     settings: "Ajuste"
@@ -6375,6 +6981,12 @@ function headerForTab(tab: TabKey, todayCount: number): { eyebrow: string; title
       title: titleForTab(tab),
       status: "Edite, duplique ou restaure registros",
       detail: "Historico"
+    },
+    clients: {
+      eyebrow: "Relacionamento",
+      title: titleForTab(tab),
+      status: "Clientes, pendencias e recebimentos",
+      detail: "Contas"
     },
     reports: {
       eyebrow: "Analise do caixa",
@@ -6435,6 +7047,7 @@ function permissionLabel(key: keyof ServerPermissions): string {
     delete: "Apagar lancamentos",
     viewEntryValues: "Ver valores das vendas",
     viewTotals: "Ver totais vendidos",
+    printReceipts: "Imprimir recibos neste cliente",
     allowClientCustomization: "Acesso local completo do cliente"
   }[key];
 }

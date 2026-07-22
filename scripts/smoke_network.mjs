@@ -24,8 +24,10 @@ settings.server.permissions = {
   delete: true,
   viewEntryValues: true,
   viewTotals: true,
+  printReceipts: true,
   allowClientCustomization: false
 };
+let remotePrintRequests = 0;
 
 const integratedEntries = async () => pdvSalesToLedgerEntries((await pdvStore.getSnapshot()).recentSales);
 const server = new LocalServer({
@@ -37,7 +39,7 @@ const server = new LocalServer({
   cancelEntry: async () => { throw new Error("Nao usado neste smoke."); },
   removeEntry: async () => undefined,
   deleteEntry: async () => undefined,
-  getPdvSnapshot: () => pdvStore.getSnapshot(),
+  getPdvSnapshot: (salesLimit) => pdvStore.getSnapshot(salesLimit),
   savePdvDirectSale: (items, discount, payments, origin, operationId) => pdvStore.saveSale({ type: "Venda direta", items, discount, payments, originDevice: origin, operationId }),
   openPdvTable: (number, people, note) => pdvStore.openTable(number, people, note),
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
@@ -47,6 +49,14 @@ const server = new LocalServer({
   updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
   savePdvCategory: (draft) => pdvStore.saveCategory(draft),
   savePdvProduct: (draft) => pdvStore.saveProduct(draft),
+  savePdvCustomer: (draft) => pdvStore.saveCustomer(draft),
+  receivePdvReceivable: (id, payment, origin, operationId) => pdvStore.receiveReceivable(id, payment, origin, operationId),
+  updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
+  cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
+  printPdvReceipt: async ({ sale }) => {
+    remotePrintRequests += 1;
+    return { ok: Boolean(sale?.id), message: "Impressao smoke recebida." };
+  },
   savePdvSettings: async (patch) => {
     const next = { ...settings, ...patch };
     Object.assign(settings, next);
@@ -104,8 +114,76 @@ const direct = await fetch("http://127.0.0.1:43991/api/pdv/sales/direct", {
   body: JSON.stringify({ items: [{ ...item, id: crypto.randomUUID() }], discount: 0, payments: [{ id: crypto.randomUUID(), method: "Debito", amount: 12 }] })
 });
 if (!direct.ok) throw new Error(`Cliente nao conseguiu registrar venda direta no servidor: ${await direct.text()}`);
-if (!(await pdvStore.getSnapshot()).recentSales.some((sale) => sale.type === "Venda direta" && sale.originDevice === "Cliente smoke")) {
+const directSale = (await pdvStore.getSnapshot()).recentSales.find((sale) => sale.type === "Venda direta" && sale.originDevice === "Cliente smoke");
+if (!directSale) {
   throw new Error("Venda direta do cliente nao foi registrada no banco do servidor.");
+}
+const printOnServer = await fetch("http://127.0.0.1:43991/api/pdv/print-receipt", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ sale: directSale })
+});
+if (!printOnServer.ok || remotePrintRequests !== 1) {
+  throw new Error(`Cliente nao conseguiu solicitar impressao no servidor: ${await printOnServer.text()}`);
+}
+
+const customerResponse = await fetch("http://127.0.0.1:43991/api/pdv/customers", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ name: "Cliente remoto conta", phone: "11999990000", active: true })
+});
+if (!customerResponse.ok) throw new Error(`Cliente nao conseguiu cadastrar cliente no servidor: ${await customerResponse.text()}`);
+const remoteCustomer = (await customerResponse.json()).customer;
+const accountSaleResponse = await fetch("http://127.0.0.1:43991/api/pdv/sales/direct", {
+  method: "POST",
+  headers: { ...headers, "x-idempotency-key": crypto.randomUUID() },
+  body: JSON.stringify({
+    items: [{ ...item, id: crypto.randomUUID(), baseUnitPrice: 20, unitPrice: 20, total: 20 }],
+    discount: 0,
+    payments: [{
+      id: crypto.randomUUID(),
+      method: "Conta a receber",
+      amount: 20,
+      customerId: remoteCustomer.id,
+      customerName: remoteCustomer.name,
+      dueDate: "2099-12-31"
+    }]
+  })
+});
+if (!accountSaleResponse.ok) throw new Error(`Cliente nao conseguiu criar conta a receber no servidor: ${await accountSaleResponse.text()}`);
+const remoteReceivable = (await pdvStore.getSnapshot()).receivables.find((entry) => entry.customerId === remoteCustomer.id);
+if (!remoteReceivable || remoteReceivable.balance !== 20) throw new Error("Conta a receber remota nao apareceu no snapshot do servidor.");
+const remoteReceiptResponse = await fetch(`http://127.0.0.1:43991/api/pdv/receivables/${remoteReceivable.id}/payments`, {
+  method: "POST",
+  headers: { ...headers, "x-idempotency-key": crypto.randomUUID() },
+  body: JSON.stringify({
+    payment: {
+      id: crypto.randomUUID(),
+      receivableId: remoteReceivable.id,
+      createdAt: new Date().toISOString(),
+      method: "Pix",
+      amount: 20,
+      description: "Recebido no cliente"
+    }
+  })
+});
+if (!remoteReceiptResponse.ok) throw new Error(`Cliente nao conseguiu receber conta no servidor: ${await remoteReceiptResponse.text()}`);
+if ((await pdvStore.getSnapshot()).receivables.find((entry) => entry.id === remoteReceivable.id)?.status !== "Recebida") {
+  throw new Error("Recebimento remoto nao quitou a conta no servidor.");
+}
+const reopenReceivableResponse = await fetch(`http://127.0.0.1:43991/api/pdv/receivables/${remoteReceivable.id}`, {
+  method: "PATCH",
+  headers,
+  body: JSON.stringify({ payments: [] })
+});
+if (!reopenReceivableResponse.ok) throw new Error(`Cliente nao conseguiu remover recebimento no servidor: ${await reopenReceivableResponse.text()}`);
+const reopenedRemoteReceivable = (await reopenReceivableResponse.json()).receivable;
+if (reopenedRemoteReceivable.status !== "Em aberto" || reopenedRemoteReceivable.receivedAmount !== 0 || reopenedRemoteReceivable.balance !== 20) {
+  throw new Error("Remocao remota do recebimento nao reabriu a pendencia.");
+}
+const persistedReopenedReceivable = (await pdvStore.getSnapshot()).receivables.find((entry) => entry.id === remoteReceivable.id);
+if (persistedReopenedReceivable?.status !== "Em aberto" || persistedReopenedReceivable.payments.length !== 0) {
+  throw new Error("Pendencia reaberta remotamente nao permaneceu consistente no snapshot do servidor.");
 }
 
 const open = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });
@@ -138,6 +216,10 @@ const after = await (await readEntries()).json();
 const sale = after.entries.find((entry) => entry.type === "Mesa");
 if (!sale || sale.originDevice !== "Cliente smoke" || sale.finalValue !== 24 || sale.paymentBreakdown?.length !== 2 || !sale.paymentBreakdown.some((payment) => payment.method === "Debito") || !sale.paymentBreakdown.some((payment) => payment.method === "Pix")) {
   throw new Error(`Venda remota nao entrou no historico integrado com origem/pagamento corretos: ${JSON.stringify(sale)}`);
+}
+const incrementalSnapshot = await (await fetch("http://127.0.0.1:43991/api/pdv/snapshot?salesLimit=1", { headers })).json();
+if (incrementalSnapshot.recentSales.length !== 1) {
+  throw new Error("Snapshot operacional remoto ignorou o limite de vendas recentes.");
 }
 
 settings.operationMode = "legacy";

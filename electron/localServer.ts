@@ -6,7 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
@@ -18,7 +18,7 @@ interface LocalServerOptions {
   cancelEntry: (id: string) => Promise<LedgerEntry>;
   removeEntry: (id: string) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
-  getPdvSnapshot: () => Promise<PdvSnapshot>;
+  getPdvSnapshot: (salesLimit?: number) => Promise<PdvSnapshot>;
   savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string, saleType?: PdvSale["type"]) => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
@@ -27,14 +27,27 @@ interface LocalServerOptions {
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
   cancelPdvTable: (tableNumber: number, originDevice?: string) => Promise<PdvSale | null>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string, observations?: string) => Promise<PdvSale>;
+  updatePdvSalePayments: (saleId: string, payments: PdvPayment[]) => Promise<PdvSale>;
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
   savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>;
+  savePdvCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
+  receivePdvReceivable: (id: string, payment: PdvReceivablePayment, originDevice?: string, operationId?: string) => Promise<PdvReceivable>;
+  updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
+  cancelPdvReceivable: (id: string) => Promise<void>;
+  printPdvReceipt: (payload: {
+    sale: PdvSale;
+    customer?: PdvCustomer;
+    receivable?: PdvReceivable;
+    customerName?: string;
+    customerDocument?: string;
+  }) => Promise<{ ok: boolean; message: string }>;
   importPdvPreset: () => Promise<PdvProductImportResult>;
   removePdvPreset: () => Promise<number>;
   onRemoteChange: () => void;
   onRemotePdvChange: () => void;
+  onRemotePrintResult?: (result: { jobId: string; ok: boolean; message: string; deviceName: string }) => void;
 }
 
 interface ClientRecord extends ServerDevice {
@@ -168,8 +181,8 @@ export class LocalServer {
       }
     });
 
-    app.get("/api/pdv/snapshot", this.authorize("view"), async (_request, response) => {
-      response.json(await this.options.getPdvSnapshot());
+    app.get("/api/pdv/snapshot", this.authorize("view"), async (request, response) => {
+      response.json(await this.options.getPdvSnapshot(normalizeEntryLimit(request.query.salesLimit)));
     });
 
     app.post("/api/pdv/sales/direct", this.authorize("create"), async (request, response) => {
@@ -323,6 +336,76 @@ export class LocalServer {
       }
     });
 
+    app.patch("/api/pdv/sales/:id/payments", this.authorize("edit"), async (request, response) => {
+      try {
+        const payments = Array.isArray(request.body?.payments) ? request.body.payments : [];
+        const sale = await this.options.updatePdvSalePayments(request.params.id, payments);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ sale });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel corrigir os pagamentos." });
+      }
+    });
+
+    app.post("/api/pdv/print-receipt", this.authorize("printReceipts"), async (request, response) => {
+      try {
+        response.json(await this.options.printPdvReceipt(request.body || {}));
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel imprimir no servidor." });
+      }
+    });
+
+    app.post("/api/pdv/customers", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const customer = await this.options.savePdvCustomer(request.body || {});
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.status(201).json({ customer });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar o cliente." });
+      }
+    });
+
+    app.post("/api/pdv/receivables/:id/payments", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const operationId = String(request.header("x-idempotency-key") || "").trim() || undefined;
+        const receivable = await this.options.receivePdvReceivable(
+          request.params.id,
+          request.body?.payment || request.body || {},
+          String(request.header("x-device-name") || "Cliente remoto"),
+          operationId
+        );
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.status(201).json({ receivable });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel registrar o recebimento." });
+      }
+    });
+
+    app.patch("/api/pdv/receivables/:id", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const receivable = await this.options.updatePdvReceivable(request.params.id, request.body || {});
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ receivable });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel atualizar a conta." });
+      }
+    });
+
+    app.post("/api/pdv/receivables/:id/cancel", this.authorize("manageTables"), async (request, response) => {
+      try {
+        await this.options.cancelPdvReceivable(request.params.id);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel cancelar a conta." });
+      }
+    });
+
     app.post("/api/pdv/tables/:number/cancel", this.authorize("manageTables"), async (request, response) => {
       try {
         const sale = await this.options.cancelPdvTable(
@@ -409,6 +492,31 @@ export class LocalServer {
     }
   }
 
+  requestReceiptPrint(
+    deviceId: string,
+    payload: {
+      jobId: string;
+      sale: PdvSale;
+      customer?: PdvCustomer;
+      receivable?: PdvReceivable;
+      customerName?: string;
+      customerDocument?: string;
+    }
+  ): { ok: boolean; message: string } {
+    const client = this.clients.get(deviceId);
+    if (!client || client.socket.readyState !== WebSocket.OPEN) {
+      return { ok: false, message: "O computador selecionado nao esta conectado." };
+    }
+    if (!client.permissions.printReceipts) {
+      return { ok: false, message: "A impressao de recibos nao esta permitida nesse cliente." };
+    }
+    client.socket.send(JSON.stringify({
+      type: "receipt-print-request",
+      ...payload
+    }));
+    return { ok: true, message: `Recibo enviado para ${client.name}.` };
+  }
+
   getState(): ServerState {
     const ips = getLocalIps();
     return {
@@ -460,8 +568,27 @@ export class LocalServer {
       socket
     };
     this.clients.set(id, device);
-    socket.on("message", () => {
+    socket.on("message", (raw) => {
       device.lastSeen = new Date().toISOString();
+      try {
+        const message = JSON.parse(String(raw || "{}")) as {
+          type?: string;
+          jobId?: string;
+          ok?: boolean;
+          message?: string;
+          deviceName?: string;
+        };
+        if (message.type === "receipt-print-result" && message.jobId) {
+          this.options.onRemotePrintResult?.({
+            jobId: message.jobId,
+            ok: Boolean(message.ok),
+            message: String(message.message || (message.ok ? "Recibo impresso." : "Falha ao imprimir recibo.")),
+            deviceName: message.deviceName || device.name
+          });
+        }
+      } catch {
+        // Mensagens de presenca antigas nao possuem corpo JSON.
+      }
     });
     socket.on("close", () => {
       this.clients.delete(id);
@@ -867,6 +994,7 @@ function remoteClientHtml(port: number): string {
         permissions.delete ? "Apagar" : "",
         permissions.viewEntryValues ? "Ver valores" : "Valores ocultos",
         permissions.viewTotals ? "Ver totais" : "Totais ocultos",
+        permissions.printReceipts ? "Imprimir recibos" : "",
         permissions.allowClientCustomization ? "Acesso local liberado" : ""
       ].filter(Boolean);
       qs("#permissionList").innerHTML = rows.map((item) => "<span>" + item + "</span>").join("");
@@ -952,6 +1080,7 @@ function remoteClientHtml(port: number): string {
         (permissions.delete ? " + apaga" : "") +
         (permissions.viewEntryValues ? "" : " | sem valores") +
         (permissions.viewTotals ? "" : " | sem totais") +
+        (permissions.printReceipts ? " | imprime recibos" : "") +
         (permissions.allowClientCustomization ? " | acesso local" : "");
       qs("#app").hidden = !permissions.create;
       qs("#summary").textContent = data.summary

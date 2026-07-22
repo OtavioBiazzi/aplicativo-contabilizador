@@ -119,6 +119,7 @@ export interface ServerPermissions {
   delete: boolean;
   viewEntryValues: boolean;
   viewTotals: boolean;
+  printReceipts: boolean;
   allowClientCustomization: boolean;
 }
 
