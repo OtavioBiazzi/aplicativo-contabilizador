@@ -53,6 +53,11 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   receiptPaperWidth: "80",
   receiptCustomPaperWidthMm: 80,
   receiptCustomPaperHeightMm: 200,
+  receiptFontSize: 11.5,
+  receiptMarginLeftMm: 4,
+  receiptMarginRightMm: 4,
+  receiptMarginTopMm: 4,
+  receiptMarginBottomMm: 5,
   receiptAutoPrint: false,
   receiptPrinterName: "",
   receiptCopies: 1,
@@ -1601,6 +1606,11 @@ export class PdvStore {
       receiptPaperWidth: ["58", "80", "a4", "custom"].includes(map.get("receipt_paper_width") || "") ? map.get("receipt_paper_width") as "58" | "80" | "a4" | "custom" : "80",
       receiptCustomPaperWidthMm: Math.max(40, Math.min(300, parseIntegerSetting(map.get("receipt_custom_paper_width_mm"), 80))),
       receiptCustomPaperHeightMm: Math.max(80, Math.min(1000, parseIntegerSetting(map.get("receipt_custom_paper_height_mm"), 200))),
+      receiptFontSize: Math.max(9, Math.min(16, Number(map.get("receipt_font_size") || DEFAULT_PDV_SETTINGS.receiptFontSize || 11.5))),
+      receiptMarginLeftMm: clampNumericSetting(map.get("receipt_margin_left_mm"), DEFAULT_PDV_SETTINGS.receiptMarginLeftMm || 4, 0, 20),
+      receiptMarginRightMm: clampNumericSetting(map.get("receipt_margin_right_mm"), DEFAULT_PDV_SETTINGS.receiptMarginRightMm || 4, 0, 20),
+      receiptMarginTopMm: clampNumericSetting(map.get("receipt_margin_top_mm"), DEFAULT_PDV_SETTINGS.receiptMarginTopMm || 4, 0, 30),
+      receiptMarginBottomMm: clampNumericSetting(map.get("receipt_margin_bottom_mm"), DEFAULT_PDV_SETTINGS.receiptMarginBottomMm || 5, 0, 30),
       receiptAutoPrint: parseBooleanSetting(map.get("receipt_auto_print"), DEFAULT_PDV_SETTINGS.receiptAutoPrint || false),
       receiptPrinterName: map.get("receipt_printer_name") || "",
       receiptCopies: Math.max(1, Math.min(5, parseIntegerSetting(map.get("receipt_copies"), 1))),
@@ -2151,6 +2161,11 @@ function parseBooleanSetting(value: string | undefined, fallback: boolean): bool
 function parseIntegerSetting(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value || "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clampNumericSetting(value: string | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
 }
 
 function tableItemsPersistenceKey(items: PdvCartItem[]): string {

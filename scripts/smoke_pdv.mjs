@@ -19,6 +19,17 @@ mkdirSync(exportDir, { recursive: true });
 
 const store = new PdvStore(dataDir);
 await store.initialize();
+const printSettings = await store.saveSettings({
+  receiptPaperWidth: "80",
+  receiptFontSize: 10.5,
+  receiptMarginLeftMm: 3.2,
+  receiptMarginRightMm: 4.1,
+  receiptMarginTopMm: 2,
+  receiptMarginBottomMm: 6
+});
+if (printSettings.receiptFontSize !== 10.5 || printSettings.receiptMarginLeftMm !== 3.2 || printSettings.receiptMarginRightMm !== 4.1 || printSettings.receiptMarginTopMm !== 2 || printSettings.receiptMarginBottomMm !== 6) {
+  throw new Error("Configuracoes de calibracao da impressao nao foram persistidas.");
+}
 
 const receiptBaseItem = {
   id: "receipt-1",

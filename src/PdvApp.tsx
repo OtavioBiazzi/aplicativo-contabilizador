@@ -5955,6 +5955,27 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
     };
     changeDraft(presets[preset]);
   };
+  const receiptPreviewWidthMm = draft.receiptPaperWidth === "58" ? 58 : draft.receiptPaperWidth === "a4" ? 210 : draft.receiptPaperWidth === "custom" ? Number(draft.receiptCustomPaperWidthMm || 80) : 80;
+  const receiptDefaultMargin = draft.receiptPaperWidth === "a4" ? 10 : receiptPreviewWidthMm >= 80 ? 4 : 2;
+  const receiptMargins = {
+    left: Number(draft.receiptMarginLeftMm ?? receiptDefaultMargin),
+    right: Number(draft.receiptMarginRightMm ?? receiptDefaultMargin),
+    top: Number(draft.receiptMarginTopMm ?? (draft.receiptPaperWidth === "a4" ? 8 : 4)),
+    bottom: Number(draft.receiptMarginBottomMm ?? (draft.receiptPaperWidth === "a4" ? 12 : 5))
+  };
+  const receiptFontSize = Number(draft.receiptFontSize || 11.5);
+  const setReceiptNumber = (key: "receiptFontSize" | "receiptMarginLeftMm" | "receiptMarginRightMm" | "receiptMarginTopMm" | "receiptMarginBottomMm", value: string, min: number, max: number) => {
+    const parsed = Number(value);
+    changeDraft({ [key]: Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : min } as Partial<PdvSettings>);
+  };
+  const applyReceiptPreset = (paper: "58" | "80") => changeDraft({
+    receiptPaperWidth: paper,
+    receiptFontSize: 11.5,
+    receiptMarginLeftMm: paper === "80" ? 4 : 2,
+    receiptMarginRightMm: paper === "80" ? 4 : 2,
+    receiptMarginTopMm: 4,
+    receiptMarginBottomMm: 5
+  });
   const sectionCopy: Record<PdvAdvancedSection, { title: string; description: string }> = {
     tables: { title: "Mesas", description: "Configure a estrutura das mesas e das contas separadas." },
     appearance: { title: "Aparencia do PDV", description: "Ajuste a densidade de Venda, Mesas, produtos e categorias." },
@@ -6088,8 +6109,8 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           <div
             className={`pdv-receipt-settings-preview paper-${draft.receiptPaperWidth || "80"}`}
             style={draft.receiptPaperWidth === "custom"
-              ? { "--receipt-custom-width": `${Math.min(360, Math.max(180, Number(draft.receiptCustomPaperWidthMm || 80) * 3.4))}px` } as React.CSSProperties
-              : undefined}
+              ? { "--receipt-custom-width": `${Math.min(360, Math.max(180, receiptPreviewWidthMm * 3.4))}px`, "--receipt-preview-font": `${receiptFontSize}px`, "--receipt-preview-left": `${receiptMargins.left / receiptPreviewWidthMm * 100}%`, "--receipt-preview-right": `${receiptMargins.right / receiptPreviewWidthMm * 100}%` } as React.CSSProperties
+              : { "--receipt-preview-font": `${receiptFontSize}px`, "--receipt-preview-left": `${receiptMargins.left / receiptPreviewWidthMm * 100}%`, "--receipt-preview-right": `${receiptMargins.right / receiptPreviewWidthMm * 100}%` } as React.CSSProperties}
           >
             <div className="pdv-receipt-paper">
               <div className={`pdv-receipt-brand ${draft.receiptShowLogo !== false && draft.receiptLogoDataUrl ? "has-logo" : ""}`}>
@@ -6121,6 +6142,18 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
             <label className="pdv-setting-line"><span>Largura personalizada (mm)</span><input type="number" min={40} max={300} value={draft.receiptCustomPaperWidthMm || 80} onChange={(event) => changeDraft({ receiptCustomPaperWidthMm: Math.max(40, Math.min(300, Number(event.target.value) || 80)) })} /></label>
             <label className="pdv-setting-line"><span>Altura personalizada (mm)</span><input type="number" min={80} max={1000} value={draft.receiptCustomPaperHeightMm || 200} onChange={(event) => changeDraft({ receiptCustomPaperHeightMm: Math.max(80, Math.min(1000, Number(event.target.value) || 200)) })} /></label>
           </>}
+          <div className="pdv-receipt-calibration pdv-wide-field">
+            <div className="pdv-receipt-calibration-head"><div><strong>Calibracao da bobina</strong><span>As margens sao medidas a partir da borda fisica do papel.</span></div><span className="pdv-measure-badge">{receiptPreviewWidthMm} mm</span></div>
+            <div className="pdv-receipt-calibration-grid">
+              <label><span>Fonte</span><input type="number" min={9} max={16} step={0.5} value={receiptFontSize} onChange={(event) => setReceiptNumber("receiptFontSize", event.target.value, 9, 16)} /><small>px</small></label>
+              <label><span>Esquerda</span><input type="number" min={0} max={20} step={0.1} value={receiptMargins.left} onChange={(event) => setReceiptNumber("receiptMarginLeftMm", event.target.value, 0, 20)} /><small>mm</small></label>
+              <label><span>Direita</span><input type="number" min={0} max={20} step={0.1} value={receiptMargins.right} onChange={(event) => setReceiptNumber("receiptMarginRightMm", event.target.value, 0, 20)} /><small>mm</small></label>
+              <label><span>Superior</span><input type="number" min={0} max={30} step={0.1} value={receiptMargins.top} onChange={(event) => setReceiptNumber("receiptMarginTopMm", event.target.value, 0, 30)} /><small>mm</small></label>
+              <label><span>Inferior</span><input type="number" min={0} max={30} step={0.1} value={receiptMargins.bottom} onChange={(event) => setReceiptNumber("receiptMarginBottomMm", event.target.value, 0, 30)} /><small>mm</small></label>
+            </div>
+            <div className="pdv-receipt-presets"><span>Aplicar preset:</span><button type="button" onClick={() => applyReceiptPreset("80")}>80 mm padrao</button><button type="button" onClick={() => applyReceiptPreset("58")}>58 mm padrao</button><button type="button" onClick={() => changeDraft({ receiptFontSize: 11.5, receiptMarginLeftMm: receiptDefaultMargin, receiptMarginRightMm: receiptDefaultMargin, receiptMarginTopMm: draft.receiptPaperWidth === "a4" ? 8 : 4, receiptMarginBottomMm: draft.receiptPaperWidth === "a4" ? 12 : 5 })}>Restaurar padrao</button></div>
+            <small className="pdv-receipt-calibration-note">Se ainda cortar, confira no driver do Windows se o tamanho do papel esta como bobina continua de {receiptPreviewWidthMm} mm e desative “ajustar a pagina”.</small>
+          </div>
           <label className="pdv-setting-line"><span>Quantidade de copias</span><input type="number" min={1} max={5} value={draft.receiptCopies || 1} onChange={(event) => changeDraft({ receiptCopies: Math.max(1, Math.min(5, Number(event.target.value) || 1)) })} /></label>
           <label className="pdv-setting-line pdv-wide-field"><span>Impressora predefinida</span><select value={draft.receiptPrinterName || ""} onChange={(event) => changeDraft({ receiptPrinterName: event.target.value })}><option value="">Selecionar ao imprimir / usar PDF</option>{printers.map((printer) => <option key={printer.name} value={printer.name}>{printer.displayName}{printer.isDefault ? " (Padrao)" : ""}</option>)}</select></label>
           <label className="pdv-setting-line"><span>Rodape</span><input value={draft.receiptFooter || ""} onChange={(event) => changeDraft({ receiptFooter: event.target.value })} /></label>

@@ -226,6 +226,11 @@ export interface PdvSettings {
   receiptPaperWidth?: "58" | "80" | "a4" | "custom";
   receiptCustomPaperWidthMm?: number;
   receiptCustomPaperHeightMm?: number;
+  receiptFontSize?: number;
+  receiptMarginLeftMm?: number;
+  receiptMarginRightMm?: number;
+  receiptMarginTopMm?: number;
+  receiptMarginBottomMm?: number;
   receiptAutoPrint?: boolean;
   receiptPrinterName?: string;
   receiptCopies?: number;

@@ -76,7 +76,7 @@ export async function printPdvReceiptDirect(
       const contentHeight = await window.webContents.executeJavaScript(
         "document.fonts.ready.then(() => Math.ceil(Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, 240)))"
       ) as number;
-      directHeightMm = Math.max(60, Math.ceil((contentHeight / 96) * 25.4 + 4));
+      directHeightMm = Math.max(60, Math.ceil((contentHeight / 96) * 25.4));
       window.setContentSize(paper.viewportWidth, Math.max(240, contentHeight + 8));
       await window.webContents.executeJavaScript(`
         (() => {
@@ -118,9 +118,8 @@ export function buildPdvReceiptHtml(
   customerDocumentOverride?: string
 ): string {
   const paper = receiptPaper(settings);
-  const horizontalMarginMm = settings.receiptPaperWidth === "a4" ? 10 : paper.widthMm >= 80 ? 4 : 2;
-  const width = `${Math.max(36, paper.widthMm - horizontalMarginMm * 2)}mm`;
-  const bodyPadding = settings.receiptPaperWidth === "a4" ? "8mm 0 12mm" : "4mm 0 5mm";
+  const layout = receiptLayout(settings, paper.widthMm);
+  const width = `${Math.max(36, paper.widthMm - layout.leftMm - layout.rightMm)}mm`;
   const pageSize = `${paper.widthMm}mm ${paper.heightMm}mm`;
   const accentColor = settings.receiptUseColor ? "#0f5f96" : "#111";
   const paidTotal = sale.payments.reduce((sum, payment) => sum + payment.amount, 0);
@@ -161,7 +160,7 @@ export function buildPdvReceiptHtml(
     @page { margin: 0; size: ${pageSize}; }
     * { box-sizing: border-box; }
     html, body { overflow-x: hidden; }
-    body { width: ${width}; margin: 0 auto; padding: ${bodyPadding}; color: #080808; font: 11.5px/1.25 Arial, sans-serif; }
+    body { width: ${width}; margin: 0; margin-left: ${layout.leftMm}mm; padding: ${layout.topMm}mm 0 ${layout.bottomMm}mm; color: #080808; font: ${layout.fontSize}px/1.25 Arial, sans-serif; }
     h1, p { margin: 0; text-align: center; }
     h1 { font-size: 15px; line-height: 1.05; text-transform: uppercase; }
     h2 { margin: 5px 0 2px; font-size: 11px; text-transform: uppercase; }
@@ -255,4 +254,21 @@ function receiptPaper(settings: PdvSettings): { widthMm: number; heightMm: numbe
     ? Math.max(80, Math.min(1000, Number(settings.receiptCustomPaperHeightMm) || 200))
     : 200;
   return { widthMm, heightMm, viewportWidth: Math.max(220, Math.round((widthMm / 25.4) * 96)) };
+}
+
+function receiptLayout(settings: PdvSettings, paperWidthMm: number): { leftMm: number; rightMm: number; topMm: number; bottomMm: number; fontSize: number } {
+  const isA4 = settings.receiptPaperWidth === "a4";
+  const defaultHorizontal = isA4 ? 10 : paperWidthMm >= 80 ? 4 : 2;
+  return {
+    leftMm: clampSetting(settings.receiptMarginLeftMm, defaultHorizontal, 0, Math.max(0, paperWidthMm - 36)),
+    rightMm: clampSetting(settings.receiptMarginRightMm, defaultHorizontal, 0, Math.max(0, paperWidthMm - 36)),
+    topMm: clampSetting(settings.receiptMarginTopMm, isA4 ? 8 : 4, 0, 30),
+    bottomMm: clampSetting(settings.receiptMarginBottomMm, isA4 ? 12 : 5, 0, 30),
+    fontSize: clampSetting(settings.receiptFontSize, 11.5, 9, 16)
+  };
+}
+
+function clampSetting(value: number | undefined, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
 }
