@@ -2168,6 +2168,321 @@ th {
   }
 }
 
+/* Refinamento operacional v0.3.43: superfícies coerentes nos dois temas,
+   controles quadrados no modo simples e melhor uso da largura do caixa. */
+#root .app-shell {
+  grid-template-rows: 22px 68px minmax(0, 1fr);
+}
+
+.window-titlebar {
+  height: 22px;
+}
+
+.window-titlebar-label {
+  gap: 5px;
+  padding-left: 7px;
+  font-size: 0.66rem;
+}
+
+.window-titlebar-label img {
+  width: 13px;
+  height: 13px;
+}
+
+.window-titlebar-actions button {
+  width: 36px;
+}
+
+.pdv-cart-head {
+  align-items: center;
+}
+
+.pdv-cart-product-search {
+  min-width: 124px;
+  min-height: 40px;
+  justify-content: center;
+  border-radius: 2px;
+  padding-inline: 15px;
+  text-align: center;
+}
+
+.pdv-cart-density,
+.pdv-cart-density button,
+.pdv-quantity-box button,
+.pdv-sale-mode-select,
+.pdv-subtable-trigger,
+.pdv-product-lookup-footer button {
+  border-radius: 2px !important;
+}
+
+.pdv-quantity-box.has-subtable .pdv-subtable-trigger {
+  min-width: 190px;
+  max-width: 280px;
+  padding-inline: 16px;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.simple-mode-toggle {
+  min-height: 54px;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  font-size: 0.94rem;
+  font-weight: 800;
+}
+
+.simple-mode-toggle input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  accent-color: var(--accent);
+}
+
+:root[data-simple-mode="true"] .pdv-shell button {
+  border-radius: 1px !important;
+}
+
+:root[data-simple-mode="true"] .app-shell.pdv-main-mode .workspace,
+:root[data-simple-mode="true"] .pdv-shell.embedded .pdv-workspace {
+  padding: 0 !important;
+}
+
+:root[data-simple-mode="true"] .pdv-sale-grid {
+  width: 100%;
+  gap: 2px;
+  grid-template-columns:
+    minmax(0, calc(100% - var(--pdv-cart-pane-width, 34%) - 6px))
+    2px
+    minmax(280px, var(--pdv-cart-pane-width, 34%));
+}
+
+:root[data-simple-mode="true"] .pdv-sale-identity {
+  display: grid;
+  min-width: 92px;
+  align-content: center;
+  padding-inline: 5px;
+}
+
+:root[data-simple-mode="true"] .pdv-sale-identity .pdv-eyebrow,
+:root[data-simple-mode="true"] .pdv-sale-identity p {
+  display: none;
+}
+
+:root[data-simple-mode="true"] .pdv-sale-identity h1 {
+  display: block;
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.05;
+}
+
+:root[data-simple-mode="true"] .pdv-cart-area {
+  border-right-width: 0;
+}
+
+/* O tema claro é deliberadamente azul: nenhuma grande superfície operacional
+   permanece branca, preservando contraste suficiente para leitura rápida. */
+:root[data-theme="datacaixa"] {
+  --bg: #79b8d8;
+  --panel: #a8cee2;
+  --panel-2: #c0ddec;
+  --line: #438bb6;
+  --text: #082843;
+  --muted: #355f7c;
+  --pdv-bg: linear-gradient(180deg, #78b7d8 0, #8bc5e1 48px, #5aa5cf 49px, #83bddb 100%);
+  --pdv-panel: #86bad3;
+  --pdv-soft: #c3dfed;
+  --pdv-soft-2: #d0e7f2;
+}
+
+:root[data-theme="datacaixa"] body {
+  background: #79b8d8;
+}
+
+:root[data-theme="datacaixa"] .pdv-tables-screen {
+  background:
+    linear-gradient(180deg, rgba(213, 237, 248, 0.28), transparent 150px),
+    #8dc4df;
+  border-color: #438bb6;
+}
+
+:root[data-theme="datacaixa"] .pdv-tables-screen > .pdv-section-head {
+  background: #abd4e8;
+}
+
+:root[data-theme="datacaixa"] .app-shell :is(input:not([type="color"]), select, textarea) {
+  border-color: #5597bd !important;
+  background: #cbe3ef !important;
+  color: #08243b !important;
+  -webkit-text-fill-color: #08243b;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-category-grid button,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-product-grid button,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-quantity-box button,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-sale-mode-select,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-subtable-trigger,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-density button {
+  border-color: #609fc3;
+  background: #c3deeb;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list {
+  border-color: #4f91b7;
+  background: #9fc9de;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list article,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list .pdv-empty {
+  border-bottom-color: #78afca;
+  background: #c7e0ec;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list article:hover,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list article.selected {
+  background: #b2d7e8;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-total-box > strong {
+  border-color: #5796b9;
+  background: #cbe3ef;
+}
+
+:root[data-theme="datacaixa"] :is(.modal, .pdv-payment-modal) {
+  scrollbar-color: #4e8fb5 #a9d0e4;
+  border-color: #438bb6 !important;
+  background: #a9d0e4 !important;
+}
+
+:root[data-theme="datacaixa"] :is(.modal, .pdv-payment-modal) :is(input, select, textarea) {
+  background: #cbe3ef !important;
+}
+
+:root[data-theme="datacaixa"] .pdv-payment-modal :is(
+  .pdv-metric,
+  .pdv-payment-entry,
+  .pdv-split-box,
+  .pdv-split-preview,
+  .pdv-payment-list,
+  .pdv-payment-list article,
+  .pdv-previous-payment-list,
+  .pdv-detail-columns > div,
+  .pdv-complement-config,
+  .pdv-transfer-list button,
+  .pdv-subtable-list > article
+) {
+  border-color: #6da7c7 !important;
+  background: #c1dfed !important;
+}
+
+:root[data-theme="datacaixa"] .pdv-product-lookup-table,
+:root[data-theme="datacaixa"] .pdv-product-lookup-table > button {
+  border-color: #5d9dc1;
+  background: #b9d9e9;
+}
+
+:root[data-theme="datacaixa"] .pdv-product-lookup-table > button:nth-child(odd) {
+  background: #c6e1ee;
+}
+
+/* No escuro, o modal usa o mesmo vocabulário cromático do aplicativo.
+   As regras antigas mantinham texto azul-escuro sobre linhas escuras. */
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal) {
+  scrollbar-color: #4f82a8 #102a40;
+  border-color: #356b91 !important;
+  background: #10283c !important;
+  color: var(--text) !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal)
+  :is(h1, h2, h3, p, label, span, small, strong, b, .pdv-empty, .pdv-eyebrow, .settings-overline) {
+  color: var(--text) !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal)
+  > :is(.modal-head, .pdv-section-head, .pdv-window-title) * {
+  color: #fff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal)
+  :is(input, select, textarea) {
+  border-color: #3e6f93 !important;
+  background: #19364e !important;
+  color: #eef7ff !important;
+  -webkit-text-fill-color: #eef7ff;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal)
+  :is(input, textarea)::placeholder {
+  color: #9fb9cd !important;
+  -webkit-text-fill-color: #9fb9cd;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-payment-modal :is(
+  .pdv-metric,
+  .pdv-payment-entry,
+  .pdv-split-box,
+  .pdv-split-preview,
+  .pdv-payment-list,
+  .pdv-payment-list article,
+  .pdv-previous-payment-list,
+  .pdv-detail-columns > div,
+  .pdv-complement-config,
+  .pdv-transfer-list button,
+  .pdv-subtable-list > article
+) {
+  border-color: #315f80 !important;
+  background: #17334a !important;
+  color: #eef7ff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-search {
+  border-color: #35698e;
+  background: #132f46;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table {
+  border-color: #35698e;
+  background: #0d2234;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button {
+  border-bottom-color: #315774;
+  background: #10283b;
+  color: #edf7ff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button:nth-child(odd) {
+  background: #173249;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button:hover,
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button.selected {
+  background: #a9502e;
+  color: #fff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-check {
+  border-color: #6f9ab8;
+  background: #0b2031;
+  color: #d8efff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button.selected .pdv-product-lookup-check {
+  border-color: #fff;
+  background: #e7f4fb;
+  color: #12324a !important;
+}
+
+@media (max-width: 900px) {
+  .pdv-quantity-box.has-subtable .pdv-subtable-trigger {
+    min-width: 150px;
+    max-width: 210px;
+  }
+}
+
 .bar-list {
   display: grid;
   gap: 10px;
@@ -15692,4 +16007,308 @@ body {
   .pdv-product-lookup-table > button > :nth-child(7) {
     display: none;
   }
+}
+
+/* Ajustes finais de densidade visual. Mantidos no fim do arquivo para que
+   prevaleçam sobre os estilos legados das telas operacionais. */
+#root .app-shell {
+  grid-template-rows: 22px 68px minmax(0, 1fr);
+}
+
+.window-titlebar {
+  height: 22px;
+}
+
+.window-titlebar-label {
+  gap: 5px;
+  padding-left: 7px;
+  font-size: 0.66rem;
+}
+
+.window-titlebar-label img {
+  width: 13px;
+  height: 13px;
+}
+
+.window-titlebar-actions button {
+  width: 36px;
+}
+
+.pdv-cart-product-search {
+  min-width: 132px;
+  min-height: 40px;
+  justify-content: center;
+  border-radius: 2px;
+  padding-inline: 16px;
+  text-align: center;
+}
+
+.pdv-quantity-box.has-subtable .pdv-subtable-trigger {
+  flex: 0 0 210px;
+  width: 210px;
+  min-width: 210px;
+  max-width: 280px;
+  padding-inline: 16px;
+  border-radius: 2px;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.simple-mode-toggle {
+  min-height: 54px;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  font-size: 0.94rem;
+  font-weight: 800;
+}
+
+.simple-mode-toggle input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  accent-color: var(--accent);
+}
+
+:root[data-simple-mode="true"] .app-shell.pdv-main-mode .workspace {
+  padding: 0 !important;
+}
+
+:root[data-simple-mode="true"] .pdv-shell.embedded .pdv-workspace,
+:root[data-simple-mode="true"] .pdv-shell.embedded .pdv-panel {
+  padding: 0 !important;
+}
+
+:root[data-simple-mode="true"] .pdv-sale-grid {
+  width: 100%;
+  gap: 2px;
+  grid-template-columns:
+    minmax(0, calc(100% - var(--pdv-cart-pane-width, 34%) - 6px))
+    2px
+    minmax(280px, var(--pdv-cart-pane-width, 34%));
+}
+
+:root[data-simple-mode="true"] .pdv-shell button {
+  border-radius: 1px !important;
+}
+
+:root[data-simple-mode="true"] .pdv-sale-identity {
+  display: grid;
+  min-width: 92px;
+  align-content: center;
+  padding-inline: 5px;
+}
+
+:root[data-simple-mode="true"] .pdv-sale-identity .pdv-eyebrow,
+:root[data-simple-mode="true"] .pdv-sale-identity p {
+  display: none;
+}
+
+:root[data-simple-mode="true"] .pdv-sale-identity h1 {
+  display: block;
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.05;
+}
+
+:root[data-simple-mode="true"] .pdv-cart-area {
+  border-right-width: 0;
+}
+
+/* No tema claro, as superfícies operacionais usam azul em vez de branco. */
+:root[data-theme="datacaixa"] {
+  --bg: #79b8d8;
+  --panel: #a8cee2;
+  --panel-2: #c0ddec;
+  --line: #438bb6;
+  --text: #082843;
+  --muted: #355f7c;
+  --pdv-bg: linear-gradient(180deg, #78b7d8 0, #8bc5e1 48px, #5aa5cf 49px, #83bddb 100%);
+  --pdv-panel: #86bad3;
+  --pdv-soft: #c3dfed;
+  --pdv-soft-2: #d0e7f2;
+}
+
+:root[data-theme="datacaixa"] body {
+  background: #79b8d8;
+}
+
+:root[data-theme="datacaixa"] .pdv-tables-screen {
+  border-color: #438bb6;
+  background:
+    linear-gradient(180deg, rgba(213, 237, 248, 0.28), transparent 150px),
+    #8dc4df;
+}
+
+:root[data-theme="datacaixa"] .pdv-tables-screen > .pdv-section-head {
+  background: #abd4e8;
+}
+
+:root[data-theme="datacaixa"] .app-shell :is(input:not([type="color"]), select, textarea) {
+  border-color: #5597bd !important;
+  background: #cbe3ef !important;
+  color: #08243b !important;
+  -webkit-text-fill-color: #08243b;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid :is(
+  .pdv-category-grid button,
+  .pdv-product-grid button,
+  .pdv-quantity-box button,
+  .pdv-sale-mode-select,
+  .pdv-subtable-trigger,
+  .pdv-cart-density button
+) {
+  border-color: #609fc3;
+  background: #c3deeb;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list {
+  border-color: #4f91b7;
+  background: #9fc9de;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list article,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list .pdv-empty {
+  border-bottom-color: #78afca;
+  background: #c7e0ec;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list article:hover,
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-cart-list article.selected {
+  background: #b2d7e8;
+}
+
+:root[data-theme="datacaixa"] .pdv-sale-grid .pdv-total-box > strong {
+  border-color: #5796b9;
+  background: #cbe3ef;
+}
+
+:root[data-theme="datacaixa"] :is(.modal, .pdv-payment-modal) {
+  border-color: #438bb6 !important;
+  background: #a9d0e4 !important;
+  scrollbar-color: #4e8fb5 #a9d0e4;
+}
+
+:root[data-theme="datacaixa"] :is(.modal, .pdv-payment-modal) :is(input, select, textarea) {
+  background: #cbe3ef !important;
+}
+
+:root[data-theme="datacaixa"] .pdv-product-lookup-table,
+:root[data-theme="datacaixa"] .pdv-product-lookup-table > button {
+  border-color: #5d9dc1;
+  background: #b9d9e9;
+}
+
+:root[data-theme="datacaixa"] .pdv-product-lookup-table > button:nth-child(odd) {
+  background: #c6e1ee;
+}
+
+/* O modal de consulta no escuro precisa manter contraste nas linhas e textos. */
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal) {
+  border-color: #356b91 !important;
+  background: #10283c !important;
+  color: var(--text) !important;
+  scrollbar-color: #4f82a8 #102a40;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal)
+  :is(h1, h2, h3, p, label, span, small, strong, b, .pdv-empty, .pdv-eyebrow, .settings-overline) {
+  color: var(--text) !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal)
+  > :is(.modal-head, .pdv-section-head, .pdv-window-title) * {
+  color: #fff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal)
+  :is(input, select, textarea) {
+  border-color: #3e6f93 !important;
+  background: #19364e !important;
+  color: #eef7ff !important;
+  -webkit-text-fill-color: #eef7ff;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) :is(.modal, .pdv-payment-modal)
+  :is(input, textarea)::placeholder {
+  color: #9fb9cd !important;
+  -webkit-text-fill-color: #9fb9cd;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-search {
+  border-color: #35698e;
+  background: #132f46;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table {
+  border-color: #35698e;
+  background: #0d2234;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button {
+  border-bottom-color: #315774;
+  background: #10283b;
+  color: #edf7ff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button:nth-child(odd) {
+  background: #173249;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button:hover,
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button.selected {
+  background: #a9502e;
+  color: #fff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-check {
+  border-color: #6f9ab8;
+  background: #0b2031;
+  color: #d8efff !important;
+}
+
+:root:is([data-theme="dark"], [data-theme="datacaixa-dark"]) .pdv-product-lookup-table > button.selected .pdv-product-lookup-check {
+  border-color: #fff;
+  background: #e7f4fb;
+  color: #12324a !important;
+}
+
+@media (max-width: 900px) {
+  .pdv-quantity-box.has-subtable .pdv-subtable-trigger {
+    flex-basis: 170px;
+    width: 170px;
+    min-width: 170px;
+    max-width: 210px;
+  }
+}
+
+html[data-theme="dark"] #root .pdv-payment-modal.pdv-product-lookup-modal,
+html[data-theme="datacaixa-dark"] #root .pdv-payment-modal.pdv-product-lookup-modal {
+  border-color: #356b91 !important;
+  background: #10283c !important;
+  color: #edf7ff !important;
+  -webkit-text-fill-color: #edf7ff !important;
+}
+
+html[data-theme="dark"] #root .pdv-product-lookup-modal .pdv-product-lookup-table > button > *,
+html[data-theme="datacaixa-dark"] #root .pdv-product-lookup-modal .pdv-product-lookup-table > button > * {
+  color: #edf7ff !important;
+  -webkit-text-fill-color: #edf7ff !important;
+}
+
+html[data-theme="dark"] #root .pdv-product-lookup-modal .pdv-product-lookup-footer,
+html[data-theme="datacaixa-dark"] #root .pdv-product-lookup-modal .pdv-product-lookup-footer {
+  border-top-color: #315f80;
+  background: #10283c;
+}
+
+/* O carrinho mantém uma margem operacional uniforme em todos os lados. */
+:root[data-simple-mode="true"] .pdv-sale-grid > .pdv-cart-area {
+  margin: 5px;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
 }

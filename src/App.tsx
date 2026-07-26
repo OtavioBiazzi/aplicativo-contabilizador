@@ -7013,7 +7013,7 @@ function SettingsPanel({
               <option value={8000}>Lento (8 s)</option>
             </select>
           </label>
-          <label className="switch-line">
+          <label className="switch-line simple-mode-toggle">
             <input type="checkbox" checked={Boolean(draft.simpleMode)} onChange={(event) => update("simpleMode", event.target.checked)} />
             Modo Simples: interface mais quadrada, compacta e sem animacoes de rolagem
           </label>
