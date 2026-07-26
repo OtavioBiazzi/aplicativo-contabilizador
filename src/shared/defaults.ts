@@ -92,6 +92,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     defaultRoundingDirection: "up",
     notificationDurationMs: 3200,
     hideHeaderBrand: false,
+    headerPinnedModules: ["sale", "tables", "history"],
     tableNumberEnabled: true,
     busNumberEnabled: true,
     theme: "datacaixa",

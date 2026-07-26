@@ -6,10 +6,11 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
+  appVersion: string;
   permissions: ServerPermissions;
   getSettings: () => Promise<AppSettings>;
   saveSettings: (settings: AppSettings) => Promise<AppSettings>;
@@ -37,6 +38,9 @@ interface LocalServerOptions {
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, originDevice?: string, operationId?: string) => Promise<PdvReceivable>;
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   cancelPdvReceivable: (id: string) => Promise<void>;
+  savePdvPayable: (draft: PdvPayableDraft) => Promise<PdvPayable>;
+  payPdvPayable: (id: string, payment: PdvPayablePayment, originDevice?: string, operationId?: string) => Promise<PdvPayable>;
+  cancelPdvPayable: (id: string) => Promise<void>;
   printPdvReceipt: (payload: {
     sale: PdvSale;
     customer?: PdvCustomer;
@@ -101,12 +105,19 @@ export class LocalServer {
     app.use(express.json());
 
     app.get("/", (_request, response) => {
-      response.type("html").send(remoteClientHtml(port));
+      response.type("html").send(remoteClientHtml(port, this.options.appVersion));
+    });
+
+    app.get("/api/version", (_request, response) => {
+      response.json({
+        appVersion: this.options.appVersion,
+        protocolVersion: normalizeProtocolVersion(this.options.appVersion)
+      });
     });
 
     app.post("/api/login", (request, response) => {
       const ok = request.body?.password === this.password;
-      response.status(ok ? 200 : 401).json({ ok });
+      response.status(ok ? 200 : 401).json({ ok, appVersion: this.options.appVersion });
     });
 
     app.patch("/api/settings", this.authorize("allowClientCustomization"), async (request, response) => {
@@ -421,6 +432,45 @@ export class LocalServer {
       }
     });
 
+    app.post("/api/pdv/payables", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const payable = await this.options.savePdvPayable(request.body || {});
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.status(201).json({ payable });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar a conta a pagar." });
+      }
+    });
+
+    app.post("/api/pdv/payables/:id/payments", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const operationId = String(request.header("x-idempotency-key") || "").trim() || undefined;
+        const payable = await this.options.payPdvPayable(
+          request.params.id,
+          request.body?.payment || request.body || {},
+          String(request.header("x-device-name") || "Cliente remoto"),
+          operationId
+        );
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.status(201).json({ payable });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel registrar o pagamento." });
+      }
+    });
+
+    app.post("/api/pdv/payables/:id/cancel", this.authorize("manageTables"), async (request, response) => {
+      try {
+        await this.options.cancelPdvPayable(request.params.id);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel cancelar a conta a pagar." });
+      }
+    });
+
     app.post("/api/pdv/tables/:number/cancel", this.authorize("manageTables"), async (request, response) => {
       try {
         const sale = await this.options.cancelPdvTable(
@@ -546,6 +596,16 @@ export class LocalServer {
 
   private authorize(permission: keyof ServerPermissions) {
     return (request: Request, response: Response, next: NextFunction) => {
+      const clientVersion = String(request.header("x-caixa-version") || "").trim();
+      if (normalizeProtocolVersion(clientVersion) !== normalizeProtocolVersion(this.options.appVersion)) {
+        response.status(426).json({
+          error: `Versao incompativel. Servidor ${this.options.appVersion}; cliente ${clientVersion || "antigo/nao identificado"}. Atualize antes de conectar.`,
+          code: "VERSION_MISMATCH",
+          serverVersion: this.options.appVersion,
+          clientVersion: clientVersion || undefined
+        });
+        return;
+      }
       const password = request.header("x-caixa-password") || request.query.password;
       if (password !== this.password) {
         response.status(401).json({ error: "Senha invalida." });
@@ -567,6 +627,11 @@ export class LocalServer {
   private handleSocket(socket: WebSocket, request: http.IncomingMessage) {
     const url = new URL(request.url || "", `http://${request.headers.host}`);
     const password = url.searchParams.get("password") || "";
+    const clientVersion = url.searchParams.get("version") || "";
+    if (normalizeProtocolVersion(clientVersion) !== normalizeProtocolVersion(this.options.appVersion)) {
+      socket.close(1008, `Versao incompativel. Servidor ${this.options.appVersion}.`);
+      return;
+    }
     if (password !== this.password || !this.permissions.view) {
       socket.close(1008, "Senha invalida");
       return;
@@ -881,7 +946,11 @@ function isPaymentMethod(value: unknown): value is PaymentMethod {
   return typeof value === "string" && PAYMENT_METHODS.includes(value as PaymentMethod);
 }
 
-function remoteClientHtml(port: number): string {
+function normalizeProtocolVersion(value: string): string {
+  return String(value || "").trim().replace(/^v/i, "");
+}
+
+function remoteClientHtml(port: number, appVersion: string): string {
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -1000,6 +1069,7 @@ function remoteClientHtml(port: number): string {
     </section>
   </main>
   <script>
+    const appVersion = ${JSON.stringify(appVersion)};
     let password = "";
     let permissions = {};
     let clientPolicy = null;
@@ -1020,7 +1090,7 @@ function remoteClientHtml(port: number): string {
       qs("#appMessage").className = error ? "status error" : "status";
     };
     async function api(path, options = {}) {
-      const response = await fetch(path, { ...options, headers: { "content-type": "application/json", "x-caixa-password": password, "x-device-name": deviceName(), ...(options.headers || {}) } });
+      const response = await fetch(path, { ...options, headers: { "content-type": "application/json", "x-caixa-password": password, "x-device-name": deviceName(), "x-caixa-version": appVersion, ...(options.headers || {}) } });
       const text = await response.text();
       if (!response.ok) throw new Error(text || response.statusText);
       return text ? JSON.parse(text) : {};
@@ -1143,7 +1213,7 @@ function remoteClientHtml(port: number): string {
         qs("#history").hidden = false;
         load();
         if (socket) socket.close();
-        socket = new WebSocket("ws://" + location.host + "/sync?password=" + encodeURIComponent(password) + "&device=" + encodeURIComponent(deviceName()));
+        socket = new WebSocket("ws://" + location.host + "/sync?password=" + encodeURIComponent(password) + "&device=" + encodeURIComponent(deviceName()) + "&version=" + encodeURIComponent(appVersion));
         socket.onopen = () => qs("#connectionState").textContent = "Tempo real ativo";
         socket.onclose = () => qs("#connectionState").textContent = "Reconecte se precisar";
         socket.onmessage = load;

@@ -31,6 +31,82 @@ if (printSettings.receiptFontSize !== 10.5 || printSettings.receiptMarginLeftMm 
   throw new Error("Configuracoes de calibracao da impressao nao foram persistidas.");
 }
 
+const payable = await store.savePayable({
+  description: "Aluguel smoke",
+  supplier: "Imobiliaria regional",
+  category: "Aluguel",
+  documentNumber: "CTR-2026",
+  dueDate: "2030-09-10",
+  amount: 900,
+  note: "Validacao do modulo financeiro"
+});
+if (payable.status !== "Em aberto" || payable.balance !== 900 || payable.supplier !== "Imobiliaria regional") {
+  throw new Error("Cadastro de conta a pagar nao foi persistido.");
+}
+const partialPayable = await store.payPayable(payable.id, {
+  id: crypto.randomUUID(),
+  payableId: payable.id,
+  createdAt: new Date().toISOString(),
+  method: "Pix",
+  amount: 350,
+  description: "Primeira parte"
+}, "Smoke local", "payable-smoke-partial");
+if (partialPayable.status !== "Parcialmente paga" || partialPayable.balance !== 550 || partialPayable.paidAmount !== 350) {
+  throw new Error("Pagamento parcial da conta a pagar ficou inconsistente.");
+}
+const repeatedPartial = await store.payPayable(payable.id, {
+  id: crypto.randomUUID(),
+  payableId: payable.id,
+  createdAt: new Date().toISOString(),
+  method: "Pix",
+  amount: 350
+}, "Smoke local", "payable-smoke-partial");
+if (repeatedPartial.paidAmount !== 350 || repeatedPartial.payments.length !== 1) {
+  throw new Error("Idempotencia do pagamento da conta a pagar falhou.");
+}
+const paidPayable = await store.payPayable(payable.id, {
+  id: crypto.randomUUID(),
+  payableId: payable.id,
+  createdAt: new Date().toISOString(),
+  method: "Debito",
+  amount: 550
+}, "Smoke local", "payable-smoke-final");
+if (paidPayable.status !== "Paga" || paidPayable.balance !== 0) {
+  throw new Error("Quitacao da conta a pagar nao foi concluida.");
+}
+const correctedPayable = await store.savePayable({
+  id: paidPayable.id,
+  description: "Aluguel smoke corrigido",
+  supplier: paidPayable.supplier,
+  category: paidPayable.category,
+  documentNumber: paidPayable.documentNumber,
+  dueDate: paidPayable.dueDate,
+  amount: 950,
+  note: "Pagamento corrigido pelo editor completo",
+  payments: [{
+    ...paidPayable.payments[0],
+    method: "Dinheiro",
+    amount: 300,
+    description: "Primeira parte corrigida"
+  }]
+});
+if (correctedPayable.status !== "Parcialmente paga"
+  || correctedPayable.balance !== 650
+  || correctedPayable.payments.length !== 1
+  || correctedPayable.payments[0].method !== "Dinheiro"
+  || correctedPayable.payments[0].description !== "Primeira parte corrigida") {
+  throw new Error("Edicao completa dos pagamentos da conta a pagar ficou inconsistente.");
+}
+const cancelablePayable = await store.savePayable({
+  description: "Conta cancelavel smoke",
+  dueDate: "2030-09-12",
+  amount: 25
+});
+await store.cancelPayable(cancelablePayable.id);
+if ((await store.getSnapshot()).payables.find((item) => item.id === cancelablePayable.id)?.status !== "Cancelada") {
+  throw new Error("Cancelamento da conta a pagar nao foi persistido.");
+}
+
 const receiptBaseItem = {
   id: "receipt-1",
   productId: "coffee",
@@ -101,6 +177,61 @@ const complement = await store.saveProduct({
   complementProductIds: [],
   sortOrder: 2
 });
+const inventoryProduct = await store.saveProduct({
+  name: "Produto com estoque smoke",
+  categoryId: category.id,
+  price: 18,
+  costPrice: 7.5,
+  unit: "UNID",
+  unitMode: "unidade",
+  active: true,
+  showOnPdv: true,
+  favorite: false,
+  canBeComplement: false,
+  hasComplements: false,
+  complementProductIds: [],
+  sortOrder: 3,
+  trackStock: true,
+  stockQuantity: 8,
+  minimumStock: 3,
+  sku: "SMK-001",
+  barcode: "7891234567890",
+  supplier: "Fornecedor smoke",
+  description: "Produto usado para validar cadastro detalhado"
+});
+if (
+  inventoryProduct.costPrice !== 7.5 ||
+  inventoryProduct.stockQuantity !== 8 ||
+  inventoryProduct.minimumStock !== 3 ||
+  inventoryProduct.sku !== "SMK-001" ||
+  inventoryProduct.barcode !== "7891234567890"
+) {
+  throw new Error("Cadastro detalhado do produto nao foi persistido.");
+}
+const inventorySale = await store.saveSale({
+  type: "Venda direta",
+  items: [{
+    id: crypto.randomUUID(),
+    productId: inventoryProduct.id,
+    productName: inventoryProduct.name,
+    categoryName: category.name,
+    quantity: 2,
+    baseUnitPrice: 18,
+    unitPrice: 18,
+    discount: 0,
+    total: 36
+  }],
+  discount: 0,
+  payments: [{ id: crypto.randomUUID(), method: "Pix", amount: 36 }]
+});
+if ((await store.getSnapshot()).products.find((product) => product.id === inventoryProduct.id)?.stockQuantity !== 6) {
+  throw new Error("Venda nao baixou o estoque controlado.");
+}
+await store.cancelSale(inventorySale.id);
+if ((await store.getSnapshot()).products.find((product) => product.id === inventoryProduct.id)?.stockQuantity !== 8) {
+  throw new Error("Cancelamento nao devolveu o estoque controlado.");
+}
+await store.deleteSale(inventorySale.id);
 await store.saveProduct({ ...baseProduct, complementProductIds: [complement.id] });
 const favoriteSnapshot = await store.getSnapshot();
 if (!favoriteSnapshot.categories[0]?.favorite || !favoriteSnapshot.products[0]?.favorite) {
@@ -446,8 +577,8 @@ if (transferRemaining[0]?.quantity !== 2 || transferSource?.items[0]?.quantity !
 }
 
 const partialSource = tableSeven.items[0];
-const partialSale = await store.closeTablePartial(7, [{ ...partialSource, quantity: 1, total: 10 }], [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }]);
-if (partialSale.status !== "Parcial" || partialSale.total !== 10) {
+const partialSale = await store.closeTablePartial(7, [{ ...partialSource, quantity: 1, total: 10 }], [{ id: crypto.randomUUID(), method: "Pix", amount: 10, description: "Joao smoke" }]);
+if (partialSale.status !== "Parcial" || partialSale.total !== 10 || partialSale.payments[0]?.description !== "Joao smoke") {
   throw new Error("Fechamento parcial nao calculou o item selecionado corretamente.");
 }
 const partialSnapshot = await store.getSnapshot();
@@ -455,16 +586,17 @@ const remainingTable = partialSnapshot.tables.find((table) => table.number === 7
 if (!remainingTable?.items.length || remainingTable.items[0].quantity !== 2 || remainingTable.items[0].paidQuantity !== 1 || remainingTable.total !== 10 || remainingTable.status !== "Ocupada") {
   throw new Error("Fechamento parcial nao preservou o item pago e o saldo restante da mesa.");
 }
-await store.closeTable(7, [{ id: crypto.randomUUID(), method: "Dinheiro", amount: 10, received: 20, change: 10 }]);
-const consolidatedTableSale = store.getSales({}).filter((sale) => sale.tableSessionId === tableSeven.sessionId);
-if (consolidatedTableSale.length !== 1 || consolidatedTableSale[0].status !== "Finalizada" || consolidatedTableSale[0].total !== 20 || consolidatedTableSale[0].payments.length !== 2) {
-  throw new Error("Pagamentos parcial e final nao foram consolidados na mesma sessao da mesa.");
+await store.closeTable(7, [{ id: crypto.randomUUID(), method: "Dinheiro", amount: 10, received: 20, change: 10, description: "Maria smoke" }]);
+const individualTableSales = store.getSales({}).filter((sale) => sale.tableSessionId === tableSeven.sessionId);
+if (individualTableSales.length !== 2 || !individualTableSales.some((sale) => sale.status === "Parcial" && sale.total === 10 && sale.payments[0]?.description === "Joao smoke") || !individualTableSales.some((sale) => sale.status === "Finalizada" && sale.total === 10 && sale.payments[0]?.description === "Maria smoke")) {
+  throw new Error("Pagamentos parcial e final nao ficaram individualizados na mesma sessao da mesa.");
 }
-const correctedMixedSale = await store.updateSalePayments(consolidatedTableSale[0].id, [
-  { id: crypto.randomUUID(), method: "Debito", amount: 8, description: "Correcao smoke" },
-  { id: crypto.randomUUID(), method: "Credito", amount: 12 }
+const finalTableSale = individualTableSales.find((sale) => sale.status === "Finalizada");
+const correctedMixedSale = await store.updateSalePayments(finalTableSale.id, [
+  { id: crypto.randomUUID(), method: "Debito", amount: 4, description: "Correcao smoke" },
+  { id: crypto.randomUUID(), method: "Credito", amount: 6 }
 ]);
-if (correctedMixedSale.total !== 20 || correctedMixedSale.payments.length !== 2 || correctedMixedSale.payments[0]?.method !== "Debito" || correctedMixedSale.payments[1]?.method !== "Credito") {
+if (correctedMixedSale.total !== 10 || correctedMixedSale.payments.length !== 2 || correctedMixedSale.payments[0]?.method !== "Debito" || correctedMixedSale.payments[1]?.method !== "Credito") {
   throw new Error("Edicao individual dos pagamentos mistos nao preservou o total da venda.");
 }
 if ((await store.getSnapshot()).tables.find((table) => table.number === 7)?.status !== "Livre") {
@@ -478,7 +610,7 @@ if (!reopenedTable?.sessionId || reopenedTable.sessionId === tableSeven.sessionI
   throw new Error("Nova abertura da mesma mesa reutilizou a sessao financeira anterior.");
 }
 await store.closeTable(7, [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }]);
-if (store.getSales({}).filter((sale) => sale.tableNumber === 7).length !== 2) {
+if (store.getSales({}).filter((sale) => sale.tableNumber === 7).length !== 3) {
   throw new Error("Visitas diferentes da mesma mesa foram consolidadas indevidamente.");
 }
 
@@ -584,12 +716,14 @@ const paymentsSheet = await zip.file("xl/worksheets/sheet4.xml").async("string")
 if (!paymentsSheet.includes("Pix") || !paymentsSheet.includes("<v>12</v>")) {
   throw new Error("XLSX PDV nao registrou os pagamentos como esperado.");
 }
-const consolidatedPaymentRows = paymentsSheet.split(consolidatedTableSale[0].id).length - 1;
 const salesSheet = await zip.file("xl/worksheets/sheet2.xml").async("string");
-const consolidatedSaleRows = salesSheet.split(consolidatedTableSale[0].id).length - 1;
+const partialPaymentRows = paymentsSheet.split(partialSale.id).length - 1;
+const finalPaymentRows = paymentsSheet.split(finalTableSale.id).length - 1;
+const partialSaleRows = salesSheet.split(partialSale.id).length - 1;
+const finalSaleRows = salesSheet.split(finalTableSale.id).length - 1;
 // O ID aparece em duas colunas (venda e operacao) por linha.
-if (consolidatedPaymentRows !== 4 || consolidatedSaleRows !== 2 || !paymentsSheet.includes("Debito") || !paymentsSheet.includes("Credito")) {
-  throw new Error(`XLSX nao separou os pagamentos mistos mantendo uma unica venda da mesa. vendas=${consolidatedSaleRows}, pagamentos=${consolidatedPaymentRows}`);
+if (partialPaymentRows !== 2 || finalPaymentRows !== 4 || partialSaleRows !== 2 || finalSaleRows !== 2 || !paymentsSheet.includes("Debito") || !paymentsSheet.includes("Credito") || !paymentsSheet.includes("Joao smoke")) {
+  throw new Error(`XLSX nao preservou os fechamentos individuais e seus pagamentos. parcial=${partialSaleRows}/${partialPaymentRows}, final=${finalSaleRows}/${finalPaymentRows}`);
 }
 if (!salesSheet.includes("Onibus") || !salesSheet.includes("Venda de onibus")) {
   throw new Error("XLSX nao exportou a venda de onibus integrada.");

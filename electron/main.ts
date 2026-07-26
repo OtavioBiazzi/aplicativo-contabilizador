@@ -29,12 +29,13 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
 let floatingWindow: BrowserWindow | null = null;
+let secondInstancePending = false;
 let store: LedgerStore;
 let pdvStore: PdvStore;
 let exporter: LedgerExporter;
@@ -555,6 +556,7 @@ async function bootstrap() {
   await logger.info("Aplicativo iniciado", `Versao ${app.getVersion()}`);
 
   localServer = new LocalServer({
+    appVersion: app.getVersion(),
     permissions: (await store.getSettings()).server.permissions,
     getSettings: () => store.getSettings(),
     saveSettings: (settings) => store.saveSettings(settings),
@@ -621,6 +623,9 @@ async function bootstrap() {
     receivePdvReceivable: (id, payment, originDevice, operationId) => pdvStore.receiveReceivable(id, payment, originDevice, operationId),
     updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
     cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
+    savePdvPayable: (draft) => pdvStore.savePayable(draft),
+    payPdvPayable: (id, payment, originDevice, operationId) => pdvStore.payPayable(id, payment, originDevice, operationId),
+    cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
     printPdvReceipt: async ({ sale, customer, receivable, customerName, customerDocument }) => {
       const snapshot = await pdvStore.getSnapshot();
       const hostWindow = mainWindow || BrowserWindow.getAllWindows()[0];
@@ -920,6 +925,23 @@ function registerIpc() {
 
   ipcMain.handle("pdv:cancelReceivable", async (_event, id: string) => {
     await pdvStore.cancelReceivable(id);
+    publishPdvChanged();
+  });
+
+  ipcMain.handle("pdv:savePayable", async (_event, draft: PdvPayableDraft): Promise<PdvPayable> => {
+    const payable = await pdvStore.savePayable(draft);
+    publishPdvChanged();
+    return payable;
+  });
+
+  ipcMain.handle("pdv:payPayable", async (_event, id: string, payment: PdvPayablePayment, operationId?: string): Promise<PdvPayable> => {
+    const payable = await pdvStore.payPayable(id, payment, "Este computador", operationId || randomUUID());
+    publishPdvChanged();
+    return payable;
+  });
+
+  ipcMain.handle("pdv:cancelPayable", async (_event, id: string) => {
+    await pdvStore.cancelPayable(id);
     publishPdvChanged();
   });
 
@@ -1509,6 +1531,8 @@ function registerIpc() {
     return state;
   });
 
+  ipcMain.handle("app:getVersion", async () => app.getVersion());
+
   ipcMain.handle("server:printPdvReceipt", async (
     _event,
     deviceId: string,
@@ -1566,7 +1590,33 @@ if (process.platform === "win32") {
   app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
 }
 
-app.whenReady().then(bootstrap);
+const singleInstanceLock = app.requestSingleInstanceLock();
+
+if (!singleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const target = mainWindow && !mainWindow.isDestroyed() ? mainWindow : floatingWindow;
+    if (target && !target.isDestroyed()) {
+      if (target.isMinimized()) target.restore();
+      target.show();
+      target.focus();
+      target.webContents.send("app:secondInstance");
+      return;
+    }
+    secondInstancePending = true;
+  });
+
+  app.whenReady().then(async () => {
+    await bootstrap();
+    if (secondInstancePending && mainWindow && !mainWindow.isDestroyed()) {
+      secondInstancePending = false;
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send("app:secondInstance");
+    }
+  });
+}
 
 app.on("before-quit", (event) => {
   if (gracefulQuitFinished || !store || !pdvStore) {

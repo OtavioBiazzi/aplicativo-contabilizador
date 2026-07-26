@@ -11,6 +11,9 @@ import type {
   PdvCustomerDraft,
   PdvExportFilters,
   PdvOpenTable,
+  PdvPayable,
+  PdvPayableDraft,
+  PdvPayablePayment,
   PdvPayment,
   PdvProduct,
   PdvProductDraft,
@@ -59,6 +62,7 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   receiptMarginTopMm: 4,
   receiptMarginBottomMm: 5,
   receiptAutoPrint: false,
+  receiptOpenAfterSale: false,
   receiptPrinterName: "",
   receiptCopies: 1,
   receiptLogoDataUrl: "",
@@ -180,6 +184,7 @@ export class PdvStore {
       recentSales: this.getRecentSales(salesLimit),
       customers: this.getCustomers(),
       receivables: this.getReceivables(),
+      payables: this.getPayables(),
       settings: this.getSettings(),
       dataFile: this.dbFilePath
     };
@@ -219,6 +224,189 @@ export class PdvStore {
     );
     await this.persist();
     return this.getCustomers().find((customer) => customer.id === id)!;
+  }
+
+  getPayables(): PdvPayable[] {
+    const today = new Date().toISOString().slice(0, 10);
+    return selectAll<{
+      id: string;
+      description: string;
+      supplier: string;
+      category: string;
+      documentNumber: string;
+      createdAt: string;
+      dueDate: string;
+      amount: number;
+      status: PdvPayable["status"];
+      note: string;
+    }>(
+      this.requireDb(),
+      `SELECT id, description, supplier, category, document_number AS documentNumber,
+       created_at AS createdAt, due_date AS dueDate, amount, status, note
+       FROM payables ORDER BY due_date, created_at DESC`
+    ).map((row) => {
+      const payments = selectAll<PdvPayablePayment>(
+        this.requireDb(),
+        `SELECT id, payable_id AS payableId, created_at AS createdAt, method, amount,
+         description, origin_device AS originDevice, operation_id AS operationId
+         FROM payable_payments WHERE payable_id = ? ORDER BY created_at, rowid`,
+        [row.id]
+      );
+      const paidAmount = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
+      const balance = roundMoney(Math.max(0, row.amount - paidAmount));
+      const status: PdvPayable["status"] = row.status === "Cancelada"
+        ? "Cancelada"
+        : balance <= 0.009
+          ? "Paga"
+          : paidAmount > 0.009
+            ? "Parcialmente paga"
+            : row.dueDate < today
+              ? "Vencida"
+              : "Em aberto";
+      return { ...row, payments, paidAmount, balance, status };
+    });
+  }
+
+  async savePayable(draft: PdvPayableDraft): Promise<PdvPayable> {
+    const description = String(draft.description || "").trim();
+    const dueDate = String(draft.dueDate || "").trim();
+    const amount = roundMoney(Number(draft.amount));
+    if (!description) throw new Error("Informe a descricao da conta.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw new Error("Informe um vencimento valido.");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Informe um valor maior que zero.");
+    const id = draft.id || randomUUID();
+    const existing = this.getPayables().find((item) => item.id === id);
+    if (existing?.status === "Cancelada") throw new Error("Uma conta cancelada nao pode ser editada.");
+    const payments = (draft.payments === undefined ? existing?.payments || [] : draft.payments).map((payment) => ({
+      id: String(payment.id || randomUUID()),
+      payableId: id,
+      createdAt: Number.isNaN(Date.parse(String(payment.createdAt || ""))) ? new Date().toISOString() : String(payment.createdAt),
+      method: payment.method || "Nao definido",
+      amount: roundMoney(Number(payment.amount)),
+      description: String(payment.description || "").trim(),
+      originDevice: String(payment.originDevice || "Edicao da conta").trim(),
+      operationId: String(payment.operationId || "").trim() || undefined
+    }));
+    if (new Set(payments.map((payment) => payment.id)).size !== payments.length) {
+      throw new Error("Existem pagamentos duplicados nesta conta.");
+    }
+    if (payments.some((payment) => !Number.isFinite(payment.amount) || payment.amount <= 0)) {
+      throw new Error("Todos os pagamentos devem ter um valor maior que zero.");
+    }
+    const paidAmount = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
+    if (amount + 0.009 < paidAmount) {
+      throw new Error(`O valor da conta nao pode ficar abaixo dos ${paidAmount.toFixed(2)} pagos.`);
+    }
+    const createdAt = existing?.createdAt || new Date().toISOString();
+    const nextStatus: PdvPayable["status"] = paidAmount && amount - paidAmount <= 0.009
+      ? "Paga"
+      : paidAmount
+        ? "Parcialmente paga"
+        : "Em aberto";
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run(
+        `INSERT INTO payables
+         (id, description, supplier, category, document_number, created_at, due_date, amount, status, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+          description=excluded.description, supplier=excluded.supplier, category=excluded.category,
+          document_number=excluded.document_number, due_date=excluded.due_date, amount=excluded.amount,
+          status=excluded.status, note=excluded.note`,
+        [
+          id,
+          description,
+          String(draft.supplier || "").trim(),
+          String(draft.category || "").trim(),
+          String(draft.documentNumber || "").trim(),
+          createdAt,
+          dueDate,
+          amount,
+          nextStatus,
+          String(draft.note || "").trim()
+        ]
+      );
+      if (draft.payments !== undefined) {
+        db.run("DELETE FROM payable_payments WHERE payable_id = ?", [id]);
+        for (const payment of payments) {
+          db.run(
+            `INSERT INTO payable_payments
+             (id, payable_id, created_at, method, amount, description, origin_device, operation_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              payment.id,
+              id,
+              payment.createdAt,
+              payment.method,
+              payment.amount,
+              payment.description,
+              payment.originDevice,
+              payment.operationId || null
+            ]
+          );
+        }
+      }
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return this.getPayables().find((item) => item.id === id)!;
+  }
+
+  async payPayable(
+    payableId: string,
+    payment: PdvPayablePayment,
+    originDevice = "Este computador",
+    operationId?: string
+  ): Promise<PdvPayable> {
+    const payable = this.getPayables().find((item) => item.id === payableId);
+    if (!payable || payable.status === "Cancelada") throw new Error("Conta a pagar nao encontrada ou cancelada.");
+    if (operationId) {
+      const existing = selectAll<{ id: string }>(this.requireDb(), "SELECT id FROM payable_payments WHERE operation_id = ?", [operationId])[0];
+      if (existing) return this.getPayables().find((item) => item.id === payableId)!;
+    }
+    const amount = roundMoney(Number(payment.amount));
+    if (!Number.isFinite(amount) || amount <= 0 || amount - payable.balance > 0.009) {
+      throw new Error(`O pagamento deve ser maior que zero e nao pode ultrapassar ${payable.balance.toFixed(2)}.`);
+    }
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run(
+        `INSERT INTO payable_payments
+         (id, payable_id, created_at, method, amount, description, origin_device, operation_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          payment.id || randomUUID(),
+          payableId,
+          new Date().toISOString(),
+          payment.method || "Nao definido",
+          amount,
+          String(payment.description || "").trim(),
+          originDevice,
+          operationId || payment.operationId || null
+        ]
+      );
+      const nextBalance = roundMoney(payable.balance - amount);
+      db.run("UPDATE payables SET status = ? WHERE id = ?", [nextBalance <= 0.009 ? "Paga" : "Parcialmente paga", payableId]);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return this.getPayables().find((item) => item.id === payableId)!;
+  }
+
+  async cancelPayable(id: string): Promise<void> {
+    const payable = this.getPayables().find((item) => item.id === id);
+    if (!payable) throw new Error("Conta a pagar nao encontrada.");
+    if (payable.paidAmount > 0.009) throw new Error("Uma conta com pagamentos nao pode ser cancelada.");
+    this.requireDb().run("UPDATE payables SET status = 'Cancelada' WHERE id = ?", [id]);
+    await this.persist();
   }
 
   getReceivables(): PdvReceivable[] {
@@ -375,6 +563,10 @@ export class PdvStore {
         ]
       );
       if (patch.items !== undefined) {
+        if (sale.status !== "Cancelada") {
+          applySaleStock(db, sale, 1, "sale-edit-reversal", "Estoque devolvido antes da edicao da venda");
+          applySaleStock(db, { ...sale, items: nextItems }, -1, "sale-edit", "Estoque recalculado pela edicao da venda");
+        }
         db.run("UPDATE sales SET subtotal = ?, discount = ?, total = ? WHERE id = ?", [saleSubtotal, saleDiscount, saleTotal, sale.id]);
         db.run("DELETE FROM sale_items WHERE sale_id = ?", [sale.id]);
         writeSaleItems(db, sale.id, nextItems);
@@ -488,20 +680,35 @@ export class PdvStore {
     if (!Number.isFinite(price) || price <= 0) {
       throw new Error("Informe um preco de venda maior que zero.");
     }
+    const costPrice = Math.max(0, Number(draft.costPrice) || 0);
+    const stockQuantity = Number(draft.stockQuantity) || 0;
+    const minimumStock = Math.max(0, Number(draft.minimumStock) || 0);
+    if (![costPrice, stockQuantity, minimumStock].every(Number.isFinite)) {
+      throw new Error("Confira os valores de custo e estoque.");
+    }
     const categories = this.getCategories();
     const fallbackCategoryId = categories[0]?.id || (await this.saveCategory({ name: "Geral", active: true, favorite: false, sortOrder: 0 })).id;
     const categoryId = categories.some((category) => category.id === draft.categoryId) ? draft.categoryId : fallbackCategoryId;
     const id = draft.id || slugId("produto", draft.name);
     const db = this.requireDb();
+    const previousStock = selectAll<{ stockQuantity: number }>(
+      db,
+      "SELECT COALESCE(stock_quantity, 0) AS stockQuantity FROM products WHERE id = ?",
+      [id]
+    )[0]?.stockQuantity;
     db.run("BEGIN IMMEDIATE");
     try {
       db.run(
-        `INSERT INTO products (id, name, category_id, price, unit, unit_mode, active, show_on_pdv, favorite, can_be_complement, has_complements, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO products
+         (id, name, category_id, price, cost_price, unit, unit_mode, active, show_on_pdv, favorite,
+          can_be_complement, has_complements, sort_order, track_stock, stock_quantity, minimum_stock,
+          sku, barcode, supplier, description)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
           name=excluded.name,
           category_id=excluded.category_id,
           price=excluded.price,
+          cost_price=excluded.cost_price,
           unit=excluded.unit,
           unit_mode=excluded.unit_mode,
           active=excluded.active,
@@ -509,12 +716,20 @@ export class PdvStore {
           favorite=excluded.favorite,
           can_be_complement=excluded.can_be_complement,
           has_complements=excluded.has_complements,
-          sort_order=excluded.sort_order`,
+          sort_order=excluded.sort_order,
+          track_stock=excluded.track_stock,
+          stock_quantity=excluded.stock_quantity,
+          minimum_stock=excluded.minimum_stock,
+          sku=excluded.sku,
+          barcode=excluded.barcode,
+          supplier=excluded.supplier,
+          description=excluded.description`,
         [
           id,
           draft.name.trim() || "Produto sem nome",
           categoryId,
           roundMoney(price),
+          roundMoney(costPrice),
           draft.unit.trim() || "UNID",
           normalizeUnitMode(draft.unitMode),
           draft.active ? 1 : 0,
@@ -522,9 +737,30 @@ export class PdvStore {
           draft.favorite ? 1 : 0,
           draft.canBeComplement ? 1 : 0,
           draft.hasComplements ? 1 : 0,
-          Math.floor(draft.sortOrder || 0)
+          Math.floor(draft.sortOrder || 0),
+          draft.trackStock ? 1 : 0,
+          roundQuantity(stockQuantity),
+          roundQuantity(minimumStock),
+          String(draft.sku || "").trim(),
+          String(draft.barcode || "").trim(),
+          String(draft.supplier || "").trim(),
+          String(draft.description || "").trim()
         ]
       );
+      if (previousStock === undefined || Math.abs(stockQuantity - previousStock) > 0.0009) {
+        db.run(
+          `INSERT INTO stock_movements
+           (id, product_id, sale_id, movement_type, quantity, created_at, note)
+           VALUES (?, ?, NULL, 'adjustment', ?, ?, ?)`,
+          [
+            randomUUID(),
+            id,
+            roundQuantity(stockQuantity - (previousStock || 0)),
+            new Date().toISOString(),
+            previousStock === undefined ? "Estoque inicial do cadastro" : "Ajuste manual no cadastro do produto"
+          ]
+        );
+      }
       db.run("DELETE FROM product_complements WHERE product_id = ?", [id]);
       const complementStatement = db.prepare("INSERT INTO product_complements (product_id, complement_product_id, sort_order) VALUES (?, ?, ?)");
       [...new Set(draft.complementProductIds || [])].filter((complementId) => complementId !== id).forEach((complementId, index) => {
@@ -883,6 +1119,8 @@ export class PdvStore {
     if (!Array.isArray(selections) || !selections.length) {
       throw new Error("Selecione ao menos um item para transferir.");
     }
+    const tables = this.getTables();
+    const targetTable = tables.find((table) => table.number === targetTableNumber);
     const sourceItems = this.getTableItems(sourceTableNumber);
     const targetItems = targetTableNumber === sourceTableNumber ? sourceItems : this.getTableItems(targetTableNumber);
     const selectedById = new Map(selections.map((selection) => [selection.itemId, selection]));
@@ -901,7 +1139,7 @@ export class PdvStore {
       movedItems.push({
         ...source,
         id: randomUUID(),
-        quantity: roundMoney(quantity),
+        quantity: roundQuantity(quantity),
         paidQuantity: 0,
         subtableName: String(selection.subtableName || "").trim(),
         discount,
@@ -915,7 +1153,7 @@ export class PdvStore {
       if (!selection) {
         return [item];
       }
-      const remainingQuantity = roundMoney(item.quantity - selection.quantity);
+      const remainingQuantity = roundQuantity(item.quantity - selection.quantity);
       if (remainingQuantity <= 0.009) {
         return [];
       }
@@ -949,6 +1187,11 @@ export class PdvStore {
            ON CONFLICT(table_number) DO UPDATE SET status='Ocupada', opened_at=COALESCE(table_sessions.opened_at, excluded.opened_at)`,
           [randomUUID(), targetTableNumber, new Date().toISOString()]
         );
+        const targetSubtables = normalizeSubtableNames([
+          ...(targetTable?.subtables || []),
+          ...nextTargetItems.map((item) => item.subtableName || "")
+        ]);
+        db.run("UPDATE table_sessions SET subtables_json = ? WHERE table_number = ?", [JSON.stringify(targetSubtables), targetTableNumber]);
       }
       if (!remainingItems.length && sourceTableNumber !== targetTableNumber) {
         db.run("DELETE FROM table_sessions WHERE table_number = ? AND status != 'Reservada'", [sourceTableNumber]);
@@ -986,13 +1229,9 @@ export class PdvStore {
     const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, items: pendingItems, discount, payments, originDevice, operationId });
     db.run("BEGIN IMMEDIATE");
     try {
-      const existingPartial = table.sessionId ? this.getSaleByTableSession(table.sessionId, "Parcial") : undefined;
-      if (existingPartial) {
-        appendSaleSegment(db, existingPartial, sale, "Finalizada");
-        if (operationId) db.run("INSERT OR IGNORE INTO partial_operations (operation_id, sale_id) VALUES (?, ?)", [operationId, existingPartial.id]);
-      } else {
-        insertSale(db, sale);
-      }
+      // Cada pagamento fica como um lancamento proprio, ligado pelo mesmo
+      // table_session_id. Isso preserva nome, recibo e auditoria de cada pessoa.
+      insertSale(db, sale);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
       db.run("COMMIT");
@@ -1001,7 +1240,7 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
-    return table.sessionId ? this.getSaleByTableSession(table.sessionId) || sale : sale;
+    return sale;
   }
 
   async cancelTable(tableNumber: number, originDevice = "Este computador"): Promise<PdvSale | null> {
@@ -1077,17 +1316,16 @@ export class PdvStore {
       const paidQuantity = Math.min(item.quantity, (item.paidQuantity || 0) + selected.quantity);
       return { ...item, paidQuantity: item.measureLabel ? roundQuantity(paidQuantity) : roundMoney(paidQuantity) };
     });
-    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, status: "Parcial", items: selectedItems, discount, payments, originDevice, operationId, observations });
-    const existingPartial = table.sessionId ? this.getSaleByTableSession(table.sessionId, "Parcial") : undefined;
+    const identifiedPayments = payments.map((payment) => ({
+      ...payment,
+      description: payment.description?.trim() || observations.trim() || undefined
+    }));
+    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, status: "Parcial", items: selectedItems, discount, payments: identifiedPayments, originDevice, operationId, observations });
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
-      if (existingPartial) {
-        appendSaleSegment(db, existingPartial, sale, "Parcial");
-      } else {
-        insertSale(db, sale);
-      }
-      if (operationId) db.run("INSERT OR IGNORE INTO partial_operations (operation_id, sale_id) VALUES (?, ?)", [operationId, existingPartial?.id || sale.id]);
+      insertSale(db, sale);
+      if (operationId) db.run("INSERT OR IGNORE INTO partial_operations (operation_id, sale_id) VALUES (?, ?)", [operationId, sale.id]);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       writeTableItems(db, tableNumber, nextItems);
       // O parcial registra os itens pagos, mas deixa o restante da conta aberto.
@@ -1098,14 +1336,16 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
-    return existingPartial ? this.getSaleById(existingPartial.id) || sale : sale;
+    return sale;
   }
 
   async cancelSale(id: string): Promise<void> {
     const db = this.requireDb();
-    if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
+    const sale = this.getSales().find((item) => item.id === id);
+    if (!sale) {
       throw new Error("Venda nao encontrada.");
     }
+    if (sale.status === "Cancelada") return;
     const received = selectAll<{ total: number }>(
       db,
       `SELECT COALESCE(SUM(rp.amount), 0) AS total
@@ -1116,6 +1356,7 @@ export class PdvStore {
     if (received > 0.009) throw new Error("Esta venda possui recebimentos de conta. Estorne-os antes de cancelar.");
     db.run("BEGIN IMMEDIATE");
     try {
+      applySaleStock(db, sale, 1, "sale-reversal", "Estoque devolvido pelo cancelamento da venda");
       db.run("UPDATE sales SET status = 'Cancelada' WHERE id = ?", [id]);
       db.run("UPDATE receivables SET status = 'Cancelada' WHERE sale_id = ?", [id]);
       db.run("COMMIT");
@@ -1151,6 +1392,11 @@ export class PdvStore {
     db.run("BEGIN IMMEDIATE");
     try {
       if (status) {
+        if (currentSale.status !== "Cancelada" && status === "Cancelada") {
+          applySaleStock(db, currentSale, 1, "sale-reversal", "Estoque devolvido pela alteracao da venda");
+        } else if (currentSale.status === "Cancelada" && status !== "Cancelada") {
+          applySaleStock(db, currentSale, -1, "sale-reactivation", "Estoque baixado pela restauracao da venda");
+        }
         db.run("UPDATE sales SET status = ? WHERE id = ?", [status, id]);
       }
       if (patch.createdAt) {
@@ -1189,11 +1435,15 @@ export class PdvStore {
 
   async deleteSale(id: string): Promise<void> {
     const db = this.requireDb();
-    if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
+    const sale = this.getSales().find((item) => item.id === id);
+    if (!sale) {
       throw new Error("Venda nao encontrada.");
     }
     db.run("BEGIN IMMEDIATE");
     try {
+      if (sale.status !== "Cancelada") {
+        applySaleStock(db, sale, 1, "sale-deletion", "Estoque devolvido pela exclusao da venda");
+      }
       db.run("DELETE FROM sales WHERE id = ?", [id]);
       db.run("COMMIT");
     } catch (error) {
@@ -1249,6 +1499,10 @@ export class PdvStore {
       this.requireDb(),
       `SELECT p.id, p.name, p.category_id AS categoryId, c.name AS categoryName, p.price, p.unit,
         COALESCE(p.unit_mode, 'unidade') AS unitMode,
+        COALESCE(p.cost_price, 0) AS costPrice, p.track_stock = 1 AS trackStock,
+        COALESCE(p.stock_quantity, 0) AS stockQuantity, COALESCE(p.minimum_stock, 0) AS minimumStock,
+        COALESCE(p.sku, '') AS sku, COALESCE(p.barcode, '') AS barcode,
+        COALESCE(p.supplier, '') AS supplier, COALESCE(p.description, '') AS description,
         p.active = 1 AS active, p.show_on_pdv = 1 AS showOnPdv, p.favorite = 1 AS favorite,
        p.can_be_complement = 1 AS canBeComplement, p.has_complements = 1 AS hasComplements,
        p.sort_order AS sortOrder, COALESCE(p.import_source, '') AS importSource
@@ -1335,12 +1589,6 @@ export class PdvStore {
     return this.getSaleWhere("operation_id = ?", [operationId]);
   }
 
-  private getSaleByTableSession(tableSessionId: string, status?: PdvSale["status"]): PdvSale | undefined {
-    return status
-      ? this.getSaleWhere("table_session_id = ? AND COALESCE(status, 'Finalizada') = ?", [tableSessionId, status])
-      : this.getSaleWhere("table_session_id = ?", [tableSessionId]);
-  }
-
   private getSaleWhere(where: string, parameters: Array<string | number>): PdvSale | undefined {
     const sale = selectAll<Omit<PdvSale, "items" | "payments">>(
       this.requireDb(),
@@ -1413,6 +1661,15 @@ export class PdvStore {
         unit_mode TEXT NOT NULL DEFAULT 'unidade',
         sort_order INTEGER NOT NULL DEFAULT 0,
         import_source TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS stock_movements (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        sale_id TEXT,
+        movement_type TEXT NOT NULL,
+        quantity REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS product_complements (
         product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
@@ -1530,12 +1787,42 @@ export class PdvStore {
         origin_device TEXT NOT NULL DEFAULT 'Este computador',
         operation_id TEXT UNIQUE
       );
+      CREATE TABLE IF NOT EXISTS payables (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        supplier TEXT NOT NULL DEFAULT '',
+        category TEXT NOT NULL DEFAULT '',
+        document_number TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        due_date TEXT NOT NULL,
+        amount REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Em aberto',
+        note TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS payable_payments (
+        id TEXT PRIMARY KEY,
+        payable_id TEXT NOT NULL REFERENCES payables(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        method TEXT NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        origin_device TEXT NOT NULL DEFAULT 'Este computador',
+        operation_id TEXT UNIQUE
+      );
     `);
     addColumnIfMissing(db, "products", "can_be_complement", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "has_complements", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "unit_mode", "TEXT NOT NULL DEFAULT 'unidade'");
     addColumnIfMissing(db, "products", "favorite", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "import_source", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "products", "cost_price", "REAL NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "products", "track_stock", "INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "products", "stock_quantity", "REAL NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "products", "minimum_stock", "REAL NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "products", "sku", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "products", "barcode", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "products", "supplier", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "products", "description", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "categories", "favorite", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "table_items", "base_unit_price", "REAL");
     addColumnIfMissing(db, "table_items", "complements_json", "TEXT NOT NULL DEFAULT '[]'");
@@ -1565,6 +1852,10 @@ export class PdvStore {
     db.run("CREATE INDEX IF NOT EXISTS idx_table_items_table_number ON table_items(table_number, sort_order)");
     db.run("CREATE INDEX IF NOT EXISTS idx_receivables_customer ON receivables(customer_id, status)");
     db.run("CREATE INDEX IF NOT EXISTS idx_receivables_due_date ON receivables(due_date, status)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_payables_due_date ON payables(due_date, status)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_payables_supplier ON payables(supplier, status)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id, created_at DESC)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode) WHERE barcode <> ''");
     const defaults = this.getSettings();
     const statement = db.prepare("INSERT INTO pdv_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING");
     Object.entries(defaults).forEach(([key, value]) => statement.run([snakeCase(key), String(value)]));
@@ -1765,39 +2056,45 @@ function insertSale(db: Database, sale: PdvSale) {
   );
   paymentStatement.free();
   createReceivablesForPayments(db, sale.id, sale.tableNumber, sale.createdAt, sale.items, sale.payments);
+  if (sale.status !== "Cancelada" && sale.status !== "deleted") {
+    applySaleStock(db, sale, -1, "sale", "Baixa automatica pela venda");
+  }
 }
 
-function appendSaleSegment(db: Database, existing: PdvSale, segment: PdvSale, status: PdvSale["status"]) {
-  db.run(
-    "UPDATE sales SET status = ?, subtotal = ?, discount = ?, total = ?, observations = ? WHERE id = ?",
-    [status, roundMoney(existing.subtotal + segment.subtotal), roundMoney(existing.discount + segment.discount), roundMoney(existing.total + segment.total), [existing.observations, segment.observations].filter(Boolean).join(" | "), existing.id]
-  );
-  const merged = { ...segment, id: existing.id };
-  const itemStatement = db.prepare(
-    `INSERT INTO sale_items (id, sale_id, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  merged.items.forEach((item) => itemStatement.run([randomUUID(), existing.id, item.productId, item.productName, item.categoryName, item.quantity, item.measureLabel || "", item.unitPrice, item.baseUnitPrice ?? item.unitPrice, item.discount, item.total, item.subtableName || "", item.note || "", JSON.stringify(item.complements || [])]));
-  itemStatement.free();
-  const paymentStatement = db.prepare(
-    `INSERT INTO sale_payments
-     (id, sale_id, method, amount, received, change, description, customer_id, customer_name, due_date)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  merged.payments.forEach((payment) => paymentStatement.run([
-    payment.id,
-    existing.id,
-    payment.method,
-    payment.amount,
-    payment.received ?? null,
-    payment.change ?? null,
-    payment.description?.trim() || "",
-    payment.customerId || null,
-    payment.customerName?.trim() || "",
-    payment.dueDate || null
-  ]));
-  paymentStatement.free();
-  createReceivablesForPayments(db, existing.id, existing.tableNumber, segment.createdAt, segment.items, segment.payments);
+function applySaleStock(
+  db: Database,
+  sale: PdvSale,
+  direction: 1 | -1,
+  movementType: string,
+  note: string
+) {
+  const quantities = new Map<string, number>();
+  sale.items.forEach((item) => {
+    if (item.productId && !item.productId.startsWith("manual-") && !item.productId.startsWith("valor-avulso-")) {
+      quantities.set(item.productId, (quantities.get(item.productId) || 0) + item.quantity);
+    }
+    (item.complements || []).forEach((complement) => {
+      if (complement.productId) {
+        quantities.set(complement.productId, (quantities.get(complement.productId) || 0) + item.quantity);
+      }
+    });
+  });
+  quantities.forEach((quantity, productId) => {
+    const product = selectAll<{ trackStock: number }>(
+      db,
+      "SELECT track_stock AS trackStock FROM products WHERE id = ?",
+      [productId]
+    )[0];
+    if (!product?.trackStock || quantity <= 0) return;
+    const delta = roundQuantity(direction * quantity);
+    db.run("UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?", [delta, productId]);
+    db.run(
+      `INSERT INTO stock_movements
+       (id, product_id, sale_id, movement_type, quantity, created_at, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [randomUUID(), productId, sale.id, movementType, delta, new Date().toISOString(), note]
+    );
+  });
 }
 
 function createReceivablesForPayments(

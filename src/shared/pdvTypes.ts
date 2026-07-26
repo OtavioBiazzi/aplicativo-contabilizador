@@ -26,6 +26,14 @@ export interface PdvProduct {
   complementProductIds: string[];
   sortOrder: number;
   importSource?: string;
+  costPrice?: number;
+  trackStock?: boolean;
+  stockQuantity?: number;
+  minimumStock?: number;
+  sku?: string;
+  barcode?: string;
+  supplier?: string;
+  description?: string;
 }
 
 export interface PdvProductDraft {
@@ -42,6 +50,14 @@ export interface PdvProductDraft {
   hasComplements: boolean;
   complementProductIds: string[];
   sortOrder: number;
+  costPrice?: number;
+  trackStock?: boolean;
+  stockQuantity?: number;
+  minimumStock?: number;
+  sku?: string;
+  barcode?: string;
+  supplier?: string;
+  description?: string;
 }
 
 export interface PdvProductRemovalResult {
@@ -152,6 +168,47 @@ export interface PdvReceivablePatch {
   payments?: PdvReceivablePayment[];
 }
 
+export type PdvPayableStatus = "Em aberto" | "Parcialmente paga" | "Paga" | "Vencida" | "Cancelada";
+
+export interface PdvPayablePayment {
+  id: string;
+  payableId: string;
+  createdAt: string;
+  method: Exclude<PdvPaymentMethod, "Conta a receber">;
+  amount: number;
+  description?: string;
+  originDevice?: string;
+  operationId?: string;
+}
+
+export interface PdvPayable {
+  id: string;
+  description: string;
+  supplier: string;
+  category: string;
+  documentNumber: string;
+  createdAt: string;
+  dueDate: string;
+  amount: number;
+  paidAmount: number;
+  balance: number;
+  status: PdvPayableStatus;
+  note: string;
+  payments: PdvPayablePayment[];
+}
+
+export interface PdvPayableDraft {
+  id?: string;
+  description: string;
+  supplier?: string;
+  category?: string;
+  documentNumber?: string;
+  dueDate: string;
+  amount: number;
+  note?: string;
+  payments?: PdvPayablePayment[];
+}
+
 export interface PdvTransferSelection {
   itemId: string;
   quantity: number;
@@ -196,6 +253,7 @@ export interface PdvSnapshot {
   recentSales: PdvSale[];
   customers: PdvCustomer[];
   receivables: PdvReceivable[];
+  payables: PdvPayable[];
   settings: PdvSettings;
   dataFile: string;
 }
@@ -232,6 +290,7 @@ export interface PdvSettings {
   receiptMarginTopMm?: number;
   receiptMarginBottomMm?: number;
   receiptAutoPrint?: boolean;
+  receiptOpenAfterSale?: boolean;
   receiptPrinterName?: string;
   receiptCopies?: number;
   receiptLogoDataUrl?: string;

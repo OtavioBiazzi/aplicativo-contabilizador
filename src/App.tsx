@@ -3,6 +3,9 @@ import {
   ArrowDown,
   ArrowUp,
   BarChart3,
+  Boxes,
+  CalendarDays,
+  ChevronDown,
   Check,
   Copy,
   DatabaseBackup,
@@ -13,8 +16,10 @@ import {
   FileSpreadsheet,
   FolderOpen,
   History,
+  Gauge,
   KeyRound,
   Laptop,
+  LayoutGrid,
   LayoutPanelTop,
   ListFilter,
   MinusCircle,
@@ -38,13 +43,14 @@ import {
   Users,
   Utensils,
   Wallet,
+  TriangleAlert,
   Wifi,
   X
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
-import { PdvApp } from "./PdvApp";
+import { PaymentAmountModal, PdvApp } from "./PdvApp";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
-import type { PdvCustomer, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
+import type { PdvCustomer, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
 import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
 import {
   buildReportDataset,
@@ -85,7 +91,7 @@ import type {
   UpdateInfo
 } from "./shared/types";
 
-type TabKey = "sale" | "tables" | "history" | "clients" | "reports" | "server" | "settings";
+type TabKey = "sale" | "tables" | "history" | "dashboard" | "clients" | "payables" | "reports" | "server" | "settings";
 type SettingsCategory =
   | "appearance"
   | "operation"
@@ -119,6 +125,7 @@ interface RemoteClientSession {
   baseUrl: string;
   password: string;
   deviceName: string;
+  appVersion: string;
   entries: LedgerEntry[];
   summary: DaySummary | null;
   todayCount?: number;
@@ -133,6 +140,19 @@ interface RemoteSessionStoragePayload {
   baseUrl: string;
   password: string;
   deviceName: string;
+}
+
+interface VersionMismatchState {
+  clientVersion: string;
+  serverVersion: string;
+  serverIsNewer: boolean;
+}
+
+class RemoteVersionMismatchError extends Error {
+  constructor(public readonly mismatch: VersionMismatchState) {
+    super(`Versao diferente: este computador usa ${mismatch.clientVersion} e o servidor usa ${mismatch.serverVersion}.`);
+    this.name = "RemoteVersionMismatchError";
+  }
 }
 
 interface ReportFocusPeriod {
@@ -166,18 +186,61 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
   { key: "sale", label: "Venda", icon: Send },
   { key: "tables", label: "Mesas", icon: LayoutPanelTop },
   { key: "history", label: "Historico", icon: History },
-  { key: "clients", label: "Clientes", icon: Users },
+  { key: "dashboard", label: "Visao geral", icon: Gauge },
+  { key: "clients", label: "Financeiro", icon: Wallet },
   { key: "reports", label: "Relatorios", icon: BarChart3 },
   { key: "server", label: "Rede", icon: Server },
   { key: "settings", label: "Ajuste", icon: Settings }
 ];
 
+const DEFAULT_HEADER_PINNED_MODULES: TabKey[] = ["sale", "tables", "history"];
+const HEADER_PINNABLE_MODULES: TabKey[] = ["sale", "tables", "history", "dashboard", "clients", "reports", "server", "settings"];
+const MAX_HEADER_PINNED_MODULES = 5;
+
+function normalizeHeaderPinnedModules(value?: string[]): TabKey[] {
+  const valid = new Set<TabKey>(HEADER_PINNABLE_MODULES);
+  const migrated = (value || []).map((key) => key === "payables" ? "clients" : key);
+  const normalized = [...new Set(migrated.filter((key): key is TabKey => valid.has(key as TabKey)))].slice(0, MAX_HEADER_PINNED_MODULES);
+  return normalized.length ? normalized : DEFAULT_HEADER_PINNED_MODULES;
+}
+const MODULE_GROUPS: Array<{
+  label: string;
+  items: Array<{
+    key: TabKey;
+    label: string;
+    description: string;
+    icon: typeof Send;
+    comingSoon?: boolean;
+  }>;
+}> = [
+  {
+    label: "Financeiro",
+    items: [
+      { key: "clients", label: "Financeiro", description: "Clientes, contas a receber e contas a pagar", icon: Wallet }
+    ]
+  },
+  {
+    label: "Analise",
+    items: [
+      { key: "dashboard", label: "Visao geral", description: "Vendas, mesas, estoque e alertas do dia", icon: Gauge },
+      { key: "reports", label: "Relatorios", description: "Resultados, produtos e formas de pagamento", icon: BarChart3 }
+    ]
+  },
+  {
+    label: "Sistema",
+    items: [
+      { key: "server", label: "Rede", description: "Servidor, clientes e sincronizacao", icon: Server },
+      { key: "settings", label: "Ajustes", description: "Preferencias gerais e operacao do PDV", icon: Settings }
+    ]
+  }
+];
+
 const IS_FLOATING_WINDOW = new URLSearchParams(window.location.search).get("floating") === "1";
 const CDA_ICON_SRC = "/cda-icon.png";
 const REMOTE_SESSION_STORAGE_KEY = "caixaRemoteSession";
+const DAILY_UPDATE_CHECK_KEY = "caixa.update.last-check-date.v1";
 const QUICK_ENTRY_MODE_STORAGE_PREFIX = "caixaQuickEntryMode";
 const HISTORY_FILTERS_STORAGE_KEY = "caixaHistoryFiltersV2";
-const REPORT_PERIOD_STORAGE_KEY = "caixaReportPeriodV1";
 const REMOTE_ENTRY_LIMIT = 0;
 const HISTORY_PAGE_SIZE = 160;
 
@@ -238,20 +301,6 @@ function loadHistoryFilters(rememberPeriod = false): StoredHistoryFilters {
     return rememberPeriod ? merged : { ...merged, dateFrom: "", dateTo: "" };
   } catch {
     return defaults;
-  }
-}
-
-function loadReportPeriod(rememberPeriod: boolean): { from: string; to: string } {
-  const fallback = currentMonthPeriod();
-  if (!rememberPeriod) return fallback;
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(REPORT_PERIOD_STORAGE_KEY) || "{}") as Partial<{ from: string; to: string }>;
-    return {
-      from: typeof stored.from === "string" ? stored.from : fallback.from,
-      to: typeof stored.to === "string" ? stored.to : fallback.to
-    };
-  } catch {
-    return fallback;
   }
 }
 
@@ -542,8 +591,8 @@ function privateSummaryForCount(count: number): DaySummary {
   };
 }
 
-function resolveTheme(theme: AppSettings["theme"], prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
-  return theme === "auto" ? (prefersDark ? "dark" : "light") : theme;
+function resolveTheme(theme: AppSettings["theme"], _prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
+  return theme === "dark" || theme === "datacaixa-dark" ? "dark" : "datacaixa";
 }
 
 function resolveFloatingTheme(settings: AppSettings, prefersDark: boolean): Exclude<AppSettings["theme"], "auto"> {
@@ -667,6 +716,7 @@ function createProfileSnapshot(settings: AppSettings): Partial<AppSettings> {
     fieldSize: settings.fieldSize,
     density: settings.density,
     layout: settings.layout,
+    headerPinnedModules: cloneValue(settings.headerPinnedModules),
     defaultType: settings.defaultType,
     defaultPeople: settings.defaultPeople,
     defaultRoundingStep: settings.defaultRoundingStep,
@@ -691,6 +741,7 @@ function profilePatch(profile?: Partial<AppSettings>): Partial<AppSettings> {
     "fieldSize",
     "density",
     "layout",
+    "headerPinnedModules",
     "defaultType",
     "defaultPeople",
     "defaultRoundingStep",
@@ -816,6 +867,7 @@ function normalizeSettingsDraft(current: AppSettings, patch: Partial<AppSettings
         ? cloneValue(current.quickTabs)
         : cloneValue(defaults.quickTabs)
   };
+  merged.headerPinnedModules = normalizeHeaderPinnedModules(merged.headerPinnedModules);
   return {
     ...merged,
     visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns,
@@ -1095,9 +1147,9 @@ export function App() {
   const [remotePdvCustomers, setRemotePdvCustomers] = useState<PdvCustomer[]>([]);
   const [remotePdvReceivables, setRemotePdvReceivables] = useState<PdvReceivable[]>([]);
   const [remotePdvSnapshot, setRemotePdvSnapshot] = useState<PdvSnapshot | null>(null);
-  const remotePdvSalesRef = useRef<PdvSale[]>([]);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sale");
+  const [financialView, setFinancialView] = useState<"customers" | "receivables" | "payables">("customers");
   const [pdvViewNonce, setPdvViewNonce] = useState(0);
   const [pdvDirectCartActive, setPdvDirectCartActive] = useState(false);
   const [pdvNavigationRequest, setPdvNavigationRequest] = useState<TabKey | null>(null);
@@ -1109,12 +1161,17 @@ export function App() {
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey());
   const [totalMenuOpen, setTotalMenuOpen] = useState(false);
   const totalMenuRef = useRef<HTMLDivElement | null>(null);
+  const [modulesMenuOpen, setModulesMenuOpen] = useState(false);
+  const modulesMenuRef = useRef<HTMLDivElement | null>(null);
   const [reportFocus, setReportFocus] = useState<ReportFocusPeriod | null>(null);
   const [historyFocus, setHistoryFocus] = useState<HistoryFocusDate | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<{ category: SettingsCategory; nonce: number } | null>(null);
   const [remoteSession, setRemoteSession] = useState<RemoteClientSession | null>(null);
   const [remoteMessage, setRemoteMessage] = useState("");
   const [remoteLoading, setRemoteLoading] = useState(false);
+  const [versionMismatch, setVersionMismatch] = useState<VersionMismatchState | null>(null);
+  const [startupUpdateInfo, setStartupUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [installingPromptUpdate, setInstallingPromptUpdate] = useState(false);
   const remoteSocket = useRef<WebSocket | null>(null);
   const remoteSessionRef = useRef<RemoteClientSession | null>(null);
   const remoteManualDisconnect = useRef(false);
@@ -1127,22 +1184,36 @@ export function App() {
   const pdvReloadInFlight = useRef<Promise<void> | null>(null);
   const pdvReloadQueued = useRef(false);
   const pdvReloadTimer = useRef<number | null>(null);
-  const remotePdvRefreshInFlight = useRef<Promise<void> | null>(null);
-  const remotePdvRefreshQueued = useRef(false);
+  const remoteRefreshInFlight = useRef<Promise<void> | null>(null);
+  const remoteRefreshQueued = useRef(false);
   const autoConnectionAttemptKey = useRef<string | null>(null);
+  const dailyUpdateCheckStarted = useRef(false);
 
   useEffect(() => {
-    if (!totalMenuOpen) {
+    if (!totalMenuOpen && !modulesMenuOpen) {
       return;
     }
-    const closeTotalMenu = (event: PointerEvent) => {
+    const closeHeaderMenus = (event: PointerEvent) => {
       if (!totalMenuRef.current?.contains(event.target as Node)) {
         setTotalMenuOpen(false);
       }
+      if (!modulesMenuRef.current?.contains(event.target as Node)) {
+        setModulesMenuOpen(false);
+      }
     };
-    window.addEventListener("pointerdown", closeTotalMenu);
-    return () => window.removeEventListener("pointerdown", closeTotalMenu);
-  }, [totalMenuOpen]);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setTotalMenuOpen(false);
+        setModulesMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", closeHeaderMenus);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeHeaderMenus);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [modulesMenuOpen, totalMenuOpen]);
   const combinedEntries = useMemo(() => [...entries].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()), [entries]);
   const todayEntries = useMemo(() => filterEntriesByLocalDate(combinedEntries, currentDateKey), [combinedEntries, currentDateKey]);
   const summary = useMemo(() => summarizeEntries(todayEntries), [todayEntries]);
@@ -1177,7 +1248,6 @@ export function App() {
       }
     }
   };
-
   const scheduleReload = () => {
     if (appReloadTimer.current !== null) {
       window.clearTimeout(appReloadTimer.current);
@@ -1255,8 +1325,35 @@ export function App() {
     showToast(result.ok ? "success" : "error", `${result.deviceName}: ${result.message}`);
   }), []);
 
+  useEffect(() => window.caixa.onSecondInstance(() => {
+    showToast("info", "O Caixa PDV ja estava aberto. A janela existente foi trazida para frente.");
+  }), []);
+
+  useEffect(() => {
+    if (!settings || IS_FLOATING_WINDOW || dailyUpdateCheckStarted.current) {
+      return;
+    }
+    const today = getLocalDateKey();
+    if (window.localStorage.getItem(DAILY_UPDATE_CHECK_KEY) === today) {
+      dailyUpdateCheckStarted.current = true;
+      return;
+    }
+    dailyUpdateCheckStarted.current = true;
+    void window.caixa.checkForUpdates().then((info) => {
+      if (info.hasUpdate || !info.message) {
+        window.localStorage.setItem(DAILY_UPDATE_CHECK_KEY, today);
+      }
+      if (info.hasUpdate) {
+        setStartupUpdateInfo(info);
+      }
+    }).catch(() => {
+      dailyUpdateCheckStarted.current = false;
+    });
+  }, [settings]);
+
   useEffect(() => {
     setTotalMenuOpen(false);
+    setModulesMenuOpen(false);
   }, [activeTab, remoteSession?.baseUrl, remoteSession?.permissions.viewTotals]);
 
   useEffect(() => {
@@ -1424,6 +1521,30 @@ export function App() {
     setToast({ tone, message });
   };
 
+  const installPromptedUpdate = async (source: "daily" | "version") => {
+    if (installingPromptUpdate) return;
+    setInstallingPromptUpdate(true);
+    try {
+      const info = await window.caixa.checkForUpdates();
+      if (!info.hasUpdate) {
+        setStartupUpdateInfo(null);
+        if (source === "version" && versionMismatch && !versionMismatch.serverIsNewer) {
+          showToast("error", `Este computador ja esta atualizado. Atualize o servidor ${versionMismatch.serverVersion} antes de conectar.`);
+        } else {
+          showToast("info", info.message || "Nenhuma atualizacao nova foi encontrada para este computador.");
+        }
+        return;
+      }
+      const result = await window.caixa.installUpdate();
+      showToast(result.ok ? "success" : "error", result.message);
+      if (!result.ok) {
+        setStartupUpdateInfo(info);
+      }
+    } finally {
+      setInstallingPromptUpdate(false);
+    }
+  };
+
   const commandMode = (type: EntryType) => {
     setActiveTab("sale");
     setModeCommand({ type, nonce: Date.now() });
@@ -1472,6 +1593,7 @@ export function App() {
         "content-type": "application/json",
         "x-caixa-password": session.password,
         "x-device-name": session.deviceName,
+        "x-caixa-version": session.appVersion,
         ...(options.headers || {})
       }
     });
@@ -1520,11 +1642,16 @@ export function App() {
       remoteSocket.current.onclose = null;
       remoteSocket.current.close();
     }
-    const wsUrl = `${session.baseUrl.replace(/^http/i, "ws")}/sync?password=${encodeURIComponent(session.password)}&device=${encodeURIComponent(session.deviceName)}`;
+    const wsUrl = `${session.baseUrl.replace(/^http/i, "ws")}/sync?password=${encodeURIComponent(session.password)}&device=${encodeURIComponent(session.deviceName)}&version=${encodeURIComponent(session.appVersion)}`;
     remoteSocket.current = new WebSocket(wsUrl);
     remoteSocket.current.onopen = () => {
       remoteReconnectAttempt.current = 0;
-      setRemoteMessage("Tempo real ativo.");
+      setRemoteMessage("Tempo real ativo. Sincronizando dados...");
+      void refreshRemote(session)
+        .then(() => setRemoteMessage("Tempo real ativo. Dados sincronizados."))
+        .catch((error) => {
+          setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel concluir a sincronizacao apos reconectar.");
+        });
     };
     remoteSocket.current.onmessage = (event) => {
       let isPdvChange = false;
@@ -1595,7 +1722,9 @@ export function App() {
           // Agrupa eventos consecutivos de mesa sem mudar o protocolo da conexao.
           remotePdvRefreshTimer.current = window.setTimeout(() => {
             remotePdvRefreshTimer.current = null;
-            void refreshRemotePdv(current).catch((error) => {
+            // Vendas PDV tambem geram lancamentos no Historico integrado.
+            // Atualize o estado inteiro para mesas e Historico nunca divergirem.
+            void refreshRemote(current).catch((error) => {
               setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel atualizar o cliente remoto.");
             });
           }, 80);
@@ -1617,61 +1746,57 @@ export function App() {
     };
   };
 
-  const applyRemotePdvSnapshot = (pdv: PdvSnapshot, incremental = false) => {
-    const sales = incremental
-      ? [...new Map([...pdv.recentSales, ...remotePdvSalesRef.current].map((sale) => [sale.id, sale])).values()]
-      : pdv.recentSales;
-    const snapshotWithSales = { ...pdv, recentSales: sales };
-    remotePdvSalesRef.current = sales;
-    setRemotePdvSnapshot(snapshotWithSales);
-    setRemotePdvSales(sales);
+  const applyRemotePdvSnapshot = (pdv: PdvSnapshot) => {
+    // O endpoint retorna o estado completo. Substituir o cache tambem remove
+    // vendas excluidas e evita manter versoes antigas no Historico do cliente.
+    setRemotePdvSnapshot(pdv);
+    setRemotePdvSales(pdv.recentSales);
     setRemotePdvCustomers(pdv.customers);
     setRemotePdvReceivables(pdv.receivables);
-  };
-
-  const refreshRemotePdv = async (session = remoteSessionRef.current) => {
-    if (!session) return;
-    if (remotePdvRefreshInFlight.current) {
-      remotePdvRefreshQueued.current = true;
-      return remotePdvRefreshInFlight.current;
-    }
-    const request = remoteRequest<PdvSnapshot>(session, "/api/pdv/snapshot?salesLimit=300")
-      .then((pdv) => applyRemotePdvSnapshot(pdv, true));
-    remotePdvRefreshInFlight.current = request;
-    try {
-      await request;
-    } finally {
-      remotePdvRefreshInFlight.current = null;
-      if (remotePdvRefreshQueued.current) {
-        remotePdvRefreshQueued.current = false;
-        void refreshRemotePdv(remoteSessionRef.current).catch((error) => {
-          setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel concluir a atualizacao remota.");
-        });
-      }
-    }
   };
 
   const refreshRemote = async (session = remoteSessionRef.current) => {
     if (!session || !settings) {
       return;
     }
-    const [data, pdv] = await Promise.all([
+    if (remoteRefreshInFlight.current) {
+      remoteRefreshQueued.current = true;
+      return remoteRefreshInFlight.current;
+    }
+    const request = Promise.all([
       remoteRequest<RemoteEntriesResponse>(session, REMOTE_ENTRY_LIMIT ? `/api/entries?limit=${REMOTE_ENTRY_LIMIT}` : "/api/entries"),
       remoteRequest<PdvSnapshot>(session, "/api/pdv/snapshot")
-    ]);
-    applyRemotePdvSnapshot(pdv);
-    const nextSession = {
-      ...session,
-      entries: data.entries,
-      summary: data.summary,
-      todayCount: data.todayCount,
-      totalCount: data.totalCount,
-      limited: data.limited,
-      permissions: data.permissions,
-      clientPolicy: normalizeRemotePolicy(data.clientPolicy, settings)
-    };
-    setRemoteSession(nextSession);
-    remoteSessionRef.current = nextSession;
+    ]).then(([data, pdv]) => {
+      const current = remoteSessionRef.current;
+      if (!current || current.baseUrl !== session.baseUrl || current.password !== session.password) {
+        return;
+      }
+      applyRemotePdvSnapshot(pdv);
+      const nextSession = {
+        ...session,
+        entries: data.entries,
+        summary: data.summary,
+        todayCount: data.todayCount,
+        totalCount: data.totalCount,
+        limited: data.limited,
+        permissions: data.permissions,
+        clientPolicy: normalizeRemotePolicy(data.clientPolicy, settings)
+      };
+      setRemoteSession(nextSession);
+      remoteSessionRef.current = nextSession;
+    });
+    remoteRefreshInFlight.current = request;
+    try {
+      await request;
+    } finally {
+      remoteRefreshInFlight.current = null;
+      if (remoteRefreshQueued.current) {
+        remoteRefreshQueued.current = false;
+        void refreshRemote(remoteSessionRef.current).catch((error) => {
+          setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel concluir a sincronizacao remota.");
+        });
+      }
+    }
   };
 
   useEffect(() => {
@@ -1708,10 +1833,32 @@ export function App() {
     setRemoteMessage("");
     try {
       const baseUrl = normalizeRemoteBaseUrl(host, settings.server.port, server?.ips || []);
+      const clientVersion = await window.caixa.getAppVersion();
+      const versionResponse = await fetch(`${baseUrl}/api/version`);
+      if (!versionResponse.ok) {
+        if (versionResponse.status === 404) {
+          throw new RemoteVersionMismatchError({
+            clientVersion,
+            serverVersion: "anterior/sem identificacao",
+            serverIsNewer: false
+          });
+        }
+        throw new Error(`Nao foi possivel confirmar a versao do servidor (${versionResponse.status}).`);
+      }
+      const versionData = await versionResponse.json() as { appVersion?: string };
+      const serverVersion = String(versionData.appVersion || "").trim();
+      if (!serverVersion || normalizeAppVersion(serverVersion) !== normalizeAppVersion(clientVersion)) {
+        throw new RemoteVersionMismatchError({
+          clientVersion,
+          serverVersion: serverVersion || "anterior/sem identificacao",
+          serverIsNewer: compareAppVersions(serverVersion, clientVersion) > 0
+        });
+      }
       const pendingSession: RemoteClientSession = {
         baseUrl,
         password,
         deviceName: deviceName.trim() || "App cliente",
+        appVersion: clientVersion,
         entries: [],
         summary: null,
         todayCount: 0,
@@ -1747,6 +1894,7 @@ export function App() {
       };
       setRemoteSession(connectedSession);
       remoteSessionRef.current = connectedSession;
+      setVersionMismatch(null);
       if (connectedSession.clientPolicy.operationMode === "pdv") {
         setActiveTab("sale");
       }
@@ -1760,7 +1908,10 @@ export function App() {
       }
       return true;
     } catch (error) {
-      if (!options.auto) {
+      if (error instanceof RemoteVersionMismatchError) {
+        setVersionMismatch(error.mismatch);
+        writeStoredRemoteSession(null);
+      } else if (!options.auto) {
         writeStoredRemoteSession(null);
       }
       setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel conectar.");
@@ -1784,11 +1935,10 @@ export function App() {
       window.clearTimeout(remotePdvRefreshTimer.current);
       remotePdvRefreshTimer.current = null;
     }
-    remotePdvRefreshQueued.current = false;
+    remoteRefreshQueued.current = false;
     socket?.close();
     remoteSocket.current = null;
     remoteSessionRef.current = null;
-    remotePdvSalesRef.current = [];
     setRemotePdvSales([]);
     setRemotePdvCustomers([]);
     setRemotePdvReceivables([]);
@@ -1996,15 +2146,19 @@ export function App() {
   };
 
   const requestNavigation = (nextTab: TabKey) => {
+    const targetTab: TabKey = nextTab === "payables" ? "clients" : nextTab;
+    if (nextTab === "payables") {
+      setFinancialView("payables");
+    }
     const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
-    if (mode === "pdv" && activeTab === "sale" && nextTab !== "sale" && pdvDirectCartActive) {
-      setPdvNavigationRequest(nextTab);
+    if (mode === "pdv" && activeTab === "sale" && targetTab !== "sale" && pdvDirectCartActive) {
+      setPdvNavigationRequest(targetTab);
       return;
     }
-    if (activeTab === nextTab && (nextTab === "tables" || nextTab === "sale")) {
+    if (activeTab === targetTab && (targetTab === "tables" || targetTab === "sale")) {
       setPdvViewNonce((nonce) => nonce + 1);
     }
-    setActiveTab(nextTab);
+    setActiveTab(targetTab);
   };
 
   useEffect(() => {
@@ -2076,6 +2230,9 @@ export function App() {
     }
     return true;
   });
+  const headerPinnedModules = normalizeHeaderPinnedModules(settings.headerPinnedModules);
+  const primaryTabItems = visibleTabItems.filter((item) => headerPinnedModules.includes(item.key));
+  const secondaryTabActive = !headerPinnedModules.includes(activeTab);
   const pdvMainTab = activeTab === "tables"
     ? (legacyMode ? null : "tables")
     : activeTab === "sale" && !legacyMode
@@ -2097,8 +2254,8 @@ export function App() {
           </div>
         )}
 
-        <nav className="tabs">
-          {visibleTabItems.map((item) => {
+        <nav className="tabs primary-tabs" aria-label="Navegacao principal">
+          {primaryTabItems.map((item) => {
             const Icon = item.icon;
             return (
               <button
@@ -2111,6 +2268,66 @@ export function App() {
               </button>
             );
           })}
+          <div className="modules-menu-wrap" ref={modulesMenuRef}>
+            <button
+              type="button"
+              className={`modules-trigger ${secondaryTabActive ? "active" : ""}`}
+              aria-haspopup="menu"
+              aria-expanded={modulesMenuOpen}
+              onClick={() => {
+                setModulesMenuOpen((open) => !open);
+                setTotalMenuOpen(false);
+              }}
+            >
+              <LayoutGrid size={18} />
+              Modulos
+              <ChevronDown className={modulesMenuOpen ? "open" : ""} size={15} />
+            </button>
+            {modulesMenuOpen && (
+              <div className="modules-popover" role="menu" aria-label="Modulos do sistema">
+                <div className="modules-popover-head">
+                  <div>
+                    <strong>Modulos do sistema</strong>
+                    <span>Acesse as areas administrativas sem ocupar o topo.</span>
+                  </div>
+                  <button type="button" className="modules-close" aria-label="Fechar modulos" onClick={() => setModulesMenuOpen(false)}>
+                    <X size={17} />
+                  </button>
+                </div>
+                <div className="modules-groups">
+                  {MODULE_GROUPS.map((group) => (
+                    <section key={group.label} className="modules-group">
+                      <span className="modules-group-label">{group.label}</span>
+                      {group.items.map((item) => {
+                        const Icon = item.icon;
+                        const isActive = activeTab === item.key;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            role="menuitem"
+                            className={isActive ? "active" : ""}
+                            disabled={item.comingSoon}
+                            onClick={() => {
+                              requestNavigation(item.key);
+                              setModulesMenuOpen(false);
+                            }}
+                          >
+                            <Icon size={19} />
+                            <span>
+                              <strong>{item.label}</strong>
+                              <small>{item.description}</small>
+                            </span>
+                            {item.comingSoon && <b>Em breve</b>}
+                          </button>
+                        );
+                      })}
+                    </section>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </nav>
 
         <div className="total-menu-wrap" ref={totalMenuRef}>
@@ -2119,7 +2336,10 @@ export function App() {
             className="sidebar-card topbar-card topbar-card-button"
             disabled={!canUseTotalMenu}
             title={canUseTotalMenu ? "Abrir acoes do total de hoje" : "O servidor bloqueou o menu de totais neste cliente."}
-            onClick={() => setTotalMenuOpen((open) => !open)}
+            onClick={() => {
+              setTotalMenuOpen((open) => !open);
+              setModulesMenuOpen(false);
+            }}
           >
             <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total hoje"}</span>
             <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "private-value" : ""}>
@@ -2141,24 +2361,14 @@ export function App() {
                 <BarChart3 size={16} />
                 Relatorio deste dia
               </button>
-              {remoteSession ? (
-                <button type="button" onClick={() => {
-                  requestNavigation("server");
-                  setTotalMenuOpen(false);
-                }}>
-                  <PlugZap size={16} />
-                  Ver cliente remoto
-                </button>
-              ) : (
-                <button type="button" onClick={() => {
-                  setHistoryFocus({ date: currentDateKey, nonce: Date.now() });
-                  requestNavigation("history");
-                  setTotalMenuOpen(false);
-                }}>
-                  <History size={16} />
-                  Historico de hoje
-                </button>
-              )}
+              <button type="button" onClick={() => {
+                setHistoryFocus({ date: currentDateKey, nonce: Date.now() });
+                requestNavigation("history");
+                setTotalMenuOpen(false);
+              }}>
+                <History size={16} />
+                Historico de hoje
+              </button>
               <button type="button" onClick={() => {
                 setSettingsFocus({ category: "privacy", nonce: Date.now() });
                 requestNavigation("settings");
@@ -2180,16 +2390,17 @@ export function App() {
       </aside>
 
       <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>
-        {!pdvMainTab && <header className="workspace-header">
-          <div>
-            <span className="eyebrow">{header.eyebrow}</span>
-            <h1>{header.title}</h1>
-          </div>
-          <div className="module-status">
-            <span>{header.status}</span>
-            <strong>{header.detail}</strong>
-          </div>
-        </header>}
+        {!pdvMainTab && (
+          <header className="workspace-header">
+            <div>
+              <span className="eyebrow">{header.eyebrow}</span>
+              <h1>{header.title}</h1>
+            </div>
+            <div className="module-status">
+              <span>{header.status}</span>
+            </div>
+          </header>
+        )}
 
         {pdvMainTab && (
           <div className="pdv-module-panel pdv-direct-panel">
@@ -2274,32 +2485,102 @@ export function App() {
           />
         )}
 
+        {activeTab === "dashboard" && (
+          <DashboardPanel
+            snapshot={remoteSession ? remotePdvSnapshot : pdvSnapshot}
+            sales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []}
+            remoteConnected={Boolean(remoteSession)}
+            connectedDevices={remoteSession ? 1 : server.devices.length}
+            canViewTotals={canViewRemoteTotals}
+            onOpenReports={() => requestNavigation("reports")}
+            onOpenClients={() => {
+              setFinancialView("customers");
+              requestNavigation("clients");
+            }}
+            onOpenPayables={() => requestNavigation("payables")}
+            onOpenTables={() => requestNavigation("tables")}
+            onOpenProducts={() => {
+              setSettingsFocus({ category: "pdv", nonce: Date.now() });
+              requestNavigation("settings");
+            }}
+          />
+        )}
+
         {activeTab === "clients" && (
-          <div className="pdv-module-panel clients-main-panel">
-            <PdvApp
-              embedded
-              initialTab="history"
-              initialHistoryView="customers"
-              hideTopbar
-              snapshotOverride={remoteSession ? remotePdvSnapshot : pdvSnapshot}
-              remoteSession={remoteSession ? {
-                ...remoteSession,
-                roundingStep: effectiveRemotePolicy?.defaultRoundingStep,
-                roundingDirection: effectiveRemotePolicy?.defaultRoundingDirection,
-                allowPrint: remoteSession.permissions.printReceipts,
-                allowEdit: remoteSession.permissions.edit,
-                snapshot: remotePdvSnapshot
-              } : null}
-              toastDuration={settings.notificationDurationMs}
-              receiptPrintTargets={remoteSession
-                ? (remoteSession.permissions.printReceipts ? [{ id: "server", label: "Computador servidor" }] : [])
-                : server.devices.filter((device) => device.permissions.printReceipts).map((device) => ({ id: device.id, label: device.name }))}
-              onRemoteReceiptPrint={remoteSession
-                ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) })
-                : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)}
-              onNavigateMain={(tab) => requestNavigation(tab)}
-            />
-          </div>
+          <section className="financial-workspace">
+            <nav className="financial-navigation" aria-label="Areas do financeiro">
+              <button className={financialView === "customers" ? "active" : ""} onClick={() => setFinancialView("customers")}><Users size={17} /> Clientes</button>
+              <button className={financialView === "receivables" ? "active" : ""} onClick={() => setFinancialView("receivables")}><ReceiptText size={17} /> Contas a receber</button>
+              <button className={financialView === "payables" ? "active" : ""} onClick={() => setFinancialView("payables")}><Wallet size={17} /> Contas a pagar</button>
+            </nav>
+            <div className="financial-content">
+              {financialView !== "payables" ? (
+                <div className="pdv-module-panel clients-main-panel">
+                  <PdvApp
+                    key={`finance-${financialView}`}
+                    embedded
+                    initialTab="history"
+                    initialHistoryView={financialView}
+                    hideHistoryNavigation
+                    hideTopbar
+                    snapshotOverride={remoteSession ? remotePdvSnapshot : pdvSnapshot}
+                    remoteSession={remoteSession ? {
+                      ...remoteSession,
+                      roundingStep: effectiveRemotePolicy?.defaultRoundingStep,
+                      roundingDirection: effectiveRemotePolicy?.defaultRoundingDirection,
+                      allowPrint: remoteSession.permissions.printReceipts,
+                      allowEdit: remoteSession.permissions.edit,
+                      snapshot: remotePdvSnapshot
+                    } : null}
+                    toastDuration={settings.notificationDurationMs}
+                    receiptPrintTargets={remoteSession
+                      ? (remoteSession.permissions.printReceipts ? [{ id: "server", label: "Computador servidor" }] : [])
+                      : server.devices.filter((device) => device.permissions.printReceipts).map((device) => ({ id: device.id, label: device.name }))}
+                    onRemoteReceiptPrint={remoteSession
+                      ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) })
+                      : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)}
+                    onNavigateMain={(tab) => requestNavigation(tab)}
+                  />
+                </div>
+              ) : (
+                <PayablesPanel
+                  payables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.payables || []}
+                  readOnly={Boolean(remoteSession && !remoteSession.permissions.manageTables)}
+                  onSave={async (draft) => {
+                    const payable = remoteSession
+                      ? await remoteRequest<{ payable: PdvPayable }>(remoteSession, "/api/pdv/payables", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.payable)
+                      : await window.caixa.savePdvPayable(draft);
+                    if (remoteSession) await refreshRemote(remoteSession);
+                    else await reloadPdv();
+                    return payable;
+                  }}
+                  onPay={async (id, payment) => {
+                    const operationId = crypto.randomUUID();
+                    const payable = remoteSession
+                      ? await remoteRequest<{ payable: PdvPayable }>(remoteSession, `/api/pdv/payables/${id}/payments`, {
+                          method: "POST",
+                          headers: { "x-idempotency-key": operationId },
+                          body: JSON.stringify({ payment })
+                        }).then((result) => result.payable)
+                      : await window.caixa.payPdvPayable(id, payment, operationId);
+                    if (remoteSession) await refreshRemote(remoteSession);
+                    else await reloadPdv();
+                    return payable;
+                  }}
+                  onCancel={async (id) => {
+                    if (remoteSession) {
+                      await remoteRequest(remoteSession, `/api/pdv/payables/${id}/cancel`, { method: "POST" });
+                      await refreshRemote(remoteSession);
+                    } else {
+                      await window.caixa.cancelPdvPayable(id);
+                      await reloadPdv();
+                    }
+                  }}
+                  onToast={showToast}
+                />
+              )}
+            </div>
+          </section>
         )}
 
         {activeTab === "reports" && (
@@ -2390,7 +2671,525 @@ export function App() {
           }}
         />
       )}
+      {versionMismatch && (
+        <SettingsConfirmModal
+          title="Versoes diferentes nao podem conectar"
+          message={`Este computador usa ${versionMismatch.clientVersion} e o servidor usa ${versionMismatch.serverVersion}. Atualize ${versionMismatch.serverIsNewer ? "este computador" : "o computador servidor"} para a mesma versao antes de tentar novamente.`}
+          confirmLabel={installingPromptUpdate ? "Verificando..." : "Verificar e atualizar"}
+          onCancel={() => setVersionMismatch(null)}
+          onConfirm={() => installPromptedUpdate("version")}
+        />
+      )}
+      {!versionMismatch && startupUpdateInfo?.hasUpdate && (
+        <SettingsConfirmModal
+          title={`Nova versao ${startupUpdateInfo.latestVersion} disponivel`}
+          message={`O Caixa PDV verificou a atualizacao diaria. Este computador esta na versao ${startupUpdateInfo.currentVersion}.`}
+          confirmLabel={installingPromptUpdate ? "Baixando..." : "Baixar e instalar"}
+          onCancel={() => setStartupUpdateInfo(null)}
+          onConfirm={() => installPromptedUpdate("daily")}
+        />
+      )}
     </div>
+  );
+}
+
+function PayablesPanel({
+  payables,
+  readOnly,
+  onSave,
+  onPay,
+  onCancel,
+  onToast
+}: {
+  payables: PdvPayable[];
+  readOnly: boolean;
+  onSave: (draft: PdvPayableDraft) => Promise<PdvPayable>;
+  onPay: (id: string, payment: PdvPayablePayment) => Promise<PdvPayable>;
+  onCancel: (id: string) => Promise<void>;
+  onToast: (tone: ToastState["tone"], message: string) => void;
+}) {
+  const today = getLocalDateKey();
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const monthEndDate = new Date(`${monthStart}T12:00:00`);
+  monthEndDate.setMonth(monthEndDate.getMonth() + 1, 0);
+  const monthEnd = getLocalDateKey(monthEndDate);
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(monthEnd);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Pagas" | "Canceladas">("Todos");
+  const [editing, setEditing] = useState<PdvPayable | "new" | null>(null);
+  const [paying, setPaying] = useState<PdvPayable | null>(null);
+  const [selected, setSelected] = useState<PdvPayable | null>(null);
+  const [cancelRequest, setCancelRequest] = useState<PdvPayable | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const visible = payables.filter((payable) => {
+    const inPeriod = (!from || payable.dueDate >= from) && (!to || payable.dueDate <= to);
+    const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+    const queryMatch = !normalizedQuery || [
+      payable.description,
+      payable.supplier,
+      payable.category,
+      payable.documentNumber
+    ].some((value) => value.toLocaleLowerCase("pt-BR").includes(normalizedQuery));
+    const statusMatch = status === "Todos"
+      || (status === "Em aberto" && ["Em aberto", "Parcialmente paga"].includes(payable.status))
+      || (status === "Vencidas" && payable.status === "Vencida")
+      || (status === "Pagas" && payable.status === "Paga")
+      || (status === "Canceladas" && payable.status === "Cancelada");
+    return inPeriod && queryMatch && statusMatch;
+  });
+  const active = visible.filter((payable) => payable.status !== "Cancelada");
+  const openBalance = roundMoney(active.reduce((sum, payable) => sum + payable.balance, 0));
+  const overdue = active.filter((payable) => payable.status === "Vencida");
+  const paidInPeriod = roundMoney(active.reduce((sum, payable) => sum + payable.paidAmount, 0));
+  const dueNextSevenDays = active.filter((payable) => {
+    if (["Paga", "Cancelada"].includes(payable.status)) return false;
+    const days = Math.ceil((new Date(`${payable.dueDate}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86400000);
+    return days >= 0 && days <= 7;
+  });
+  const categories = [...new Set(payables.map((payable) => payable.category).filter(Boolean))].sort((left, right) => left.localeCompare(right, "pt-BR"));
+  const suppliers = [...new Set(payables.map((payable) => payable.supplier).filter(Boolean))].sort((left, right) => left.localeCompare(right, "pt-BR"));
+  const syncSelection = (next: PdvPayable) => {
+    setSelected(next);
+    setPaying((current) => current?.id === next.id ? next : current);
+  };
+
+  return (
+    <section className="payables-panel">
+      <div className="payables-toolbar">
+        <p>Vencimentos, fornecedores e pagamentos do negocio.</p>
+        {!readOnly && <button className="primary-button" onClick={() => setEditing("new")}><Plus size={17} /> Nova conta</button>}
+      </div>
+
+      <div className="payables-metrics">
+        <button onClick={() => setStatus("Em aberto")}><span>Saldo em aberto</span><strong>{formatCurrency(openBalance)}</strong><small>{active.filter((item) => !["Paga", "Cancelada"].includes(item.status)).length} conta(s)</small></button>
+        <button className={overdue.length ? "warning" : ""} onClick={() => setStatus("Vencidas")}><span>Vencidas</span><strong>{formatCurrency(overdue.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{overdue.length} pendencia(s)</small></button>
+        <button onClick={() => setStatus("Todos")}><span>Proximos 7 dias</span><strong>{formatCurrency(dueNextSevenDays.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{dueNextSevenDays.length} vencimento(s)</small></button>
+        <button onClick={() => setStatus("Pagas")}><span>Pago no recorte</span><strong>{formatCurrency(paidInPeriod)}</strong><small>{active.filter((item) => item.paidAmount > 0).length} conta(s) com pagamento</small></button>
+      </div>
+
+      <div className="payables-filters">
+        <label><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, fornecedor, categoria ou documento" /></label>
+        <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+        <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+        <label><span>Situacao</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>{["Todos", "Em aberto", "Vencidas", "Pagas", "Canceladas"].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <button onClick={() => { setFrom(monthStart); setTo(monthEnd); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Mes atual</button>
+      </div>
+
+      <div className="payables-content">
+        <div className="payables-list">
+          <div className="payables-list-head"><span>Conta</span><span>Vencimento</span><span>Valor</span><span>Saldo</span><span>Situacao</span><span>Acoes</span></div>
+          {visible.map((payable) => (
+            <article key={payable.id} className={`${payable.status === "Vencida" ? "overdue" : ""} ${selected?.id === payable.id ? "selected" : ""}`} onClick={() => setSelected(payable)}>
+              <div><strong>{payable.description}</strong><small>{payable.supplier || "Fornecedor nao informado"}{payable.category ? ` · ${payable.category}` : ""}</small></div>
+              <time>{new Date(`${payable.dueDate}T12:00:00`).toLocaleDateString("pt-BR")}</time>
+              <b>{formatCurrency(payable.amount)}</b>
+              <b>{formatCurrency(payable.balance)}</b>
+              <span className={`payable-status status-${payable.status.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-")}`}>{payable.status}</span>
+              <div className="payable-row-actions">
+                {!readOnly && !["Paga", "Cancelada"].includes(payable.status) && <button title="Registrar pagamento" onClick={(event) => { event.stopPropagation(); setPaying(payable); }}><Wallet size={15} /></button>}
+                {!readOnly && payable.status !== "Cancelada" && <button title="Editar conta" onClick={(event) => { event.stopPropagation(); setEditing(payable); }}><Edit3 size={15} /></button>}
+                {!readOnly && payable.paidAmount <= 0.009 && payable.status !== "Cancelada" && <button className="danger" title="Cancelar conta" onClick={(event) => { event.stopPropagation(); setCancelRequest(payable); }}><X size={15} /></button>}
+              </div>
+            </article>
+          ))}
+          {!visible.length && (
+            <div className="payables-empty">
+              <CalendarDays size={30} />
+              <strong>Nenhuma conta neste recorte</strong>
+              <span>Ajuste os filtros ou cadastre o primeiro vencimento.</span>
+            </div>
+          )}
+        </div>
+        <aside className="payable-detail">
+          {selected ? (
+            <>
+              <div><span className="settings-overline">Detalhes</span><h3>{selected.description}</h3><p>{selected.note || "Sem observacoes."}</p></div>
+              <dl>
+                <div><dt>Fornecedor</dt><dd>{selected.supplier || "Nao informado"}</dd></div>
+                <div><dt>Categoria</dt><dd>{selected.category || "Nao informada"}</dd></div>
+                <div><dt>Documento</dt><dd>{selected.documentNumber || "Nao informado"}</dd></div>
+                <div><dt>Valor original</dt><dd>{formatCurrency(selected.amount)}</dd></div>
+              </dl>
+              {!readOnly && !["Paga", "Cancelada"].includes(selected.status) && (
+                <div className="payable-detail-actions">
+                  <button className="primary-button" onClick={() => setPaying(selected)}>
+                    <Wallet size={16} /> Registrar pagamento
+                  </button>
+                </div>
+              )}
+              <div className="payable-payment-history">
+                <strong>Pagamentos</strong>
+                {selected.payments.map((payment) => (
+                  <div key={payment.id}><span>{new Date(payment.createdAt).toLocaleDateString("pt-BR")} · {payment.method}</span><b>{formatCurrency(payment.amount)}</b><small>{payment.description || payment.originDevice || ""}</small></div>
+                ))}
+                {!selected.payments.length && <span>Nenhum pagamento registrado.</span>}
+              </div>
+            </>
+          ) : (
+            <div className="payable-detail-empty"><Wallet size={28} /><strong>Selecione uma conta</strong><span>Os dados e pagamentos aparecerao aqui.</span></div>
+          )}
+        </aside>
+      </div>
+
+      {editing && (
+        <PayableEditorModal
+          payable={editing === "new" ? null : editing}
+          categories={categories}
+          suppliers={suppliers}
+          busy={busy}
+          onCancel={() => setEditing(null)}
+          onSave={async (draft) => {
+            setBusy(true);
+            try {
+              const next = await onSave(draft);
+              syncSelection(next);
+              setEditing(null);
+              onToast("success", draft.id ? "Conta atualizada." : "Conta a pagar cadastrada.");
+            } catch (error) {
+              onToast("error", error instanceof Error ? error.message : "Nao foi possivel salvar a conta.");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      )}
+      {paying && (
+        <PayablePaymentModal
+          payable={paying}
+          busy={busy}
+          onCancel={() => setPaying(null)}
+          onConfirm={async (payment) => {
+            setBusy(true);
+            try {
+              const next = await onPay(paying.id, payment);
+              syncSelection(next);
+              setPaying(null);
+              onToast("success", next.status === "Paga" ? "Conta paga por completo." : "Pagamento parcial registrado.");
+            } catch (error) {
+              onToast("error", error instanceof Error ? error.message : "Nao foi possivel registrar o pagamento.");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      )}
+      {cancelRequest && (
+        <SettingsConfirmModal
+          title="Cancelar conta a pagar?"
+          message={`${cancelRequest.description} sera mantida no historico com a situacao Cancelada.`}
+          confirmLabel="Cancelar conta"
+          danger
+          onCancel={() => setCancelRequest(null)}
+          onConfirm={async () => {
+            await onCancel(cancelRequest.id);
+            setSelected((current) => current?.id === cancelRequest.id ? null : current);
+            setCancelRequest(null);
+            onToast("success", "Conta cancelada.");
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function PayableEditorModal({
+  payable,
+  categories,
+  suppliers,
+  busy,
+  onCancel,
+  onSave
+}: {
+  payable: PdvPayable | null;
+  categories: string[];
+  suppliers: string[];
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (draft: PdvPayableDraft) => void;
+}) {
+  const [draft, setDraft] = useState<PdvPayableDraft>({
+    id: payable?.id,
+    description: payable?.description || "",
+    supplier: payable?.supplier || "",
+    category: payable?.category || "",
+    documentNumber: payable?.documentNumber || "",
+    dueDate: payable?.dueDate || getLocalDateKey(),
+    amount: payable?.amount || 0,
+    note: payable?.note || ""
+  });
+  const [amountText, setAmountText] = useState(payable ? String(payable.amount).replace(".", ",") : "");
+  const [payments, setPayments] = useState<PdvPayablePayment[]>(() => payable?.payments.map((payment) => ({ ...payment })) || []);
+  const amount = roundMoney(parseMoney(amountText));
+  const paidAmount = roundMoney(payments.reduce((sum, payment) => sum + roundMoney(Number(payment.amount) || 0), 0));
+  const balance = roundMoney(Math.max(0, amount - paidAmount));
+  const paymentsValid = payments.every((payment) => Number.isFinite(Number(payment.amount)) && Number(payment.amount) > 0)
+    && paidAmount - amount <= 0.009;
+  const updatePayment = (id: string, patch: Partial<PdvPayablePayment>) => {
+    setPayments((current) => current.map((payment) => payment.id === id ? { ...payment, ...patch } : payment));
+  };
+  const addPayment = () => {
+    const nextAmount = balance > 0.009 ? balance : 0;
+    setPayments((current) => [...current, {
+      id: crypto.randomUUID(),
+      payableId: payable?.id || draft.id || "",
+      createdAt: new Date().toISOString(),
+      method: "Pix",
+      amount: nextAmount,
+      description: "",
+      originDevice: "Edicao da conta"
+    }]);
+  };
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <section className="modal payable-editor-modal">
+        <div className="modal-head"><div><span className="settings-overline">Contas a pagar</span><strong>{payable ? "Editar conta" : "Nova conta"}</strong></div><button className="icon-button" onClick={onCancel}><X size={18} /></button></div>
+        <div className="payable-editor-body">
+          <div className="payable-form-grid">
+            <label className="wide"><span>Descricao *</span><input autoFocus value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Ex.: Energia eletrica da loja" /></label>
+            <label><span>Valor *</span><input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} placeholder="0,00" /></label>
+            <label><span>Vencimento *</span><input type="date" value={draft.dueDate} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value })} /></label>
+            <label><span>Fornecedor</span><input list="payable-suppliers" value={draft.supplier} onChange={(event) => setDraft({ ...draft, supplier: event.target.value })} placeholder="Opcional" /><datalist id="payable-suppliers">{suppliers.map((value) => <option key={value} value={value} />)}</datalist></label>
+            <label><span>Categoria</span><input list="payable-categories" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} placeholder="Ex.: Energia, aluguel..." /><datalist id="payable-categories">{categories.map((value) => <option key={value} value={value} />)}</datalist></label>
+            <label className="wide"><span>Numero do documento</span><input value={draft.documentNumber} onChange={(event) => setDraft({ ...draft, documentNumber: event.target.value })} placeholder="Nota fiscal, boleto ou referencia opcional" /></label>
+            <label className="wide"><span>Observacoes</span><textarea value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} placeholder="Informacoes internas sobre esta despesa." /></label>
+          </div>
+          <section className="payable-editor-payments">
+            <div className="payable-editor-section-head">
+              <div><strong>Pagamentos da conta</strong><span>Edite ou remova pagamentos incorretos antes de salvar.</span></div>
+              <button type="button" className="ghost-button" onClick={addPayment} disabled={balance <= 0.009}><Plus size={16} /> Adicionar pagamento</button>
+            </div>
+            <div className="payable-editor-summary">
+              <span>Valor <b>{formatCurrency(amount)}</b></span>
+              <span>Pago <b>{formatCurrency(paidAmount)}</b></span>
+              <span>Saldo <b>{formatCurrency(balance)}</b></span>
+            </div>
+            <div className="payable-editor-payment-list">
+              {payments.map((payment) => (
+                <div key={payment.id} className="payable-editor-payment-row">
+                  <label><span>Data</span><input type="date" value={String(payment.createdAt).slice(0, 10)} onChange={(event) => updatePayment(payment.id, { createdAt: `${event.target.value}T12:00:00.000Z` })} /></label>
+                  <label><span>Forma</span><select value={payment.method} onChange={(event) => updatePayment(payment.id, { method: event.target.value as PdvPayablePayment["method"] })}>{["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Nao definido"].map((value) => <option key={value}>{value}</option>)}</select></label>
+                  <label><span>Valor</span><input type="number" min="0.01" step="0.01" value={Number.isFinite(Number(payment.amount)) ? payment.amount : ""} onChange={(event) => updatePayment(payment.id, { amount: Number(event.target.value) })} /></label>
+                  <label className="payment-description"><span>Observacao</span><input value={payment.description || ""} onChange={(event) => updatePayment(payment.id, { description: event.target.value })} placeholder="Opcional" /></label>
+                  <button type="button" className="icon-button danger" title="Remover pagamento" onClick={() => setPayments((current) => current.filter((item) => item.id !== payment.id))}><Trash2 size={17} /></button>
+                </div>
+              ))}
+              {!payments.length && <div className="payable-editor-payment-empty">Nenhum pagamento registrado. A conta permanecera em aberto.</div>}
+            </div>
+            {!paymentsValid && <div className="payable-editor-warning"><TriangleAlert size={16} /> O total pago nao pode ultrapassar o valor da conta e todos os pagamentos precisam ser maiores que zero.</div>}
+          </section>
+        </div>
+        <div className="modal-actions"><button className="ghost-button" onClick={onCancel} disabled={busy}>Cancelar</button><button className="primary-button" disabled={busy || !draft.description.trim() || !draft.dueDate || amount <= 0 || !paymentsValid} onClick={() => onSave({ ...draft, amount, payments })}>{busy ? "Salvando..." : "Salvar conta"}</button></div>
+      </section>
+    </div>
+  );
+}
+
+function PayablePaymentModal({ payable, busy, onCancel, onConfirm }: { payable: PdvPayable; busy: boolean; onCancel: () => void; onConfirm: (payment: PdvPayablePayment) => void }) {
+  const methods: Array<Exclude<PdvPaymentMethod, "Conta a receber" | "Nao definido">> = ["Dinheiro", "Debito", "Credito", "Pix", "Outros"];
+  const [method, setMethod] = useState<typeof methods[number] | null>(null);
+  const [description, setDescription] = useState("");
+  const confirmPayment = (payment: PdvPayment) => {
+    onConfirm({
+      id: crypto.randomUUID(),
+      payableId: payable.id,
+      createdAt: new Date().toISOString(),
+      method: payment.method as Exclude<PdvPaymentMethod, "Conta a receber">,
+      amount: payment.amount,
+      description: description.trim() || undefined
+    });
+  };
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop" role="dialog" aria-modal="true">
+      <section className="pdv-payment-modal pdv-collection-modal pdv-admin-modal payable-payment-modal">
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Pagamento de conta</span>
+            <h1>{payable.description}</h1>
+            <p>Saldo atual: {formatCurrency(payable.balance)}</p>
+          </div>
+          <button className="pdv-icon-button" onClick={onCancel} disabled={busy}><X size={18} /></button>
+        </div>
+        <div className="pdv-payment-methods" aria-label="Forma de pagamento">
+          {methods.map((value) => (
+            <button key={value} type="button" className={method === value ? "active" : ""} disabled={busy} onClick={() => setMethod(value)}>
+              {value}
+            </button>
+          ))}
+        </div>
+        <label className="pdv-payment-description">
+          <span>Observacao do pagamento</span>
+          <input value={description} maxLength={160} onChange={(event) => setDescription(event.target.value)} placeholder="Comprovante, conta utilizada ou observacao opcional" />
+          <small>A observacao ficara salva no historico desta conta.</small>
+        </label>
+        <div className="pdv-action-row">
+          <button className="pdv-ghost-button" onClick={onCancel} disabled={busy}>Voltar</button>
+        </div>
+        {method && (
+          <PaymentAmountModal
+            key={`${method}-${payable.balance}`}
+            method={method}
+            remaining={payable.balance}
+            context="payable"
+            onCancel={() => setMethod(null)}
+            onConfirm={confirmPayment}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function DashboardPanel({
+  snapshot,
+  sales,
+  remoteConnected,
+  connectedDevices,
+  canViewTotals,
+  onOpenReports,
+  onOpenClients,
+  onOpenPayables,
+  onOpenTables,
+  onOpenProducts
+}: {
+  snapshot: PdvSnapshot | null;
+  sales: PdvSale[];
+  remoteConnected: boolean;
+  connectedDevices: number;
+  canViewTotals: boolean;
+  onOpenReports: () => void;
+  onOpenClients: () => void;
+  onOpenPayables: () => void;
+  onOpenTables: () => void;
+  onOpenProducts: () => void;
+}) {
+  if (!snapshot) {
+    return (
+      <section className="dashboard-panel dashboard-loading" aria-label="Carregando Visao geral">
+        <div /><div /><div /><div />
+      </section>
+    );
+  }
+  const today = getLocalDateKey();
+  const todaySales = sales.filter((sale) => getLocalDateKey(sale.createdAt) === today && sale.status !== "Cancelada" && sale.status !== "deleted");
+  const totalToday = roundMoney(todaySales.reduce((sum, sale) => sum + sale.total, 0));
+  const ticketAverage = todaySales.length ? roundMoney(totalToday / todaySales.length) : 0;
+  const openTables = snapshot.tables.filter((table) => table.items.length > 0 || table.status === "Ocupada" || table.status === "Fechamento");
+  const activeReceivables = snapshot.receivables.filter((receivable) => !["Recebida", "Cancelada"].includes(receivable.status));
+  const overdueReceivables = activeReceivables.filter((receivable) => Boolean(receivable.dueDate && receivable.dueDate < today));
+  const receivableBalance = roundMoney(activeReceivables.reduce((sum, receivable) => sum + receivable.balance, 0));
+  const activePayables = (snapshot.payables || []).filter((payable) => !["Paga", "Cancelada"].includes(payable.status));
+  const overduePayables = activePayables.filter((payable) => payable.status === "Vencida");
+  const payableBalance = roundMoney(activePayables.reduce((sum, payable) => sum + payable.balance, 0));
+  const lowStock = snapshot.products
+    .filter((product) => product.active && product.trackStock && (product.stockQuantity || 0) <= (product.minimumStock || 0))
+    .sort((left, right) => (left.stockQuantity || 0) - (right.stockQuantity || 0));
+  const costByProduct = new Map(snapshot.products.map((product) => [product.id, product.costPrice || 0]));
+  const estimatedCost = roundMoney(todaySales.reduce((saleSum, sale) => saleSum + sale.items.reduce(
+    (itemSum, item) => itemSum + (costByProduct.get(item.productId) || 0) * item.quantity,
+    0
+  ), 0));
+  const estimatedGrossProfit = roundMoney(totalToday - estimatedCost);
+  const productsToday = new Map<string, { quantity: number; total: number }>();
+  todaySales.forEach((sale) => sale.items.forEach((item) => {
+    const current = productsToday.get(item.productName) || { quantity: 0, total: 0 };
+    current.quantity += item.quantity;
+    current.total += item.total;
+    productsToday.set(item.productName, current);
+  }));
+  const topProducts = [...productsToday.entries()].sort((left, right) => right[1].quantity - left[1].quantity).slice(0, 6);
+  const privacyValue = (value: number) => canViewTotals ? formatCurrency(value) : "Privado";
+
+  return (
+    <section className="dashboard-panel">
+      <div className="dashboard-intro">
+        <div>
+          <span className="settings-overline">Resumo operacional de hoje</span>
+          <h2>O que precisa da sua atencao agora</h2>
+          <p>Vendas, mesas, recebimentos, estoque e rede reunidos sem interromper o fluxo do caixa.</p>
+        </div>
+        <div className={`dashboard-network ${remoteConnected || connectedDevices > 0 ? "online" : ""}`}>
+          <Wifi size={18} />
+          <span>{remoteConnected ? "Cliente sincronizado" : connectedDevices > 0 ? `${connectedDevices} cliente(s) conectado(s)` : "Servidor local sem clientes"}</span>
+        </div>
+      </div>
+
+      <div className="dashboard-metrics">
+        <button onClick={onOpenReports}>
+          <span>Vendas de hoje</span>
+          <strong>{privacyValue(totalToday)}</strong>
+          <small>{todaySales.length} fechamento(s) · ticket {privacyValue(ticketAverage)}</small>
+        </button>
+        <button onClick={onOpenTables}>
+          <span>Mesas em atendimento</span>
+          <strong>{openTables.length}</strong>
+          <small>{openTables.reduce((sum, table) => sum + table.items.length, 0)} item(ns) ainda em aberto</small>
+        </button>
+        <button onClick={onOpenClients} className={overdueReceivables.length ? "warning" : ""}>
+          <span>Contas a receber</span>
+          <strong>{privacyValue(receivableBalance)}</strong>
+          <small>{overdueReceivables.length} vencida(s) de {activeReceivables.length} em aberto</small>
+        </button>
+        <button onClick={onOpenPayables} className={overduePayables.length ? "warning" : ""}>
+          <span>Contas a pagar</span>
+          <strong>{privacyValue(payableBalance)}</strong>
+          <small>{overduePayables.length} vencida(s) de {activePayables.length} em aberto</small>
+        </button>
+        <button onClick={onOpenProducts} className={lowStock.length ? "warning" : ""}>
+          <span>Estoque baixo</span>
+          <strong>{lowStock.length}</strong>
+          <small>{snapshot.products.filter((product) => product.trackStock).length} produto(s) monitorado(s)</small>
+        </button>
+      </div>
+
+      <div className="dashboard-grid">
+        <section className="dashboard-performance">
+          <div className="dashboard-section-head">
+            <div><BarChart3 size={18} /><span><strong>Desempenho do dia</strong><small>Estimativa baseada no custo atual dos produtos.</small></span></div>
+            <button onClick={onOpenReports}>Abrir relatorios</button>
+          </div>
+          <div className="dashboard-profit-line">
+            <div><span>Faturamento</span><strong>{privacyValue(totalToday)}</strong></div>
+            <div><span>Custo estimado</span><strong>{privacyValue(estimatedCost)}</strong></div>
+            <div><span>Lucro bruto estimado</span><strong>{privacyValue(estimatedGrossProfit)}</strong></div>
+          </div>
+          <div className="dashboard-top-products">
+            <strong>Produtos mais vendidos hoje</strong>
+            {topProducts.map(([name, result], index) => (
+              <div key={name}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <b>{name}</b>
+                <small>{formatReportQuantity(result.quantity)} · {privacyValue(result.total)}</small>
+              </div>
+            ))}
+            {!topProducts.length && <p className="dashboard-empty">As primeiras vendas do dia aparecerao aqui.</p>}
+          </div>
+        </section>
+
+        <aside className="dashboard-attention">
+          <div className="dashboard-section-head">
+            <div><TriangleAlert size={18} /><span><strong>Atencao</strong><small>Pontos que podem exigir uma acao.</small></span></div>
+          </div>
+          <button onClick={onOpenProducts} className={lowStock.length ? "alert" : ""}>
+            <Boxes size={18} />
+            <span><strong>{lowStock.length ? `${lowStock.length} estoque(s) no limite` : "Estoque em ordem"}</strong><small>{lowStock.slice(0, 3).map((product) => `${product.name} (${formatReportQuantity(product.stockQuantity || 0)})`).join(" · ") || "Nenhum produto abaixo do minimo."}</small></span>
+          </button>
+          <button onClick={onOpenClients} className={overdueReceivables.length ? "alert" : ""}>
+            <Wallet size={18} />
+            <span><strong>{overdueReceivables.length ? `${overdueReceivables.length} conta(s) vencida(s)` : "Recebimentos em dia"}</strong><small>{overdueReceivables.length ? `${privacyValue(overdueReceivables.reduce((sum, item) => sum + item.balance, 0))} aguardando recebimento` : "Nenhum vencimento atrasado."}</small></span>
+          </button>
+          <button onClick={onOpenPayables} className={overduePayables.length ? "alert" : ""}>
+            <CalendarDays size={18} />
+            <span><strong>{overduePayables.length ? `${overduePayables.length} despesa(s) vencida(s)` : "Despesas em dia"}</strong><small>{overduePayables.length ? `${privacyValue(overduePayables.reduce((sum, item) => sum + item.balance, 0))} aguardando pagamento` : "Nenhuma conta a pagar atrasada."}</small></span>
+          </button>
+          <button onClick={onOpenTables}>
+            <Utensils size={18} />
+            <span><strong>{openTables.length} mesa(s) aberta(s)</strong><small>{openTables.slice(0, 5).map((table) => String(table.number).padStart(3, "0")).join(", ") || "Nenhuma mesa em atendimento."}</small></span>
+          </button>
+        </aside>
+      </div>
+    </section>
   );
 }
 
@@ -3231,12 +4030,13 @@ function HistoryPanel({
   onPrintServer?: (payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
 }) {
   const savedFilters = useMemo(() => loadHistoryFilters(settings.rememberHistoryPeriod), []);
+  const todayFilter = useMemo(() => getLocalDateKey(), []);
   const [query, setQuery] = useState(savedFilters.query);
   const [type, setType] = useState(savedFilters.type);
   const [statusFilter, setStatusFilter] = useState(savedFilters.statusFilter);
   const [paymentFilter, setPaymentFilter] = useState(savedFilters.paymentFilter);
-  const [dateFrom, setDateFrom] = useState(savedFilters.dateFrom);
-  const [dateTo, setDateTo] = useState(savedFilters.dateTo);
+  const [dateFrom, setDateFrom] = useState(todayFilter);
+  const [dateTo, setDateTo] = useState(todayFilter);
   const [minimumValue, setMinimumValue] = useState(savedFilters.minimumValue);
   const [maximumValue, setMaximumValue] = useState(savedFilters.maximumValue);
   const [originFilter, setOriginFilter] = useState(savedFilters.originFilter);
@@ -3268,8 +4068,9 @@ function HistoryPanel({
       type,
       statusFilter,
       paymentFilter,
-      dateFrom: settings.rememberHistoryPeriod ? dateFrom : "",
-      dateTo: settings.rememberHistoryPeriod ? dateTo : "",
+      // O periodo e sempre temporario: ao reabrir o Historico ele volta para hoje.
+      dateFrom: "",
+      dateTo: "",
       minimumValue,
       maximumValue,
       originFilter
@@ -3411,8 +4212,8 @@ function HistoryPanel({
           setType("Todos");
           setStatusFilter("active");
           setPaymentFilter("Todos");
-          setDateFrom("");
-          setDateTo("");
+          setDateFrom(todayFilter);
+          setDateTo(todayFilter);
           setMinimumValue("");
           setMaximumValue("");
           setOriginFilter("Todos");
@@ -4114,7 +4915,7 @@ function ProfessionalReportsPanel({
   onExport: () => Promise<void>;
   onExportFiltered: (ids: string[], label: string) => Promise<void>;
 }) {
-  const initialPeriod = useMemo(() => loadReportPeriod(settings.rememberReportPeriod), []);
+  const initialPeriod = useMemo(() => currentMonthPeriod(), []);
   const [tab, setTab] = useState<ProfessionalReportTab>("overview");
   const [from, setFrom] = useState(initialPeriod.from);
   const [to, setTo] = useState(initialPeriod.to);
@@ -4182,14 +4983,6 @@ function ProfessionalReportsPanel({
   useEffect(() => {
     setShowSensitive(canViewTotals && !settings.privacy.hideReportTotals);
   }, [canViewTotals, settings.privacy.hideReportTotals]);
-
-  useEffect(() => {
-    if (settings.rememberReportPeriod) {
-      window.localStorage.setItem(REPORT_PERIOD_STORAGE_KEY, JSON.stringify({ from, to }));
-    } else {
-      window.localStorage.removeItem(REPORT_PERIOD_STORAGE_KEY);
-    }
-  }, [from, to, settings.rememberReportPeriod]);
 
   useEffect(() => {
     if (!focusPeriod) return;
@@ -5492,6 +6285,21 @@ function RemoteClientWorkspace({
   );
 }
 
+function normalizeAppVersion(value: string): string {
+  return String(value || "").trim().replace(/^v/i, "");
+}
+
+function compareAppVersions(left: string, right: string): number {
+  const leftParts = normalizeAppVersion(left).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = normalizeAppVersion(right).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
 function normalizeRemoteBaseUrl(value: string, defaultPort = 4317, localIps: string[] = []): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -5876,6 +6684,7 @@ function SettingsPanel({
           density: defaults.density,
           layout: defaults.layout,
           hideHeaderBrand: defaults.hideHeaderBrand,
+          headerPinnedModules: defaults.headerPinnedModules,
           rememberHistoryPeriod: defaults.rememberHistoryPeriod,
           rememberReportPeriod: defaults.rememberReportPeriod
         };
@@ -6082,7 +6891,7 @@ function SettingsPanel({
         <div className="settings-content">
           <div className={`settings-hero ${isRemoteLockedCategory(category) ? "remote-locked-hero" : ""}`}>
             <div>
-              <span className="settings-overline">Ajustes</span>
+              <span className="settings-overline">Categoria</span>
               <h2>{activeCategory.label}</h2>
               <p>{activeCategory.description}</p>
               {remoteClientActive && (
@@ -6107,22 +6916,16 @@ function SettingsPanel({
 
       <div className="settings-grid">
         <section className={categoryClass("appearance")}>
-          <h3>Aparencia</h3>
           <label className="field"><span>Tema</span>
             <select
-              value={draft.theme}
+              value={draft.theme === "dark" || draft.theme === "datacaixa-dark" ? "dark" : "datacaixa"}
               onChange={(event) => {
                 const theme = event.target.value as AppSettings["theme"];
                 setDraft((current) => ({ ...current, theme, accentColor: themeDefaultAccent(theme) }));
               }}
             >
-              <option value="light">Claro</option>
+              <option value="datacaixa">Claro</option>
               <option value="dark">Escuro</option>
-              <option value="auto">Automatico</option>
-              <option value="contrast">Alto contraste</option>
-              <option value="datacaixa">DataCaixa PDV</option>
-              <option value="datacaixa-dark">DataCaixa PDV escuro</option>
-              <option value="italia">Italia</option>
             </select>
           </label>
           <label className="field"><span>Cor principal</span><input type="color" value={draft.accentColor} onChange={(event) => update("accentColor", event.target.value)} /></label>
@@ -6160,6 +6963,35 @@ function SettingsPanel({
             <input type="checkbox" checked={draft.hideHeaderBrand} onChange={(event) => update("hideHeaderBrand", event.target.checked)} />
             Ocultar marca Caixa PDV no cabecalho
           </label>
+          <div className="header-module-settings">
+            <div>
+              <strong>Modulos fixados no cabecalho</strong>
+              <span>Escolha de 1 a {MAX_HEADER_PINNED_MODULES} atalhos. Os demais continuam no menu Modulos.</span>
+            </div>
+            <div className="header-module-options">
+              {TAB_ITEMS.map((item) => {
+                const selectedModules = normalizeHeaderPinnedModules(draft.headerPinnedModules);
+                const checked = selectedModules.includes(item.key);
+                const disabled = checked ? selectedModules.length === 1 : selectedModules.length >= MAX_HEADER_PINNED_MODULES;
+                return (
+                  <label key={item.key} className={checked ? "selected" : ""}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => update(
+                        "headerPinnedModules",
+                        checked
+                          ? selectedModules.filter((key) => key !== item.key)
+                          : [...selectedModules, item.key]
+                      )}
+                    />
+                    {item.label}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
         </section>
 
         <section className={categoryClass("floating", "settings-group wide")} {...remoteSectionProps("floating")}>
@@ -6180,13 +7012,15 @@ function SettingsPanel({
             })}
           </div>
           <label className="field"><span>Tema da barra</span>
-            <select value={draft.floating.theme || "follow"} onChange={(event) => update("floating", { ...draft.floating, theme: event.target.value as AppSettings["floating"]["theme"] })}>
+            <select
+              value={draft.floating.theme === "dark" || draft.floating.theme === "datacaixa-dark"
+                ? "dark"
+                : draft.floating.theme === "follow" ? "follow" : "datacaixa"}
+              onChange={(event) => update("floating", { ...draft.floating, theme: event.target.value as AppSettings["floating"]["theme"] })}
+            >
               <option value="follow">Seguir tema do app</option>
-              <option value="light">Claro</option>
+              <option value="datacaixa">Claro</option>
               <option value="dark">Escuro</option>
-              <option value="datacaixa">DataCaixa</option>
-              <option value="datacaixa-dark">DataCaixa escuro</option>
-              <option value="italia">Italia</option>
             </select>
           </label>
           <label className="field"><span>Modo visual</span>
@@ -6239,7 +7073,6 @@ function SettingsPanel({
         </section>
 
         <section className={categoryClass("operation")}>
-          <h3>Modo de operacao</h3>
           <label className="field"><span>Interface principal</span>
             <select value={effectiveSettingsOperationMode} disabled={remoteClientActive} onChange={(event) => update("operationMode", event.target.value as AppSettings["operationMode"])}>
               <option value="pdv">PDV novo integrado</option>
@@ -6618,7 +7451,6 @@ function SettingsPanel({
         </section>
 
         <section className={categoryClass("shortcuts", "settings-group wide")}>
-          <h3>Atalhos</h3>
           <div className="shortcut-list">
             {SHORTCUT_ORDER.map((key) => (
               <article className={`shortcut-card ${draft.shortcuts[key] ? "" : "disabled"}`} key={key}>
@@ -6646,7 +7478,6 @@ function SettingsPanel({
         </section>
 
         <section className={categoryClass("updates", "settings-group wide")}>
-          <h3>Atualizacoes</h3>
           <p className="settings-note">A verificacao consulta a ultima release e, quando houver versao nova, baixa o instalador para atualizar sem abrir o GitHub.</p>
           <div className="update-card">
             <Download size={20} />
@@ -6998,7 +7829,9 @@ function titleForTab(tab: TabKey): string {
     sale: "Venda",
     tables: "Mesas",
     history: "Historico editavel",
-    clients: "Clientes e contas",
+    dashboard: "Visao geral",
+    clients: "Financeiro",
+    payables: "Financeiro",
     reports: "Relatorios",
     server: "Servidor local",
     settings: "Ajuste"
@@ -7026,11 +7859,23 @@ function headerForTab(tab: TabKey, todayCount: number): { eyebrow: string; title
       status: "Edite, duplique ou restaure registros",
       detail: "Historico"
     },
-    clients: {
-      eyebrow: "Relacionamento",
+    dashboard: {
+      eyebrow: "Painel de gestao",
       title: titleForTab(tab),
-      status: "Clientes, pendencias e recebimentos",
-      detail: "Contas"
+      status: "Vendas, mesas, estoque e alertas",
+      detail: "Hoje"
+    },
+    clients: {
+      eyebrow: "Gestao financeira",
+      title: titleForTab(tab),
+      status: "Clientes, contas a receber e contas a pagar",
+      detail: "Financeiro"
+    },
+    payables: {
+      eyebrow: "Gestao financeira",
+      title: titleForTab(tab),
+      status: "Clientes, contas a receber e contas a pagar",
+      detail: "Financeiro"
     },
     reports: {
       eyebrow: "Analise do caixa",

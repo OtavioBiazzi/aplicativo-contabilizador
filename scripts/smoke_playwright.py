@@ -77,6 +77,11 @@ def collect_console_error(errors: list[str], message) -> None:
     errors.append(text)
 
 
+def open_module(page, label: str) -> None:
+  page.get_by_role("button", name="Modulos").click()
+  page.locator(".modules-popover").get_by_role("menuitem").filter(has_text=label).click()
+
+
 def main() -> int:
   if not (ROOT / "dist-electron" / "electron" / "main.js").exists():
     print("Run npm run build before the smoke test.", file=sys.stderr)
@@ -196,7 +201,14 @@ def main() -> int:
       expect(page.get_by_text("Vai cobrar R$ 0,36 a mais no total")).to_be_visible()
       page.get_by_role("button", name="Historico").click()
       expect(page.get_by_text("Mesa 4").first).to_be_visible()
-      page.get_by_role("button", name="Relatorios").click()
+      history_dates = page.locator(".professional-history-filters input[type='date']")
+      if history_dates.nth(0).input_value() != today_key or history_dates.nth(1).input_value() != today_key:
+        print("History filters did not default to today.", file=sys.stderr)
+        return 1
+      yesterday_key = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+      history_dates.nth(0).fill(yesterday_key)
+      history_dates.nth(1).fill(yesterday_key)
+      open_module(page, "Relatorios")
       expect(page.get_by_text("Total do periodo")).to_be_visible()
       expect(page.get_by_text("Relatorios com filtros")).to_be_visible()
       expect(page.get_by_text("Fechamento").first).to_be_visible()
@@ -211,10 +223,22 @@ def main() -> int:
       if report_dates.nth(0).input_value() != month_start or report_dates.nth(1).input_value() != month_end:
         print("Report filters did not default to the current month.", file=sys.stderr)
         return 1
+      report_dates.nth(0).fill(today_key)
+      report_dates.nth(1).fill(today_key)
+      page.get_by_role("button", name="Historico").click()
+      history_dates = page.locator(".professional-history-filters input[type='date']")
+      if history_dates.nth(0).input_value() != today_key or history_dates.nth(1).input_value() != today_key:
+        print("History period persisted after leaving the tab.", file=sys.stderr)
+        return 1
+      open_module(page, "Relatorios")
+      report_dates = page.locator(".report-filter-bar input[type='date']")
+      if report_dates.nth(0).input_value() != month_start or report_dates.nth(1).input_value() != month_end:
+        print("Report period persisted after leaving the tab.", file=sys.stderr)
+        return 1
       page.get_by_label("Tipo").select_option("Venda")
       page.get_by_role("button", name="Exportar filtrado").click()
       expect(page.get_by_text("Relatorio filtrado exportado.")).to_be_visible(timeout=15000)
-      page.get_by_role("button", name="Ajustes").click()
+      open_module(page, "Ajustes")
       expect(page.get_by_role("button", name="Aparencia")).to_be_visible()
       page.locator(".settings-nav").get_by_role("button", name="Barra fixada").click()
       expect(page.get_by_text("Elementos da barra")).to_be_visible()
@@ -347,7 +371,7 @@ def main() -> int:
         return 1
       page.locator(".settings-nav").get_by_role("button", name="Servidor").click()
       expect(page.get_by_text("Porta padrao")).to_be_visible()
-      page.get_by_role("button", name="Rede").click()
+      open_module(page, "Rede")
       expect(page.get_by_text("Criar servidor")).to_be_visible()
       page.get_by_role("button", name="Conectar").click()
       expect(page.get_by_text("Conectar este computador")).to_be_visible()
@@ -435,7 +459,7 @@ def main() -> int:
       ):
         print("Remote client did not send an independent Onibus entry to the principal caixa.", file=sys.stderr)
         return 1
-      page.get_by_role("button", name="Ajustes").click()
+      open_module(page, "Ajustes")
       page.locator(".settings-nav").get_by_role("button", name="Vendas").click()
       expect(page.get_by_text("Esta area esta travada no cliente")).to_be_visible(timeout=10000)
       expect(page.locator("section.remote-locked-section.active-category")).to_be_visible(timeout=10000)
@@ -477,7 +501,7 @@ def main() -> int:
       page.locator(".settings-nav").get_by_role("button", name="Planilha e backup").click()
       expect(page.get_by_text("Esta area esta travada no cliente")).to_be_visible(timeout=10000)
       expect(page.locator("section.remote-locked-section.active-category").first).to_be_visible(timeout=10000)
-      page.get_by_role("button", name="Rede").click()
+      open_module(page, "Rede")
       page.get_by_role("button", name="Conectar", exact=True).click()
       page.locator(".connect-panel").get_by_label("Valor").first.fill("18,75")
       page.locator(".connect-panel").get_by_role("button", name="Registrar").first.click()

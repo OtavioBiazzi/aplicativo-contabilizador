@@ -13,7 +13,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "./shared/types";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvProductRemovalResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvProductRemovalResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
@@ -42,6 +42,9 @@ export interface CaixaApi {
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, operationId?: string) => Promise<PdvReceivable>;
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   cancelPdvReceivable: (id: string) => Promise<void>;
+  savePdvPayable: (draft: PdvPayableDraft) => Promise<PdvPayable>;
+  payPdvPayable: (id: string, payment: PdvPayablePayment, operationId?: string) => Promise<PdvPayable>;
+  cancelPdvPayable: (id: string) => Promise<void>;
   printPdvReceipt: (
     sale: PdvSale,
     customer?: PdvCustomer,
@@ -78,7 +81,9 @@ export interface CaixaApi {
   openDataDirectory: () => Promise<string>;
   openOutputDirectory: () => Promise<string>;
   checkForUpdates: () => Promise<UpdateInfo>;
+  getAppVersion: () => Promise<string>;
   installUpdate: () => Promise<UpdateInstallResult>;
+  onSecondInstance: (listener: () => void) => () => void;
   startServer: (port: number, password: string) => Promise<ServerState>;
   stopServer: () => Promise<ServerState>;
   disconnectDevice: (id: string) => Promise<ServerState>;

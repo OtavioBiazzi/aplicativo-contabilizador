@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings, EntryDraft, LedgerEntry, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayment, PdvProductDraft, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProductDraft, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 contextBridge.exposeInMainWorld("caixa", {
   getSnapshot: () => ipcRenderer.invoke("app:getSnapshot"),
@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld("caixa", {
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, operationId?: string) => ipcRenderer.invoke("pdv:receiveReceivable", id, payment, operationId),
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => ipcRenderer.invoke("pdv:updateReceivable", id, patch),
   cancelPdvReceivable: (id: string) => ipcRenderer.invoke("pdv:cancelReceivable", id),
+  savePdvPayable: (draft: PdvPayableDraft) => ipcRenderer.invoke("pdv:savePayable", draft),
+  payPdvPayable: (id: string, payment: PdvPayablePayment, operationId?: string) => ipcRenderer.invoke("pdv:payPayable", id, payment, operationId),
+  cancelPdvPayable: (id: string) => ipcRenderer.invoke("pdv:cancelPayable", id),
   printPdvReceipt: (
     sale: PdvSale,
     customer?: PdvCustomer,
@@ -65,7 +68,13 @@ contextBridge.exposeInMainWorld("caixa", {
   openDataDirectory: () => ipcRenderer.invoke("diagnostics:openDataDirectory"),
   openOutputDirectory: () => ipcRenderer.invoke("diagnostics:openOutputDirectory"),
   checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  getAppVersion: () => ipcRenderer.invoke("app:getVersion"),
   installUpdate: () => ipcRenderer.invoke("updates:install"),
+  onSecondInstance: (listener: () => void) => {
+    const handler = () => listener();
+    ipcRenderer.on("app:secondInstance", handler);
+    return () => ipcRenderer.removeListener("app:secondInstance", handler);
+  },
   startServer: (port: number, password: string) => ipcRenderer.invoke("server:start", port, password),
   stopServer: () => ipcRenderer.invoke("server:stop"),
   disconnectDevice: (id: string) => ipcRenderer.invoke("server:disconnectDevice", id),

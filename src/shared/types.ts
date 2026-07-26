@@ -180,6 +180,7 @@ export interface AppSettings {
   defaultRoundingDirection: RoundDirection;
   notificationDurationMs: number;
   hideHeaderBrand: boolean;
+  headerPinnedModules: string[];
   tableNumberEnabled: boolean;
   busNumberEnabled: boolean;
   theme: ThemeMode;
