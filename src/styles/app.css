@@ -15952,10 +15952,8 @@ body {
 
 :root[data-simple-mode="true"] .pdv-sale-grid {
   width: 100%;
-  gap: 5px;
-  grid-template-columns:
-    minmax(0, calc(100% - var(--pdv-cart-pane-width, 34%) - 10px))
-    minmax(280px, var(--pdv-cart-pane-width, 34%));
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr) 5px minmax(280px, var(--pdv-cart-pane-width, 34%));
 }
 
 :root[data-simple-mode="true"] .pdv-shell button {
@@ -15988,6 +15986,79 @@ body {
   min-width: 0;
   min-height: 0;
   box-sizing: border-box;
+}
+
+/* A consulta de produtos tem um único padrão visual, independente do tema
+   do aplicativo. Assim, a grade não perde legibilidade no modo escuro. */
+#root .pdv-product-lookup-modal {
+  border-color: #78a8c8 !important;
+  background: #e8f3fa !important;
+  color: #092b46 !important;
+}
+
+#root .pdv-product-lookup-modal .pdv-section-head {
+  background: linear-gradient(180deg, #155b8c, #0b426e) !important;
+}
+
+#root .pdv-product-lookup-modal .pdv-section-head :is(h1, p, span) {
+  color: #fff !important;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-search {
+  border-color: #78a8c8;
+  background: #e8f3fa;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-search input {
+  border: 1px solid #9fc4dc;
+  border-radius: 5px;
+  background: #fff;
+  color: #092b46;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-search span {
+  color: #426b8a;
+  white-space: nowrap;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-table {
+  border-color: #78a8c8;
+  background: #f8fbfd;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-table > button {
+  border-bottom-color: #b4d0e1;
+  background: #f8fbfd;
+  color: #092b46 !important;
+  -webkit-text-fill-color: #092b46;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-table > button:nth-child(odd) {
+  background: #edf6fb;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-table > button:hover,
+#root .pdv-product-lookup-modal .pdv-product-lookup-table > button.selected {
+  background: #ef773e;
+  color: #fff !important;
+  -webkit-text-fill-color: #fff;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-table > button:hover > *,
+#root .pdv-product-lookup-modal .pdv-product-lookup-table > button.selected > * {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-check {
+  border-color: #78a8c8;
+  background: #fff;
+  color: #092b46;
+}
+
+#root .pdv-product-lookup-modal .pdv-product-lookup-footer {
+  border-top-color: #b4d0e1;
+  background: #e8f3fa;
 }
 
 /* No tema claro, as superfícies operacionais usam azul em vez de branco. */
