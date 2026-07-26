@@ -15909,7 +15909,16 @@ body {
   justify-content: center;
   border-radius: 5px;
   padding-inline: 16px;
+  border-color: #9fc4dc !important;
+  background: #fff !important;
+  color: #071d30 !important;
+  -webkit-text-fill-color: #071d30;
   text-align: center;
+}
+
+.pdv-cart-product-search svg {
+  color: #071d30 !important;
+  stroke: currentColor;
 }
 
 .pdv-quantity-box.has-subtable .pdv-subtable-trigger {
@@ -15952,8 +15961,27 @@ body {
 
 :root[data-simple-mode="true"] .pdv-sale-grid {
   width: 100%;
-  gap: 0;
-  grid-template-columns: minmax(0, 1fr) 5px minmax(280px, var(--pdv-cart-pane-width, 34%));
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 6px minmax(280px, var(--pdv-cart-pane-width, 34%));
+}
+
+/* O tamanho do carrinho é calculado pelo próprio grid. Evitar calc(100% - ...)
+   impede que os gaps sejam descontados duas vezes e criem sobra lateral. */
+#root .pdv-sale-grid,
+#root .pdv-table-open-grid {
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 8px minmax(280px, var(--pdv-cart-pane-width, 34%));
+}
+
+#root .pdv-cart-area {
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+:root[data-simple-mode="true"] #root .pdv-sale-grid {
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 6px minmax(280px, var(--pdv-cart-pane-width, 34%));
 }
 
 :root[data-simple-mode="true"] .pdv-shell button {
@@ -15982,10 +16010,6 @@ body {
 
 :root[data-simple-mode="true"] .pdv-cart-area {
   border-right-width: 0;
-  margin: 5px 5px 5px 0;
-  min-width: 0;
-  min-height: 0;
-  box-sizing: border-box;
 }
 
 /* A consulta de produtos tem um único padrão visual, independente do tema
