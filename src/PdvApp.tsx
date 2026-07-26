@@ -2786,6 +2786,16 @@ function SubtableManagerModal({
         <div className="pdv-subtable-create">
           <input autoFocus value={newName} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") create(); }} placeholder="Nome da nova submesa" />
           <button className="pdv-primary-button" type="button" disabled={!newName.trim()} onClick={create}>Criar submesa</button>
+          <button
+            className="pdv-ghost-button"
+            type="button"
+            onClick={() => {
+              onCreate(temporarySubtableName(names));
+              setNewName("");
+            }}
+          >
+            Criar temporaria
+          </button>
         </div>
         <div className="pdv-subtable-list">
           <article className={!currentSubtable ? "active" : ""}>
@@ -4090,25 +4100,21 @@ function TransferListModal({
               value={creatingTargetSubtable ? "__new__" : targetSubtable}
               onChange={(event) => {
                 const value = event.target.value;
+                if (value === "__temporary__") {
+                  setTargetSubtable(temporarySubtableName(existingSubtables));
+                  setCreatingTargetSubtable(true);
+                  return;
+                }
                 setCreatingTargetSubtable(value === "__new__");
                 setTargetSubtable(value === "__new__" ? "" : value);
               }}
             >
               <option value="">Mesa principal</option>
               {existingSubtables.map((name) => <option key={name} value={name}>{name}</option>)}
+              <option value="__temporary__">Criar submesa temporaria</option>
               <option value="__new__">Criar nova submesa...</option>
             </select>
             {creatingTargetSubtable && <input autoFocus value={targetSubtable} onChange={(event) => setTargetSubtable(event.target.value)} placeholder="Nome da nova submesa" />}
-            <button
-              className="pdv-ghost-button pdv-temporary-subtable-button"
-              type="button"
-              onClick={() => {
-                setTargetSubtable(temporarySubtableName(existingSubtables));
-                setCreatingTargetSubtable(true);
-              }}
-            >
-              + Submesa temporaria
-            </button>
           </label>
           <Metric title="Selecionado" value={money(selectedTotal)} />
         </div>
