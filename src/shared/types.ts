@@ -187,6 +187,7 @@ export interface AppSettings {
   accentColor: string;
   fieldSize: "small" | "medium" | "large";
   density: DensityMode;
+  simpleMode: boolean;
   layout: LayoutMode;
   operationMode: OperationMode;
   profiles: Record<string, Partial<AppSettings>>;

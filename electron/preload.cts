@@ -85,6 +85,9 @@ contextBridge.exposeInMainWorld("caixa", {
   setPinned: (pinned: boolean, options?: { opacity?: number; borderless?: boolean; lockPosition?: boolean }) =>
     ipcRenderer.invoke("window:setPinned", pinned, options),
   getPinned: () => ipcRenderer.invoke("window:getPinned"),
+  minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
+  toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggleMaximize"),
+  closeWindow: () => ipcRenderer.invoke("window:close"),
   onEntriesChanged: (callback: () => void) => {
     const handler = () => callback();
     ipcRenderer.on("entries:changed", handler);

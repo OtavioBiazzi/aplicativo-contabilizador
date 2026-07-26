@@ -93,6 +93,9 @@ export interface CaixaApi {
   ) => Promise<{ ok: boolean; message: string }>;
   setPinned: (pinned: boolean, options?: { opacity?: number; borderless?: boolean; lockPosition?: boolean }) => Promise<boolean>;
   getPinned: () => Promise<boolean>;
+  minimizeWindow: () => Promise<void>;
+  toggleMaximizeWindow: () => Promise<boolean>;
+  closeWindow: () => Promise<void>;
   onEntriesChanged: (callback: () => void) => () => void;
   onServerChanged: (callback: (state: ServerState) => void) => () => void;
   onRemoteReceiptPrintResult: (callback: (result: { jobId: string; ok: boolean; message: string; deviceName: string }) => void) => () => void;

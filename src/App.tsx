@@ -23,6 +23,7 @@ import {
   LayoutPanelTop,
   ListFilter,
   MinusCircle,
+  Minus,
   MonitorUp,
   Palette,
   Pin,
@@ -37,6 +38,7 @@ import {
   Server,
   Settings,
   ShieldCheck,
+  Square,
   Trash2,
   Undo2,
   Upload,
@@ -1474,6 +1476,7 @@ export function App() {
       document.documentElement.dataset.themePreference = settings.theme;
       document.documentElement.dataset.floatingTheme = resolvedFloatingTheme;
       document.documentElement.dataset.density = settings.density;
+      document.documentElement.dataset.simpleMode = settings.simpleMode ? "true" : "false";
       document.documentElement.dataset.fieldSize = settings.fieldSize;
       document.documentElement.dataset.floatingBorderless = settings.floating.borderless ? "true" : "false";
       document.documentElement.dataset.floatingCornerStyle = settings.floating.cornerStyle || "rounded";
@@ -1811,13 +1814,12 @@ export function App() {
   useEffect(() => {
     if (!remoteSession) return;
     const interval = window.setInterval(() => {
-      if (remoteSocket.current?.readyState === WebSocket.OPEN) return;
       const current = remoteSessionRef.current;
       if (!current) return;
       void refreshRemote(current).catch((error) => {
         setRemoteMessage(error instanceof Error ? error.message : "Sincronizacao em tempo real temporariamente indisponivel.");
       });
-    }, 5000);
+    }, 10000);
     return () => window.clearInterval(interval);
   }, [remoteSession?.baseUrl, remoteSession?.password]);
 
@@ -2203,6 +2205,12 @@ export function App() {
     ? settingsForRemoteClient(settings, remoteSession.clientPolicy, remoteSession.permissions.allowClientCustomization)
     : settings;
   const displayEntries = remoteSession ? remoteSession.entries : entries;
+  const historyEntries = settings.privacy.hideHeaderTotal
+    ? []
+    : remoteSession ? displayEntries : combinedEntries;
+  const historyPdvSales = settings.privacy.hideHeaderTotal
+    ? []
+    : remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || [];
   const displayTodayEntries = remoteSession ? filterEntriesByLocalDate(remoteSession.entries, currentDateKey) : todayEntries;
   const canViewRemoteTotals = !remoteSession || remoteSession.permissions.viewTotals;
   const canViewRemoteEntryValues = !remoteSession || remoteSession.permissions.viewEntryValues;
@@ -2263,6 +2271,17 @@ export function App() {
 
   return (
     <div className={`app-shell ${pdvMainTab ? "pdv-main-mode" : ""} ${settings.hideHeaderBrand ? "header-brand-hidden" : ""}`}>
+      <div className="window-titlebar" onDoubleClick={() => void window.caixa.toggleMaximizeWindow()}>
+        <div className="window-titlebar-label">
+          <img src={CDA_ICON_SRC} alt="" draggable={false} />
+          <span>Caixa PDV</span>
+        </div>
+        <div className="window-titlebar-actions">
+          <button type="button" title="Minimizar" aria-label="Minimizar" onClick={(event) => { event.stopPropagation(); void window.caixa.minimizeWindow(); }}><Minus size={14} /></button>
+          <button type="button" title="Maximizar ou restaurar" aria-label="Maximizar ou restaurar" onClick={(event) => { event.stopPropagation(); void window.caixa.toggleMaximizeWindow(); }}><Square size={11} /></button>
+          <button className="close" type="button" title="Fechar" aria-label="Fechar" onClick={(event) => { event.stopPropagation(); void window.caixa.closeWindow(); }}><X size={15} /></button>
+        </div>
+      </div>
       <aside className="sidebar app-topbar">
         {!settings.hideHeaderBrand && (
           <div className="brand-block">
@@ -2491,14 +2510,14 @@ export function App() {
 
         {activeTab === "history" && !pdvMainTab && (
           <HistoryPanel
-            entries={remoteSession ? displayEntries : combinedEntries}
+            entries={historyEntries}
             settings={settings}
             focusDate={historyFocus}
             onChange={async () => {
               await reload();
             }}
             onToast={showToast}
-            pdvSales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []}
+            pdvSales={historyPdvSales}
             pdvCustomers={remoteSession ? remotePdvCustomers : pdvSnapshot?.customers || []}
             pdvReceivables={remoteSession ? remotePdvReceivables : pdvSnapshot?.receivables || []}
             pdvSettings={remoteSession ? remotePdvSnapshot?.settings : pdvSnapshot?.settings}
@@ -2618,7 +2637,7 @@ export function App() {
         )}
 
         {activeTab === "reports" && (
-            <ProfessionalReportsPanel entries={remoteSession ? displayEntries : combinedEntries} pdvSales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []} receivables={remoteSession ? remotePdvReceivables : pdvSnapshot?.receivables || []} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
+            <ProfessionalReportsPanel entries={historyEntries} pdvSales={historyPdvSales} receivables={remoteSession ? remotePdvReceivables : pdvSnapshot?.receivables || []} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
               if (remoteSession) {
                 showToast("info", "A pasta de Excel deve ser aberta no computador servidor.");
                 return;
@@ -2747,8 +2766,8 @@ function PayablesPanel({
   const monthEndDate = new Date(`${monthStart}T12:00:00`);
   monthEndDate.setMonth(monthEndDate.getMonth() + 1, 0);
   const monthEnd = getLocalDateKey(monthEndDate);
-  const [from, setFrom] = useState(monthStart);
-  const [to, setTo] = useState(monthEnd);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Pagas" | "Canceladas">("Todos");
   const [editing, setEditing] = useState<PdvPayable | "new" | null>(null);
@@ -2764,7 +2783,8 @@ function PayablesPanel({
       payable.description,
       payable.supplier,
       payable.category,
-      payable.documentNumber
+      payable.documentNumber,
+      payable.note
     ].some((value) => value.toLocaleLowerCase("pt-BR").includes(normalizedQuery));
     const statusMatch = status === "Todos"
       || (status === "Em aberto" && ["Em aberto", "Parcialmente paga"].includes(payable.status))
@@ -2808,7 +2828,7 @@ function PayablesPanel({
         <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
         <label><span>Situacao</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>{["Todos", "Em aberto", "Vencidas", "Pagas", "Canceladas"].map((value) => <option key={value}>{value}</option>)}</select></label>
-        <button onClick={() => { setFrom(monthStart); setTo(monthEnd); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Mes atual</button>
+        <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Exibir tudo</button>
       </div>
 
       <div className="payables-content">
@@ -6992,6 +7012,10 @@ function SettingsPanel({
               <option value={5000}>Demorado (5 s)</option>
               <option value={8000}>Lento (8 s)</option>
             </select>
+          </label>
+          <label className="switch-line">
+            <input type="checkbox" checked={Boolean(draft.simpleMode)} onChange={(event) => update("simpleMode", event.target.checked)} />
+            Modo Simples: interface mais quadrada, compacta e sem animacoes de rolagem
           </label>
           <label className="switch-line">
             <input type="checkbox" checked={draft.hideHeaderBrand} onChange={(event) => update("hideHeaderBrand", event.target.checked)} />

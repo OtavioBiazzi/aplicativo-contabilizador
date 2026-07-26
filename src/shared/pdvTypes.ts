@@ -274,6 +274,7 @@ export interface PdvSettings {
   productFontSize?: number;
   categoryCardHeight?: number;
   tableCardHeight?: number;
+  productLookupPageSize?: number;
   stackIdenticalItems?: boolean;
   partialPaymentDescriptionEnabled?: boolean;
   skipPaymentConfirmation?: boolean;

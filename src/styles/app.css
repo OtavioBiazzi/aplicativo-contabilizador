@@ -15296,3 +15296,400 @@ body {
 .pdv-table-filter-tools > button {
   flex: 0 0 auto;
 }
+
+/* Janela integrada: substitui a faixa nativa do Windows por 28px úteis e
+   mantém os controles previsíveis, inclusive em telas pequenas. */
+#root .app-shell {
+  grid-template-rows: 28px 68px minmax(0, 1fr);
+}
+
+.window-titlebar {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 28px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  background: color-mix(in srgb, var(--panel) 94%, var(--accent) 6%);
+  color: var(--muted);
+  user-select: none;
+}
+
+.window-titlebar-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding-left: 9px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.window-titlebar-label img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.window-titlebar-actions {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-self: stretch;
+}
+
+.window-titlebar-actions button {
+  display: grid;
+  width: 42px;
+  height: 100%;
+  place-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.window-titlebar-actions button:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+
+.window-titlebar-actions button.close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+
+#root .app-shell > .sidebar,
+#root .app-shell.pdv-main-mode > .sidebar {
+  height: 68px;
+  min-height: 68px;
+  max-height: 68px;
+  padding: 5px 12px;
+  gap: 9px;
+}
+
+#root .app-shell > .sidebar .topbar-card {
+  width: 166px;
+  min-width: 166px;
+  height: 56px;
+  min-height: 56px;
+  max-height: 56px;
+  grid-template-rows: 12px 21px 12px;
+  padding: 5px 9px;
+}
+
+#root .app-shell > .sidebar .topbar-card strong,
+#root .app-shell > .sidebar .topbar-card .private-value {
+  font-size: 1.12rem;
+  line-height: 21px;
+}
+
+#root .app-shell > .sidebar .brand-mark {
+  width: 36px;
+  height: 36px;
+}
+
+#root .app-shell > .sidebar .brand-block {
+  gap: 8px;
+}
+
+#root .app-shell > .sidebar .brand-block span {
+  font-size: 0.72rem;
+}
+
+#root .app-shell > .sidebar .tabs button {
+  min-width: 96px;
+  min-height: 42px;
+  padding: 8px 9px;
+}
+
+/* A mesa com submesas vazias continua usando sua cor representativa. */
+.pdv-table-card.has-subtables.empty-subtables {
+  border-color: color-mix(in srgb, #7650a7 68%, #ffffff);
+  background: linear-gradient(90deg, #c83525, #7650a7);
+  color: #fff;
+}
+
+.pdv-temporary-subtable-button {
+  width: 100%;
+  min-height: 32px !important;
+  padding: 4px 8px !important;
+  font-size: 0.76rem !important;
+}
+
+.pdv-cart-head {
+  gap: 8px;
+}
+
+.pdv-cart-title {
+  display: grid;
+  gap: 1px;
+  margin-right: auto;
+}
+
+.pdv-cart-title h2 {
+  margin: 0;
+}
+
+.pdv-cart-title span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.pdv-cart-product-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 38px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 5px;
+  padding: 7px 13px;
+  background: color-mix(in srgb, var(--panel) 84%, var(--accent) 16%);
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.pdv-product-lookup-modal {
+  width: min(1120px, 95vw);
+  height: min(760px, 92vh);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  font-size: 0.9rem;
+}
+
+.pdv-product-lookup-modal .pdv-section-head h1 {
+  font-size: 1.3rem;
+}
+
+.pdv-product-lookup-modal .pdv-section-head p {
+  font-size: 0.88rem;
+}
+
+.pdv-product-lookup-search {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--ui-border, var(--line));
+  border-radius: 5px;
+  padding: 5px 9px;
+  background: var(--panel-2);
+}
+
+.pdv-product-lookup-search input {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  outline: 0;
+}
+
+.pdv-product-lookup-search span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.pdv-product-lookup-table {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.pdv-product-lookup-head,
+.pdv-product-lookup-table > button {
+  display: grid;
+  grid-template-columns: 34px 90px 130px minmax(190px, 1.8fr) minmax(120px, 1fr) 80px 60px 100px;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.pdv-product-lookup-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--accent) 78%, #07345a);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.pdv-product-lookup-table > button {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.86rem;
+}
+
+.pdv-product-lookup-table > button:nth-child(odd) {
+  background: color-mix(in srgb, var(--panel-2) 70%, var(--panel));
+}
+
+.pdv-product-lookup-table > button:hover,
+.pdv-product-lookup-table > button.selected {
+  background: color-mix(in srgb, var(--pdv-action) 74%, var(--panel));
+  color: #fff;
+}
+
+.pdv-product-lookup-table > button.active {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 72%, #fff);
+}
+
+.pdv-product-lookup-check {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, var(--text));
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--accent-strong);
+  font-size: 0.9rem;
+  font-weight: 950;
+}
+
+.pdv-product-lookup-table > button.selected .pdv-product-lookup-check {
+  border-color: #fff;
+  background: #fff;
+}
+
+.pdv-product-lookup-table > button > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdv-product-lookup-footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.pdv-product-lookup-footer > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pdv-product-lookup-footer small {
+  color: var(--muted);
+}
+
+.pdv-product-lookup-actions {
+  justify-content: flex-end;
+}
+
+/* Modo Simples: densidade operacional alta, cantos discretos e nenhuma
+   interpolacao de rolagem. Modais preservam a hierarquia visual. */
+:root[data-simple-mode="true"] {
+  scroll-behavior: auto;
+  --radius: 2px;
+  --density-gap: 6px;
+}
+
+:root[data-simple-mode="true"] * {
+  scroll-behavior: auto !important;
+}
+
+:root[data-simple-mode="true"] :is(.pdv-table-card, .pdv-product-grid button, .pdv-category-grid button, .pdv-panel, .pdv-cart-list article, .pdv-section-head, .pdv-filter-row button) {
+  border-radius: 1px !important;
+  transition: none !important;
+  animation: none !important;
+}
+
+:root[data-simple-mode="true"] :is(.pdv-table-card, .pdv-product-grid button, .pdv-category-grid button, .pdv-cart-list article):hover {
+  transform: none !important;
+}
+
+:root[data-simple-mode="true"] .app-shell.pdv-main-mode .workspace,
+:root[data-simple-mode="true"] .pdv-workspace,
+:root[data-simple-mode="true"] .pdv-panel {
+  padding: 3px !important;
+  gap: 3px !important;
+}
+
+:root[data-simple-mode="true"] .pdv-section-head {
+  min-height: 42px;
+  padding: 5px 7px;
+}
+
+:root[data-simple-mode="true"] .pdv-section-head :is(.pdv-eyebrow, p) {
+  display: none;
+}
+
+:root[data-simple-mode="true"] .pdv-section-head h1 {
+  font-size: 1rem;
+}
+
+:root[data-simple-mode="true"] .pdv-filter-row {
+  gap: 3px;
+}
+
+:root[data-simple-mode="true"] .pdv-filter-row button {
+  min-height: 30px;
+  padding-inline: 9px;
+}
+
+:root[data-simple-mode="true"] .pdv-table-grid {
+  gap: 3px;
+}
+
+:root[data-simple-mode="true"] .pdv-operational-head {
+  min-height: 44px;
+  gap: 4px;
+  padding: 3px;
+}
+
+:root[data-simple-mode="true"] .pdv-sale-identity {
+  display: none;
+}
+
+:root[data-simple-mode="true"] .pdv-category-grid {
+  gap: 3px;
+}
+
+:root[data-simple-mode="true"] .pdv-product-grid {
+  gap: 3px;
+}
+
+:root[data-theme="datacaixa"] {
+  --bg: #cfe8f6;
+  --panel-2: #d2eaf7;
+  --line: #72afd4;
+  --pdv-bg: linear-gradient(180deg, #c6e7f8 0, #d9effa 48px, #87c9e9 49px, #cceaf8 100%);
+  --pdv-panel: #84b9d5;
+}
+
+:root[data-theme="datacaixa"] .pdv-tables-screen,
+:root[data-theme="light"] .pdv-tables-screen {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34), transparent 150px),
+    #b9def2;
+  border-color: #69afd5;
+}
+
+:root[data-theme="datacaixa"] .pdv-tables-screen > .pdv-section-head,
+:root[data-theme="light"] .pdv-tables-screen > .pdv-section-head {
+  background: #d3ecf8;
+}
+
+@media (max-width: 860px) {
+  .pdv-product-lookup-head,
+  .pdv-product-lookup-table > button {
+    grid-template-columns: 34px 72px minmax(160px, 1.6fr) minmax(100px, 1fr) 70px 86px;
+  }
+
+  .pdv-product-lookup-head > :nth-child(3),
+  .pdv-product-lookup-table > button > :nth-child(3),
+  .pdv-product-lookup-head > :nth-child(7),
+  .pdv-product-lookup-table > button > :nth-child(7) {
+    display: none;
+  }
+}

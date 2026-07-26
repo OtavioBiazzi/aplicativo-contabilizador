@@ -91,6 +91,7 @@ async function createWindow() {
     minWidth: 420,
     minHeight: 360,
     show: false,
+    frame: false,
     backgroundColor: "#0f1311",
     title: "Contabilizador Caixa",
     webPreferences: {
@@ -1567,6 +1568,14 @@ function registerIpc() {
   });
 
   ipcMain.handle("window:getPinned", async () => Boolean(floatingWindow && !floatingWindow.isDestroyed()));
+  ipcMain.handle("window:minimize", () => mainWindow?.minimize());
+  ipcMain.handle("window:toggleMaximize", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+    return mainWindow.isMaximized();
+  });
+  ipcMain.handle("window:close", () => mainWindow?.close());
 }
 
 function normalizeVersion(version: string) {

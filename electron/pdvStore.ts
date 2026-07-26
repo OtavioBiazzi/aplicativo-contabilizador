@@ -46,6 +46,7 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   productFontSize: 14,
   categoryCardHeight: 64,
   tableCardHeight: 96,
+  productLookupPageSize: 30,
   stackIdenticalItems: false,
   partialPaymentDescriptionEnabled: false,
   skipPaymentConfirmation: false,
@@ -1121,6 +1122,7 @@ export class PdvStore {
     }
     const tables = this.getTables();
     const targetTable = tables.find((table) => table.number === targetTableNumber);
+    const sourceTable = tables.find((table) => table.number === sourceTableNumber);
     const sourceItems = this.getTableItems(sourceTableNumber);
     const targetItems = targetTableNumber === sourceTableNumber ? sourceItems : this.getTableItems(targetTableNumber);
     const selectedById = new Map(selections.map((selection) => [selection.itemId, selection]));
@@ -1171,6 +1173,18 @@ export class PdvStore {
     const nextTargetItems = targetTableNumber === sourceTableNumber
       ? [...remainingItems, ...movedItems]
       : [...targetItems, ...movedItems];
+    const touchedSourceSubtables = new Set(
+      selections
+        .map((selection) => sourceItems.find((item) => item.id === selection.itemId)?.subtableName || "")
+        .filter(Boolean)
+    );
+    const nextSourceSubtables = normalizeSubtableNames([
+      ...(sourceTable?.subtables || []).filter((name) =>
+        !touchedSourceSubtables.has(name)
+        || remainingItems.some((item) => (item.subtableName || "") === name)
+      ),
+      ...remainingItems.map((item) => item.subtableName || "")
+    ]);
     validateCartItems(nextTargetItems);
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
@@ -1193,7 +1207,13 @@ export class PdvStore {
         ]);
         db.run("UPDATE table_sessions SET subtables_json = ? WHERE table_number = ?", [JSON.stringify(targetSubtables), targetTableNumber]);
       }
-      if (!remainingItems.length && sourceTableNumber !== targetTableNumber) {
+      if (sourceTableNumber !== targetTableNumber && (remainingItems.length || nextSourceSubtables.length)) {
+        db.run(
+          "UPDATE table_sessions SET subtables_json = ?, status = 'Ocupada' WHERE table_number = ?",
+          [JSON.stringify(nextSourceSubtables), sourceTableNumber]
+        );
+      }
+      if (!remainingItems.length && !nextSourceSubtables.length && sourceTableNumber !== targetTableNumber) {
         db.run("DELETE FROM table_sessions WHERE table_number = ? AND status != 'Reservada'", [sourceTableNumber]);
       }
       db.run("COMMIT");
@@ -1202,7 +1222,10 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
-    return remainingItems;
+    // Dentro da mesma mesa a origem e o destino sao o mesmo documento. Retornar
+    // apenas "remainingItems" fazia o cliente salvar um snapshot parcial e apagar
+    // justamente os itens acabados de mover para a submesa destino.
+    return sourceTableNumber === targetTableNumber ? nextTargetItems : remainingItems;
   }
 
   async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string): Promise<PdvSale> {
@@ -1885,6 +1908,7 @@ export class PdvStore {
       productFontSize: Math.max(10, Math.min(20, parseIntegerSetting(map.get("product_font_size"), DEFAULT_PDV_SETTINGS.productFontSize || 14))),
       categoryCardHeight: Math.max(44, Math.min(90, parseIntegerSetting(map.get("category_card_height"), DEFAULT_PDV_SETTINGS.categoryCardHeight || 64))),
       tableCardHeight: Math.max(74, Math.min(130, parseIntegerSetting(map.get("table_card_height"), DEFAULT_PDV_SETTINGS.tableCardHeight || 96))),
+      productLookupPageSize: Math.max(10, Math.min(100, parseIntegerSetting(map.get("product_lookup_page_size"), DEFAULT_PDV_SETTINGS.productLookupPageSize || 30))),
       stackIdenticalItems: parseBooleanSetting(map.get("stack_identical_items"), DEFAULT_PDV_SETTINGS.stackIdenticalItems || false),
       partialPaymentDescriptionEnabled: parseBooleanSetting(map.get("partial_payment_description_enabled"), DEFAULT_PDV_SETTINGS.partialPaymentDescriptionEnabled || false),
       skipPaymentConfirmation: parseBooleanSetting(map.get("skip_payment_confirmation"), DEFAULT_PDV_SETTINGS.skipPaymentConfirmation || false),

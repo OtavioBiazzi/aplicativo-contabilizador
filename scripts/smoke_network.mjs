@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { WebSocket } from "ws";
 import { PdvStore } from "../dist-electron/electron/pdvStore.js";
@@ -7,6 +7,7 @@ import { pdvSalesToLedgerEntries } from "../dist-electron/src/shared/pdvLedger.j
 import { createDefaultSettings } from "../dist-electron/src/shared/defaults.js";
 
 const root = process.cwd();
+const appVersion = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
 const tmp = path.join(root, ".tmp-network-smoke");
 const dataDir = path.join(tmp, "data");
 rmSync(tmp, { recursive: true, force: true });
@@ -34,7 +35,7 @@ let resolveNextServerStateChange = null;
 
 const integratedEntries = async () => pdvSalesToLedgerEntries((await pdvStore.getSnapshot()).recentSales);
 const server = new LocalServer({
-  appVersion: "0.3.41",
+  appVersion,
   permissions: settings.server.permissions,
   getSettings: async () => settings,
   saveSettings: async (next) => {
@@ -88,7 +89,7 @@ const server = new LocalServer({
 await server.start(43991, "smoke-password");
 const versionResponse = await fetch("http://127.0.0.1:43991/api/version");
 const versionPayload = await versionResponse.json();
-if (!versionResponse.ok || versionPayload.appVersion !== "0.3.41") {
+if (!versionResponse.ok || versionPayload.appVersion !== appVersion) {
   throw new Error("Servidor nao publicou a versao do protocolo remoto.");
 }
 const incompatibleResponse = await fetch("http://127.0.0.1:43991/api/entries", {
@@ -97,7 +98,7 @@ const incompatibleResponse = await fetch("http://127.0.0.1:43991/api/entries", {
 if (incompatibleResponse.status !== 426 || (await incompatibleResponse.json()).code !== "VERSION_MISMATCH") {
   throw new Error("Servidor aceitou cliente com versao diferente.");
 }
-const printClientSocket = new WebSocket("ws://127.0.0.1:43991/sync?password=smoke-password&device=Impressora%20smoke&version=0.3.41");
+const printClientSocket = new WebSocket(`ws://127.0.0.1:43991/sync?password=smoke-password&device=Impressora%20smoke&version=${encodeURIComponent(appVersion)}`);
 const printClientConnected = new Promise((resolve) => printClientSocket.once("message", resolve));
 await new Promise((resolve, reject) => {
   printClientSocket.once("open", resolve);
@@ -108,7 +109,7 @@ const printClient = server.getState().devices.find((device) => device.name === "
 if (!printClient || serverStateChanges < 1) {
   throw new Error("Servidor nao identificou o cliente imediatamente ao conectar.");
 }
-const headers = { "content-type": "application/json", "x-caixa-password": "smoke-password", "x-device-name": "Cliente smoke", "x-caixa-version": "0.3.41" };
+const headers = { "content-type": "application/json", "x-caixa-password": "smoke-password", "x-device-name": "Cliente smoke", "x-caixa-version": appVersion };
 const readEntries = () => fetch("http://127.0.0.1:43991/api/entries", { headers });
 const initial = await (await readEntries()).json();
 if (initial.clientPolicy.operationMode !== "pdv") {
@@ -387,6 +388,58 @@ if (
   throw new Error("Transferencia remota nao permaneceu consistente no snapshot completo.");
 }
 
+// Regressao: ao mover entre submesas da mesma mesa, o endpoint retornava apenas
+// o restante da origem. O autosave do cliente gravava esse retorno parcial e
+// substituia os itens que ja existiam no destino.
+const localDestinationItem = { ...item, id: crypto.randomUUID(), productName: "Ja estava no destino", subtableName: "Destino local" };
+const sameTableSeed = await fetch("http://127.0.0.1:43991/api/pdv/tables/21/items", {
+  method: "PUT",
+  headers,
+  body: JSON.stringify({ items: [networkSource.items[0], localDestinationItem], subtables: ["Origem", "Destino local"] })
+});
+if (!sameTableSeed.ok) throw new Error(`Nao foi possivel preparar transferencia interna: ${await sameTableSeed.text()}`);
+const sameTableTransfer = await fetch("http://127.0.0.1:43991/api/pdv/tables/21/transfer", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({
+    targetTableNumber: 21,
+    selections: [{ itemId: networkSource.items[0].id, quantity: 1, subtableName: "Destino local" }]
+  })
+});
+if (!sameTableTransfer.ok) throw new Error(`Transferencia entre submesas falhou: ${await sameTableTransfer.text()}`);
+const sameTableBody = await sameTableTransfer.json();
+const sameTableSnapshot = await (await fetch("http://127.0.0.1:43991/api/pdv/snapshot", { headers })).json();
+const sameTable = sameTableSnapshot.tables.find((table) => table.number === 21);
+if (
+  sameTableBody.items.length !== 3
+  || sameTable?.items.length !== 3
+  || !sameTable.items.some((row) => row.id === localDestinationItem.id)
+  || sameTable.items.filter((row) => row.subtableName === "Destino local").length !== 2
+) {
+  throw new Error(`Transferencia interna substituiu itens existentes na submesa destino: ${JSON.stringify({ returned: sameTableBody.items, persisted: sameTable?.items })}`);
+}
+
+const subtableToMain = await fetch("http://127.0.0.1:43991/api/pdv/tables/21/transfer", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({
+    targetTableNumber: 21,
+    selections: [{ itemId: networkSource.items[0].id, quantity: 1 }]
+  })
+});
+if (!subtableToMain.ok) throw new Error(`Transferencia da submesa para a mesa principal falhou: ${await subtableToMain.text()}`);
+const subtableToMainBody = await subtableToMain.json();
+const subtableToMainSnapshot = await (await fetch("http://127.0.0.1:43991/api/pdv/snapshot", { headers })).json();
+const tableWithMainTransfer = subtableToMainSnapshot.tables.find((table) => table.number === 21);
+if (
+  subtableToMainBody.items.length !== 3
+  || tableWithMainTransfer?.items.length !== 3
+  || tableWithMainTransfer.items.filter((row) => !row.subtableName).length !== 1
+  || tableWithMainTransfer.items.some((row) => row.id === networkSource.items[0].id && row.subtableName === "Origem")
+) {
+  throw new Error("Transferencia da submesa para a mesa principal nao foi persistida corretamente.");
+}
+
 const rapidFirstItem = { ...item, id: crypto.randomUUID(), productName: "Produto rapido 1" };
 const rapidSecondItem = { ...item, id: crypto.randomUUID(), productName: "Produto rapido 2" };
 for (const items of [[rapidFirstItem], [rapidFirstItem, rapidSecondItem]]) {
@@ -439,7 +492,7 @@ const reconnectSale = await pdvStore.saveSale({
 });
 
 await server.start(43991, "smoke-password");
-const reconnectSocket = new WebSocket("ws://127.0.0.1:43991/sync?password=smoke-password&device=Cliente%20reconectado&version=0.3.41");
+const reconnectSocket = new WebSocket(`ws://127.0.0.1:43991/sync?password=smoke-password&device=Cliente%20reconectado&version=${encodeURIComponent(appVersion)}`);
 const reconnectInitialMessage = new Promise((resolve) => reconnectSocket.once("message", resolve));
 await new Promise((resolve, reject) => {
   reconnectSocket.once("open", resolve);

@@ -99,6 +99,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     accentColor: "#0565b7",
     fieldSize: "medium",
     density: "normal",
+    simpleMode: false,
     layout: "complete",
     operationMode: "pdv",
     activeProfile: "Perfil PC",
