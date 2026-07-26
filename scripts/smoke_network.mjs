@@ -34,7 +34,7 @@ let resolveNextServerStateChange = null;
 
 const integratedEntries = async () => pdvSalesToLedgerEntries((await pdvStore.getSnapshot()).recentSales);
 const server = new LocalServer({
-  appVersion: "0.3.40",
+  appVersion: "0.3.41",
   permissions: settings.server.permissions,
   getSettings: async () => settings,
   saveSettings: async (next) => {
@@ -88,16 +88,16 @@ const server = new LocalServer({
 await server.start(43991, "smoke-password");
 const versionResponse = await fetch("http://127.0.0.1:43991/api/version");
 const versionPayload = await versionResponse.json();
-if (!versionResponse.ok || versionPayload.appVersion !== "0.3.40") {
+if (!versionResponse.ok || versionPayload.appVersion !== "0.3.41") {
   throw new Error("Servidor nao publicou a versao do protocolo remoto.");
 }
 const incompatibleResponse = await fetch("http://127.0.0.1:43991/api/entries", {
-  headers: { "x-caixa-password": "smoke-password", "x-caixa-version": "0.3.39" }
+  headers: { "x-caixa-password": "smoke-password", "x-caixa-version": "0.3.40" }
 });
 if (incompatibleResponse.status !== 426 || (await incompatibleResponse.json()).code !== "VERSION_MISMATCH") {
   throw new Error("Servidor aceitou cliente com versao diferente.");
 }
-const printClientSocket = new WebSocket("ws://127.0.0.1:43991/sync?password=smoke-password&device=Impressora%20smoke&version=0.3.40");
+const printClientSocket = new WebSocket("ws://127.0.0.1:43991/sync?password=smoke-password&device=Impressora%20smoke&version=0.3.41");
 const printClientConnected = new Promise((resolve) => printClientSocket.once("message", resolve));
 await new Promise((resolve, reject) => {
   printClientSocket.once("open", resolve);
@@ -108,7 +108,7 @@ const printClient = server.getState().devices.find((device) => device.name === "
 if (!printClient || serverStateChanges < 1) {
   throw new Error("Servidor nao identificou o cliente imediatamente ao conectar.");
 }
-const headers = { "content-type": "application/json", "x-caixa-password": "smoke-password", "x-device-name": "Cliente smoke", "x-caixa-version": "0.3.40" };
+const headers = { "content-type": "application/json", "x-caixa-password": "smoke-password", "x-device-name": "Cliente smoke", "x-caixa-version": "0.3.41" };
 const readEntries = () => fetch("http://127.0.0.1:43991/api/entries", { headers });
 const initial = await (await readEntries()).json();
 if (initial.clientPolicy.operationMode !== "pdv") {
@@ -439,7 +439,7 @@ const reconnectSale = await pdvStore.saveSale({
 });
 
 await server.start(43991, "smoke-password");
-const reconnectSocket = new WebSocket("ws://127.0.0.1:43991/sync?password=smoke-password&device=Cliente%20reconectado&version=0.3.40");
+const reconnectSocket = new WebSocket("ws://127.0.0.1:43991/sync?password=smoke-password&device=Cliente%20reconectado&version=0.3.41");
 const reconnectInitialMessage = new Promise((resolve) => reconnectSocket.once("message", resolve));
 await new Promise((resolve, reject) => {
   reconnectSocket.once("open", resolve);

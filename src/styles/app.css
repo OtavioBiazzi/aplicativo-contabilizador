@@ -15108,6 +15108,13 @@ body {
   height: 42px;
   min-height: 42px;
   padding: 9px 10px;
+  white-space: nowrap;
+}
+
+#root .app-shell > .sidebar .primary-tabs > .header-dashboard-tab {
+  flex-basis: 132px;
+  width: 132px;
+  min-width: 132px;
 }
 
 #root .app-shell > .sidebar .primary-tabs > .modules-menu-wrap {
@@ -15133,6 +15140,50 @@ body {
   height: 18px;
 }
 
+#root .app-shell > .sidebar .primary-tabs > .header-settings-shortcut {
+  margin-left: auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  background: color-mix(in srgb, var(--panel) 88%, var(--accent) 12%);
+}
+
+:root[data-theme="datacaixa"] #root .app-shell > .sidebar .primary-tabs > .header-settings-shortcut:not(.active) {
+  border-color: rgba(234, 247, 255, 0.42);
+  background: rgba(2, 66, 113, 0.46);
+  color: #eaf7ff;
+}
+
+#root .app-shell > .sidebar .primary-tabs.header-tabs-dense > button {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  gap: 6px;
+  padding-inline: 10px;
+}
+
+#root .app-shell > .sidebar .primary-tabs.header-tabs-dense > .header-dashboard-tab {
+  width: auto;
+  min-width: 0;
+}
+
+#root .app-shell > .sidebar .primary-tabs.header-tabs-dense > .modules-menu-wrap {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+}
+
+#root .app-shell > .sidebar .primary-tabs.header-tabs-dense > .modules-menu-wrap > .modules-trigger {
+  width: auto;
+  min-width: 0;
+  gap: 6px;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+#root .app-shell > .sidebar .primary-tabs.header-tabs-dense > button > svg,
+#root .app-shell > .sidebar .primary-tabs.header-tabs-dense > .modules-menu-wrap > .modules-trigger > svg:first-child {
+  display: none;
+}
+
 /* Busca de mesas: o nome de uma submesa mantém visível sua mesa principal. */
 .pdv-table-filter-tools {
   display: flex;
@@ -15146,6 +15197,7 @@ body {
 }
 
 .pdv-table-search {
+  box-sizing: border-box;
   display: flex;
   min-width: 232px;
   flex: 0 0 232px;
@@ -15155,6 +15207,7 @@ body {
   border: 1px solid var(--ui-border);
   border-radius: 6px;
   padding: 0 8px;
+  overflow: hidden;
   background: var(--panel);
   color: var(--muted);
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
@@ -15166,15 +15219,24 @@ body {
   color: var(--accent);
 }
 
-.pdv-table-search input {
+#root .pdv-table-search > input,
+#root .pdv-table-search > input:hover,
+#root .pdv-table-search > input:focus,
+#root .pdv-table-search > input:focus-visible {
+  box-sizing: border-box;
+  flex: 1 1 auto;
   min-width: 0;
-  width: 182px;
+  width: auto;
   height: 100%;
-  border: 0;
-  outline: 0;
-  padding: 0;
-  background: transparent;
-  color: var(--text);
+  min-height: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  background: transparent !important;
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text) !important;
   font: inherit;
   font-size: 0.82rem;
 }

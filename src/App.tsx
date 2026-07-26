@@ -190,18 +190,19 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
   { key: "clients", label: "Financeiro", icon: Wallet },
   { key: "reports", label: "Relatorios", icon: BarChart3 },
   { key: "server", label: "Rede", icon: Server },
-  { key: "settings", label: "Ajuste", icon: Settings }
+  { key: "settings", label: "Ajustes", icon: Settings }
 ];
 
 const DEFAULT_HEADER_PINNED_MODULES: TabKey[] = ["sale", "tables", "history"];
 const HEADER_PINNABLE_MODULES: TabKey[] = ["sale", "tables", "history", "dashboard", "clients", "reports", "server", "settings"];
-const MAX_HEADER_PINNED_MODULES = 5;
 
 function normalizeHeaderPinnedModules(value?: string[]): TabKey[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_HEADER_PINNED_MODULES;
+  }
   const valid = new Set<TabKey>(HEADER_PINNABLE_MODULES);
   const migrated = (value || []).map((key) => key === "payables" ? "clients" : key);
-  const normalized = [...new Set(migrated.filter((key): key is TabKey => valid.has(key as TabKey)))].slice(0, MAX_HEADER_PINNED_MODULES);
-  return normalized.length ? normalized : DEFAULT_HEADER_PINNED_MODULES;
+  return [...new Set(migrated.filter((key): key is TabKey => valid.has(key as TabKey)))];
 }
 const MODULE_GROUPS: Array<{
   label: string;
@@ -213,6 +214,14 @@ const MODULE_GROUPS: Array<{
     comingSoon?: boolean;
   }>;
 }> = [
+  {
+    label: "Operacao",
+    items: [
+      { key: "sale", label: "Venda", description: "Venda direta e lancamento rapido de produtos", icon: Send },
+      { key: "tables", label: "Mesas", description: "Mapa de mesas, submesas e comandas", icon: LayoutPanelTop },
+      { key: "history", label: "Historico", description: "Vendas, pagamentos e recibos anteriores", icon: History }
+    ]
+  },
   {
     label: "Financeiro",
     items: [
@@ -2231,8 +2240,21 @@ export function App() {
     return true;
   });
   const headerPinnedModules = normalizeHeaderPinnedModules(settings.headerPinnedModules);
-  const primaryTabItems = visibleTabItems.filter((item) => headerPinnedModules.includes(item.key));
-  const secondaryTabActive = !headerPinnedModules.includes(activeTab);
+  const primaryTabItems = visibleTabItems.filter((item) => item.key !== "settings" && headerPinnedModules.includes(item.key));
+  const settingsPinnedItem = visibleTabItems.find((item) => item.key === "settings" && headerPinnedModules.includes(item.key));
+  const availableModuleGroups = MODULE_GROUPS
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => (
+        visibleTabItems.some((visibleItem) => visibleItem.key === item.key)
+        && !headerPinnedModules.includes(item.key)
+      ))
+    }))
+    .filter((group) => group.items.length > 0);
+  const availableModuleKeys = new Set(availableModuleGroups.flatMap((group) => group.items.map((item) => item.key)));
+  const hasAvailableModules = availableModuleGroups.length > 0;
+  const secondaryTabActive = availableModuleKeys.has(activeTab);
+  const headerControlCount = primaryTabItems.length + (hasAvailableModules ? 1 : 0) + (settingsPinnedItem ? 1 : 0);
   const pdvMainTab = activeTab === "tables"
     ? (legacyMode ? null : "tables")
     : activeTab === "sale" && !legacyMode
@@ -2254,13 +2276,13 @@ export function App() {
           </div>
         )}
 
-        <nav className="tabs primary-tabs" aria-label="Navegacao principal">
+        <nav className={`tabs primary-tabs ${headerControlCount > 6 ? "header-tabs-dense" : ""}`} aria-label="Navegacao principal">
           {primaryTabItems.map((item) => {
             const Icon = item.icon;
             return (
               <button
                 key={item.key}
-                className={activeTab === item.key ? "active" : ""}
+                className={`${activeTab === item.key ? "active" : ""} ${item.key === "dashboard" ? "header-dashboard-tab" : ""}`.trim()}
                 onClick={() => requestNavigation(item.key)}
               >
                 <Icon size={18} />
@@ -2268,66 +2290,78 @@ export function App() {
               </button>
             );
           })}
-          <div className="modules-menu-wrap" ref={modulesMenuRef}>
+          {hasAvailableModules && (
+            <div className="modules-menu-wrap" ref={modulesMenuRef}>
+              <button
+                type="button"
+                className={`modules-trigger ${secondaryTabActive ? "active" : ""}`}
+                aria-haspopup="menu"
+                aria-expanded={modulesMenuOpen}
+                onClick={() => {
+                  setModulesMenuOpen((open) => !open);
+                  setTotalMenuOpen(false);
+                }}
+              >
+                <LayoutGrid size={18} />
+                Modulos
+                <ChevronDown className={modulesMenuOpen ? "open" : ""} size={15} />
+              </button>
+              {modulesMenuOpen && (
+                <div className="modules-popover" role="menu" aria-label="Modulos do sistema">
+                  <div className="modules-popover-head">
+                    <div>
+                      <strong>Modulos do sistema</strong>
+                      <span>Somente os atalhos que nao estao fixados no cabecalho.</span>
+                    </div>
+                    <button type="button" className="modules-close" aria-label="Fechar modulos" onClick={() => setModulesMenuOpen(false)}>
+                      <X size={17} />
+                    </button>
+                  </div>
+                  <div className="modules-groups">
+                    {availableModuleGroups.map((group) => (
+                      <section key={group.label} className="modules-group">
+                        <span className="modules-group-label">{group.label}</span>
+                        {group.items.map((item) => {
+                          const Icon = item.icon;
+                          const isActive = activeTab === item.key;
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              role="menuitem"
+                              className={isActive ? "active" : ""}
+                              disabled={item.comingSoon}
+                              onClick={() => {
+                                requestNavigation(item.key);
+                                setModulesMenuOpen(false);
+                              }}
+                            >
+                              <Icon size={19} />
+                              <span>
+                                <strong>{item.label}</strong>
+                                <small>{item.description}</small>
+                              </span>
+                              {item.comingSoon && <b>Em breve</b>}
+                            </button>
+                          );
+                        })}
+                      </section>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {settingsPinnedItem && (
             <button
               type="button"
-              className={`modules-trigger ${secondaryTabActive ? "active" : ""}`}
-              aria-haspopup="menu"
-              aria-expanded={modulesMenuOpen}
-              onClick={() => {
-                setModulesMenuOpen((open) => !open);
-                setTotalMenuOpen(false);
-              }}
+              className={`header-settings-shortcut ${activeTab === "settings" ? "active" : ""}`}
+              onClick={() => requestNavigation("settings")}
             >
-              <LayoutGrid size={18} />
-              Modulos
-              <ChevronDown className={modulesMenuOpen ? "open" : ""} size={15} />
+              <Settings size={18} />
+              Ajustes
             </button>
-            {modulesMenuOpen && (
-              <div className="modules-popover" role="menu" aria-label="Modulos do sistema">
-                <div className="modules-popover-head">
-                  <div>
-                    <strong>Modulos do sistema</strong>
-                    <span>Acesse as areas administrativas sem ocupar o topo.</span>
-                  </div>
-                  <button type="button" className="modules-close" aria-label="Fechar modulos" onClick={() => setModulesMenuOpen(false)}>
-                    <X size={17} />
-                  </button>
-                </div>
-                <div className="modules-groups">
-                  {MODULE_GROUPS.map((group) => (
-                    <section key={group.label} className="modules-group">
-                      <span className="modules-group-label">{group.label}</span>
-                      {group.items.map((item) => {
-                        const Icon = item.icon;
-                        const isActive = activeTab === item.key;
-                        return (
-                          <button
-                            key={item.key}
-                            type="button"
-                            role="menuitem"
-                            className={isActive ? "active" : ""}
-                            disabled={item.comingSoon}
-                            onClick={() => {
-                              requestNavigation(item.key);
-                              setModulesMenuOpen(false);
-                            }}
-                          >
-                            <Icon size={19} />
-                            <span>
-                              <strong>{item.label}</strong>
-                              <small>{item.description}</small>
-                            </span>
-                            {item.comingSoon && <b>Em breve</b>}
-                          </button>
-                        );
-                      })}
-                    </section>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          )}
         </nav>
 
         <div className="total-menu-wrap" ref={totalMenuRef}>
@@ -6966,19 +7000,17 @@ function SettingsPanel({
           <div className="header-module-settings">
             <div>
               <strong>Modulos fixados no cabecalho</strong>
-              <span>Escolha de 1 a {MAX_HEADER_PINNED_MODULES} atalhos. Os demais continuam no menu Modulos.</span>
+              <span>Sem limite de atalhos. O que for fixado sai do menu Modulos; Ajustes fica separado no canto direito.</span>
             </div>
             <div className="header-module-options">
               {TAB_ITEMS.map((item) => {
                 const selectedModules = normalizeHeaderPinnedModules(draft.headerPinnedModules);
                 const checked = selectedModules.includes(item.key);
-                const disabled = checked ? selectedModules.length === 1 : selectedModules.length >= MAX_HEADER_PINNED_MODULES;
                 return (
                   <label key={item.key} className={checked ? "selected" : ""}>
                     <input
                       type="checkbox"
                       checked={checked}
-                      disabled={disabled}
                       onChange={() => update(
                         "headerPinnedModules",
                         checked
