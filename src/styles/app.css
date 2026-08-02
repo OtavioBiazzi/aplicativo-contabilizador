@@ -12596,6 +12596,10 @@ body {
   display: none;
 }
 
+#root .status-legend-hidden .pdv-table-status-legend {
+  display: none;
+}
+
 /* The selected marker must remain visible over the orange selected row. */
 #root .pdv-product-lookup-modal .pdv-product-lookup-table > button.selected .pdv-product-lookup-check {
   border-color: #ffffff;

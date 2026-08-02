@@ -41,6 +41,7 @@ type PendingRemoteTable = { tableNumber: number; people: number; note: string; i
 type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "productFontSize" | "categoryCardHeight" | "tableCardHeight"> & {
   vibrantMode?: boolean;
   hideTableStatusDescriptions?: boolean;
+  hideTableStatusLegend?: boolean;
 };
 type PdvOperationId = ReturnType<typeof crypto.randomUUID>;
 type TableCloseScope =
@@ -87,6 +88,7 @@ function readClientVisualSettings(storageKey: string): Partial<PdvClientVisualSe
     }, {});
     if (typeof value.vibrantMode === "boolean") parsed.vibrantMode = value.vibrantMode;
     if (typeof value.hideTableStatusDescriptions === "boolean") parsed.hideTableStatusDescriptions = value.hideTableStatusDescriptions;
+    if (typeof value.hideTableStatusLegend === "boolean") parsed.hideTableStatusLegend = value.hideTableStatusLegend;
     return parsed;
   } catch {
     return {};
@@ -1519,7 +1521,7 @@ export function PdvApp({
   const activeCloseTotal = roundMoney(activeCloseItems.reduce((total, item) => total + item.total, 0));
 
   return (
-    <div className={`pdv-shell ${embedded ? "embedded" : ""} ${hideTopbar ? "no-topbar" : ""} ${clientVisualSettings.vibrantMode ? "vibrant-mode" : ""} ${clientVisualSettings.hideTableStatusDescriptions ? "status-labels-hidden" : ""}`}>
+    <div className={`pdv-shell ${embedded ? "embedded" : ""} ${hideTopbar ? "no-topbar" : ""} ${clientVisualSettings.vibrantMode ? "vibrant-mode" : ""} ${clientVisualSettings.hideTableStatusDescriptions ? "status-labels-hidden" : ""} ${clientVisualSettings.hideTableStatusLegend ? "status-legend-hidden" : ""}`}>
       {!hideTopbar && (
         <aside className="pdv-topbar">
           <div className="pdv-brand">
@@ -6977,9 +6979,9 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
   };
   const applyPreset = (preset: "compact" | "normal" | "comfortable") => {
     const presets: Record<typeof preset, Partial<PdvClientVisualSettings>> = {
-      compact: { gridColumns: 7, categoryColumns: 7, tableColumns: 11, productCardHeight: 52, categoryCardHeight: 44, tableCardHeight: 74, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions) },
-      normal: { gridColumns: 5, categoryColumns: 5, tableColumns: 9, productCardHeight: 60, categoryCardHeight: 52, tableCardHeight: 88, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions) },
-      comfortable: { gridColumns: 5, categoryColumns: 5, tableColumns: 8, productCardHeight: 76, categoryCardHeight: 62, tableCardHeight: 104, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions) }
+      compact: { gridColumns: 7, categoryColumns: 7, tableColumns: 11, productCardHeight: 52, categoryCardHeight: 44, tableCardHeight: 74, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions), hideTableStatusLegend: Boolean(draft.hideTableStatusLegend) },
+      normal: { gridColumns: 5, categoryColumns: 5, tableColumns: 9, productCardHeight: 60, categoryCardHeight: 52, tableCardHeight: 88, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions), hideTableStatusLegend: Boolean(draft.hideTableStatusLegend) },
+      comfortable: { gridColumns: 5, categoryColumns: 5, tableColumns: 8, productCardHeight: 76, categoryCardHeight: 62, tableCardHeight: 104, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions), hideTableStatusLegend: Boolean(draft.hideTableStatusLegend) }
     };
     changeDraft(presets[preset]);
   };
@@ -7009,6 +7011,10 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
       <label className="pdv-switch-line pdv-local-visual-toggle">
         <input type="checkbox" checked={Boolean(draft.hideTableStatusDescriptions)} onChange={(event) => changeDraft({ hideTableStatusDescriptions: event.target.checked })} />
         <span><strong>Mostrar somente indicadores das mesas</strong><small>Oculta os textos dos status nos cartoes e na legenda. Passe o mouse sobre um indicador para consultar seu significado.</small></span>
+      </label>
+      <label className="pdv-switch-line pdv-local-visual-toggle">
+        <input type="checkbox" checked={Boolean(draft.hideTableStatusLegend)} onChange={(event) => changeDraft({ hideTableStatusLegend: event.target.checked })} />
+        <span><strong>Ocultar legenda de status</strong><small>Remove completamente a barra abaixo das mesas, incluindo cores, icones, textos e o espaco ocupado.</small></span>
       </label>
       <div className="pdv-advanced-grid">
         <article>
@@ -7231,6 +7237,10 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           <label className="pdv-switch-line pdv-local-visual-toggle">
             <input type="checkbox" checked={Boolean(clientVisualSettings.hideTableStatusDescriptions)} onChange={(event) => onClientVisualSettingsChange?.({ hideTableStatusDescriptions: event.target.checked })} />
             <span><strong>Mostrar somente indicadores das mesas</strong><small>Oculta as descricoes dos status nos cartoes e na legenda somente neste computador.</small></span>
+          </label>
+          <label className="pdv-switch-line pdv-local-visual-toggle">
+            <input type="checkbox" checked={Boolean(clientVisualSettings.hideTableStatusLegend)} onChange={(event) => onClientVisualSettingsChange?.({ hideTableStatusLegend: event.target.checked })} />
+            <span><strong>Ocultar legenda de status</strong><small>Remove totalmente a barra de legenda das mesas somente neste computador, sem deixar icones ou espaco vazio.</small></span>
           </label>
         </div>}
 
