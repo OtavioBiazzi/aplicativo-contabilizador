@@ -29,7 +29,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -616,17 +616,21 @@ async function bootstrap() {
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
     savePdvTableItems: (tableNumber, items, subtables) => pdvStore.saveTableItems(tableNumber, items, subtables),
     transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections),
+    appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
     updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
     savePdvCategory: (draft) => pdvStore.saveCategory(draft),
     savePdvProduct: (draft) => pdvStore.saveProduct(draft),
     savePdvSettings: (patch) => pdvStore.saveSettings(patch),
     savePdvCustomer: (draft) => pdvStore.saveCustomer(draft),
+    savePdvReceivable: (draft) => pdvStore.saveReceivable(draft),
     receivePdvReceivable: (id, payment, originDevice, operationId) => pdvStore.receiveReceivable(id, payment, originDevice, operationId),
     updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
     cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
+    deletePdvReceivable: (id) => pdvStore.deleteReceivable(id),
     savePdvPayable: (draft) => pdvStore.savePayable(draft),
     payPdvPayable: (id, payment, originDevice, operationId) => pdvStore.payPayable(id, payment, originDevice, operationId),
     cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
+    deletePdvPayable: (id) => pdvStore.deletePayable(id),
     printPdvReceipt: async ({ sale, customer, receivable, customerName, customerDocument }) => {
       const snapshot = await pdvStore.getSnapshot();
       const hostWindow = mainWindow || BrowserWindow.getAllWindows()[0];
@@ -875,6 +879,11 @@ function registerIpc() {
     return sale;
   });
 
+  ipcMain.handle("pdv:appendTableItems", async (_event, targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string): Promise<void> => {
+    await pdvStore.appendTableItems(targetTableNumber, items, targetSubtable);
+    publishPdvChanged();
+  });
+
   ipcMain.handle("pdv:cancelTable", async (_event, tableNumber: number): Promise<PdvSale | null> => {
     const sale = await pdvStore.cancelTable(tableNumber, "Este computador");
     await exportLedgerIfEnabled();
@@ -918,6 +927,12 @@ function registerIpc() {
     return receivable;
   });
 
+  ipcMain.handle("pdv:saveReceivable", async (_event, draft: PdvReceivableDraft): Promise<PdvReceivable> => {
+    const receivable = await pdvStore.saveReceivable(draft);
+    publishPdvChanged();
+    return receivable;
+  });
+
   ipcMain.handle("pdv:updateReceivable", async (_event, id: string, patch: PdvReceivablePatch): Promise<PdvReceivable> => {
     const receivable = await pdvStore.updateReceivable(id, patch);
     publishPdvChanged();
@@ -926,6 +941,11 @@ function registerIpc() {
 
   ipcMain.handle("pdv:cancelReceivable", async (_event, id: string) => {
     await pdvStore.cancelReceivable(id);
+    publishPdvChanged();
+  });
+
+  ipcMain.handle("pdv:deleteReceivable", async (_event, id: string) => {
+    await pdvStore.deleteReceivable(id);
     publishPdvChanged();
   });
 
@@ -943,6 +963,11 @@ function registerIpc() {
 
   ipcMain.handle("pdv:cancelPayable", async (_event, id: string) => {
     await pdvStore.cancelPayable(id);
+    publishPdvChanged();
+  });
+
+  ipcMain.handle("pdv:deletePayable", async (_event, id: string) => {
+    await pdvStore.deletePayable(id);
     publishPdvChanged();
   });
 

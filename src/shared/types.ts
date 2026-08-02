@@ -179,6 +179,7 @@ export interface AppSettings {
   defaultRoundingStep: number;
   defaultRoundingDirection: RoundDirection;
   notificationDurationMs: number;
+  notificationsEnabled: boolean;
   hideHeaderBrand: boolean;
   headerPinnedModules: string[];
   tableNumberEnabled: boolean;

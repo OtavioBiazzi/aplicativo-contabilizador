@@ -13,7 +13,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "./shared/types";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvProductRemovalResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvProductRemovalResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
@@ -33,18 +33,22 @@ export interface CaixaApi {
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
+  appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => Promise<PdvSale>;
   cancelPdvTable: (tableNumber: number) => Promise<PdvSale | null>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string) => Promise<PdvSale>;
   cancelPdvSale: (id: string) => Promise<void>;
   updatePdvSalePayments: (id: string, payments: PdvPayment[]) => Promise<PdvSale>;
   savePdvCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
+  savePdvReceivable: (draft: PdvReceivableDraft) => Promise<PdvReceivable>;
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, operationId?: string) => Promise<PdvReceivable>;
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   cancelPdvReceivable: (id: string) => Promise<void>;
+  deletePdvReceivable: (id: string) => Promise<void>;
   savePdvPayable: (draft: PdvPayableDraft) => Promise<PdvPayable>;
   payPdvPayable: (id: string, payment: PdvPayablePayment, operationId?: string) => Promise<PdvPayable>;
   cancelPdvPayable: (id: string) => Promise<void>;
+  deletePdvPayable: (id: string) => Promise<void>;
   printPdvReceipt: (
     sale: PdvSale,
     customer?: PdvCustomer,

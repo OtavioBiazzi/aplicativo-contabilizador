@@ -10,6 +10,7 @@ import type {
   PdvCustomer,
   PdvCustomerDraft,
   PdvExportFilters,
+  PdvFinancialAuditEvent,
   PdvOpenTable,
   PdvPayable,
   PdvPayableDraft,
@@ -20,6 +21,7 @@ import type {
   PdvProductImportPreview,
   PdvProductImportResult,
   PdvReceivable,
+  PdvReceivableDraft,
   PdvReceivablePatch,
   PdvReceivablePayment,
   PdvSettings,
@@ -47,6 +49,7 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   categoryCardHeight: 64,
   tableCardHeight: 96,
   productLookupPageSize: 30,
+  productLookupQuantitiesEnabled: false,
   stackIdenticalItems: false,
   partialPaymentDescriptionEnabled: false,
   skipPaymentConfirmation: false,
@@ -234,16 +237,28 @@ export class PdvStore {
       description: string;
       supplier: string;
       category: string;
+      costCenter: string;
       documentNumber: string;
+      paymentAccount: string;
+      tagsJson: string;
       createdAt: string;
+      updatedAt: string;
+      issueDate: string;
+      seriesId?: string;
+      seriesKind?: "Parcelamento" | "Recorrencia";
+      installmentNumber?: number;
+      installmentCount?: number;
       dueDate: string;
       amount: number;
       status: PdvPayable["status"];
       note: string;
     }>(
       this.requireDb(),
-      `SELECT id, description, supplier, category, document_number AS documentNumber,
-       created_at AS createdAt, due_date AS dueDate, amount, status, note
+      `SELECT id, description, supplier, category, cost_center AS costCenter, document_number AS documentNumber,
+       payment_account AS paymentAccount, tags_json AS tagsJson, created_at AS createdAt,
+       updated_at AS updatedAt, issue_date AS issueDate, series_id AS seriesId, series_kind AS seriesKind,
+       installment_number AS installmentNumber, installment_count AS installmentCount,
+       due_date AS dueDate, amount, status, note
        FROM payables ORDER BY due_date, created_at DESC`
     ).map((row) => {
       const payments = selectAll<PdvPayablePayment>(
@@ -255,8 +270,8 @@ export class PdvStore {
       );
       const paidAmount = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
       const balance = roundMoney(Math.max(0, row.amount - paidAmount));
-      const status: PdvPayable["status"] = row.status === "Cancelada"
-        ? "Cancelada"
+      const status: PdvPayable["status"] = row.status === "Cancelada" || row.status === "Excluida"
+        ? row.status
         : balance <= 0.009
           ? "Paga"
           : paidAmount > 0.009
@@ -264,7 +279,9 @@ export class PdvStore {
             : row.dueDate < today
               ? "Vencida"
               : "Em aberto";
-      return { ...row, payments, paidAmount, balance, status };
+      const events = this.getFinancialEvents("payable", row.id);
+      const { tagsJson, ...payable } = row;
+      return { ...payable, tags: parseStringList(tagsJson), payments, events, paidAmount, balance, status };
     });
   }
 
@@ -277,7 +294,7 @@ export class PdvStore {
     if (!Number.isFinite(amount) || amount <= 0) throw new Error("Informe um valor maior que zero.");
     const id = draft.id || randomUUID();
     const existing = this.getPayables().find((item) => item.id === id);
-    if (existing?.status === "Cancelada") throw new Error("Uma conta cancelada nao pode ser editada.");
+    if (existing?.status === "Cancelada" || existing?.status === "Excluida") throw new Error("Uma conta cancelada ou excluida nao pode ser editada.");
     const payments = (draft.payments === undefined ? existing?.payments || [] : draft.payments).map((payment) => ({
       id: String(payment.id || randomUUID()),
       payableId: id,
@@ -299,6 +316,7 @@ export class PdvStore {
       throw new Error(`O valor da conta nao pode ficar abaixo dos ${paidAmount.toFixed(2)} pagos.`);
     }
     const createdAt = existing?.createdAt || new Date().toISOString();
+    const updatedAt = new Date().toISOString();
     const nextStatus: PdvPayable["status"] = paidAmount && amount - paidAmount <= 0.009
       ? "Paga"
       : paidAmount
@@ -309,25 +327,40 @@ export class PdvStore {
     try {
       db.run(
         `INSERT INTO payables
-         (id, description, supplier, category, document_number, created_at, due_date, amount, status, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, description, supplier, category, cost_center, document_number, payment_account, tags_json,
+          created_at, updated_at, issue_date, series_id, series_kind, installment_number, installment_count,
+          due_date, amount, status, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
           description=excluded.description, supplier=excluded.supplier, category=excluded.category,
-          document_number=excluded.document_number, due_date=excluded.due_date, amount=excluded.amount,
-          status=excluded.status, note=excluded.note`,
+          cost_center=excluded.cost_center, document_number=excluded.document_number,
+          payment_account=excluded.payment_account, tags_json=excluded.tags_json,
+          updated_at=excluded.updated_at, issue_date=excluded.issue_date, series_id=excluded.series_id, series_kind=excluded.series_kind,
+          installment_number=excluded.installment_number, installment_count=excluded.installment_count, due_date=excluded.due_date,
+          amount=excluded.amount, status=excluded.status, note=excluded.note`,
         [
           id,
           description,
           String(draft.supplier || "").trim(),
           String(draft.category || "").trim(),
+          String(draft.costCenter || "").trim(),
           String(draft.documentNumber || "").trim(),
+          String(draft.paymentAccount || "").trim(),
+          JSON.stringify(normalizeStringList(draft.tags)),
           createdAt,
+          updatedAt,
+          normalizeDateInput(draft.issueDate) || createdAt.slice(0, 10),
+          String(draft.seriesId || "").trim() || null,
+          draft.seriesKind || null,
+          draft.installmentNumber ? Math.max(1, Math.floor(draft.installmentNumber)) : null,
+          draft.installmentCount ? Math.max(1, Math.floor(draft.installmentCount)) : null,
           dueDate,
           amount,
           nextStatus,
           String(draft.note || "").trim()
         ]
       );
+      this.writeFinancialEvent(db, "payable", id, existing ? "Edicao" : "Criacao", existing ? "Dados da conta atualizados." : "Conta a pagar cadastrada.", "Este computador");
       if (draft.payments !== undefined) {
         db.run("DELETE FROM payable_payments WHERE payable_id = ?", [id]);
         for (const payment of payments) {
@@ -364,7 +397,7 @@ export class PdvStore {
     operationId?: string
   ): Promise<PdvPayable> {
     const payable = this.getPayables().find((item) => item.id === payableId);
-    if (!payable || payable.status === "Cancelada") throw new Error("Conta a pagar nao encontrada ou cancelada.");
+    if (!payable || payable.status === "Cancelada" || payable.status === "Excluida") throw new Error("Conta a pagar nao encontrada, cancelada ou excluida.");
     if (operationId) {
       const existing = selectAll<{ id: string }>(this.requireDb(), "SELECT id FROM payable_payments WHERE operation_id = ?", [operationId])[0];
       if (existing) return this.getPayables().find((item) => item.id === payableId)!;
@@ -393,6 +426,7 @@ export class PdvStore {
       );
       const nextBalance = roundMoney(payable.balance - amount);
       db.run("UPDATE payables SET status = ? WHERE id = ?", [nextBalance <= 0.009 ? "Paga" : "Parcialmente paga", payableId]);
+      this.writeFinancialEvent(db, "payable", payableId, "Pagamento", String(payment.description || "Pagamento registrado.").trim(), originDevice, amount);
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -407,6 +441,15 @@ export class PdvStore {
     if (!payable) throw new Error("Conta a pagar nao encontrada.");
     if (payable.paidAmount > 0.009) throw new Error("Uma conta com pagamentos nao pode ser cancelada.");
     this.requireDb().run("UPDATE payables SET status = 'Cancelada' WHERE id = ?", [id]);
+    this.writeFinancialEvent(this.requireDb(), "payable", id, "Cancelamento", "Conta a pagar cancelada.", "Este computador");
+    await this.persist();
+  }
+
+  async deletePayable(id: string): Promise<void> {
+    const payable = this.getPayables().find((item) => item.id === id);
+    if (!payable) throw new Error("Conta a pagar nao encontrada.");
+    this.requireDb().run("UPDATE payables SET status = 'Excluida' WHERE id = ?", [id]);
+    this.writeFinancialEvent(this.requireDb(), "payable", id, "Exclusao", "Conta movida para o historico de excluidas.", "Este computador");
     await this.persist();
   }
 
@@ -421,6 +464,13 @@ export class PdvStore {
       subtableName?: string;
       createdAt: string;
       dueDate?: string;
+      description: string;
+      category: string;
+      costCenter: string;
+      documentNumber: string;
+      paymentAccount: string;
+      tagsJson: string;
+      updatedAt: string;
       originalAmount: number;
       status: PdvReceivable["status"];
       note: string;
@@ -428,7 +478,10 @@ export class PdvStore {
       this.requireDb(),
       `SELECT r.id, r.sale_id AS saleId, r.customer_id AS customerId, c.name AS customerName,
        s.table_number AS tableNumber, r.subtable_name AS subtableName, r.created_at AS createdAt,
-       r.due_date AS dueDate, r.original_amount AS originalAmount, r.status, r.note
+       r.due_date AS dueDate, r.description, r.category, r.cost_center AS costCenter,
+       r.document_number AS documentNumber, r.payment_account AS paymentAccount,
+       r.tags_json AS tagsJson, r.updated_at AS updatedAt,
+       r.original_amount AS originalAmount, r.status, r.note
        FROM receivables r
        JOIN customers c ON c.id = r.customer_id
        JOIN sales s ON s.id = r.sale_id
@@ -443,8 +496,8 @@ export class PdvStore {
       );
       const receivedAmount = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
       const balance = roundMoney(Math.max(0, row.originalAmount - receivedAmount));
-      const status = row.status === "Cancelada"
-        ? "Cancelada"
+      const status: PdvReceivable["status"] = row.status === "Cancelada" || row.status === "Excluida"
+        ? row.status
         : balance <= 0.009
           ? "Recebida"
           : receivedAmount > 0
@@ -452,8 +505,72 @@ export class PdvStore {
             : row.dueDate && row.dueDate < today
               ? "Vencida"
               : "Em aberto";
-      return { ...row, status, payments, receivedAmount, balance };
+      const events = this.getFinancialEvents("receivable", row.id);
+      const { tagsJson, ...receivable } = row;
+      return { ...receivable, tags: parseStringList(tagsJson), status, payments, events, receivedAmount, balance };
     });
+  }
+
+  async saveReceivable(draft: PdvReceivableDraft): Promise<PdvReceivable> {
+    const id = String(draft.id || randomUUID()).trim();
+    const customerId = String(draft.customerId || "").trim();
+    const description = String(draft.description || "").trim();
+    const amount = roundMoney(Number(draft.amount));
+    const dueDate = normalizeDateInput(draft.dueDate) || null;
+    const customer = this.getCustomers().find((item) => item.id === customerId && item.active);
+    if (!customer) throw new Error("Selecione um cliente ativo.");
+    if (!description) throw new Error("Informe a descricao da conta.");
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error("Informe um valor maior que zero.");
+    const existing = this.getReceivables().find((item) => item.id === id);
+    if (existing) {
+      return this.updateReceivable(id, {
+        originalAmount: amount,
+        dueDate: dueDate || undefined,
+        description,
+        category: draft.category,
+        costCenter: draft.costCenter,
+        documentNumber: draft.documentNumber,
+        paymentAccount: draft.paymentAccount,
+        tags: draft.tags,
+        note: draft.note
+      });
+    }
+    const createdAt = new Date().toISOString();
+    const saleId = `financial-${id}`;
+    const salePaymentId = `financial-payment-${id}`;
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run(
+        `INSERT INTO sales
+         (id, created_at, type, table_number, table_session_id, status, subtotal, discount, total,
+          description, observations, origin_device, operation_id, financial_only)
+         VALUES (?, ?, 'Venda direta', NULL, NULL, 'Finalizada', ?, 0, ?, ?, ?, 'Financeiro', ?, 1)`,
+        [saleId, createdAt, amount, amount, description, String(draft.note || "").trim(), `receivable-${id}`]
+      );
+      db.run(
+        `INSERT INTO sale_payments
+         (id, sale_id, method, amount, received, change, description, customer_id, customer_name, due_date)
+         VALUES (?, ?, 'Conta a receber', ?, ?, 0, ?, ?, ?, ?)`,
+        [salePaymentId, saleId, amount, amount, description, customer.id, customer.name, dueDate]
+      );
+      db.run(
+        `INSERT INTO receivables
+         (id, sale_id, customer_id, payment_id, subtable_name, created_at, due_date, original_amount,
+          status, note, description, category, cost_center, document_number, payment_account, tags_json, updated_at)
+         VALUES (?, ?, ?, ?, '', ?, ?, ?, 'Em aberto', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, saleId, customer.id, salePaymentId, createdAt, dueDate, amount, String(draft.note || "").trim(), description,
+          String(draft.category || "").trim(), String(draft.costCenter || "").trim(), String(draft.documentNumber || "").trim(),
+          String(draft.paymentAccount || "").trim(), JSON.stringify(normalizeStringList(draft.tags)), createdAt]
+      );
+      this.writeFinancialEvent(db, "receivable", id, "Criacao", "Conta a receber cadastrada manualmente.", "Este computador");
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
+    return this.getReceivables().find((item) => item.id === id)!;
   }
 
   async receiveReceivable(
@@ -463,7 +580,7 @@ export class PdvStore {
     operationId?: string
   ): Promise<PdvReceivable> {
     const receivable = this.getReceivables().find((item) => item.id === receivableId);
-    if (!receivable || receivable.status === "Cancelada") throw new Error("Conta a receber nao encontrada ou cancelada.");
+    if (!receivable || receivable.status === "Cancelada" || receivable.status === "Excluida") throw new Error("Conta a receber nao encontrada, cancelada ou excluida.");
     if (operationId) {
       const existing = selectAll<{ id: string }>(this.requireDb(), "SELECT id FROM receivable_payments WHERE operation_id = ?", [operationId])[0];
       if (existing) return this.getReceivables().find((item) => item.id === receivableId)!;
@@ -498,6 +615,7 @@ export class PdvStore {
       );
       const nextBalance = roundMoney(receivable.balance - amount);
       db.run("UPDATE receivables SET status = ? WHERE id = ?", [nextBalance <= 0.009 ? "Recebida" : "Parcialmente recebida", receivableId]);
+      this.writeFinancialEvent(db, "receivable", receivableId, "Pagamento", String(payment.description || "Recebimento registrado.").trim(), originDevice, amount);
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -512,29 +630,41 @@ export class PdvStore {
     if (!receivable) throw new Error("Conta a receber nao encontrada.");
     if (receivable.receivedAmount > 0.009) throw new Error("Uma conta com recebimentos nao pode ser cancelada sem estornar os pagamentos.");
     this.requireDb().run("UPDATE receivables SET status = 'Cancelada' WHERE id = ?", [id]);
+    this.writeFinancialEvent(this.requireDb(), "receivable", id, "Cancelamento", "Conta a receber cancelada.", "Este computador");
+    await this.persist();
+  }
+
+  async deleteReceivable(id: string): Promise<void> {
+    const receivable = this.getReceivables().find((item) => item.id === id);
+    if (!receivable) throw new Error("Conta a receber nao encontrada.");
+    this.requireDb().run("UPDATE receivables SET status = 'Excluida' WHERE id = ?", [id]);
+    this.writeFinancialEvent(this.requireDb(), "receivable", id, "Exclusao", "Conta movida para o historico de excluidas.", "Este computador");
     await this.persist();
   }
 
   async updateReceivable(id: string, patch: PdvReceivablePatch): Promise<PdvReceivable> {
     const receivable = this.getReceivables().find((item) => item.id === id);
     if (!receivable) throw new Error("Conta a receber nao encontrada.");
-    if (receivable.status === "Cancelada") throw new Error("Uma pendencia cancelada nao pode ser editada.");
+    if (receivable.status === "Cancelada" || receivable.status === "Excluida") throw new Error("Uma pendencia cancelada ou excluida nao pode ser editada.");
     const sale = this.getSaleById(receivable.saleId);
     if (!sale) throw new Error("A venda vinculada a pendencia nao foi encontrada.");
+    const financialOnly = Boolean(selectAll<{ financialOnly: number }>(this.requireDb(), "SELECT financial_only AS financialOnly FROM sales WHERE id = ?", [sale.id])[0]?.financialOnly);
     const productModes = new Map(this.getProducts().map((product) => [product.id, product.unitMode]));
     const nextItems = patch.items === undefined
       ? sale.items
       : patch.items.map((item) => normalizeEditedCartItem(item, productModes.get(item.productId)));
-    if (!nextItems.length) throw new Error("A pendencia precisa manter pelo menos um produto.");
-    validateCartItems(nextItems);
+    if (!financialOnly && !nextItems.length) throw new Error("A pendencia precisa manter pelo menos um produto.");
+    if (nextItems.length) validateCartItems(nextItems);
     const nextPayments = patch.payments === undefined
       ? receivable.payments
       : patch.payments.map((payment) => normalizeEditedReceivablePayment(payment, id));
     const receivedAmount = roundMoney(nextPayments.reduce((sum, payment) => sum + payment.amount, 0));
     const otherSalePayments = sale.payments.filter((payment) => payment.method !== "Conta a receber");
     const otherPaid = roundMoney(otherSalePayments.reduce((sum, payment) => sum + payment.amount, 0));
-    const saleTotal = roundMoney(nextItems.reduce((sum, item) => sum + item.total, 0));
-    const originalAmount = roundMoney(saleTotal - otherPaid);
+    const saleTotal = financialOnly
+      ? roundMoney(patch.originalAmount === undefined ? receivable.originalAmount : Number(patch.originalAmount))
+      : roundMoney(nextItems.reduce((sum, item) => sum + item.total, 0));
+    const originalAmount = financialOnly ? saleTotal : roundMoney(saleTotal - otherPaid);
     if (originalAmount <= 0) throw new Error("O total dos produtos precisa ser maior que os outros pagamentos da venda.");
     if (receivedAmount - originalAmount > 0.009) {
       throw new Error(`O total da pendencia nao pode ficar abaixo dos ${receivedAmount.toFixed(2)} ja recebidos.`);
@@ -554,15 +684,31 @@ export class PdvStore {
     db.run("BEGIN IMMEDIATE");
     try {
       db.run(
-        "UPDATE receivables SET due_date = ?, note = ?, original_amount = ?, status = ? WHERE id = ?",
+        `UPDATE receivables SET due_date = ?, note = ?, description = ?, category = ?, cost_center = ?,
+         document_number = ?, payment_account = ?, tags_json = ?, updated_at = ?, original_amount = ?, status = ? WHERE id = ?`,
         [
           patch.dueDate === undefined ? receivable.dueDate || null : String(patch.dueDate || "").trim() || null,
           patch.note === undefined ? receivable.note : String(patch.note || "").trim(),
+          patch.description === undefined ? receivable.description || "" : String(patch.description || "").trim(),
+          patch.category === undefined ? receivable.category || "" : String(patch.category || "").trim(),
+          patch.costCenter === undefined ? receivable.costCenter || "" : String(patch.costCenter || "").trim(),
+          patch.documentNumber === undefined ? receivable.documentNumber || "" : String(patch.documentNumber || "").trim(),
+          patch.paymentAccount === undefined ? receivable.paymentAccount || "" : String(patch.paymentAccount || "").trim(),
+          JSON.stringify(patch.tags === undefined ? receivable.tags || [] : normalizeStringList(patch.tags)),
+          new Date().toISOString(),
           originalAmount,
           nextStatus,
           id
         ]
       );
+      this.writeFinancialEvent(db, "receivable", id, "Edicao", "Dados da conta a receber atualizados.", "Este computador");
+      if (financialOnly && patch.originalAmount !== undefined) {
+        db.run("UPDATE sales SET subtotal = ?, discount = 0, total = ?, description = ? WHERE id = ?", [originalAmount, originalAmount, patch.description === undefined ? receivable.description || sale.description || "Conta a receber" : String(patch.description || "").trim(), sale.id]);
+        const linkedPayment = selectAll<{ paymentId: string }>(db, "SELECT payment_id AS paymentId FROM receivables WHERE id = ?", [id])[0];
+        if (linkedPayment?.paymentId) {
+          db.run("UPDATE sale_payments SET amount = ?, received = ?, change = 0, due_date = ? WHERE id = ?", [originalAmount, originalAmount, patch.dueDate === undefined ? receivable.dueDate || null : String(patch.dueDate || "").trim() || null, linkedPayment.paymentId]);
+        }
+      }
       if (patch.items !== undefined) {
         if (sale.status !== "Cancelada") {
           applySaleStock(db, sale, 1, "sale-edit-reversal", "Estoque devolvido antes da edicao da venda");
@@ -611,7 +757,7 @@ export class PdvStore {
     const sales = selectAll<Omit<PdvSale, "items" | "payments">>(
       this.requireDb(),
       `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, table_session_id AS tableSessionId, COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations, origin_device AS originDevice, operation_id AS operationId
-       FROM sales ORDER BY created_at DESC${limitSql}`
+       FROM sales WHERE COALESCE(financial_only, 0) = 0 ORDER BY created_at DESC${limitSql}`
     );
     return this.hydrateSales(sales).filter((sale) => matchesSaleFilters(sale, filters));
   }
@@ -1202,7 +1348,7 @@ export class PdvStore {
           [randomUUID(), targetTableNumber, new Date().toISOString()]
         );
         const targetSubtables = normalizeSubtableNames([
-          ...(targetTable?.subtables || []),
+          ...(sourceTableNumber === targetTableNumber ? nextSourceSubtables : targetTable?.subtables || []),
           ...nextTargetItems.map((item) => item.subtableName || "")
         ]);
         db.run("UPDATE table_sessions SET subtables_json = ? WHERE table_number = ?", [JSON.stringify(targetSubtables), targetTableNumber]);
@@ -1226,6 +1372,49 @@ export class PdvStore {
     // apenas "remainingItems" fazia o cliente salvar um snapshot parcial e apagar
     // justamente os itens acabados de mover para a submesa destino.
     return sourceTableNumber === targetTableNumber ? nextTargetItems : remainingItems;
+  }
+
+  async appendTableItems(targetTableNumber: number, items: PdvCartItem[], targetSubtable = ""): Promise<void> {
+    targetTableNumber = this.normalizeTableNumber(targetTableNumber);
+    if (!Array.isArray(items) || !items.length) {
+      throw new Error("Selecione ao menos um item para transferir.");
+    }
+    validateCartItems(items);
+    const db = this.requireDb();
+    const targetTable = this.getTables().find((table) => table.number === targetTableNumber);
+    const normalizedSubtable = String(targetSubtable || "").trim();
+    const movedItems = items.map((item) => ({
+      ...item,
+      id: randomUUID(),
+      paidQuantity: 0,
+      subtableName: normalizedSubtable
+    }));
+    const nextItems = [...this.getTableItems(targetTableNumber), ...movedItems];
+    validateCartItems(nextItems);
+    const nextSubtables = normalizeSubtableNames([
+      ...(targetTable?.subtables || []),
+      normalizedSubtable,
+      ...nextItems.map((item) => item.subtableName || "")
+    ]);
+    db.run("BEGIN IMMEDIATE");
+    try {
+      db.run(
+        `INSERT INTO table_sessions (id, table_number, status, opened_at, people, note, subtables_json)
+         VALUES (?, ?, 'Ocupada', ?, 1, '', ?)
+         ON CONFLICT(table_number) DO UPDATE SET
+           status=CASE WHEN table_sessions.status IN ('Livre', 'Reservada') THEN 'Ocupada' ELSE table_sessions.status END,
+           opened_at=COALESCE(table_sessions.opened_at, excluded.opened_at),
+           subtables_json=excluded.subtables_json`,
+        [randomUUID(), targetTableNumber, new Date().toISOString(), JSON.stringify(nextSubtables)]
+      );
+      db.run("DELETE FROM table_items WHERE table_number = ?", [targetTableNumber]);
+      writeTableItems(db, targetTableNumber, nextItems);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    await this.persist();
   }
 
   async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string): Promise<PdvSale> {
@@ -1659,6 +1848,34 @@ export class PdvStore {
     }));
   }
 
+  private getFinancialEvents(accountType: PdvFinancialAuditEvent["accountType"], accountId: string): PdvFinancialAuditEvent[] {
+    return selectAll<PdvFinancialAuditEvent>(
+      this.requireDb(),
+      `SELECT id, account_type AS accountType, account_id AS accountId, action, created_at AS createdAt,
+       description, origin_device AS originDevice, amount
+       FROM financial_audit_events WHERE account_type = ? AND account_id = ?
+       ORDER BY created_at DESC, rowid DESC`,
+      [accountType, accountId]
+    ).map((event) => ({ ...event, amount: event.amount === null || event.amount === undefined ? undefined : Number(event.amount) }));
+  }
+
+  private writeFinancialEvent(
+    db: Database,
+    accountType: PdvFinancialAuditEvent["accountType"],
+    accountId: string,
+    action: PdvFinancialAuditEvent["action"],
+    description: string,
+    originDevice: string,
+    amount?: number
+  ) {
+    db.run(
+      `INSERT INTO financial_audit_events
+       (id, account_type, account_id, action, created_at, description, origin_device, amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [randomUUID(), accountType, accountId, action, new Date().toISOString(), description, originDevice || "Este computador", amount ?? null]
+    );
+  }
+
   private migrate() {
     const db = this.requireDb();
     db.run(`
@@ -1832,6 +2049,16 @@ export class PdvStore {
         origin_device TEXT NOT NULL DEFAULT 'Este computador',
         operation_id TEXT UNIQUE
       );
+      CREATE TABLE IF NOT EXISTS financial_audit_events (
+        id TEXT PRIMARY KEY,
+        account_type TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        origin_device TEXT NOT NULL DEFAULT 'Este computador',
+        amount REAL
+      );
     `);
     addColumnIfMissing(db, "products", "can_be_complement", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "products", "has_complements", "INTEGER NOT NULL DEFAULT 0");
@@ -1861,10 +2088,27 @@ export class PdvStore {
     addColumnIfMissing(db, "sales", "table_session_id", "TEXT");
     addColumnIfMissing(db, "sales", "origin_device", "TEXT NOT NULL DEFAULT 'Este computador'");
     addColumnIfMissing(db, "sales", "operation_id", "TEXT");
+    addColumnIfMissing(db, "sales", "financial_only", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "sale_payments", "description", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sale_payments", "customer_id", "TEXT");
     addColumnIfMissing(db, "sale_payments", "customer_name", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sale_payments", "due_date", "TEXT");
+    addColumnIfMissing(db, "receivables", "description", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "receivables", "category", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "receivables", "cost_center", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "receivables", "document_number", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "receivables", "payment_account", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "receivables", "tags_json", "TEXT NOT NULL DEFAULT '[]'");
+    addColumnIfMissing(db, "receivables", "updated_at", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "payables", "cost_center", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "payables", "payment_account", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "payables", "tags_json", "TEXT NOT NULL DEFAULT '[]'");
+    addColumnIfMissing(db, "payables", "updated_at", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "payables", "issue_date", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "payables", "series_id", "TEXT");
+    addColumnIfMissing(db, "payables", "series_kind", "TEXT");
+    addColumnIfMissing(db, "payables", "installment_number", "INTEGER");
+    addColumnIfMissing(db, "payables", "installment_count", "INTEGER");
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_operation_id ON sales(operation_id) WHERE operation_id IS NOT NULL");
     db.run("CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at DESC)");
     db.run("CREATE INDEX IF NOT EXISTS idx_sales_status ON sales(status)");
@@ -1877,6 +2121,7 @@ export class PdvStore {
     db.run("CREATE INDEX IF NOT EXISTS idx_receivables_due_date ON receivables(due_date, status)");
     db.run("CREATE INDEX IF NOT EXISTS idx_payables_due_date ON payables(due_date, status)");
     db.run("CREATE INDEX IF NOT EXISTS idx_payables_supplier ON payables(supplier, status)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_financial_audit_account ON financial_audit_events(account_type, account_id, created_at DESC)");
     db.run("CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id, created_at DESC)");
     db.run("CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode) WHERE barcode <> ''");
     const defaults = this.getSettings();
@@ -1909,6 +2154,7 @@ export class PdvStore {
       categoryCardHeight: Math.max(44, Math.min(90, parseIntegerSetting(map.get("category_card_height"), DEFAULT_PDV_SETTINGS.categoryCardHeight || 64))),
       tableCardHeight: Math.max(74, Math.min(130, parseIntegerSetting(map.get("table_card_height"), DEFAULT_PDV_SETTINGS.tableCardHeight || 96))),
       productLookupPageSize: Math.max(10, Math.min(100, parseIntegerSetting(map.get("product_lookup_page_size"), DEFAULT_PDV_SETTINGS.productLookupPageSize || 30))),
+      productLookupQuantitiesEnabled: parseBooleanSetting(map.get("product_lookup_quantities_enabled"), DEFAULT_PDV_SETTINGS.productLookupQuantitiesEnabled || false),
       stackIdenticalItems: parseBooleanSetting(map.get("stack_identical_items"), DEFAULT_PDV_SETTINGS.stackIdenticalItems || false),
       partialPaymentDescriptionEnabled: parseBooleanSetting(map.get("partial_payment_description_enabled"), DEFAULT_PDV_SETTINGS.partialPaymentDescriptionEnabled || false),
       skipPaymentConfirmation: parseBooleanSetting(map.get("skip_payment_confirmation"), DEFAULT_PDV_SETTINGS.skipPaymentConfirmation || false),
@@ -2482,6 +2728,24 @@ function parseBooleanSetting(value: string | undefined, fallback: boolean): bool
 function parseIntegerSetting(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value || "", 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseStringList(raw?: string): string[] {
+  try {
+    return normalizeStringList(JSON.parse(raw || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => String(item || "").trim()).filter(Boolean))].slice(0, 20);
+}
+
+function normalizeDateInput(value: unknown): string {
+  const normalized = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
 }
 
 function clampNumericSetting(value: string | undefined, fallback: number, min: number, max: number): number {

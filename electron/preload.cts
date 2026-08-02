@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings, EntryDraft, LedgerEntry, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProductDraft, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProductDraft, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 contextBridge.exposeInMainWorld("caixa", {
   getSnapshot: () => ipcRenderer.invoke("app:getSnapshot"),
@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("caixa", {
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => ipcRenderer.invoke("pdv:saveTableItems", tableNumber, items, subtables),
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) =>
     ipcRenderer.invoke("pdv:transferTableItems", sourceTableNumber, targetTableNumber, selections),
+  appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) =>
+    ipcRenderer.invoke("pdv:appendTableItems", targetTableNumber, items, targetSubtable),
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => ipcRenderer.invoke("pdv:closeTable", tableNumber, payments, discount, operationId),
   cancelPdvTable: (tableNumber: number) => ipcRenderer.invoke("pdv:cancelTable", tableNumber),
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string) =>
@@ -30,12 +32,15 @@ contextBridge.exposeInMainWorld("caixa", {
   cancelPdvSale: (id: string) => ipcRenderer.invoke("pdv:cancelSale", id),
   updatePdvSalePayments: (id: string, payments: PdvPayment[]) => ipcRenderer.invoke("pdv:updateSalePayments", id, payments),
   savePdvCustomer: (draft: PdvCustomerDraft) => ipcRenderer.invoke("pdv:saveCustomer", draft),
+  savePdvReceivable: (draft: PdvReceivableDraft) => ipcRenderer.invoke("pdv:saveReceivable", draft),
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, operationId?: string) => ipcRenderer.invoke("pdv:receiveReceivable", id, payment, operationId),
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => ipcRenderer.invoke("pdv:updateReceivable", id, patch),
   cancelPdvReceivable: (id: string) => ipcRenderer.invoke("pdv:cancelReceivable", id),
+  deletePdvReceivable: (id: string) => ipcRenderer.invoke("pdv:deleteReceivable", id),
   savePdvPayable: (draft: PdvPayableDraft) => ipcRenderer.invoke("pdv:savePayable", draft),
   payPdvPayable: (id: string, payment: PdvPayablePayment, operationId?: string) => ipcRenderer.invoke("pdv:payPayable", id, payment, operationId),
   cancelPdvPayable: (id: string) => ipcRenderer.invoke("pdv:cancelPayable", id),
+  deletePdvPayable: (id: string) => ipcRenderer.invoke("pdv:deletePayable", id),
   printPdvReceipt: (
     sale: PdvSale,
     customer?: PdvCustomer,

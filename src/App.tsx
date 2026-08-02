@@ -54,6 +54,7 @@ import { PaymentAmountModal, PdvApp } from "./PdvApp";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
 import type { PdvCustomer, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
 import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
+import { downloadFinancialCsv } from "./shared/financialExport";
 import {
   buildReportDataset,
   createReportRecords,
@@ -93,7 +94,7 @@ import type {
   UpdateInfo
 } from "./shared/types";
 
-type TabKey = "sale" | "tables" | "history" | "dashboard" | "clients" | "payables" | "reports" | "server" | "settings";
+type TabKey = "sale" | "tables" | "history" | "dashboard" | "clients" | "receivables" | "payables" | "reports" | "server" | "settings";
 type SettingsCategory =
   | "appearance"
   | "operation"
@@ -144,6 +145,33 @@ interface RemoteSessionStoragePayload {
   deviceName: string;
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 12000): Promise<Response> {
+  const controller = new AbortController();
+  const sourceSignal = init.signal;
+  const abortFromSource = () => controller.abort(sourceSignal?.reason);
+  sourceSignal?.addEventListener("abort", abortFromSource, { once: true });
+  const timer = window.setTimeout(() => controller.abort("timeout"), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted && !sourceSignal?.aborted) {
+      throw new Error("O servidor nao respondeu dentro do tempo esperado. A conexao sera restabelecida automaticamente.");
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+    sourceSignal?.removeEventListener("abort", abortFromSource);
+  }
+}
+
+function addMonthsClamped(dateKey: string, months: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const target = new Date(year, month - 1 + months, 1, 12);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0, 12).getDate();
+  target.setDate(Math.min(day, lastDay));
+  return getLocalDateKey(target);
+}
+
 interface VersionMismatchState {
   clientVersion: string;
   serverVersion: string;
@@ -189,22 +217,23 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
   { key: "tables", label: "Mesas", icon: LayoutPanelTop },
   { key: "history", label: "Historico", icon: History },
   { key: "dashboard", label: "Visao geral", icon: Gauge },
-  { key: "clients", label: "Financeiro", icon: Wallet },
+  { key: "clients", label: "Clientes", icon: Users },
+  { key: "receivables", label: "Contas a receber", icon: ReceiptText },
+  { key: "payables", label: "Contas a pagar", icon: Wallet },
   { key: "reports", label: "Relatorios", icon: BarChart3 },
   { key: "server", label: "Rede", icon: Server },
   { key: "settings", label: "Ajustes", icon: Settings }
 ];
 
 const DEFAULT_HEADER_PINNED_MODULES: TabKey[] = ["sale", "tables", "history"];
-const HEADER_PINNABLE_MODULES: TabKey[] = ["sale", "tables", "history", "dashboard", "clients", "reports", "server", "settings"];
+const HEADER_PINNABLE_MODULES: TabKey[] = ["sale", "tables", "history", "dashboard", "clients", "receivables", "payables", "reports", "server", "settings"];
 
 function normalizeHeaderPinnedModules(value?: string[]): TabKey[] {
   if (!Array.isArray(value)) {
     return DEFAULT_HEADER_PINNED_MODULES;
   }
   const valid = new Set<TabKey>(HEADER_PINNABLE_MODULES);
-  const migrated = (value || []).map((key) => key === "payables" ? "clients" : key);
-  return [...new Set(migrated.filter((key): key is TabKey => valid.has(key as TabKey)))];
+  return [...new Set((value || []).filter((key): key is TabKey => valid.has(key as TabKey)))];
 }
 const MODULE_GROUPS: Array<{
   label: string;
@@ -227,7 +256,9 @@ const MODULE_GROUPS: Array<{
   {
     label: "Financeiro",
     items: [
-      { key: "clients", label: "Financeiro", description: "Clientes, contas a receber e contas a pagar", icon: Wallet }
+      { key: "clients", label: "Clientes", description: "Cadastro, historico e contas vinculadas aos clientes", icon: Users },
+      { key: "receivables", label: "Contas a receber", description: "Pendencias, recebimentos, vencimentos e historico", icon: ReceiptText },
+      { key: "payables", label: "Contas a pagar", description: "Fornecedores, despesas, pagamentos e historico", icon: Wallet }
     ]
   },
   {
@@ -1160,7 +1191,7 @@ export function App() {
   const [remotePdvSnapshot, setRemotePdvSnapshot] = useState<PdvSnapshot | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("sale");
-  const [financialView, setFinancialView] = useState<"customers" | "receivables" | "payables">("customers");
+  const [payableCreateRequest, setPayableCreateRequest] = useState<{ supplier: string; nonce: number } | null>(null);
   const [pdvViewNonce, setPdvViewNonce] = useState(0);
   const [pdvDirectCartActive, setPdvDirectCartActive] = useState(false);
   const [pdvNavigationRequest, setPdvNavigationRequest] = useState<TabKey | null>(null);
@@ -1188,6 +1219,7 @@ export function App() {
   const remoteManualDisconnect = useRef(false);
   const remoteReconnectTimer = useRef<number | null>(null);
   const remoteReconnectAttempt = useRef(0);
+  const remoteHeartbeatFailures = useRef(0);
   const remotePdvRefreshTimer = useRef<number | null>(null);
   const appReloadInFlight = useRef<Promise<void> | null>(null);
   const appReloadQueued = useRef(false);
@@ -1530,6 +1562,9 @@ export function App() {
   }, [entries, settings, pinned]);
 
   const showToast = (tone: ToastState["tone"], message: string) => {
+    if (settings && settings.notificationsEnabled === false && tone !== "error") {
+      return;
+    }
     setToast({ tone, message });
   };
 
@@ -1599,7 +1634,7 @@ export function App() {
   };
 
   const remoteRequest = async <T,>(session: RemoteClientSession, path: string, options: RequestInit = {}): Promise<T> => {
-    const response = await fetch(`${session.baseUrl}${path}`, {
+    const response = await fetchWithTimeout(`${session.baseUrl}${path}`, {
       ...options,
       headers: {
         "content-type": "application/json",
@@ -1658,12 +1693,18 @@ export function App() {
     remoteSocket.current = new WebSocket(wsUrl);
     remoteSocket.current.onopen = () => {
       remoteReconnectAttempt.current = 0;
+      remoteHeartbeatFailures.current = 0;
       setRemoteMessage("Tempo real ativo. Sincronizando dados...");
       void refreshRemote(session)
         .then(() => setRemoteMessage("Tempo real ativo. Dados sincronizados."))
         .catch((error) => {
           setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel concluir a sincronizacao apos reconectar.");
         });
+    };
+    remoteSocket.current.onerror = () => {
+      if (remoteSocket.current?.readyState !== WebSocket.CLOSED) {
+        remoteSocket.current?.close();
+      }
     };
     remoteSocket.current.onmessage = (event) => {
       let isPdvChange = false;
@@ -1796,6 +1837,7 @@ export function App() {
       };
       setRemoteSession(nextSession);
       remoteSessionRef.current = nextSession;
+      remoteHeartbeatFailures.current = 0;
     });
     remoteRefreshInFlight.current = request;
     try {
@@ -1817,10 +1859,39 @@ export function App() {
       const current = remoteSessionRef.current;
       if (!current) return;
       void refreshRemote(current).catch((error) => {
+        remoteHeartbeatFailures.current += 1;
         setRemoteMessage(error instanceof Error ? error.message : "Sincronizacao em tempo real temporariamente indisponivel.");
+        if (remoteHeartbeatFailures.current >= 2) {
+          remoteSocket.current?.close();
+          scheduleRemoteReconnect();
+        }
       });
     }, 10000);
     return () => window.clearInterval(interval);
+  }, [remoteSession?.baseUrl, remoteSession?.password]);
+
+  useEffect(() => {
+    if (!remoteSession) return;
+    const onOnline = () => {
+      remoteHeartbeatFailures.current = 0;
+      const current = remoteSessionRef.current;
+      if (!current) return;
+      if (!remoteSocket.current || remoteSocket.current.readyState !== WebSocket.OPEN) {
+        openRemoteSocket(current);
+        return;
+      }
+      void refreshRemote(current).catch(() => {
+        remoteSocket.current?.close();
+        scheduleRemoteReconnect();
+      });
+    };
+    const onOffline = () => setRemoteMessage("Sem conexao de rede. Os dados serao atualizados ao reconectar.");
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
   }, [remoteSession?.baseUrl, remoteSession?.password]);
 
   const connectRemoteClient = async (
@@ -1845,7 +1916,7 @@ export function App() {
     try {
       const baseUrl = normalizeRemoteBaseUrl(host, settings.server.port, server?.ips || []);
       const clientVersion = await window.caixa.getAppVersion();
-      const versionResponse = await fetch(`${baseUrl}/api/version`);
+      const versionResponse = await fetchWithTimeout(`${baseUrl}/api/version`);
       if (!versionResponse.ok) {
         if (versionResponse.status === 404) {
           throw new RemoteVersionMismatchError({
@@ -2157,10 +2228,7 @@ export function App() {
   };
 
   const requestNavigation = (nextTab: TabKey) => {
-    const targetTab: TabKey = nextTab === "payables" ? "clients" : nextTab;
-    if (nextTab === "payables") {
-      setFinancialView("payables");
-    }
+    const targetTab = nextTab;
     const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
     if (mode === "pdv" && activeTab === "sale" && targetTab !== "sale" && pdvDirectCartActive) {
       setPdvNavigationRequest(targetTab);
@@ -2205,12 +2273,9 @@ export function App() {
     ? settingsForRemoteClient(settings, remoteSession.clientPolicy, remoteSession.permissions.allowClientCustomization)
     : settings;
   const displayEntries = remoteSession ? remoteSession.entries : entries;
-  const historyEntries = settings.privacy.hideHeaderTotal
-    ? []
-    : remoteSession ? displayEntries : combinedEntries;
-  const historyPdvSales = settings.privacy.hideHeaderTotal
-    ? []
-    : remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || [];
+  // Privacidade oculta valores de destaque, mas nunca remove a auditoria.
+  const historyEntries = remoteSession ? displayEntries : combinedEntries;
+  const historyPdvSales = remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || [];
   const displayTodayEntries = remoteSession ? filterEntriesByLocalDate(remoteSession.entries, currentDateKey) : todayEntries;
   const canViewRemoteTotals = !remoteSession || remoteSession.permissions.viewTotals;
   const canViewRemoteEntryValues = !remoteSession || remoteSession.permissions.viewEntryValues;
@@ -2242,7 +2307,7 @@ export function App() {
   const effectiveOperationMode = remoteSession?.clientPolicy.operationMode || settings.operationMode;
   const legacyMode = effectiveOperationMode === "legacy";
   const visibleTabItems = TAB_ITEMS.filter((item) => {
-    if (legacyMode && (item.key === "tables" || item.key === "clients")) {
+    if (legacyMode && (["tables", "clients", "receivables", "payables"] as TabKey[]).includes(item.key)) {
       return false;
     }
     return true;
@@ -2268,6 +2333,7 @@ export function App() {
     : activeTab === "sale" && !legacyMode
       ? "sale"
       : null;
+  const financialMainTab = (["clients", "receivables", "payables"] as TabKey[]).includes(activeTab);
 
   return (
     <div className={`app-shell ${pdvMainTab ? "pdv-main-mode" : ""} ${settings.hideHeaderBrand ? "header-brand-hidden" : ""}`}>
@@ -2442,8 +2508,8 @@ export function App() {
 
       </aside>
 
-      <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>
-        {!pdvMainTab && (
+      <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : financialMainTab ? "admin-workspace financial-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>
+        {!pdvMainTab && !financialMainTab && (
           <header className="workspace-header">
             <div>
               <span className="eyebrow">{header.eyebrow}</span>
@@ -2547,8 +2613,7 @@ export function App() {
             canViewTotals={canViewRemoteTotals}
             onOpenReports={() => requestNavigation("reports")}
             onOpenClients={() => {
-              setFinancialView("customers");
-              requestNavigation("clients");
+              requestNavigation("receivables");
             }}
             onOpenPayables={() => requestNavigation("payables")}
             onOpenTables={() => requestNavigation("tables")}
@@ -2559,21 +2624,16 @@ export function App() {
           />
         )}
 
-        {activeTab === "clients" && (
+        {(["clients", "receivables", "payables"] as TabKey[]).includes(activeTab) && (
           <section className="financial-workspace">
-            <nav className="financial-navigation" aria-label="Areas do financeiro">
-              <button className={financialView === "customers" ? "active" : ""} onClick={() => setFinancialView("customers")}><Users size={17} /> Clientes</button>
-              <button className={financialView === "receivables" ? "active" : ""} onClick={() => setFinancialView("receivables")}><ReceiptText size={17} /> Contas a receber</button>
-              <button className={financialView === "payables" ? "active" : ""} onClick={() => setFinancialView("payables")}><Wallet size={17} /> Contas a pagar</button>
-            </nav>
             <div className="financial-content">
-              {financialView !== "payables" ? (
+              {activeTab !== "payables" ? (
                 <div className="pdv-module-panel clients-main-panel">
                   <PdvApp
-                    key={`finance-${financialView}`}
+                    key={`finance-${activeTab}`}
                     embedded
                     initialTab="history"
-                    initialHistoryView={financialView}
+                    initialHistoryView={activeTab === "receivables" ? "receivables" : "customers"}
                     hideHistoryNavigation
                     hideTopbar
                     snapshotOverride={remoteSession ? remotePdvSnapshot : pdvSnapshot}
@@ -2593,10 +2653,15 @@ export function App() {
                       ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) })
                       : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)}
                     onNavigateMain={(tab) => requestNavigation(tab)}
+                    onCreatePayableForCustomer={(customer) => {
+                      setPayableCreateRequest({ supplier: customer.name, nonce: Date.now() });
+                      requestNavigation("payables");
+                    }}
                   />
                 </div>
               ) : (
-                <PayablesPanel
+                <div className="pdv-module-panel payables-main-panel">
+                  <PayablesPanel
                   payables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.payables || []}
                   readOnly={Boolean(remoteSession && !remoteSession.permissions.manageTables)}
                   onSave={async (draft) => {
@@ -2629,8 +2694,20 @@ export function App() {
                       await reloadPdv();
                     }
                   }}
+                  onDelete={async (id) => {
+                    if (remoteSession) {
+                      await remoteRequest(remoteSession, `/api/pdv/payables/${id}`, { method: "DELETE" });
+                      await refreshRemote(remoteSession);
+                    } else {
+                      await window.caixa.deletePdvPayable(id);
+                      await reloadPdv();
+                    }
+                  }}
+                  createRequest={payableCreateRequest}
+                  onCreateRequestConsumed={() => setPayableCreateRequest(null)}
                   onToast={showToast}
-                />
+                  />
+                </div>
               )}
             </div>
           </section>
@@ -2752,6 +2829,9 @@ function PayablesPanel({
   onSave,
   onPay,
   onCancel,
+  onDelete,
+  createRequest,
+  onCreateRequestConsumed,
   onToast
 }: {
   payables: PdvPayable[];
@@ -2759,6 +2839,9 @@ function PayablesPanel({
   onSave: (draft: PdvPayableDraft) => Promise<PdvPayable>;
   onPay: (id: string, payment: PdvPayablePayment) => Promise<PdvPayable>;
   onCancel: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  createRequest?: { supplier: string; nonce: number } | null;
+  onCreateRequestConsumed?: () => void;
   onToast: (tone: ToastState["tone"], message: string) => void;
 }) {
   const today = getLocalDateKey();
@@ -2769,12 +2852,21 @@ function PayablesPanel({
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Pagas" | "Canceladas">("Todos");
+  const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Historico" | "Pagas" | "Canceladas" | "Excluidas">("Em aberto");
   const [editing, setEditing] = useState<PdvPayable | "new" | null>(null);
   const [paying, setPaying] = useState<PdvPayable | null>(null);
   const [selected, setSelected] = useState<PdvPayable | null>(null);
   const [cancelRequest, setCancelRequest] = useState<PdvPayable | null>(null);
+  const [deleteRequest, setDeleteRequest] = useState<PdvPayable | null>(null);
   const [busy, setBusy] = useState(false);
+  const [newSupplier, setNewSupplier] = useState("");
+
+  useEffect(() => {
+    if (!createRequest) return;
+    setNewSupplier(createRequest.supplier);
+    setEditing("new");
+    onCreateRequestConsumed?.();
+  }, [createRequest?.nonce]);
 
   const visible = payables.filter((payable) => {
     const inPeriod = (!from || payable.dueDate >= from) && (!to || payable.dueDate <= to);
@@ -2783,22 +2875,28 @@ function PayablesPanel({
       payable.description,
       payable.supplier,
       payable.category,
+      payable.costCenter,
       payable.documentNumber,
+      payable.paymentAccount,
+      ...(payable.tags || []),
       payable.note
     ].some((value) => value.toLocaleLowerCase("pt-BR").includes(normalizedQuery));
     const statusMatch = status === "Todos"
       || (status === "Em aberto" && ["Em aberto", "Parcialmente paga"].includes(payable.status))
       || (status === "Vencidas" && payable.status === "Vencida")
       || (status === "Pagas" && payable.status === "Paga")
-      || (status === "Canceladas" && payable.status === "Cancelada");
+      || (status === "Canceladas" && payable.status === "Cancelada")
+      || (status === "Excluidas" && payable.status === "Excluida")
+      || (status === "Historico" && ["Paga", "Cancelada", "Excluida"].includes(payable.status));
     return inPeriod && queryMatch && statusMatch;
   });
-  const active = visible.filter((payable) => payable.status !== "Cancelada");
+  const active = visible.filter((payable) => !["Cancelada", "Excluida"].includes(payable.status));
   const openBalance = roundMoney(active.reduce((sum, payable) => sum + payable.balance, 0));
   const overdue = active.filter((payable) => payable.status === "Vencida");
   const paidInPeriod = roundMoney(active.reduce((sum, payable) => sum + payable.paidAmount, 0));
+  const dueToday = active.filter((payable) => payable.dueDate === today && !["Paga", "Cancelada", "Excluida"].includes(payable.status));
   const dueNextSevenDays = active.filter((payable) => {
-    if (["Paga", "Cancelada"].includes(payable.status)) return false;
+    if (["Paga", "Cancelada", "Excluida"].includes(payable.status)) return false;
     const days = Math.ceil((new Date(`${payable.dueDate}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86400000);
     return days >= 0 && days <= 7;
   });
@@ -2810,79 +2908,97 @@ function PayablesPanel({
   };
 
   return (
-    <section className="payables-panel">
-      <div className="payables-toolbar">
-        <p>Vencimentos, fornecedores e pagamentos do negocio.</p>
-        {!readOnly && <button className="primary-button" onClick={() => setEditing("new")}><Plus size={17} /> Nova conta</button>}
+    <section className="payables-panel pdv-panel financial-module-shell pdv-payable-professional">
+      <div className="pdv-section-head financial-module-head">
+        <div>
+          <span className="pdv-eyebrow">Financeiro</span>
+          <h1>Contas a pagar</h1>
+          <p>Vencimentos, fornecedores e pagamentos do negocio.</p>
+        </div>
+        <div className="financial-head-actions"><button className="pdv-ghost-button" onClick={() => downloadFinancialCsv(`contas-a-pagar-${today}.csv`, ["Descricao", "Fornecedor", "Categoria", "Centro de custo", "Documento", "Emissao", "Vencimento", "Valor", "Pago", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"], visible.map((item) => [item.description, item.supplier, item.category, item.costCenter, item.documentNumber, item.issueDate, item.dueDate, item.amount, item.paidAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note]))}><Download size={16} /> Exportar</button>{!readOnly && <button className="pdv-primary-button" onClick={() => setEditing("new")}><Plus size={17} /> Nova conta</button>}</div>
       </div>
 
-      <div className="payables-metrics">
-        <button onClick={() => setStatus("Em aberto")}><span>Saldo em aberto</span><strong>{formatCurrency(openBalance)}</strong><small>{active.filter((item) => !["Paga", "Cancelada"].includes(item.status)).length} conta(s)</small></button>
+      <div className="financial-metrics">
+        <button onClick={() => setStatus("Em aberto")}><span>Saldo em aberto</span><strong>{formatCurrency(openBalance)}</strong><small>{active.filter((item) => !["Paga", "Cancelada", "Excluida"].includes(item.status)).length} conta(s)</small></button>
         <button className={overdue.length ? "warning" : ""} onClick={() => setStatus("Vencidas")}><span>Vencidas</span><strong>{formatCurrency(overdue.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{overdue.length} pendencia(s)</small></button>
+        <button onClick={() => { setFrom(today); setTo(today); setStatus("Todos"); }}><span>Vence hoje</span><strong>{formatCurrency(dueToday.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{dueToday.length} conta(s)</small></button>
         <button onClick={() => setStatus("Todos")}><span>Proximos 7 dias</span><strong>{formatCurrency(dueNextSevenDays.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{dueNextSevenDays.length} vencimento(s)</small></button>
         <button onClick={() => setStatus("Pagas")}><span>Pago no recorte</span><strong>{formatCurrency(paidInPeriod)}</strong><small>{active.filter((item) => item.paidAmount > 0).length} conta(s) com pagamento</small></button>
       </div>
 
-      <div className="payables-filters">
-        <label><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, fornecedor, categoria ou documento" /></label>
+      <div className="financial-filters">
+        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, fornecedor, categoria, documento ou tag" /></label>
         <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        <label><span>Situacao</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>{["Todos", "Em aberto", "Vencidas", "Pagas", "Canceladas"].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label><span>Situacao</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>{["Em aberto", "Vencidas", "Historico", "Pagas", "Canceladas", "Excluidas", "Todos"].map((value) => <option key={value}>{value}</option>)}</select></label>
         <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Exibir tudo</button>
       </div>
 
-      <div className="payables-content">
-        <div className="payables-list">
-          <div className="payables-list-head"><span>Conta</span><span>Vencimento</span><span>Valor</span><span>Saldo</span><span>Situacao</span><span>Acoes</span></div>
+      <div className="financial-master-detail">
+        <div className="financial-account-list">
+          <div className="financial-account-list-head"><span>Conta</span><span>Vencimento</span><span>Valor</span><span>Saldo</span><span>Situacao</span><span>Acoes</span></div>
           {visible.map((payable) => (
             <article key={payable.id} className={`${payable.status === "Vencida" ? "overdue" : ""} ${selected?.id === payable.id ? "selected" : ""}`} onClick={() => setSelected(payable)}>
               <div><strong>{payable.description}</strong><small>{payable.supplier || "Fornecedor nao informado"}{payable.category ? ` · ${payable.category}` : ""}</small></div>
               <time>{new Date(`${payable.dueDate}T12:00:00`).toLocaleDateString("pt-BR")}</time>
               <b>{formatCurrency(payable.amount)}</b>
               <b>{formatCurrency(payable.balance)}</b>
-              <span className={`payable-status status-${payable.status.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-")}`}>{payable.status}</span>
+              <span className={`financial-status status-${payable.status.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-")}`}>{payable.status}</span>
               <div className="payable-row-actions">
-                {!readOnly && !["Paga", "Cancelada"].includes(payable.status) && <button title="Registrar pagamento" onClick={(event) => { event.stopPropagation(); setPaying(payable); }}><Wallet size={15} /></button>}
-                {!readOnly && payable.status !== "Cancelada" && <button title="Editar conta" onClick={(event) => { event.stopPropagation(); setEditing(payable); }}><Edit3 size={15} /></button>}
-                {!readOnly && payable.paidAmount <= 0.009 && payable.status !== "Cancelada" && <button className="danger" title="Cancelar conta" onClick={(event) => { event.stopPropagation(); setCancelRequest(payable); }}><X size={15} /></button>}
+                {!readOnly && !["Paga", "Cancelada", "Excluida"].includes(payable.status) && <button title="Registrar pagamento" onClick={(event) => { event.stopPropagation(); setPaying(payable); }}><Wallet size={15} /></button>}
+                {!readOnly && !["Cancelada", "Excluida"].includes(payable.status) && <button title="Editar conta" onClick={(event) => { event.stopPropagation(); setEditing(payable); }}><Edit3 size={15} /></button>}
+                {!readOnly && payable.paidAmount <= 0.009 && !["Cancelada", "Excluida"].includes(payable.status) && <button className="danger" title="Cancelar conta" onClick={(event) => { event.stopPropagation(); setCancelRequest(payable); }}><X size={15} /></button>}
+                {!readOnly && payable.status !== "Excluida" && <button className="danger" title="Mover para excluidas" onClick={(event) => { event.stopPropagation(); setDeleteRequest(payable); }}><Trash2 size={15} /></button>}
               </div>
             </article>
           ))}
           {!visible.length && (
-            <div className="payables-empty">
+            <div className="financial-detail-empty">
               <CalendarDays size={30} />
               <strong>Nenhuma conta neste recorte</strong>
               <span>Ajuste os filtros ou cadastre o primeiro vencimento.</span>
             </div>
           )}
         </div>
-        <aside className="payable-detail">
+        <aside className="financial-account-detail">
           {selected ? (
             <>
-              <div><span className="settings-overline">Detalhes</span><h3>{selected.description}</h3><p>{selected.note || "Sem observacoes."}</p></div>
+              <div className="financial-detail-title"><span className="pdv-eyebrow">Detalhes da conta</span><h3>{selected.description}</h3><p>{selected.note || "Sem observacoes."}</p></div>
               <dl>
                 <div><dt>Fornecedor</dt><dd>{selected.supplier || "Nao informado"}</dd></div>
                 <div><dt>Categoria</dt><dd>{selected.category || "Nao informada"}</dd></div>
+                <div><dt>Centro de custo</dt><dd>{selected.costCenter || "Nao informado"}</dd></div>
                 <div><dt>Documento</dt><dd>{selected.documentNumber || "Nao informado"}</dd></div>
+                <div><dt>Conta prevista</dt><dd>{selected.paymentAccount || "Nao informada"}</dd></div>
+                <div><dt>Emissao</dt><dd>{selected.issueDate ? new Date(`${selected.issueDate}T12:00:00`).toLocaleDateString("pt-BR") : "Nao informada"}</dd></div>
+                {selected.installmentCount && selected.installmentCount > 1 && <div><dt>Parcela</dt><dd>{selected.installmentNumber}/{selected.installmentCount}</dd></div>}
                 <div><dt>Valor original</dt><dd>{formatCurrency(selected.amount)}</dd></div>
               </dl>
-              {!readOnly && !["Paga", "Cancelada"].includes(selected.status) && (
-                <div className="payable-detail-actions">
-                  <button className="primary-button" onClick={() => setPaying(selected)}>
+              {(selected.tags || []).length > 0 && <div className="financial-tag-list">{(selected.tags || []).map((tag) => <span key={tag}>{tag}</span>)}</div>}
+              {!readOnly && !["Paga", "Cancelada", "Excluida"].includes(selected.status) && (
+                <div className="financial-detail-actions payable-detail-actions">
+                  <button className="pdv-primary-button" onClick={() => setPaying(selected)}>
                     <Wallet size={16} /> Registrar pagamento
                   </button>
                 </div>
               )}
-              <div className="payable-payment-history">
+              <div className="financial-payment-history">
                 <strong>Pagamentos</strong>
                 {selected.payments.map((payment) => (
                   <div key={payment.id}><span>{new Date(payment.createdAt).toLocaleDateString("pt-BR")} · {payment.method}</span><b>{formatCurrency(payment.amount)}</b><small>{payment.description || payment.originDevice || ""}</small></div>
                 ))}
                 {!selected.payments.length && <span>Nenhum pagamento registrado.</span>}
               </div>
+              <div className="financial-audit-timeline">
+                <strong>Linha do tempo</strong>
+                {(selected.events || []).map((event) => (
+                  <div key={event.id}><i /><span><b>{event.action}</b>{event.description}</span><time>{new Date(event.createdAt).toLocaleString("pt-BR")} · {event.originDevice}</time>{event.amount !== undefined && <em>{formatCurrency(event.amount)}</em>}</div>
+                ))}
+                {!selected.events?.length && <div className="financial-audit-created"><i /><span><b>Criacao</b>Conta cadastrada no sistema.</span><time>{new Date(selected.createdAt).toLocaleString("pt-BR")}</time></div>}
+              </div>
             </>
           ) : (
-            <div className="payable-detail-empty"><Wallet size={28} /><strong>Selecione uma conta</strong><span>Os dados e pagamentos aparecerao aqui.</span></div>
+            <div className="financial-detail-empty"><Wallet size={28} /><strong>Selecione uma conta</strong><span>Os dados e pagamentos aparecerao aqui.</span></div>
           )}
         </aside>
       </div>
@@ -2890,17 +3006,49 @@ function PayablesPanel({
       {editing && (
         <PayableEditorModal
           payable={editing === "new" ? null : editing}
+          initialSupplier={editing === "new" ? newSupplier : undefined}
           categories={categories}
           suppliers={suppliers}
           busy={busy}
-          onCancel={() => setEditing(null)}
+          onCancel={() => { setEditing(null); setNewSupplier(""); }}
           onSave={async (draft) => {
             setBusy(true);
             try {
-              const next = await onSave(draft);
+              const installmentCount = editing === "new" ? Math.max(1, Math.min(60, Math.floor(draft.installmentCount || 1))) : 1;
+              const recurrenceInterval = editing === "new" && installmentCount === 1 ? Math.max(0, Math.floor(draft.recurrenceIntervalMonths || 0)) : 0;
+              const recurrenceCount = recurrenceInterval > 0 ? Math.max(2, Math.min(60, Math.floor(draft.recurrenceCount || 2))) : 1;
+              const seriesCount = installmentCount > 1 ? installmentCount : recurrenceCount;
+              let next: PdvPayable;
+              if (seriesCount > 1) {
+                const totalCents = Math.round(draft.amount * 100);
+                const baseCents = Math.floor(totalCents / installmentCount);
+                const seriesId = draft.seriesId || draft.id || crypto.randomUUID();
+                const created: PdvPayable[] = [];
+                for (let index = 0; index < seriesCount; index += 1) {
+                  const amountCents = installmentCount > 1
+                    ? (index === installmentCount - 1 ? totalCents - baseCents * (installmentCount - 1) : baseCents)
+                    : totalCents;
+                  created.push(await onSave({
+                    ...draft,
+                    id: `${seriesId}-${index + 1}`,
+                    seriesId,
+                    seriesKind: installmentCount > 1 ? "Parcelamento" : "Recorrencia",
+                    installmentNumber: index + 1,
+                    installmentCount: seriesCount,
+                    description: `${draft.description} (${index + 1}/${seriesCount})`,
+                    dueDate: addMonthsClamped(draft.dueDate, index * (installmentCount > 1 ? 1 : recurrenceInterval)),
+                    amount: amountCents / 100,
+                    payments: []
+                  }));
+                }
+                next = created[0];
+              } else {
+                next = await onSave({ ...draft, installmentCount: draft.installmentCount || 1 });
+              }
               syncSelection(next);
               setEditing(null);
-              onToast("success", draft.id ? "Conta atualizada." : "Conta a pagar cadastrada.");
+              setNewSupplier("");
+              onToast("success", editing === "new" ? (installmentCount > 1 ? `${installmentCount} parcelas cadastradas.` : recurrenceCount > 1 ? `${recurrenceCount} contas recorrentes cadastradas.` : "Conta a pagar cadastrada.") : "Conta atualizada.");
             } catch (error) {
               onToast("error", error instanceof Error ? error.message : "Nao foi possivel salvar a conta.");
             } finally {
@@ -2944,12 +3092,28 @@ function PayablesPanel({
           }}
         />
       )}
+      {deleteRequest && (
+        <SettingsConfirmModal
+          title="Excluir conta a pagar?"
+          message={`${deleteRequest.description} saira da lista principal e ficara disponivel no filtro Excluidas.`}
+          confirmLabel="Excluir conta"
+          danger
+          onCancel={() => setDeleteRequest(null)}
+          onConfirm={async () => {
+            await onDelete(deleteRequest.id);
+            setSelected((current) => current?.id === deleteRequest.id ? null : current);
+            setDeleteRequest(null);
+            onToast("success", "Conta movida para o historico de excluidas.");
+          }}
+        />
+      )}
     </section>
   );
 }
 
 function PayableEditorModal({
   payable,
+  initialSupplier,
   categories,
   suppliers,
   busy,
@@ -2957,6 +3121,7 @@ function PayableEditorModal({
   onSave
 }: {
   payable: PdvPayable | null;
+  initialSupplier?: string;
   categories: string[];
   suppliers: string[];
   busy: boolean;
@@ -2964,11 +3129,20 @@ function PayableEditorModal({
   onSave: (draft: PdvPayableDraft) => void;
 }) {
   const [draft, setDraft] = useState<PdvPayableDraft>({
-    id: payable?.id,
+    id: payable?.id || crypto.randomUUID(),
     description: payable?.description || "",
-    supplier: payable?.supplier || "",
+    supplier: payable?.supplier || initialSupplier || "",
     category: payable?.category || "",
+    costCenter: payable?.costCenter || "",
     documentNumber: payable?.documentNumber || "",
+    paymentAccount: payable?.paymentAccount || "",
+    tags: payable?.tags || [],
+    issueDate: payable?.issueDate || getLocalDateKey(),
+    seriesId: payable?.seriesId,
+    installmentNumber: payable?.installmentNumber,
+    installmentCount: payable?.installmentCount || 1,
+    recurrenceIntervalMonths: 0,
+    recurrenceCount: 2,
     dueDate: payable?.dueDate || getLocalDateKey(),
     amount: payable?.amount || 0,
     note: payable?.note || ""
@@ -3002,17 +3176,26 @@ function PayableEditorModal({
         <div className="payable-editor-body">
           <div className="payable-form-grid">
             <label className="wide"><span>Descricao *</span><input autoFocus value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Ex.: Energia eletrica da loja" /></label>
-            <label><span>Valor *</span><input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} placeholder="0,00" /></label>
+            <label><span>{!payable && (draft.installmentCount || 1) > 1 ? "Valor total *" : "Valor *"}</span><input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} placeholder="0,00" /></label>
+            {!payable && <label><span>Parcelas</span><input type="number" min="1" max="60" value={draft.installmentCount || 1} onChange={(event) => setDraft({ ...draft, installmentCount: Math.max(1, Math.min(60, Math.floor(Number(event.target.value) || 1))) })} /></label>}
+            {!payable && (draft.installmentCount || 1) === 1 && <label><span>Recorrencia</span><select value={draft.recurrenceIntervalMonths || 0} onChange={(event) => setDraft({ ...draft, recurrenceIntervalMonths: Number(event.target.value) })}><option value="0">Nao repetir</option><option value="1">Mensal</option><option value="2">Bimestral</option><option value="3">Trimestral</option><option value="6">Semestral</option><option value="12">Anual</option></select></label>}
+            {!payable && (draft.recurrenceIntervalMonths || 0) > 0 && <label><span>Quantidade de ocorrencias</span><input type="number" min="2" max="60" value={draft.recurrenceCount || 2} onChange={(event) => setDraft({ ...draft, recurrenceCount: Math.max(2, Math.min(60, Math.floor(Number(event.target.value) || 2))) })} /></label>}
+            <label><span>Data de emissao</span><input type="date" value={draft.issueDate || ""} onChange={(event) => setDraft({ ...draft, issueDate: event.target.value })} /></label>
             <label><span>Vencimento *</span><input type="date" value={draft.dueDate} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value })} /></label>
             <label><span>Fornecedor</span><input list="payable-suppliers" value={draft.supplier} onChange={(event) => setDraft({ ...draft, supplier: event.target.value })} placeholder="Opcional" /><datalist id="payable-suppliers">{suppliers.map((value) => <option key={value} value={value} />)}</datalist></label>
             <label><span>Categoria</span><input list="payable-categories" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} placeholder="Ex.: Energia, aluguel..." /><datalist id="payable-categories">{categories.map((value) => <option key={value} value={value} />)}</datalist></label>
+            <label><span>Centro de custo</span><input value={draft.costCenter || ""} onChange={(event) => setDraft({ ...draft, costCenter: event.target.value })} placeholder="Ex.: Loja, cozinha, administrativo" /></label>
+            <label><span>Conta/caixa previsto</span><input value={draft.paymentAccount || ""} onChange={(event) => setDraft({ ...draft, paymentAccount: event.target.value })} placeholder="Ex.: Caixa principal, Banco" /></label>
             <label className="wide"><span>Numero do documento</span><input value={draft.documentNumber} onChange={(event) => setDraft({ ...draft, documentNumber: event.target.value })} placeholder="Nota fiscal, boleto ou referencia opcional" /></label>
+            <label className="wide"><span>Tags</span><input value={(draft.tags || []).join(", ")} onChange={(event) => setDraft({ ...draft, tags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} placeholder="Ex.: fixa, urgente, fornecedor local" /></label>
             <label className="wide"><span>Observacoes</span><textarea value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} placeholder="Informacoes internas sobre esta despesa." /></label>
           </div>
+          {!payable && (draft.installmentCount || 1) > 1 && <div className="financial-installment-preview"><CalendarDays size={17} /><span>O total sera dividido em <b>{draft.installmentCount} parcelas mensais</b>, a partir do vencimento informado. Cada parcela tera seu proprio pagamento e historico.</span></div>}
+          {!payable && (draft.installmentCount || 1) === 1 && (draft.recurrenceIntervalMonths || 0) > 0 && <div className="financial-installment-preview"><RotateCcw size={17} /><span>Serão criadas <b>{draft.recurrenceCount || 2} contas recorrentes</b>. O valor informado será repetido em cada ocorrência, com vencimentos calculados automaticamente.</span></div>}
           <section className="payable-editor-payments">
             <div className="payable-editor-section-head">
               <div><strong>Pagamentos da conta</strong><span>Edite ou remova pagamentos incorretos antes de salvar.</span></div>
-              <button type="button" className="ghost-button" onClick={addPayment} disabled={balance <= 0.009}><Plus size={16} /> Adicionar pagamento</button>
+              <button type="button" className="ghost-button" onClick={addPayment} disabled={balance <= 0.009 || (!payable && (draft.installmentCount || 1) > 1)}><Plus size={16} /> Adicionar pagamento</button>
             </div>
             <div className="payable-editor-summary">
               <span>Valor <b>{formatCurrency(amount)}</b></span>
@@ -3130,12 +3313,16 @@ function DashboardPanel({
   const totalToday = roundMoney(todaySales.reduce((sum, sale) => sum + sale.total, 0));
   const ticketAverage = todaySales.length ? roundMoney(totalToday / todaySales.length) : 0;
   const openTables = snapshot.tables.filter((table) => table.items.length > 0 || table.status === "Ocupada" || table.status === "Fechamento");
-  const activeReceivables = snapshot.receivables.filter((receivable) => !["Recebida", "Cancelada"].includes(receivable.status));
+  const activeReceivables = snapshot.receivables.filter((receivable) => !["Recebida", "Cancelada", "Excluida"].includes(receivable.status));
   const overdueReceivables = activeReceivables.filter((receivable) => Boolean(receivable.dueDate && receivable.dueDate < today));
   const receivableBalance = roundMoney(activeReceivables.reduce((sum, receivable) => sum + receivable.balance, 0));
-  const activePayables = (snapshot.payables || []).filter((payable) => !["Paga", "Cancelada"].includes(payable.status));
+  const activePayables = (snapshot.payables || []).filter((payable) => !["Paga", "Cancelada", "Excluida"].includes(payable.status));
   const overduePayables = activePayables.filter((payable) => payable.status === "Vencida");
   const payableBalance = roundMoney(activePayables.reduce((sum, payable) => sum + payable.balance, 0));
+  const projectionLimit = addMonthsClamped(today, 1);
+  const receivableNext30 = roundMoney(activeReceivables.filter((item) => !item.dueDate || item.dueDate <= projectionLimit).reduce((sum, item) => sum + item.balance, 0));
+  const payableNext30 = roundMoney(activePayables.filter((item) => item.dueDate <= projectionLimit).reduce((sum, item) => sum + item.balance, 0));
+  const projectedFinancialResult = roundMoney(receivableNext30 - payableNext30);
   const lowStock = snapshot.products
     .filter((product) => product.active && product.trackStock && (product.stockQuantity || 0) <= (product.minimumStock || 0))
     .sort((left, right) => (left.stockQuantity || 0) - (right.stockQuantity || 0));
@@ -3207,6 +3394,7 @@ function DashboardPanel({
             <div><span>Faturamento</span><strong>{privacyValue(totalToday)}</strong></div>
             <div><span>Custo estimado</span><strong>{privacyValue(estimatedCost)}</strong></div>
             <div><span>Lucro bruto estimado</span><strong>{privacyValue(estimatedGrossProfit)}</strong></div>
+            <div className={projectedFinancialResult < 0 ? "warning" : ""}><span>Projecao financeira 30 dias</span><strong>{privacyValue(projectedFinancialResult)}</strong><small>{privacyValue(receivableNext30)} a receber · {privacyValue(payableNext30)} a pagar</small></div>
           </div>
           <div className="dashboard-top-products">
             <strong>Produtos mais vendidos hoje</strong>
@@ -7013,6 +7201,10 @@ function SettingsPanel({
               <option value={8000}>Lento (8 s)</option>
             </select>
           </label>
+          <label className="switch-line">
+            <input type="checkbox" checked={draft.notificationsEnabled !== false} onChange={(event) => update("notificationsEnabled", event.target.checked)} />
+            Ativar notificacoes e avisos informativos
+          </label>
           <label className="switch-line simple-mode-toggle">
             <input type="checkbox" checked={Boolean(draft.simpleMode)} onChange={(event) => update("simpleMode", event.target.checked)} />
             Modo Simples: interface mais quadrada, compacta e sem animacoes de rolagem
@@ -7886,8 +8078,9 @@ function titleForTab(tab: TabKey): string {
     tables: "Mesas",
     history: "Historico editavel",
     dashboard: "Visao geral",
-    clients: "Financeiro",
-    payables: "Financeiro",
+    clients: "Clientes",
+    receivables: "Contas a receber",
+    payables: "Contas a pagar",
     reports: "Relatorios",
     server: "Servidor local",
     settings: "Ajuste"
@@ -7922,16 +8115,22 @@ function headerForTab(tab: TabKey, todayCount: number): { eyebrow: string; title
       detail: "Hoje"
     },
     clients: {
+      eyebrow: "Relacionamento",
+      title: titleForTab(tab),
+      status: "Cadastro, historico e contas vinculadas",
+      detail: "Clientes"
+    },
+    receivables: {
       eyebrow: "Gestao financeira",
       title: titleForTab(tab),
-      status: "Clientes, contas a receber e contas a pagar",
-      detail: "Financeiro"
+      status: "Pendencias, recebimentos e vencimentos",
+      detail: "Receber"
     },
     payables: {
       eyebrow: "Gestao financeira",
       title: titleForTab(tab),
-      status: "Clientes, contas a receber e contas a pagar",
-      detail: "Financeiro"
+      status: "Fornecedores, despesas e pagamentos",
+      detail: "Pagar"
     },
     reports: {
       eyebrow: "Analise do caixa",

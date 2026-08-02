@@ -91,6 +91,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     defaultRoundingStep: 0.25,
     defaultRoundingDirection: "up",
     notificationDurationMs: 3200,
+    notificationsEnabled: true,
     hideHeaderBrand: false,
     headerPinnedModules: ["sale", "tables", "history"],
     tableNumberEnabled: true,

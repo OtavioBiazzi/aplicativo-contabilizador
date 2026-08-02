@@ -1,34 +1,47 @@
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
+import { useLayoutEffect } from "react";
 import {
+  AlertTriangle,
   Banknote,
   Check,
+  CheckCircle2,
   ClipboardList,
+  Clock3,
   ContactRound,
   Download,
   FileSpreadsheet,
   LayoutGrid,
+  Layers3,
+  Lock,
   Minus,
   Plus,
   ReceiptText,
   Pencil,
+  RotateCcw,
   Search,
   Settings,
   ShoppingCart,
   Trash2,
   Utensils,
+  Wallet,
+  WifiOff,
   X
 } from "lucide-react";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvOpenTable, PdvPayment, PdvPaymentMethod, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 import type { RoundDirection } from "./shared/types";
 import { calculateSplit } from "./shared/calculations";
 import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
+import { downloadFinancialCsv } from "./shared/financialExport";
 
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 export type PdvAdvancedSection = "tables" | "appearance" | "operation" | "printing" | "data";
-type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; appVersion: string; connectedAt?: string; roundingStep?: number; roundingDirection?: RoundDirection; allowPrint?: boolean; allowEdit?: boolean; snapshot?: PdvSnapshot | null; permissions?: { allowClientCustomization: boolean } };
-type PendingRemoteTable = { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; updatedAt: string };
-type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "productFontSize" | "categoryCardHeight" | "tableCardHeight">;
+type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; appVersion: string; connectedAt?: string; roundingStep?: number; roundingDirection?: RoundDirection; allowPrint?: boolean; allowEdit?: boolean; snapshot?: PdvSnapshot | null; permissions?: { allowClientCustomization: boolean; manageTables?: boolean } };
+type PendingRemoteTable = { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; updatedAt: string; attempts?: number; lastError?: string };
+type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "productFontSize" | "categoryCardHeight" | "tableCardHeight"> & {
+  vibrantMode?: boolean;
+  hideTableStatusDescriptions?: boolean;
+};
 type PdvOperationId = ReturnType<typeof crypto.randomUUID>;
 type TableCloseScope =
   | { kind: "all" }
@@ -62,15 +75,19 @@ function money(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
 }
 
-function readClientVisualSettings(): Partial<PdvClientVisualSettings> {
+function readClientVisualSettings(storageKey: string): Partial<PdvClientVisualSettings> {
   try {
-    const value = JSON.parse(window.localStorage.getItem(CLIENT_VISUAL_SETTINGS_KEY) || "{}") as Partial<PdvClientVisualSettings>;
-    const fields: Array<keyof PdvClientVisualSettings> = ["gridColumns", "categoryColumns", "tableColumns", "productCardHeight", "productFontSize", "categoryCardHeight", "tableCardHeight"];
-    return fields.reduce<Partial<PdvClientVisualSettings>>((current, field) => {
+    const stored = window.localStorage.getItem(storageKey) ?? window.localStorage.getItem(CLIENT_VISUAL_SETTINGS_KEY) ?? "{}";
+    const value = JSON.parse(stored) as Partial<PdvClientVisualSettings>;
+    const fields = ["gridColumns", "categoryColumns", "tableColumns", "productCardHeight", "productFontSize", "categoryCardHeight", "tableCardHeight"] as const;
+    const parsed = fields.reduce<Partial<PdvClientVisualSettings>>((current, field) => {
       const numeric = Number(value[field]);
-      if (Number.isFinite(numeric) && numeric > 0) current[field] = Math.round(numeric);
+      if (Number.isFinite(numeric) && numeric > 0) Object.assign(current, { [field]: Math.round(numeric) });
       return current;
     }, {});
+    if (typeof value.vibrantMode === "boolean") parsed.vibrantMode = value.vibrantMode;
+    if (typeof value.hideTableStatusDescriptions === "boolean") parsed.hideTableStatusDescriptions = value.hideTableStatusDescriptions;
+    return parsed;
   } catch {
     return {};
   }
@@ -102,10 +119,50 @@ function normalizeTableSearch(value: string): string {
     .toLocaleLowerCase("pt-BR");
 }
 
-function tableSearchDetails(table: PdvOpenTable, rawQuery: string): { matches: boolean; subtables: string[] } {
+function boundedEditDistance(left: string, right: string, maximum = 1): number {
+  if (Math.abs(left.length - right.length) > maximum) return maximum + 1;
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMinimum = current[0];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+      rowMinimum = Math.min(rowMinimum, current[rightIndex]);
+    }
+    if (rowMinimum > maximum) return maximum + 1;
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length];
+}
+
+function fuzzySearchMatch(value: string, rawQuery: string): boolean {
+  const candidate = normalizeTableSearch(value);
+  const query = normalizeTableSearch(rawQuery);
+  if (!query || candidate.includes(query)) return true;
+  if (query.length < 4) return false;
+  return candidate.split(/\s+/).some((word) => (
+    boundedEditDistance(word, query, 1) <= 1
+    || (word.length >= query.length && boundedEditDistance(word.slice(0, query.length), query, 1) <= 1)
+  ));
+}
+
+function tableSearchDetails(table: PdvOpenTable, rawQuery: string): { matches: boolean; subtables: string[]; products: string[] } {
   const query = normalizeTableSearch(rawQuery);
   if (!query) {
-    return { matches: true, subtables: [] };
+    return { matches: true, subtables: [], products: [] };
+  }
+
+  const productCommand = query.match(/^produtos?\s*:\s*(.*)$/);
+  if (productCommand) {
+    const productQuery = productCommand[1].trim();
+    const matchingProducts = [...new Set(table.items
+      .filter((item) => productQuery && fuzzySearchMatch(item.productName, productQuery))
+      .map((item) => item.productName))];
+    return { matches: matchingProducts.length > 0, subtables: [], products: matchingProducts };
   }
 
   const tableNumberQuery = query.replace(/^mesa\s*/, "").trim();
@@ -114,11 +171,13 @@ function tableSearchDetails(table: PdvOpenTable, rawQuery: string): { matches: b
     ...(table.subtables || []),
     ...table.items.map((item) => item.subtableName || "").filter(Boolean)
   ])];
-  const matchingSubtables = subtableNames.filter((name) => normalizeTableSearch(name).includes(query));
+  const matchingSubtables = subtableNames.filter((name) => fuzzySearchMatch(name, query));
+  const matchesNote = Boolean(table.note && fuzzySearchMatch(table.note, query));
 
   return {
-    matches: matchesNumber || matchingSubtables.length > 0,
-    subtables: matchingSubtables
+    matches: matchesNumber || matchesNote || matchingSubtables.length > 0,
+    subtables: matchingSubtables,
+    products: []
   };
 }
 
@@ -242,16 +301,33 @@ function complementsForProduct(product: PdvProduct, products: PdvProduct[]): Pdv
 }
 
 async function remotePdvRequest<T>(session: PdvRemoteSession, path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${session.baseUrl}${path}`, {
-    ...options,
-    headers: {
-      "content-type": "application/json",
-      "x-caixa-password": session.password,
-      "x-device-name": session.deviceName,
-      "x-caixa-version": session.appVersion,
-      ...(options.headers || {})
+  const controller = new AbortController();
+  const sourceSignal = options.signal;
+  const abortFromSource = () => controller.abort(sourceSignal?.reason);
+  sourceSignal?.addEventListener("abort", abortFromSource, { once: true });
+  const timeout = window.setTimeout(() => controller.abort("timeout"), 12000);
+  let response: Response;
+  try {
+    response = await fetch(`${session.baseUrl}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-caixa-password": session.password,
+        "x-device-name": session.deviceName,
+        "x-caixa-version": session.appVersion,
+        ...(options.headers || {})
+      }
+    });
+  } catch (error) {
+    if (controller.signal.aborted && !sourceSignal?.aborted) {
+      throw new Error("O servidor nao respondeu. Aguarde a reconexao automatica e tente novamente.");
     }
-  });
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    sourceSignal?.removeEventListener("abort", abortFromSource);
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(`${data?.error || "Nao foi possivel sincronizar com o servidor."} (HTTP ${response.status})`);
@@ -330,6 +406,7 @@ export function PdvApp({
   receiptPrintTargets = [],
   onRemoteReceiptPrint,
   onNavigateMain,
+  onCreatePayableForCustomer,
   advancedSettingsActionsRef,
   onAdvancedSettingsDirtyChange
 }: {
@@ -350,9 +427,11 @@ export function PdvApp({
   receiptPrintTargets?: Array<{ id: string; label: string }>;
   onRemoteReceiptPrint?: (targetId: string, payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
   onNavigateMain?: (tab: "history" | "reports") => void;
+  onCreatePayableForCustomer?: (customer: PdvCustomer) => void;
   advancedSettingsActionsRef?: React.MutableRefObject<PdvAdvancedSettingsActions | null>;
   onAdvancedSettingsDirtyChange?: (dirty: boolean) => void;
 }) {
+  const visualSettingsStorageKey = `${CLIENT_VISUAL_SETTINGS_KEY}.${remoteSession ? "client" : "server"}`;
   const [snapshot, setSnapshot] = useState<PdvSnapshot | null>(null);
   const [tab, setTab] = useState<PdvTab>(initialTab);
   const [activeCategory, setActiveCategory] = useState("todos");
@@ -363,6 +442,8 @@ export function PdvApp({
   const [discount, setDiscount] = useState(0);
   const [tableFilter, setTableFilter] = useState<PdvTableStatus | "Todas">("Todas");
   const [tableSearch, setTableSearch] = useState("");
+  const [pendingSyncTick, setPendingSyncTick] = useState(0);
+  const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine);
   const [activeTable, setActiveTable] = useState<PdvOpenTable | null>(null);
   const [tableCart, setTableCart] = useState<PdvCartItem[]>([]);
   const [tablePeople, setTablePeople] = useState(1);
@@ -388,7 +469,10 @@ export function PdvApp({
   const [confirmRequest, setConfirmRequest] = useState<{ title: string; message: string; action: () => Promise<void> } | null>(null);
   const [correctingPartialPayment, setCorrectingPartialPayment] = useState<{ sale: PdvSale; payment: PdvPayment } | null>(null);
   const [tableSaveState, setTableSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [clientVisualSettings, setClientVisualSettings] = useState<Partial<PdvClientVisualSettings>>(readClientVisualSettings);
+  const [clientVisualSettings, setClientVisualSettings] = useState<Partial<PdvClientVisualSettings>>(() => readClientVisualSettings(visualSettingsStorageKey));
+  useEffect(() => {
+    setClientVisualSettings(readClientVisualSettings(visualSettingsStorageKey));
+  }, [visualSettingsStorageKey]);
   const tableAutosaveTimer = useRef<number | null>(null);
   // Todas as gravacoes da mesa passam por esta fila. Sem isso, uma resposta antiga
   // podia terminar depois da mais nova e repor no banco uma versao desatualizada.
@@ -453,12 +537,17 @@ export function PdvApp({
       ? remotePdvRequest<{ ok: boolean; items: PdvCartItem[] }>(remoteSession, `/api/pdv/tables/${sourceTableNumber}/transfer`, { method: "POST", body: JSON.stringify({ targetTableNumber, selections }) }).then((result) => result.items)
       : window.caixa.transferPdvTableItems(sourceTableNumber, targetTableNumber, selections);
   };
+  const appendPdvTableItems = (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => remotePdvActive && remoteSession
+    ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${targetTableNumber}/append`, { method: "POST", body: JSON.stringify({ items, targetSubtable }) }).then(() => undefined)
+    : window.caixa.appendPdvTableItems(targetTableNumber, items, targetSubtable);
   const queueRemoteTable = (tableNumber: number, people: number, note: string, items: PdvCartItem[], subtables?: string[]) => {
     if (!remoteSession) {
       return;
     }
-    const queued = readPendingRemoteTables(remoteSession.baseUrl).filter((item) => item.tableNumber !== tableNumber);
-    queued.push({ tableNumber, people: Math.max(1, Math.floor(people || 1)), note: note || "", items, subtables, updatedAt: new Date().toISOString() });
+    const currentQueue = readPendingRemoteTables(remoteSession.baseUrl);
+    const previous = currentQueue.find((item) => item.tableNumber === tableNumber);
+    const queued = currentQueue.filter((item) => item.tableNumber !== tableNumber);
+    queued.push({ tableNumber, people: Math.max(1, Math.floor(people || 1)), note: note || "", items, subtables, updatedAt: new Date().toISOString(), attempts: previous?.attempts || 0, lastError: previous?.lastError });
     writePendingRemoteTables(remoteSession.baseUrl, queued);
   };
   const clearQueuedRemoteTable = (tableNumber: number) => {
@@ -470,7 +559,7 @@ export function PdvApp({
   const saveClientVisualSettings = (patch: Partial<PdvClientVisualSettings>) => {
     setClientVisualSettings((current) => {
       const next = { ...current, ...patch };
-      window.localStorage.setItem(CLIENT_VISUAL_SETTINGS_KEY, JSON.stringify(next));
+      window.localStorage.setItem(visualSettingsStorageKey, JSON.stringify(next));
       return next;
     });
   };
@@ -500,6 +589,31 @@ export function PdvApp({
   };
 
   useEffect(() => {
+    const updateConnectionState = () => setNetworkOnline(navigator.onLine);
+    window.addEventListener("online", updateConnectionState);
+    window.addEventListener("offline", updateConnectionState);
+    return () => {
+      window.removeEventListener("online", updateConnectionState);
+      window.removeEventListener("offline", updateConnectionState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!remoteTablesActive || !remoteSession) return;
+    const retry = () => {
+      if (readPendingRemoteTables(remoteSession.baseUrl).length) {
+        setPendingSyncTick((current) => current + 1);
+      }
+    };
+    window.addEventListener("online", retry);
+    const interval = window.setInterval(retry, 5000);
+    return () => {
+      window.removeEventListener("online", retry);
+      window.clearInterval(interval);
+    };
+  }, [remoteSession?.baseUrl, remoteTablesActive]);
+
+  useEffect(() => {
     if (!remoteTablesActive || !remoteSession) {
       return;
     }
@@ -514,8 +628,12 @@ export function PdvApp({
         try {
           await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/open`, { method: "POST", body: JSON.stringify({ people: table.people, note: table.note }) });
           await remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items: table.items, subtables: table.subtables }) });
-        } catch {
-          remaining.push(table);
+        } catch (error) {
+          remaining.push({
+            ...table,
+            attempts: (table.attempts || 0) + 1,
+            lastError: error instanceof Error ? error.message : "Falha ao sincronizar"
+          });
         }
       }
       if (!cancelled) {
@@ -527,7 +645,7 @@ export function PdvApp({
       }
     })();
     return () => { cancelled = true; };
-  }, [remoteSession?.baseUrl, remoteSession?.connectedAt, remoteTablesActive, reloadToken]);
+  }, [remoteSession?.baseUrl, remoteSession?.connectedAt, remoteTablesActive, reloadToken, pendingSyncTick]);
   const closePdvTable = (tableNumber: number, payments: PdvPayment[], closeDiscount = 0, operationId: PdvOperationId = crypto.randomUUID()) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/tables/${tableNumber}/close`, { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ payments, discount: closeDiscount }) }).then((result) => result.sale)
     : window.caixa.closePdvTable(tableNumber, payments, closeDiscount, operationId);
@@ -568,6 +686,13 @@ export function PdvApp({
   const savePdvCustomer = (draft: PdvCustomerDraft) => remotePdvActive && remoteSession
     ? remotePdvRequest<{ customer: PdvCustomer }>(remoteSession, "/api/pdv/customers", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.customer)
     : window.caixa.savePdvCustomer(draft);
+  const savePdvReceivable = async (draft: PdvReceivableDraft) => {
+    const receivable = remotePdvActive && remoteSession
+      ? await remotePdvRequest<{ receivable: PdvReceivable }>(remoteSession, "/api/pdv/receivables", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.receivable)
+      : await window.caixa.savePdvReceivable(draft);
+    setSnapshot((current) => current ? { ...current, receivables: [...current.receivables.filter((item) => item.id !== receivable.id), receivable] } : current);
+    return receivable;
+  };
   const applyConfirmedReceivable = (receivable: PdvReceivable) => {
     setSnapshot((current) => current ? {
       ...current,
@@ -590,6 +715,9 @@ export function PdvApp({
   const cancelPdvReceivable = (id: string) => remotePdvActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/receivables/${id}/cancel`, { method: "POST" }).then(() => undefined)
     : window.caixa.cancelPdvReceivable(id);
+  const deletePdvReceivable = (id: string) => remotePdvActive && remoteSession
+    ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/receivables/${id}`, { method: "DELETE" }).then(() => undefined)
+    : window.caixa.deletePdvReceivable(id);
   const importPdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<PdvProductImportResult> : window.caixa.importCoseProducts();
   const previewPdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<PdvProductImportPreview> : window.caixa.previewCoseProducts();
   const removePdvPreset = () => isRemoteClient ? clientConfigurationBlocked() as Promise<number> : window.caixa.removeCoseProducts();
@@ -788,15 +916,14 @@ export function PdvApp({
   )) || [] : [];
 
   const addProduct = (product: PdvProduct, direct = false, bypassReopen = false) => {
-    if (activeTable?.status === "Fechamento" && !bypassReopen) {
+    const latestTableStatus = activeTable
+      ? snapshot?.tables.find((table) => table.number === activeTable.number)?.status || activeTable.status
+      : undefined;
+    if (latestTableStatus === "Fechamento" && !bypassReopen) {
       setConfirmRequest({
-        title: "Reabrir mesa para adicionar produto?",
-        message: "Os pagamentos ja registrados serao preservados. Apenas os itens novos ou pendentes entrarao no proximo saldo.",
-        action: async () => {
-          await setPdvTableStatus(activeTable.number, "Ocupada");
-          setActiveTable((current) => current ? { ...current, status: "Ocupada" } : current);
-          addProduct(product, direct, true);
-        }
+        title: "Conta em processo de fechamento",
+        message: "Existe uma conta desta mesa em processo de fechamento. Deseja realmente adicionar este produto?",
+        action: async () => addProduct(product, direct, true)
       });
       return;
     }
@@ -822,6 +949,15 @@ export function PdvApp({
     }
     setCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
     setQuantity(1);
+  };
+  const addProductBatch = (items: Array<{ product: PdvProduct; quantity: number }>) => {
+    items.forEach(({ product, quantity: batchQuantity }) => {
+      if (product.unitMode !== "unidade") {
+        addProduct(product, true);
+        return;
+      }
+      addResolvedProduct(product, { quantity: Math.max(1, Math.floor(batchQuantity || 1)) }, true);
+    });
   };
 
   const finishDirectSale = () => {
@@ -1373,7 +1509,8 @@ export function PdvApp({
     return <div className="pdv-loading">Carregando PDV local...</div>;
   }
 
-  const visibleSettings = isRemoteClient ? { ...snapshot.settings, ...clientVisualSettings } : snapshot.settings;
+  const visibleSettings = { ...snapshot.settings, ...clientVisualSettings };
+  const pendingRemoteTables = remoteSession ? readPendingRemoteTables(remoteSession.baseUrl) : [];
   const visibleTables = snapshot.tables.filter((table) => {
     const matchesStatus = tableFilter === "Todas" || table.status === tableFilter;
     return matchesStatus && tableSearchDetails(table, tableSearch).matches;
@@ -1382,7 +1519,7 @@ export function PdvApp({
   const activeCloseTotal = roundMoney(activeCloseItems.reduce((total, item) => total + item.total, 0));
 
   return (
-    <div className={`pdv-shell ${embedded ? "embedded" : ""} ${hideTopbar ? "no-topbar" : ""}`}>
+    <div className={`pdv-shell ${embedded ? "embedded" : ""} ${hideTopbar ? "no-topbar" : ""} ${clientVisualSettings.vibrantMode ? "vibrant-mode" : ""} ${clientVisualSettings.hideTableStatusDescriptions ? "status-labels-hidden" : ""}`}>
       {!hideTopbar && (
         <aside className="pdv-topbar">
           <div className="pdv-brand">
@@ -1417,6 +1554,7 @@ export function PdvApp({
             setActiveCategory={setActiveCategory}
             setQuantity={setQuantity}
             addProduct={addProduct}
+            addProductBatch={addProductBatch}
             setCart={setCart}
             setDiscount={setDiscount}
             selectedItemIds={selectedDirectItemIds}
@@ -1426,6 +1564,15 @@ export function PdvApp({
             settings={visibleSettings}
             saleMode={directSaleMode}
             setSaleMode={setDirectSaleMode}
+            appendPdvTableItems={appendPdvTableItems}
+            onOpenTransferredTable={async (tableNumber, subtableName) => {
+              const refreshed = await load();
+              setTab("tables");
+              resetTableMutationTracking();
+              applyFreshOpenTable(refreshed, tableNumber);
+              setCurrentSubtable(subtableName || "");
+              setSelectedTableItemIds([]);
+            }}
           />
         )}
 
@@ -1443,7 +1590,7 @@ export function PdvApp({
                     aria-label="Buscar mesa ou submesa"
                     value={tableSearch}
                     onChange={(event) => setTableSearch(event.target.value)}
-                    placeholder="Buscar mesa ou submesa"
+                    placeholder="Ex.: mesa 12, submesa Oliveira ou produtos: coca-cola"
                   />
                   {tableSearch && (
                     <button type="button" aria-label="Limpar busca de mesas" onClick={() => setTableSearch("")}>
@@ -1471,9 +1618,29 @@ export function PdvApp({
                 const hasSubtableDefinitions = Boolean(table.subtables?.length || table.items.some((item) => item.subtableName));
                 const hasMainItems = table.items.some((item) => !item.subtableName);
                 const hasSubtableItems = table.items.some((item) => item.subtableName);
+                const waitingPayment = table.items.length > 0 && table.items.every((item) => unpaidQuantity(item) <= 0.009);
+                const pendingRecord = pendingRemoteTables.find((item) => item.tableNumber === table.number);
+                const offlineChange = Boolean(pendingRecord && !networkOnline);
+                const syncError = Boolean(pendingRecord && networkOnline && (pendingRecord.attempts || 0) >= 3);
+                const pendingSync = Boolean(pendingRecord && !offlineChange && !syncError);
+                const visualState = syncError
+                  ? { label: "Erro de sincronizacao", className: "sync-error", Icon: AlertTriangle }
+                  : offlineChange
+                    ? { label: "Alteracao offline", className: "offline-change", Icon: WifiOff }
+                    : pendingSync
+                      ? { label: "Sincronizando", className: "pending-sync", Icon: Clock3 }
+                      : waitingPayment
+                        ? { label: "Aguardando pagamento", className: "waiting-payment", Icon: Banknote }
+                        : table.status === "Fechamento"
+                          ? { label: "Em fechamento", className: "closing", Icon: Lock }
+                          : hasSubtableDefinitions
+                            ? { label: hasMainItems ? "Principal + submesas" : "Submesas", className: "subtables", Icon: Layers3 }
+                            : table.status === "Livre"
+                              ? { label: "Vazia", className: "free", Icon: CheckCircle2 }
+                              : { label: table.status, className: "occupied", Icon: Utensils };
                 return (
                   <article
-                    className={`pdv-table-card ${table.status.toLowerCase()} ${hasSubtableDefinitions ? "has-subtables" : ""} ${hasSubtableItems && hasMainItems ? "mixed-subtables" : ""} ${hasSubtableDefinitions && !table.items.length ? "empty-subtables" : ""}`}
+                    className={`pdv-table-card ${table.status.toLowerCase()} ${hasSubtableDefinitions ? "has-subtables" : ""} ${hasSubtableItems && hasMainItems ? "mixed-subtables" : ""} ${hasSubtableDefinitions && !table.items.length ? "empty-subtables" : ""} ${waitingPayment ? "waiting-payment" : ""} ${pendingSync ? "pending-sync" : ""} ${offlineChange ? "offline-change" : ""} ${syncError ? "sync-error" : ""}`}
                     key={table.id}
                     role="button"
                     tabIndex={0}
@@ -1490,13 +1657,18 @@ export function PdvApp({
                     }}
                   >
                     <strong>{String(table.number).padStart(3, "0")}</strong>
-                    <span>{table.status}</span>
+                    <span className={`pdv-table-state ${visualState.className}`} title={pendingRecord?.lastError || visualState.label} aria-label={visualState.label}><visualState.Icon size={12} /><span className="pdv-status-label-copy">{visualState.label}</span></span>
                     <small>Abertura: {shortTime(table.openedAt) || "-"}</small>
                     {snapshot.settings.tablePeopleEnabled && <small>Pessoas: {table.people || "-"}</small>}
                     {table.note && <small className="pdv-table-note" title={table.note}>Obs.: {table.note}</small>}
                     {searchDetails.subtables.length > 0 && (
                       <small className="pdv-table-search-match" title={searchDetails.subtables.join(", ")}>
                         Submesa: {searchDetails.subtables.join(", ")}
+                      </small>
+                    )}
+                    {searchDetails.products.length > 0 && (
+                      <small className="pdv-table-search-match" title={searchDetails.products.join(", ")}>
+                        Produto: {searchDetails.products.join(", ")}
                       </small>
                     )}
                     <b>{table.total ? money(table.total) : "Vr Total:"}</b>
@@ -1515,6 +1687,17 @@ export function PdvApp({
                   <strong>+</strong>
                 </button>
               )}
+            </div>
+            <div className="pdv-table-status-legend" aria-label="Legenda das cores das mesas">
+              <span className="free" title="Vazia"><CheckCircle2 size={12} /><span className="pdv-status-label-copy">Vazia</span></span>
+              <span className="occupied" title="Em atendimento"><Utensils size={12} /><span className="pdv-status-label-copy">Em atendimento</span></span>
+              <span className="subtables" title="Somente submesas"><Layers3 size={12} /><span className="pdv-status-label-copy">Somente submesas</span></span>
+              <span className="mixed" title="Principal + submesas"><Layers3 size={12} /><span className="pdv-status-label-copy">Principal + submesas</span></span>
+              <span className="closing" title="Em fechamento"><Lock size={12} /><span className="pdv-status-label-copy">Em fechamento</span></span>
+              <span className="waiting" title="Aguardando pagamento"><Banknote size={12} /><span className="pdv-status-label-copy">Aguardando pagamento</span></span>
+              <span className="pending" title="Sincronizando"><Clock3 size={12} /><span className="pdv-status-label-copy">Sincronizando</span></span>
+              <span className="offline" title="Alteracao offline"><WifiOff size={12} /><span className="pdv-status-label-copy">Alteracao offline</span></span>
+              <span className="sync-error" title="Erro de sincronizacao"><AlertTriangle size={12} /><span className="pdv-status-label-copy">Erro de sincronizacao</span></span>
             </div>
             {tableMenu && (
               <ContextMenu x={tableMenu.x} y={tableMenu.y} onClose={() => setTableMenu(null)}>
@@ -1545,6 +1728,7 @@ export function PdvApp({
             setActiveCategory={setActiveCategory}
             setQuantity={setQuantity}
             addProduct={addProduct}
+            addProductBatch={addProductBatch}
             setCart={updateLocalTableCart}
             setDiscount={() => undefined}
             finishLabel="Fechar conta"
@@ -1587,7 +1771,7 @@ export function PdvApp({
         )}
 
         {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} removePdvProduct={removePdvProduct} />}
-        {tab === "history" && <HistoryScreen snapshot={snapshot} initialView={initialHistoryView} hideNavigation={hideHistoryNavigation} readOnly={isRemoteClient} onChanged={load} saveCustomer={savePdvCustomer} receiveReceivable={receivePdvReceivable} updateReceivable={updatePdvReceivable} cancelReceivable={cancelPdvReceivable} allowPrint={!isRemoteClient || (snapshot.settings.receiptAllowClientPrint !== false && remoteSession?.allowPrint !== false)} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} onNavigateMain={onNavigateMain} />}
+        {tab === "history" && <HistoryScreen snapshot={snapshot} initialView={initialHistoryView} hideNavigation={hideHistoryNavigation} readOnly={isRemoteClient && remoteSession?.permissions?.manageTables === false} onChanged={load} saveCustomer={savePdvCustomer} saveReceivable={savePdvReceivable} receiveReceivable={receivePdvReceivable} updateReceivable={updatePdvReceivable} cancelReceivable={cancelPdvReceivable} deleteReceivable={deletePdvReceivable} allowPrint={!isRemoteClient || (snapshot.settings.receiptAllowClientPrint !== false && remoteSession?.allowPrint !== false)} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} onNavigateMain={onNavigateMain} onCreatePayableForCustomer={onCreatePayableForCustomer} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
         {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={!canConfigureServer} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} externalActionsRef={advancedSettingsActionsRef} onDirtyChange={onAdvancedSettingsDirtyChange} forcedSection={advancedSection} hideNavigation={hideAdvancedNavigation} />}
       </main>
@@ -1813,6 +1997,7 @@ function PdvSaleScreen(props: {
   setActiveCategory: (value: string) => void;
   setQuantity: (value: number) => void;
   addProduct: (product: PdvProduct, direct?: boolean) => void;
+  addProductBatch?: (items: Array<{ product: PdvProduct; quantity: number }>) => void;
   setCart: (items: PdvCartItem[] | ((current: PdvCartItem[]) => PdvCartItem[])) => void;
   setDiscount: (value: number) => void;
   onFinish: () => void;
@@ -1839,6 +2024,7 @@ function PdvSaleScreen(props: {
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
+  appendPdvTableItems?: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   onCancelWholeTable?: () => void | Promise<void>;
 }) {
   const visibleCart = props.activeTableNumber && props.settings.subtablesEnabled
@@ -1862,7 +2048,7 @@ function PdvSaleScreen(props: {
   const cartListRef = useRef<HTMLDivElement | null>(null);
   const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: PdvCartItem } | null>(null);
   const [transferItem, setTransferItem] = useState<PdvCartItem | null>(null);
-  const [transferListOpen, setTransferListOpen] = useState(false);
+  const [transferListMode, setTransferListMode] = useState<"items" | "accounts" | null>(null);
   const [transferAllOnOpen, setTransferAllOnOpen] = useState(false);
   const [transferPreferredSubtable, setTransferPreferredSubtable] = useState("");
   const [editingItem, setEditingItem] = useState<{
@@ -1920,7 +2106,7 @@ function PdvSaleScreen(props: {
       if (event.key !== "Escape") return;
       if (itemMenu) { event.preventDefault(); setItemMenu(null); return; }
       if (transferItem) { event.preventDefault(); setTransferItem(null); return; }
-      if (transferListOpen) { event.preventDefault(); setTransferListOpen(false); return; }
+      if (transferListMode) { event.preventDefault(); setTransferListMode(null); return; }
       if (editingItem) { event.preventDefault(); setEditingItem(null); return; }
       if (splitItem) { event.preventDefault(); setSplitItem(null); return; }
       if (movingItem) { event.preventDefault(); setMovingItem(null); return; }
@@ -1930,7 +2116,7 @@ function PdvSaleScreen(props: {
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [itemMenu, transferItem, transferListOpen, editingItem, splitItem, movingItem, directDiscountOpen, productLookupOpen, subtableManagerOpen]);
+  }, [itemMenu, transferItem, transferListMode, editingItem, splitItem, movingItem, directDiscountOpen, productLookupOpen, subtableManagerOpen]);
 
   useEffect(() => {
     window.localStorage.setItem("caixa.pdv.cart-density-v2", cartDensity);
@@ -2169,6 +2355,11 @@ function PdvSaleScreen(props: {
             event.preventDefault();
             setItemMenu({ x: event.clientX, y: event.clientY, item: activeItem });
           }}
+          onDoubleClick={(event) => {
+            if (event.target === event.currentTarget && activeItem) {
+              runItemAction("remove", activeItem);
+            }
+          }}
           onKeyDown={(event) => {
             if (event.key === "ArrowUp") {
               event.preventDefault();
@@ -2227,9 +2418,21 @@ function PdvSaleScreen(props: {
           </ContextMenu>
         )}
         {!props.activeTableNumber && (
-          <button className="pdv-ghost-button pdv-direct-discount-button" disabled={!props.cart.length} onClick={() => setDirectDiscountOpen(true)}>
-            Desconto da venda{props.discount > 0 ? `: ${money(props.discount)}` : ""}
-          </button>
+          <div className="pdv-direct-utility-actions">
+            <button className="pdv-ghost-button pdv-direct-discount-button" disabled={!props.cart.length} onClick={() => setDirectDiscountOpen(true)}>
+              Desconto da venda{props.discount > 0 ? `: ${money(props.discount)}` : ""}
+            </button>
+            <button
+              className="pdv-ghost-button"
+              disabled={!props.cart.length || !props.appendPdvTableItems}
+              onClick={() => {
+                setTransferAllOnOpen(true);
+                setTransferListMode("items");
+              }}
+            >
+              Transferir venda
+            </button>
+          </div>
         )}
         <div className="pdv-total-box">
           <span>Valor Total</span>
@@ -2256,7 +2459,7 @@ function PdvSaleScreen(props: {
               onClick={() => {
                 setTransferAllOnOpen(false);
                 setTransferPreferredSubtable("");
-                setTransferListOpen(true);
+                setTransferListMode("items");
               }}
             >
               Transferir
@@ -2295,25 +2498,27 @@ function PdvSaleScreen(props: {
             </button>
           </div>
         )}
-        {transferListOpen && props.activeTableNumber && (
+        {transferListMode && props.activeTableNumber && (
           <TransferListModal
-            cart={visibleCart}
+            cart={transferListMode === "accounts" ? props.cart : visibleCart}
             tables={props.snapshot.tables}
             sourceTableNumber={props.activeTableNumber}
+            sourceSubtableNames={transferListMode === "accounts" ? subtableNames : []}
+            accountMode={transferListMode === "accounts"}
             openPdvTable={props.openPdvTable}
             savePdvTableItems={props.savePdvTableItems}
             transferPdvTableItems={props.transferPdvTableItems}
             selectAllInitially={transferAllOnOpen}
             preferredTargetSubtable={transferPreferredSubtable}
             onCancel={() => {
-              setTransferListOpen(false);
+              setTransferListMode(null);
               setTransferAllOnOpen(false);
               setTransferPreferredSubtable("");
             }}
             onTransferred={(nextSource, targetTableNumber, targetSubtable) => {
               props.setCart(nextSource);
               props.setSelectedItemIds?.(nextSource.at(-1) ? [nextSource.at(-1)!.id] : []);
-              setTransferListOpen(false);
+              setTransferListMode(null);
               setTransferAllOnOpen(false);
               setTransferPreferredSubtable("");
               void props.onOpenTransferredTable?.(targetTableNumber, targetSubtable);
@@ -2339,12 +2544,11 @@ function PdvSaleScreen(props: {
             onDelete={props.onDeleteSubtable}
             onCloseSubtable={props.onCloseSubtable}
             onDeleteAll={props.onDeleteAllSubtables}
-            onTransfer={(name) => {
-              props.setCurrentSubtable?.(name);
+            onTransfer={() => {
               setSubtableManagerOpen(false);
-              setTransferAllOnOpen(true);
-              setTransferPreferredSubtable(name);
-              setTransferListOpen(true);
+              setTransferAllOnOpen(false);
+              setTransferPreferredSubtable("");
+              setTransferListMode("accounts");
             }}
           />
         )}
@@ -2378,14 +2582,53 @@ function PdvSaleScreen(props: {
             }}
           />
         )}
+        {transferListMode && !props.activeTableNumber && props.appendPdvTableItems && (
+          <TransferListModal
+            cart={props.cart}
+            tables={props.snapshot.tables}
+            sourceTableNumber={0}
+            selectAllInitially={transferAllOnOpen}
+            transferPdvTableItems={async (_sourceTableNumber, targetTableNumber, selections) => {
+              const selectedById = new Map(selections.map((selection) => [selection.itemId, selection]));
+              const groups = new Map<string, PdvCartItem[]>();
+              selections.forEach((selection) => {
+                const source = props.cart.find((item) => item.id === selection.itemId);
+                if (!source) return;
+                const subtable = String(selection.subtableName || "").trim();
+                const moved = splitCartItemForTransfer(source, selection.quantity, subtable);
+                groups.set(subtable, [...(groups.get(subtable) || []), moved]);
+              });
+              for (const [subtable, items] of groups) {
+                await props.appendPdvTableItems!(targetTableNumber, items, subtable);
+              }
+              return props.cart.reduce((remaining, item) => {
+                const selection = selectedById.get(item.id);
+                return selection ? subtractCartItemQuantity(remaining, item.id, selection.quantity) : remaining;
+              }, props.cart);
+            }}
+            onCancel={() => {
+              setTransferListMode(null);
+              setTransferAllOnOpen(false);
+            }}
+            onTransferred={(nextSource, targetTableNumber, targetSubtable) => {
+              props.setCart(nextSource);
+              props.setSelectedItemIds?.([]);
+              setTransferListMode(null);
+              setTransferAllOnOpen(false);
+              void props.onOpenTransferredTable?.(targetTableNumber, targetSubtable);
+            }}
+          />
+        )}
         {productLookupOpen && (
           <ProductLookupModal
             products={props.snapshot.products.filter((product) => product.active && product.showOnPdv)}
             pageSize={props.settings.productLookupPageSize || 30}
+            quantitiesEnabled={Boolean(props.settings.productLookupQuantitiesEnabled)}
             onCancel={() => setProductLookupOpen(false)}
             onSelect={(selectedProducts) => {
-              selectedProducts.forEach((product) => {
-                props.addProduct(product, selectedProducts.length > 1);
+              if (props.addProductBatch) props.addProductBatch(selectedProducts);
+              else selectedProducts.forEach(({ product, quantity: selectedQuantity }) => {
+                Array.from({ length: selectedQuantity }, () => product).forEach((item) => props.addProduct(item, selectedProducts.length > 1));
               });
               setProductLookupOpen(false);
             }}
@@ -2551,17 +2794,20 @@ function SplitItemModal({
 function ProductLookupModal({
   products,
   pageSize,
+  quantitiesEnabled,
   onCancel,
   onSelect
 }: {
   products: PdvProduct[];
   pageSize: number;
+  quantitiesEnabled: boolean;
   onCancel: () => void;
-  onSelect: (products: PdvProduct[]) => void;
+  onSelect: (products: Array<{ product: PdvProduct; quantity: number }>) => void;
 }) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
   const normalizedQuery = normalizeTableSearch(query);
@@ -2601,7 +2847,12 @@ function ProductLookupModal({
       setNotice("Produtos vendidos por peso precisam ser adicionados individualmente para informar o peso correto.");
       return;
     }
-    onSelect(items);
+    onSelect(items.map((product) => ({
+      product,
+      quantity: product.unitMode === "unidade" && quantitiesEnabled
+        ? Math.max(1, Math.min(999, Math.floor(quantities[product.id] || 1)))
+        : 1
+    })));
   };
 
   const toggleSelection = (product: PdvProduct, index: number, extendRange: boolean) => {
@@ -2656,7 +2907,7 @@ function ProductLookupModal({
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
       <section
-        className="pdv-payment-modal pdv-product-lookup-modal"
+        className={`pdv-payment-modal pdv-product-lookup-modal ${quantitiesEnabled ? "with-quantities" : ""}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="pdv-product-lookup-title"
@@ -2676,7 +2927,7 @@ function ProductLookupModal({
         </label>
         <div className="pdv-product-lookup-table" role="table" aria-label="Produtos da loja">
           <div className="pdv-product-lookup-head" role="row">
-            <span>Sel.</span><span>Codigo</span><span>Codigo de barras</span><span>Descricao</span><span>Grupo</span><span>Estoque</span><span>Un.</span><span>Preco</span>
+            <span>Sel.</span><span>Codigo</span><span>Codigo de barras</span><span>Descricao</span><span>Grupo</span><span>Estoque</span><span>Un.</span>{quantitiesEnabled && <span>Qtde</span>}<span>Preco</span>
           </div>
           {visible.map((product, index) => (
             <button
@@ -2688,13 +2939,26 @@ function ProductLookupModal({
               onClick={(event) => toggleSelection(product, index, event.shiftKey)}
               onDoubleClick={() => submitProducts([product])}
             >
-              <span className="pdv-product-lookup-check" aria-hidden="true">{selectedIds.includes(product.id) ? "✓" : ""}</span>
+              <span className="pdv-product-lookup-check" aria-hidden="true">{selectedIds.includes(product.id) ? <Check size={15} strokeWidth={3} /> : null}</span>
               <span>{product.sku || product.id.slice(-6)}</span>
               <span>{product.barcode || "-"}</span>
               <strong>{product.name}</strong>
               <span>{product.categoryName}</span>
               <span>{product.trackStock ? formatQuantity(product.stockQuantity || 0) : "-"}</span>
               <span>{product.unit || "UNID"}</span>
+              {quantitiesEnabled && (
+                <label className="pdv-product-lookup-quantity" onClick={(event) => event.stopPropagation()}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={999}
+                    value={quantities[product.id] || 1}
+                    disabled={product.unitMode !== "unidade"}
+                    aria-label={`Quantidade de ${product.name}`}
+                    onChange={(event) => setQuantities((current) => ({ ...current, [product.id]: Math.max(1, Math.min(999, Math.floor(Number(event.target.value) || 1))) }))}
+                  />
+                </label>
+              )}
               <b>{money(product.price)}</b>
             </button>
           ))}
@@ -2752,7 +3016,7 @@ function SubtableManagerModal({
   onDelete?: (name: string) => void;
   onCloseSubtable?: (name: string) => void;
   onDeleteAll?: () => void;
-  onTransfer?: (name: string) => void;
+  onTransfer?: () => void;
 }) {
   const [newName, setNewName] = useState("");
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
@@ -2806,7 +3070,6 @@ function SubtableManagerModal({
               <button type="button" onClick={() => onSelect(name)}><strong>{name}</strong><span>{cart.filter((item) => item.subtableName === name).length} item(ns) | {money(totalFor(name))}</span></button>
               <div className="pdv-subtable-row-actions">
                 <button type="button" className="pdv-ghost-button" onClick={() => { setRenameTarget(name); setRenameValue(name); }}>Renomear</button>
-                {onTransfer && cart.some((item) => item.subtableName === name && unpaidQuantity(item) > 0.009) && <button type="button" className="pdv-ghost-button" onClick={() => onTransfer(name)}>Transferir</button>}
                 {onCloseSubtable && <button type="button" className="pdv-ghost-button" onClick={() => { onCloseSubtable(name); onClose(); }}>Fechar</button>}
                 {onDelete && <button type="button" className="pdv-danger-button" onClick={() => { onDelete(name); onClose(); }}>Cancelar submesa</button>}
               </div>
@@ -2836,6 +3099,7 @@ function SubtableManagerModal({
           ))}
         </div>
         <div className="pdv-action-row">
+          {onTransfer && cart.some((item) => unpaidQuantity(item) > 0.009) && <button type="button" className="pdv-primary-button" onClick={onTransfer}>Transferir contas/submesas</button>}
           {names.length > 0 && onDeleteAll && <button type="button" className="pdv-danger-button" onClick={() => { onDeleteAll(); onClose(); }}>Apagar todas as submesas</button>}
           <button type="button" className="pdv-ghost-button" onClick={onClose}>Voltar para a mesa</button>
         </div>
@@ -3995,6 +4259,8 @@ function TransferListModal({
   cart,
   tables,
   sourceTableNumber,
+  sourceSubtableNames = [],
+  accountMode = false,
   openPdvTable,
   savePdvTableItems,
   transferPdvTableItems,
@@ -4006,6 +4272,8 @@ function TransferListModal({
   cart: PdvCartItem[];
   tables: PdvOpenTable[];
   sourceTableNumber: number;
+  sourceSubtableNames?: string[];
+  accountMode?: boolean;
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
@@ -4014,14 +4282,15 @@ function TransferListModal({
   onCancel: () => void;
   onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number, targetSubtable?: string) => void;
 }) {
-  const [selectedIds, setSelectedIds] = useState<string[]>(() => selectAllInitially ? cart.map((item) => item.id) : []);
-  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(cart.map((item) => [item.id, String(unpaidQuantity(item)).replace(".", ",")])));
-  const [targetTableNumber, setTargetTableNumber] = useState(sourceTableNumber);
+  const transferableCart = cart.filter((item) => unpaidQuantity(item) > 0.009);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => selectAllInitially ? transferableCart.map((item) => item.id) : []);
+  const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(transferableCart.map((item) => [item.id, String(unpaidQuantity(item)).replace(".", ",")])));
+  const [targetTableNumber, setTargetTableNumber] = useState(() => tables.find((table) => table.number !== sourceTableNumber)?.number || sourceTableNumber);
   const [targetSubtable, setTargetSubtable] = useState(preferredTargetSubtable);
   const [creatingTargetSubtable, setCreatingTargetSubtable] = useState(Boolean(preferredTargetSubtable));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
-  const selectedItems = cart.filter((item) => selectedIds.includes(item.id));
+  const selectedItems = transferableCart.filter((item) => selectedIds.includes(item.id));
   const selectedTotal = roundMoney(selectedItems.reduce((total, item) => {
     const quantity = transferQuantity(item, quantities[item.id]);
     const ratio = item.quantity > 0 ? quantity / item.quantity : 1;
@@ -4029,10 +4298,30 @@ function TransferListModal({
   }, 0));
   const targetTable = tables.find((table) => table.number === targetTableNumber);
   const existingSubtables = [...new Set([...(targetTable?.subtables || []), ...(targetTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
+  const allSourceSubtables = [...new Set([...sourceSubtableNames, ...cart.map((item) => item.subtableName || "").filter(Boolean)])];
+  const sourceScopes = [
+    { key: "", label: "Conta principal", count: transferableCart.filter((item) => !item.subtableName).length },
+    ...allSourceSubtables.map((name) => ({
+      key: name,
+      label: name,
+      count: transferableCart.filter((item) => (item.subtableName || "") === name).length
+    }))
+  ];
   const toggle = (id: string) => {
     setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   };
-  const selectAll = () => setSelectedIds(cart.map((item) => item.id));
+  const toggleScope = (scope: string) => {
+    const scopeIds = transferableCart.filter((item) => (item.subtableName || "") === scope).map((item) => item.id);
+    if (!scopeIds.length) return;
+    const fullySelected = scopeIds.every((id) => selectedIds.includes(id));
+    setSelectedIds((current) => fullySelected
+      ? current.filter((id) => !scopeIds.includes(id))
+      : [...new Set([...current, ...scopeIds])]);
+  };
+  const destinationIsOrigin = (subtable: string) => targetTableNumber === sourceTableNumber
+    && selectedItems.length > 0
+    && selectedItems.some((item) => (item.subtableName || "") === subtable);
+  const selectAll = () => setSelectedIds(transferableCart.map((item) => item.id));
   const clearSelection = () => setSelectedIds([]);
   const confirm = async () => {
     if (busy || !selectedItems.length || !targetTable) {
@@ -4040,9 +4329,9 @@ function TransferListModal({
     }
     if (
       targetTableNumber === sourceTableNumber
-      && selectedItems.every((item) => (item.subtableName || "") === targetSubtable.trim())
+      && selectedItems.some((item) => (item.subtableName || "") === targetSubtable.trim())
     ) {
-      setNotice("Os itens selecionados ja estao nesse destino.");
+      setNotice("O destino tambem esta entre as contas de origem. Escolha outra mesa ou submesa.");
       return;
     }
     setBusy(true);
@@ -4072,12 +4361,12 @@ function TransferListModal({
 
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-transfer-list-modal">
+      <section className={`pdv-payment-modal pdv-transfer-list-modal ${accountMode ? "pdv-account-transfer-modal" : ""}`}>
         <div className="pdv-section-head">
           <div>
-            <span className="pdv-eyebrow">Transferir produtos</span>
-            <h1>Escolha os itens da mesa</h1>
-            <p>Marque os produtos, ajuste a quantidade de cada um e escolha o destino.</p>
+            <span className="pdv-eyebrow">{sourceTableNumber > 0 ? accountMode ? "Transferir contas" : "Transferir produtos" : "Destino da venda"}</span>
+            <h1>{sourceTableNumber > 0 ? accountMode ? "Transferir principal e submesas" : "Escolha os itens da mesa" : "Transferir venda para uma mesa"}</h1>
+            <p>{accountMode ? "Selecione uma ou varias contas e envie todos os produtos para um unico destino." : "Marque os produtos, ajuste a quantidade de cada um e escolha o destino."}</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
@@ -4090,7 +4379,7 @@ function TransferListModal({
               setCreatingTargetSubtable(Boolean(preferredTargetSubtable));
             }}>
               {tables.map((table) => (
-                <option key={table.number} value={table.number}>Mesa {String(table.number).padStart(3, "0")} - {table.status}</option>
+                <option key={table.number} value={table.number}>Mesa {String(table.number).padStart(3, "0")} - {table.status}{table.number === sourceTableNumber ? " (mesa atual)" : ""}</option>
               ))}
             </select>
           </label>
@@ -4109,8 +4398,8 @@ function TransferListModal({
                 setTargetSubtable(value === "__new__" ? "" : value);
               }}
             >
-              <option value="">Mesa principal</option>
-              {existingSubtables.map((name) => <option key={name} value={name}>{name}</option>)}
+              <option value="" disabled={destinationIsOrigin("")}>Mesa principal{destinationIsOrigin("") ? " (origem)" : ""}</option>
+              {existingSubtables.map((name) => <option key={name} value={name} disabled={destinationIsOrigin(name)}>{name}{destinationIsOrigin(name) ? " (origem)" : ""}</option>)}
               <option value="__temporary__">Criar submesa temporaria</option>
               <option value="__new__">Criar nova submesa...</option>
             </select>
@@ -4118,12 +4407,22 @@ function TransferListModal({
           </label>
           <Metric title="Selecionado" value={money(selectedTotal)} />
         </div>
+        {sourceTableNumber > 0 && accountMode && (
+          <div className="pdv-transfer-scope-picker" aria-label="Selecionar contas de origem">
+            <span>Selecionar contas:</span>
+            {sourceScopes.map((scope) => {
+              const scopeIds = transferableCart.filter((item) => (item.subtableName || "") === scope.key).map((item) => item.id);
+              const selected = scopeIds.length > 0 && scopeIds.every((id) => selectedIds.includes(id));
+              return <button type="button" className={selected ? "selected" : ""} disabled={!scope.count} key={scope.key || "__main__"} onClick={() => toggleScope(scope.key)}>{scope.label} <small>{scope.count}</small></button>;
+            })}
+          </div>
+        )}
         <div className="pdv-transfer-select-row">
           <button className="pdv-ghost-button" type="button" disabled={!cart.length} onClick={selectAll}>Selecionar todos</button>
           <button className="pdv-ghost-button" type="button" disabled={!selectedIds.length} onClick={clearSelection}>Limpar selecao</button>
         </div>
         <div className="pdv-transfer-list">
-          {cart.map((item, index) => (
+          {transferableCart.map((item, index) => (
             <button className={selectedIds.includes(item.id) ? "selected" : ""} key={item.id} onClick={() => toggle(item.id)}>
               <input type="checkbox" checked={selectedIds.includes(item.id)} onChange={() => toggle(item.id)} onClick={(event) => event.stopPropagation()} />
               <span>{index + 1}. {item.productName}</span>
@@ -4137,7 +4436,7 @@ function TransferListModal({
                 : transferQuantity(item, quantities[item.id]) * item.unitPrice))}</strong>
             </button>
           ))}
-          {!cart.length && <div className="pdv-empty">Nenhum produto para transferir.</div>}
+          {!transferableCart.length && <div className="pdv-empty">Nenhum produto em aberto para transferir.</div>}
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
@@ -4342,6 +4641,7 @@ function TransferItemModal({
   const [notice, setNotice] = useState("");
   const targetTable = tables.find((table) => table.number === targetTableNumber);
   const existingSubtables = [...new Set([...(targetTable?.subtables || []), ...(targetTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
+  const destinationIsOrigin = (subtable: string) => targetTableNumber === sourceTableNumber && subtable === (item.subtableName || "");
   const quantity = roundQuantity(Math.min(item.quantity, Math.max(0.001, parseBrazilianNumber(quantityText))));
 
   const confirm = async () => {
@@ -4397,7 +4697,7 @@ function TransferItemModal({
               setCreatingTargetSubtable(false);
             }}>
               {tables.map((table) => (
-                <option key={table.number} value={table.number}>Mesa {String(table.number).padStart(3, "0")} - {table.status}</option>
+                <option key={table.number} value={table.number}>Mesa {String(table.number).padStart(3, "0")} - {table.status}{table.number === sourceTableNumber ? " (mesa atual)" : ""}</option>
               ))}
             </select>
           </label>
@@ -4415,8 +4715,8 @@ function TransferItemModal({
                 setTargetSubtable(value === "__new__" ? "" : value);
               }}
             >
-              <option value="">Mesa principal</option>
-              {existingSubtables.map((name) => <option key={name} value={name}>{name}</option>)}
+              <option value="" disabled={destinationIsOrigin("")}>Mesa principal{destinationIsOrigin("") ? " (origem)" : ""}</option>
+              {existingSubtables.map((name) => <option key={name} value={name} disabled={destinationIsOrigin(name)}>{name}{destinationIsOrigin(name) ? " (origem)" : ""}</option>)}
               <option value="__new__">Criar nova submesa...</option>
             </select>
             {creatingTargetSubtable && <input autoFocus value={targetSubtable} onChange={(event) => setTargetSubtable(event.target.value)} placeholder="Nome da nova submesa" />}
@@ -5464,6 +5764,8 @@ function CategoryEditorModal({ category, onCancel, onSave }: { category: PdvCate
 }
 
 function ContextMenu({ x, y, children, onClose }: { x: number; y: number; children: React.ReactNode; onClose: () => void }) {
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState({ left: Math.max(8, x), top: Math.max(8, y) });
   useEffect(() => {
     const close = () => onClose();
     window.addEventListener("click", close);
@@ -5473,10 +5775,24 @@ function ContextMenu({ x, y, children, onClose }: { x: number; y: number; childr
       window.removeEventListener("keydown", close);
     };
   }, [onClose]);
-  const safeX = Math.max(8, Math.min(x, window.innerWidth - 260));
-  const safeY = Math.max(8, Math.min(y, window.innerHeight - 380));
+
+  useLayoutEffect(() => {
+    const reposition = () => {
+      const bounds = menuRef.current?.getBoundingClientRect();
+      const width = bounds?.width || 260;
+      const height = bounds?.height || 380;
+      setPosition({
+        left: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
+        top: Math.max(8, Math.min(y, window.innerHeight - height - 8))
+      });
+    };
+    reposition();
+    window.addEventListener("resize", reposition);
+    return () => window.removeEventListener("resize", reposition);
+  }, [x, y]);
+
   return (
-    <div className="pdv-context-menu" style={{ left: safeX, top: safeY }} onClick={(event) => event.stopPropagation()}>
+    <div ref={menuRef} className="pdv-context-menu" style={position} onClick={(event) => event.stopPropagation()}>
       {children}
     </div>
   );
@@ -5623,42 +5939,65 @@ function ReceivablesScreen({
   view,
   onViewChange,
   onChanged,
+  onSaveReceivable,
   onReceive,
+  onUpdateReceivable,
   onCancelReceivable,
+  onDeleteReceivable,
   showSales,
   hideNavigation,
   allowPrint,
   receiptPrintTargets,
   onRemoteReceiptPrint
+  ,readOnly
 }: {
   snapshot: PdvSnapshot;
   view: HistoryView;
   onViewChange: (value: HistoryView) => void;
   onChanged: () => void;
+  onSaveReceivable: (draft: PdvReceivableDraft) => Promise<PdvReceivable>;
   onReceive: (id: string, payment: PdvReceivablePayment, operationId?: string) => Promise<PdvReceivable>;
+  onUpdateReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   onCancelReceivable: (id: string) => Promise<void>;
+  onDeleteReceivable: (id: string) => Promise<void>;
   showSales: boolean;
   hideNavigation: boolean;
   allowPrint: boolean;
   receiptPrintTargets: Array<{ id: string; label: string }>;
   onRemoteReceiptPrint?: (targetId: string, payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
+  readOnly: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("Todos");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [selected, setSelected] = useState<PdvReceivable | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<PdvReceivable | null>(null);
   const [receiving, setReceiving] = useState<PdvReceivable | null>(null);
   const [cancelRequest, setCancelRequest] = useState<PdvReceivable | null>(null);
+  const [deleteRequest, setDeleteRequest] = useState<PdvReceivable | null>(null);
   const [receiptTarget, setReceiptTarget] = useState<{ sale: PdvSale; receivable: PdvReceivable } | null>(null);
   const [notice, setNotice] = useState("");
   const normalized = query.trim().toLocaleLowerCase("pt-BR");
   const receivables = snapshot.receivables.filter((item) => {
+    if (from && (item.dueDate || "") < from) return false;
+    if (to && (item.dueDate || "9999-12-31") > to) return false;
     if (status === "Pendentes" && !["Em aberto", "Parcialmente recebida", "Vencida"].includes(item.status)) return false;
-    if (status !== "Todos" && status !== "Pendentes" && item.status !== status) return false;
+    if (status === "Historico" && !["Recebida", "Cancelada", "Excluida"].includes(item.status)) return false;
+    if (status !== "Todos" && status !== "Pendentes" && status !== "Historico" && item.status !== status) return false;
     if (!normalized) return true;
     const sale = snapshot.recentSales.find((value) => value.id === item.saleId);
     return [
       item.customerName,
       item.status,
       item.note,
+      item.description || "",
+      item.category || "",
+      item.costCenter || "",
+      item.documentNumber || "",
+      item.paymentAccount || "",
+      ...(item.tags || []),
       item.tableNumber ? `mesa ${item.tableNumber}` : "",
       money(item.originalAmount),
       ...(sale?.items.map((value) => value.productName) || [])
@@ -5668,15 +6007,23 @@ function ReceivablesScreen({
   const outstanding = roundMoney(pending.reduce((sum, item) => sum + item.balance, 0));
   const overdue = roundMoney(pending.filter((item) => item.status === "Vencida").reduce((sum, item) => sum + item.balance, 0));
   const receivedToday = roundMoney(snapshot.receivables.flatMap((item) => item.payments).filter((payment) => localDateInputValue(new Date(payment.createdAt)) === localDateInputValue()).reduce((sum, payment) => sum + payment.amount, 0));
+  const today = localDateInputValue();
+  const dueToday = pending.filter((item) => item.dueDate === today);
+  const dueNextSevenDays = pending.filter((item) => {
+    if (!item.dueDate) return false;
+    const days = Math.ceil((new Date(`${item.dueDate}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86400000);
+    return days >= 0 && days <= 7;
+  });
 
   const registerPayment = async (receivable: PdvReceivable, payment: PdvPayment) => {
     if (payment.method === "Conta a receber") return;
-    await onReceive(receivable.id, {
+    const next = await onReceive(receivable.id, {
       ...payment,
       receivableId: receivable.id,
       createdAt: new Date().toISOString(),
       method: payment.method
     }, crypto.randomUUID());
+    setSelected(next);
     setReceiving(null);
     await onChanged();
     setNotice("Recebimento registrado e saldo atualizado.");
@@ -5692,52 +6039,109 @@ function ReceivablesScreen({
   };
 
   return (
-    <section className="pdv-panel">
-      <div className="pdv-section-head">
-        <div><span className="pdv-eyebrow">Financeiro simples</span><h1>Contas a receber</h1><p>Vendas feitas para pagamento posterior e recebimentos registrados.</p></div>
+    <section className="pdv-panel financial-module-shell pdv-receivable-professional">
+      <div className="pdv-section-head financial-module-head">
+        <div><span className="pdv-eyebrow">Financeiro</span><h1>Contas a receber</h1><p>Cobrancas, vencimentos e recebimentos vinculados aos clientes.</p></div>
+        <div className="financial-head-actions"><button className="pdv-ghost-button" onClick={() => downloadFinancialCsv(`contas-a-receber-${today}.csv`, ["Cliente", "Descricao", "Mesa", "Submesa", "Categoria", "Centro de custo", "Documento", "Vencimento", "Original", "Recebido", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"], receivables.map((item) => [item.customerName, item.description, item.tableNumber || "", item.subtableName || "", item.category, item.costCenter, item.documentNumber, item.dueDate, item.originalAmount, item.receivedAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note]))}><Download size={16} /> Exportar</button>{!readOnly && <button className="pdv-primary-button" onClick={() => setCreating(true)}><Plus size={16} /> Nova conta</button>}</div>
       </div>
       {!hideNavigation && <HistoryViewTabs value={view} onChange={onViewChange} showSales={showSales} />}
-      <div className="pdv-payment-summary pdv-receivable-metrics">
-        <Metric title="Saldo a receber" value={money(outstanding)} />
-        <Metric title="Vencido" value={money(overdue)} />
-        <Metric title="Recebido hoje" value={money(receivedToday)} />
+      <div className="financial-metrics">
+        <button onClick={() => { setStatus("Pendentes"); setFrom(""); setTo(""); }}><span>Saldo em aberto</span><strong>{money(outstanding)}</strong><small>{pending.length} conta(s)</small></button>
+        <button className={overdue ? "warning" : ""} onClick={() => { setStatus("Vencida"); setFrom(""); setTo(""); }}><span>Vencidas</span><strong>{money(overdue)}</strong><small>{pending.filter((item) => item.status === "Vencida").length} pendencia(s)</small></button>
+        <button onClick={() => { setStatus("Todos"); setFrom(today); setTo(today); }}><span>Vence hoje</span><strong>{money(dueToday.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{dueToday.length} conta(s)</small></button>
+        <button onClick={() => { setStatus("Pendentes"); setFrom(""); setTo(""); }}><span>Proximos 7 dias</span><strong>{money(dueNextSevenDays.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{dueNextSevenDays.length} vencimento(s)</small></button>
+        <button onClick={() => { setStatus("Recebida"); setFrom(today); setTo(today); }}><span>Recebido hoje</span><strong>{money(receivedToday)}</strong><small>Movimentacao do dia</small></button>
       </div>
-      <div className="pdv-history-filters">
-        <label><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cliente, mesa, produto ou valor..." /></label>
-        <label><span>Status</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option>Pendentes</option><option>Todos</option><option>Em aberto</option><option>Parcialmente recebida</option><option>Vencida</option><option>Recebida</option><option>Cancelada</option></select></label>
+      <div className="financial-filters">
+        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cliente, documento, categoria, mesa ou produto" /></label>
+        <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
+        <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
+        <label><span>Situacao</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option>Pendentes</option><option>Historico</option><option>Todos</option><option>Em aberto</option><option>Parcialmente recebida</option><option>Vencida</option><option>Recebida</option><option>Cancelada</option><option>Excluida</option></select></label>
+        <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Exibir tudo</button>
       </div>
-      <div className="pdv-receivable-list">
-        {receivables.map((receivable) => (
-          <article key={receivable.id} className={`status-${receivable.status.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-")}`}>
-            <div>
-              <strong>{receivable.customerName}</strong>
-              <span>{new Date(receivable.createdAt).toLocaleString("pt-BR")}{receivable.tableNumber ? ` | Mesa ${String(receivable.tableNumber).padStart(3, "0")}` : ""}{receivable.subtableName ? ` | ${receivable.subtableName}` : ""}</span>
-              <small>{receivable.dueDate ? `Vencimento ${receivable.dueDate.split("-").reverse().join("/")}` : "Sem vencimento"} | {receivable.status}</small>
-              {receivable.note && <small className="pdv-receivable-note">Obs.: {receivable.note}</small>}
+      <div className="financial-master-detail">
+        <div className="financial-account-list">
+          <div className="financial-account-list-head"><span>Cliente / origem</span><span>Vencimento</span><span>Original</span><span>Recebido</span><span>Saldo</span><span>Situacao</span></div>
+          {receivables.map((receivable) => (
+            <article key={receivable.id} className={`${receivable.status === "Vencida" ? "overdue" : ""} ${selected?.id === receivable.id ? "selected" : ""}`} onClick={() => setSelected(receivable)}>
+              <div><strong>{receivable.customerName}</strong><small>{receivable.description || (receivable.tableNumber ? `Mesa ${String(receivable.tableNumber).padStart(3, "0")}${receivable.subtableName ? ` · ${receivable.subtableName}` : ""}` : "Venda vinculada")}</small></div>
+              <time>{receivable.dueDate ? new Date(`${receivable.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "Sem data"}</time>
+              <b>{money(receivable.originalAmount)}</b><b>{money(receivable.receivedAmount)}</b><b>{money(receivable.balance)}</b>
+              <span className={`financial-status status-${receivable.status.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-")}`}>{receivable.status}</span>
+            </article>
+          ))}
+          {!receivables.length && <div className="pdv-empty">Nenhuma conta encontrada para os filtros.</div>}
+        </div>
+        <aside className="financial-account-detail">
+          {selected ? <>
+            <div className="financial-detail-title"><span className="pdv-eyebrow">Detalhes da conta</span><h3>{selected.customerName}</h3><p>{selected.description || selected.note || "Sem descricao adicional."}</p></div>
+            <dl>
+              <div><dt>Valor original</dt><dd>{money(selected.originalAmount)}</dd></div><div><dt>Recebido</dt><dd>{money(selected.receivedAmount)}</dd></div><div><dt>Saldo</dt><dd>{money(selected.balance)}</dd></div>
+              <div><dt>Categoria</dt><dd>{selected.category || "Nao informada"}</dd></div><div><dt>Centro de custo</dt><dd>{selected.costCenter || "Nao informado"}</dd></div><div><dt>Documento</dt><dd>{selected.documentNumber || "Nao informado"}</dd></div><div><dt>Conta prevista</dt><dd>{selected.paymentAccount || "Nao informada"}</dd></div>
+            </dl>
+            {(selected.tags || []).length > 0 && <div className="financial-tag-list">{(selected.tags || []).map((tag) => <span key={tag}>{tag}</span>)}</div>}
+            <div className="financial-detail-actions">
+              {snapshot.recentSales.some((sale) => sale.id === selected.saleId) && <button className="pdv-ghost-button" onClick={() => openReceipt(selected)}><ReceiptText size={15} /> Recibo</button>}
+              {!readOnly && <button className="pdv-ghost-button" disabled={["Cancelada", "Excluida"].includes(selected.status)} onClick={() => setEditing(selected)}><Pencil size={15} /> Editar</button>}
+              {!readOnly && <button className="pdv-primary-button" disabled={selected.balance <= 0.009 || ["Cancelada", "Excluida"].includes(selected.status)} onClick={() => setReceiving(selected)}>Registrar recebimento</button>}
             </div>
-            <div><span>Original</span><b>{money(receivable.originalAmount)}</b></div>
-            <div><span>Recebido</span><b>{money(receivable.receivedAmount)}</b></div>
-            <div><span>Saldo</span><b>{money(receivable.balance)}</b></div>
-            <div className="pdv-receivable-actions">
-              <button className="pdv-ghost-button" onClick={() => openReceipt(receivable)}><ReceiptText size={15} /> Recibo</button>
-              <button className="pdv-primary-button" disabled={receivable.balance <= 0.009 || receivable.status === "Cancelada"} onClick={() => setReceiving(receivable)}>Registrar pagamento</button>
-              <button className="pdv-danger-button" disabled={receivable.receivedAmount > 0.009 || receivable.status === "Cancelada"} onClick={() => setCancelRequest(receivable)}>Cancelar</button>
-            </div>
-            {receivable.payments.length > 0 && (
-              <details>
-                <summary>{receivable.payments.length} recebimento(s)</summary>
-                {receivable.payments.map((payment) => <p key={payment.id}>{new Date(payment.createdAt).toLocaleString("pt-BR")} | {payment.method} | {money(payment.amount)}{payment.change ? ` | Troco ${money(payment.change)}` : ""}</p>)}
-              </details>
-            )}
-          </article>
-        ))}
-        {!receivables.length && <div className="pdv-empty">Nenhuma conta encontrada para os filtros.</div>}
+            <div className="financial-payment-history"><strong>Recebimentos</strong>{selected.payments.map((payment) => <div key={payment.id}><span>{new Date(payment.createdAt).toLocaleString("pt-BR")} · {payment.method}</span><b>{money(payment.amount)}</b><small>{payment.description || payment.originDevice || ""}</small></div>)}{!selected.payments.length && <span>Nenhum recebimento registrado.</span>}</div>
+            <div className="financial-audit-timeline"><strong>Linha do tempo</strong>{(selected.events || []).map((event) => <div key={event.id}><i /><span><b>{event.action}</b>{event.description}</span><time>{new Date(event.createdAt).toLocaleString("pt-BR")} · {event.originDevice}</time>{event.amount !== undefined && <em>{money(event.amount)}</em>}</div>)}{!selected.events?.length && <div className="financial-audit-created"><i /><span><b>Criacao</b>Conta gerada pela venda.</span><time>{new Date(selected.createdAt).toLocaleString("pt-BR")}</time></div>}</div>
+            {!readOnly && <div className="financial-danger-actions"><button disabled={selected.receivedAmount > 0.009 || ["Cancelada", "Excluida"].includes(selected.status)} onClick={() => setCancelRequest(selected)}>Cancelar</button><button disabled={selected.status === "Excluida"} onClick={() => setDeleteRequest(selected)}><Trash2 size={15} /> Excluir</button></div>}
+          </> : <div className="financial-detail-empty"><ReceiptText size={30} /><strong>Selecione uma conta</strong><span>Os detalhes, recebimentos e historico aparecerao aqui.</span></div>}
+        </aside>
       </div>
       {receiving && <ReceivableCollectionModal receivable={receiving} onCancel={() => setReceiving(null)} onConfirm={(payment) => registerPayment(receiving, payment)} />}
-      {cancelRequest && <PdvConfirmModal title="Cancelar conta a receber?" message={`A conta de ${cancelRequest.customerName} sera marcada como cancelada. A venda permanecera no Historico.`} onCancel={() => setCancelRequest(null)} onConfirm={() => void onCancelReceivable(cancelRequest.id).then(async () => { setCancelRequest(null); await onChanged(); })} />}
+      {creating && <ReceivableDraftModal customers={snapshot.customers} onCancel={() => setCreating(false)} onSave={async (draft) => { const next = await onSaveReceivable(draft); setSelected(next); setCreating(false); await onChanged(); setNotice("Conta a receber cadastrada."); }} />}
+      {editing && <ReceivableEditorModal receivable={editing} sale={snapshot.recentSales.find((item) => item.id === editing.saleId)} onCancel={() => setEditing(null)} onDelete={() => { setDeleteRequest(editing); setEditing(null); }} onSave={async (patch) => { const next = await onUpdateReceivable(editing.id, patch); setSelected(next); setEditing(null); await onChanged(); setNotice("Conta a receber atualizada."); }} />}
+      {cancelRequest && <PdvConfirmModal title="Cancelar conta a receber?" message={`A conta de ${cancelRequest.customerName} sera marcada como cancelada. A venda permanecera no Historico.`} onCancel={() => setCancelRequest(null)} onConfirm={() => void onCancelReceivable(cancelRequest.id).then(async () => { setSelected((current) => current?.id === cancelRequest.id ? null : current); setCancelRequest(null); await onChanged(); })} />}
+      {deleteRequest && <PdvConfirmModal title="Excluir conta a receber?" message={`A conta de ${deleteRequest.customerName} saira das listas operacionais e permanecera somente no historico como excluida.`} confirmLabel="Excluir conta" danger onCancel={() => setDeleteRequest(null)} onConfirm={() => void onDeleteReceivable(deleteRequest.id).then(async () => { setSelected((current) => current?.id === deleteRequest.id ? null : current); setDeleteRequest(null); await onChanged(); setNotice("Conta movida para o historico de excluidas."); })} />}
       {receiptTarget && <PdvReceiptDraftModal sale={receiptTarget.sale} receivable={receiptTarget.receivable} receiptSettings={snapshot.settings} customers={snapshot.customers} allowPrint={allowPrint} printTargets={receiptPrintTargets} onRemotePrint={onRemoteReceiptPrint} onClose={() => setReceiptTarget(null)} onNotice={setNotice} />}
       {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
     </section>
+  );
+}
+
+function ReceivableDraftModal({ customers, onCancel, onSave }: { customers: PdvCustomer[]; onCancel: () => void; onSave: (draft: PdvReceivableDraft) => Promise<void> }) {
+  const [draft, setDraft] = useState<PdvReceivableDraft>({ id: crypto.randomUUID(), customerId: "", description: "", dueDate: localDateInputValue(), amount: 0, tags: [] });
+  const [amountText, setAmountText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const amount = roundMoney(Number(amountText.replace(",", ".")) || 0);
+  const valid = Boolean(draft.customerId && draft.description.trim() && amount > 0);
+  const confirm = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onSave({ ...draft, amount });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Nao foi possivel salvar a conta.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  useModalConfirmShortcut(() => void confirm(), onCancel, valid && !busy);
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop" role="dialog" aria-modal="true">
+      <section className="pdv-payment-modal pdv-admin-modal pdv-financial-editor-modal">
+        <div className="pdv-section-head"><div><span className="pdv-eyebrow">Contas a receber</span><h1>Nova conta</h1><p>Cadastre uma cobranca sem precisar criar uma venda no PDV.</p></div><button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button></div>
+        <div className="pdv-editor-grid pdv-financial-editor-grid">
+          <label className="pdv-wide-field"><span>Cliente *</span><select autoFocus value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}><option value="">Selecione um cliente</option>{customers.filter((item) => item.active).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.document ? ` · ${customer.document}` : ""}</option>)}</select></label>
+          <label className="pdv-wide-field"><span>Descricao *</span><input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Ex.: Encomenda, mensalidade ou venda a prazo" /></label>
+          <label><span>Valor *</span><input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} placeholder="0,00" /></label>
+          <label><span>Vencimento</span><input type="date" value={draft.dueDate || ""} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value })} /></label>
+          <label><span>Categoria</span><input value={draft.category || ""} onChange={(event) => setDraft({ ...draft, category: event.target.value })} placeholder="Ex.: Vendas, encomendas" /></label>
+          <label><span>Centro de custo</span><input value={draft.costCenter || ""} onChange={(event) => setDraft({ ...draft, costCenter: event.target.value })} placeholder="Ex.: Loja principal" /></label>
+          <label><span>Documento</span><input value={draft.documentNumber || ""} onChange={(event) => setDraft({ ...draft, documentNumber: event.target.value })} placeholder="Pedido ou referencia" /></label>
+          <label><span>Conta prevista</span><input value={draft.paymentAccount || ""} onChange={(event) => setDraft({ ...draft, paymentAccount: event.target.value })} placeholder="Ex.: Caixa ou Banco" /></label>
+          <label className="pdv-wide-field"><span>Tags</span><input value={(draft.tags || []).join(", ")} onChange={(event) => setDraft({ ...draft, tags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} placeholder="Ex.: mensalista, prioridade" /></label>
+          <label className="pdv-wide-field"><span>Observacao</span><textarea rows={3} value={draft.note || ""} onChange={(event) => setDraft({ ...draft, note: event.target.value })} /></label>
+        </div>
+        {error && <div className="pdv-inline-warning">{error}</div>}
+        <div className="pdv-action-row"><button className="pdv-ghost-button" onClick={onCancel} disabled={busy}>Cancelar</button><button className="pdv-primary-button" disabled={!valid || busy} onClick={() => void confirm()}>{busy ? "Salvando..." : "Salvar conta"}</button></div>
+      </section>
+    </div>
   );
 }
 
@@ -5770,10 +6174,12 @@ function CustomersScreen({
   onReceive,
   onUpdateReceivable,
   onCancelReceivable,
+  onDeleteReceivable,
   allowPrint,
   receiptPrintTargets,
   onRemoteReceiptPrint,
-  onNavigateMain
+  onNavigateMain,
+  onCreatePayableForCustomer
 }: {
   snapshot: PdvSnapshot;
   view: HistoryView;
@@ -5786,36 +6192,82 @@ function CustomersScreen({
   onReceive: (id: string, payment: PdvReceivablePayment, operationId?: string) => Promise<PdvReceivable>;
   onUpdateReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   onCancelReceivable: (id: string) => Promise<void>;
+  onDeleteReceivable: (id: string) => Promise<void>;
   allowPrint: boolean;
   receiptPrintTargets: Array<{ id: string; label: string }>;
   onRemoteReceiptPrint?: (targetId: string, payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
   onNavigateMain?: (tab: "history" | "reports") => void;
+  onCreatePayableForCustomer?: (customer: PdvCustomer) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [customerStatus, setCustomerStatus] = useState<"Todos" | "Ativos" | "Inativos" | "Com saldo">("Todos");
   const [editing, setEditing] = useState<PdvCustomer | "new" | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<PdvCustomer | null>(null);
+  const [detailCustomer, setDetailCustomer] = useState<PdvCustomer | null>(null);
   const [notice, setNotice] = useState("");
   const normalized = query.trim().toLocaleLowerCase("pt-BR");
-  const customers = snapshot.customers.filter((customer) => !normalized || [customer.name, customer.document, customer.phone, customer.email].join(" ").toLocaleLowerCase("pt-BR").includes(normalized));
-  const balanceFor = (id: string) => roundMoney(snapshot.receivables.filter((item) => item.customerId === id && item.status !== "Cancelada").reduce((sum, item) => sum + item.balance, 0));
+  const balanceFor = (id: string) => roundMoney(snapshot.receivables.filter((item) => item.customerId === id && !["Cancelada", "Excluida"].includes(item.status)).reduce((sum, item) => sum + item.balance, 0));
   const accountCountFor = (id: string) => snapshot.receivables.filter((item) => item.customerId === id).length;
+  const customers = snapshot.customers.filter((customer) => {
+    const matchesQuery = !normalized || [customer.name, customer.document, customer.phone, customer.email, customer.note].join(" ").toLocaleLowerCase("pt-BR").includes(normalized);
+    const matchesStatus = customerStatus === "Todos"
+      || (customerStatus === "Ativos" && customer.active)
+      || (customerStatus === "Inativos" && !customer.active)
+      || (customerStatus === "Com saldo" && balanceFor(customer.id) > 0.009);
+    return matchesQuery && matchesStatus;
+  });
+  const activeCustomers = snapshot.customers.filter((customer) => customer.active);
+  const customersWithBalance = snapshot.customers.filter((customer) => balanceFor(customer.id) > 0.009);
+  const outstandingBalance = roundMoney(customersWithBalance.reduce((sum, customer) => sum + balanceFor(customer.id), 0));
+  const registeredAccounts = snapshot.receivables.filter((item) => !["Cancelada", "Excluida"].includes(item.status)).length;
   return (
-    <section className="pdv-panel">
-      <div className="pdv-section-head"><div><span className="pdv-eyebrow">Clientes e contas</span><h1>Clientes</h1><p>Cadastro, pendencias, recebimentos e historico em um unico lugar.</p></div>{!readOnly && <button className="pdv-primary-button" onClick={() => setEditing("new")}><Plus size={16} /> Novo cliente</button>}</div>
+    <section className="pdv-panel financial-module-shell pdv-customer-professional">
+      <div className="pdv-section-head financial-module-head"><div><span className="pdv-eyebrow">Relacionamento</span><h1>Clientes</h1><p>Cadastros, contatos, saldos e movimentacoes reunidos em uma unica ficha.</p></div>{!readOnly && <button className="pdv-primary-button" onClick={() => setEditing("new")}><Plus size={16} /> Novo cliente</button>}</div>
       {!hideNavigation && <HistoryViewTabs value={view} onChange={onViewChange} showSales={showSales} />}
-      <div className="pdv-history-filters"><label><span>Buscar cliente</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome, telefone, CPF/CNPJ..." /></label></div>
-      <div className="pdv-customer-list">
-        {customers.map((customer) => (
-          <article key={customer.id} className={!customer.active ? "inactive" : ""}>
-            <div><strong>{customer.name}</strong><span>{customer.phone || "Sem telefone"}{customer.document ? ` | ${customer.document}` : ""}</span><small>{customer.note || (customer.active ? "Cliente ativo" : "Cliente inativo")}</small></div>
-            <div><span>{accountCountFor(customer.id)} conta(s)</span><b>{money(balanceFor(customer.id))}</b><small>Saldo pendente</small></div>
-            <div className="pdv-customer-row-actions">
-              <button className="pdv-primary-button" onClick={() => setSelectedCustomer(customer)}>Abrir ficha</button>
-              {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditing(customer)}>Editar</button>}
+      <div className="financial-metrics customer-financial-metrics">
+        <button onClick={() => setCustomerStatus("Todos")}><span>Total de clientes</span><strong>{snapshot.customers.length}</strong><small>Cadastros encontrados</small></button>
+        <button onClick={() => setCustomerStatus("Ativos")}><span>Clientes ativos</span><strong>{activeCustomers.length}</strong><small>Disponiveis para lancamentos</small></button>
+        <button className={customersWithBalance.length ? "warning" : ""} onClick={() => setCustomerStatus("Com saldo")}><span>Com saldo pendente</span><strong>{customersWithBalance.length}</strong><small>Precisam de acompanhamento</small></button>
+        <button onClick={() => setCustomerStatus("Com saldo")}><span>Saldo a receber</span><strong>{money(outstandingBalance)}</strong><small>Somado entre clientes</small></button>
+        <button onClick={() => setCustomerStatus("Todos")}><span>Contas registradas</span><strong>{registeredAccounts}</strong><small>Ativas no financeiro</small></button>
+      </div>
+      <div className="financial-filters customer-financial-filters">
+        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome, telefone, e-mail, CPF/CNPJ ou observacao" /></label>
+        <label><span>Situacao</span><select value={customerStatus} onChange={(event) => setCustomerStatus(event.target.value as typeof customerStatus)}><option>Todos</option><option>Ativos</option><option>Inativos</option><option>Com saldo</option></select></label>
+        <button onClick={() => { setQuery(""); setCustomerStatus("Todos"); }}><RotateCcw size={15} /> Exibir tudo</button>
+      </div>
+      <div className="financial-master-detail customer-master-detail">
+        <div className="financial-account-list financial-customer-list">
+          <div className="financial-account-list-head"><span>Cliente</span><span>Contato</span><span>Contas</span><span>Saldo</span><span>Situacao</span></div>
+          {customers.map((customer) => (
+            <article key={customer.id} className={`${!customer.active ? "inactive" : ""} ${selectedCustomer?.id === customer.id ? "selected" : ""}`} onClick={() => setSelectedCustomer(customer)}>
+              <div><strong>{customer.name}</strong><small>{customer.document || customer.note || "Sem documento informado"}</small></div>
+              <span>{customer.phone || customer.email || "Sem contato informado"}</span>
+              <b>{accountCountFor(customer.id)}</b>
+              <b>{money(balanceFor(customer.id))}</b>
+              <span className={`financial-status ${customer.active ? "status-recebida" : "status-cancelada"}`}>{customer.active ? "Ativo" : "Inativo"}</span>
+            </article>
+          ))}
+          {!customers.length && <div className="financial-detail-empty"><Search size={28} /><strong>Nenhum cliente encontrado</strong><span>Altere a busca ou o filtro de situacao.</span></div>}
+        </div>
+        <aside className="financial-account-detail financial-customer-detail">
+          {selectedCustomer ? <>
+            <div className="financial-detail-title"><span className="pdv-eyebrow">Resumo do cliente</span><h3>{selectedCustomer.name}</h3><p>{selectedCustomer.note || "Sem observacoes cadastradas."}</p></div>
+            <dl>
+              <div><dt>Telefone</dt><dd>{selectedCustomer.phone || "Nao informado"}</dd></div>
+              <div><dt>E-mail</dt><dd>{selectedCustomer.email || "Nao informado"}</dd></div>
+              <div><dt>CPF/CNPJ</dt><dd>{selectedCustomer.document || "Nao informado"}</dd></div>
+              <div><dt>Contas vinculadas</dt><dd>{accountCountFor(selectedCustomer.id)}</dd></div>
+              <div><dt>Saldo pendente</dt><dd>{money(balanceFor(selectedCustomer.id))}</dd></div>
+            </dl>
+            <div className="financial-detail-actions customer-detail-actions">
+              <button className="pdv-primary-button" onClick={() => setDetailCustomer(selectedCustomer)}>Abrir ficha completa</button>
+              {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditing(selectedCustomer)}><Pencil size={15} /> Editar</button>}
+              {!readOnly && onCreatePayableForCustomer && <button className="pdv-ghost-button" onClick={() => onCreatePayableForCustomer(selectedCustomer)}><Wallet size={15} /> Conta a pagar</button>}
             </div>
-          </article>
-        ))}
-        {!customers.length && <div className="pdv-empty">Nenhum cliente encontrado.</div>}
+            <div className="customer-detail-guidance"><ContactRound size={20} /><span><strong>Ficha centralizada</strong><small>Abra a ficha para consultar vendas, recebimentos, historico e emitir recibos.</small></span></div>
+          </> : <div className="financial-detail-empty"><ContactRound size={30} /><strong>Selecione um cliente</strong><span>Contato, saldo e atalhos aparecerao aqui.</span></div>}
+        </aside>
       </div>
       {editing && (
         <CustomerEditorModal
@@ -5832,21 +6284,23 @@ function CustomersScreen({
           }}
         />
       )}
-      {selectedCustomer && (
+      {detailCustomer && (
         <CustomerDetailModal
-          customer={selectedCustomer}
+          customer={detailCustomer}
           snapshot={snapshot}
           readOnly={readOnly}
           allowPrint={allowPrint}
           printTargets={receiptPrintTargets}
           onRemotePrint={onRemoteReceiptPrint}
-          onClose={() => setSelectedCustomer(null)}
-          onEdit={() => setEditing(selectedCustomer)}
+          onClose={() => setDetailCustomer(null)}
+          onEdit={() => setEditing(detailCustomer)}
           onChanged={onChanged}
           onReceive={onReceive}
           onUpdateReceivable={onUpdateReceivable}
           onCancelReceivable={onCancelReceivable}
+          onDeleteReceivable={onDeleteReceivable}
           onNavigateMain={onNavigateMain}
+          onCreatePayable={onCreatePayableForCustomer ? () => onCreatePayableForCustomer(detailCustomer) : undefined}
           onNotice={setNotice}
         />
       )}
@@ -5868,7 +6322,9 @@ function CustomerDetailModal({
   onReceive,
   onUpdateReceivable,
   onCancelReceivable,
+  onDeleteReceivable,
   onNavigateMain,
+  onCreatePayable,
   onNotice
 }: {
   customer: PdvCustomer;
@@ -5883,7 +6339,9 @@ function CustomerDetailModal({
   onReceive: (id: string, payment: PdvReceivablePayment, operationId?: string) => Promise<PdvReceivable>;
   onUpdateReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   onCancelReceivable: (id: string) => Promise<void>;
+  onDeleteReceivable: (id: string) => Promise<void>;
   onNavigateMain?: (tab: "history" | "reports") => void;
+  onCreatePayable?: () => void;
   onNotice: (message: string) => void;
 }) {
   const [section, setSection] = useState<"summary" | "pending" | "history">("summary");
@@ -5893,11 +6351,11 @@ function CustomerDetailModal({
   const [receiptTarget, setReceiptTarget] = useState<{ sale: PdvSale; receivable: PdvReceivable } | null>(null);
   const [selectedSale, setSelectedSale] = useState<PdvSale | null>(null);
   const customerReceivables = snapshot.receivables.filter((item) => item.customerId === customer.id);
-  const pending = customerReceivables.filter((item) => !["Recebida", "Cancelada"].includes(item.status));
+  const pending = customerReceivables.filter((item) => !["Recebida", "Cancelada", "Excluida"].includes(item.status));
   const linkedSales = customerReceivables
     .map((receivable) => snapshot.recentSales.find((sale) => sale.id === receivable.saleId))
     .filter((sale): sale is PdvSale => Boolean(sale));
-  const totalCredited = roundMoney(customerReceivables.filter((item) => item.status !== "Cancelada").reduce((sum, item) => sum + item.originalAmount, 0));
+  const totalCredited = roundMoney(customerReceivables.filter((item) => !["Cancelada", "Excluida"].includes(item.status)).reduce((sum, item) => sum + item.originalAmount, 0));
   const totalReceived = roundMoney(customerReceivables.reduce((sum, item) => sum + item.receivedAmount, 0));
   const outstanding = roundMoney(pending.reduce((sum, item) => sum + item.balance, 0));
 
@@ -5985,7 +6443,7 @@ function CustomerDetailModal({
                       {sale && <button className="pdv-ghost-button" onClick={() => setSelectedSale(sale)}>Ver venda</button>}
                       {sale && <button className="pdv-ghost-button" onClick={() => openReceipt(receivable)}><ReceiptText size={15} /> Recibo</button>}
                       {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingReceivable(receivable)}><Pencil size={15} /> Editar lancamento</button>}
-                      {!readOnly && receivable.balance > 0.009 && receivable.status !== "Cancelada" && <button className="pdv-primary-button" onClick={() => setReceiving(receivable)}>Registrar pagamento</button>}
+                      {!readOnly && receivable.balance > 0.009 && !["Cancelada", "Excluida"].includes(receivable.status) && <button className="pdv-primary-button" onClick={() => setReceiving(receivable)}>Registrar pagamento</button>}
                     </div>
                   </article>
                 );
@@ -5996,6 +6454,7 @@ function CustomerDetailModal({
         </div>
         <div className="pdv-action-row pdv-customer-detail-actions">
           <button className="pdv-ghost-button" onClick={navigateFromCustomer}><ClipboardList size={16} /> Ir para Historico</button>
+          {!readOnly && onCreatePayable && <button className="pdv-ghost-button" onClick={onCreatePayable}><Wallet size={16} /> Nova conta a pagar</button>}
           {!readOnly && <button className="pdv-ghost-button" onClick={onEdit}><Pencil size={16} /> Editar cliente</button>}
           <button className="pdv-primary-button" onClick={onClose}>Fechar</button>
         </div>
@@ -6006,17 +6465,12 @@ function CustomerDetailModal({
           await onChanged();
           onNotice("Lancamento da pendencia atualizado.");
         }} />}
-        {deletingReceivable && <PdvConfirmModal title="Excluir esta pendencia?" message={deletingReceivable.receivedAmount > 0.009 ? "Remova primeiro os recebimentos registrados. Depois a pendencia podera ser cancelada sem apagar a venda do Historico." : "A pendencia sera marcada como cancelada e deixara de compor o saldo do cliente. A venda permanecera no Historico para auditoria."} confirmLabel="Excluir pendencia" danger onCancel={() => setDeletingReceivable(null)} onConfirm={() => {
-          if (deletingReceivable.receivedAmount > 0.009) {
-            setDeletingReceivable(null);
-            onNotice("Remova os recebimentos antes de excluir a pendencia.");
-            return;
-          }
-          void onCancelReceivable(deletingReceivable.id).then(async () => {
+        {deletingReceivable && <PdvConfirmModal title="Excluir esta pendencia?" message="A pendencia saira das listas operacionais, mas continuara registrada no historico como excluida. A venda original nao sera apagada." confirmLabel="Excluir pendencia" danger onCancel={() => setDeletingReceivable(null)} onConfirm={() => {
+          void onDeleteReceivable(deletingReceivable.id).then(async () => {
             setDeletingReceivable(null);
             setEditingReceivable(null);
             await onChanged();
-            onNotice("Pendencia cancelada e mantida no Historico.");
+            onNotice("Pendencia movida para o historico de excluidas.");
           });
         }} />}
         {receiptTarget && <PdvReceiptDraftModal sale={receiptTarget.sale} receivable={receiptTarget.receivable} receiptSettings={snapshot.settings} customers={snapshot.customers} allowPrint={allowPrint} printTargets={printTargets} onRemotePrint={onRemotePrint} onClose={() => setReceiptTarget(null)} onNotice={onNotice} />}
@@ -6027,18 +6481,26 @@ function CustomerDetailModal({
 }
 
 function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }: { receivable: PdvReceivable; sale?: PdvSale; onCancel: () => void; onSave: (patch: PdvReceivablePatch) => void | Promise<void>; onDelete: () => void }) {
+  const manualAccount = receivable.saleId.startsWith("financial-") && !sale?.items.length;
   const [dueDate, setDueDate] = useState(receivable.dueDate || "");
   const [note, setNote] = useState(receivable.note || "");
+  const [description, setDescription] = useState(receivable.description || "");
+  const [category, setCategory] = useState(receivable.category || "");
+  const [costCenter, setCostCenter] = useState(receivable.costCenter || "");
+  const [documentNumber, setDocumentNumber] = useState(receivable.documentNumber || "");
+  const [paymentAccount, setPaymentAccount] = useState(receivable.paymentAccount || "");
+  const [tagsText, setTagsText] = useState((receivable.tags || []).join(", "));
+  const [manualAmountText, setManualAmountText] = useState(String(receivable.originalAmount).replace(".", ","));
   const [items, setItems] = useState<PdvCartItem[]>(() => sale?.items.map((item) => ({ ...item })) || []);
   const [payments, setPayments] = useState<PdvReceivablePayment[]>(() => receivable.payments.map((payment) => ({ ...payment })));
   const [addingPayment, setAddingPayment] = useState(false);
   const itemTotal = roundMoney(items.reduce((sum, item) => sum + Number(item.total || 0), 0));
   const otherPaid = roundMoney((sale?.payments || []).filter((payment) => payment.method !== "Conta a receber").reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
-  const accountTotal = roundMoney(Math.max(0, itemTotal - otherPaid));
+  const accountTotal = manualAccount ? roundMoney(Number(manualAmountText.replace(",", ".")) || 0) : roundMoney(Math.max(0, itemTotal - otherPaid));
   const receivedTotal = roundMoney(payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
   const remaining = roundMoney(accountTotal - receivedTotal);
-  const valid = items.length > 0 && accountTotal > 0 && receivedTotal <= accountTotal + 0.009 && payments.every((payment) => payment.amount > 0);
-  const confirm = () => valid && void onSave({ dueDate, note, items, payments });
+  const valid = (manualAccount || items.length > 0) && accountTotal > 0 && receivedTotal <= accountTotal + 0.009 && payments.every((payment) => payment.amount > 0);
+  const confirm = () => valid && void onSave({ dueDate, note, description, category, costCenter, documentNumber, paymentAccount, tags: tagsText.split(",").map((value) => value.trim()).filter(Boolean), originalAmount: manualAccount ? accountTotal : undefined, items: manualAccount ? undefined : items, payments });
   useModalConfirmShortcut(confirm, onCancel, valid && !addingPayment);
   const updateItem = (id: string, patch: Partial<PdvCartItem>) => setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
   const updatePayment = (id: string, patch: Partial<PdvReceivablePayment>) => setPayments((current) => current.map((payment) => payment.id === id ? { ...payment, ...patch } : payment));
@@ -6068,9 +6530,16 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
         <div className="pdv-receivable-editor-scroll">
           <div className="pdv-editor-grid pdv-receivable-editor-fields">
             <label><span>Data de vencimento</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
+            {manualAccount && <label><span>Valor da conta</span><input inputMode="decimal" value={manualAmountText} onChange={(event) => setManualAmountText(event.target.value)} /></label>}
+            <label><span>Descricao</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Venda a prazo, encomenda..." /></label>
+            <label><span>Categoria</span><input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Ex.: Vendas, encomendas" /></label>
+            <label><span>Centro de custo</span><input value={costCenter} onChange={(event) => setCostCenter(event.target.value)} placeholder="Ex.: Loja principal" /></label>
+            <label><span>Documento</span><input value={documentNumber} onChange={(event) => setDocumentNumber(event.target.value)} placeholder="Pedido, contrato ou referencia" /></label>
+            <label><span>Conta prevista</span><input value={paymentAccount} onChange={(event) => setPaymentAccount(event.target.value)} placeholder="Ex.: Caixa principal, Banco" /></label>
+            <label className="pdv-wide-field"><span>Tags</span><input value={tagsText} onChange={(event) => setTagsText(event.target.value)} placeholder="Ex.: prioridade, encomenda, mensalista" /></label>
             <label className="pdv-wide-field"><span>Observacao da pendencia</span><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></label>
           </div>
-          <section className="pdv-receivable-editor-section">
+          {!manualAccount && <section className="pdv-receivable-editor-section">
             <div className="pdv-subsection-title"><div><strong>Produtos e valores</strong><span>Altere a quantidade ou o valor final lancado. O saldo sera recalculado.</span></div><b>{money(itemTotal)}</b></div>
             {otherPaid > 0.009 && <div className="pdv-account-allocation-note">Outros pagamentos desta venda: <strong>{money(otherPaid)}</strong>. Total vinculado a conta: <strong>{money(accountTotal)}</strong>.</div>}
             <div className="pdv-receivable-item-editor-list">
@@ -6099,7 +6568,7 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
                 </article>
               ))}
             </div>
-          </section>
+          </section>}
           <section className="pdv-receivable-editor-section">
             <div className="pdv-subsection-title"><div><strong>Recebimentos registrados</strong><span>Edite forma, valor, dinheiro recebido ou remova um lançamento incorreto.</span></div><button className="pdv-ghost-button" type="button" disabled={remaining <= 0.009} onClick={() => setAddingPayment(true)}><Plus size={15} /> Adicionar</button></div>
             <div className="pdv-receivable-payment-editor-list">
@@ -6178,13 +6647,16 @@ function HistoryScreen({
   readOnly = false,
   onChanged,
   saveCustomer,
+  saveReceivable,
   receiveReceivable,
   updateReceivable,
   cancelReceivable,
+  deleteReceivable,
   allowPrint,
   receiptPrintTargets,
   onRemoteReceiptPrint,
-  onNavigateMain
+  onNavigateMain,
+  onCreatePayableForCustomer
 }: {
   snapshot: PdvSnapshot;
   initialView?: HistoryView;
@@ -6192,13 +6664,16 @@ function HistoryScreen({
   readOnly?: boolean;
   onChanged: () => void;
   saveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
+  saveReceivable: (draft: PdvReceivableDraft) => Promise<PdvReceivable>;
   receiveReceivable: (id: string, payment: PdvReceivablePayment, operationId?: string) => Promise<PdvReceivable>;
   updateReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   cancelReceivable: (id: string) => Promise<void>;
+  deleteReceivable: (id: string) => Promise<void>;
   allowPrint: boolean;
   receiptPrintTargets: Array<{ id: string; label: string }>;
   onRemoteReceiptPrint?: (targetId: string, payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
   onNavigateMain?: (tab: "history" | "reports") => void;
+  onCreatePayableForCustomer?: (customer: PdvCustomer) => void;
 }) {
   const [view, setView] = useState<HistoryView>(initialView);
   const showSales = initialView === "sales";
@@ -6264,10 +6739,10 @@ function HistoryScreen({
   };
 
   if (view === "receivables") {
-    return <ReceivablesScreen snapshot={snapshot} view={view} onViewChange={setView} onChanged={onChanged} onReceive={receiveReceivable} onCancelReceivable={cancelReceivable} showSales={showSales} hideNavigation={hideNavigation} allowPrint={allowPrint} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} />;
+    return <ReceivablesScreen snapshot={snapshot} view={view} onViewChange={setView} onChanged={onChanged} onSaveReceivable={saveReceivable} onReceive={receiveReceivable} onUpdateReceivable={updateReceivable} onCancelReceivable={cancelReceivable} onDeleteReceivable={deleteReceivable} showSales={showSales} hideNavigation={hideNavigation} allowPrint={allowPrint} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} readOnly={readOnly} />;
   }
   if (view === "customers") {
-    return <CustomersScreen snapshot={snapshot} view={view} onViewChange={setView} onSave={saveCustomer} onChanged={onChanged} showSales={showSales} hideNavigation={hideNavigation} readOnly={readOnly} onReceive={receiveReceivable} onUpdateReceivable={updateReceivable} onCancelReceivable={cancelReceivable} allowPrint={allowPrint} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} onNavigateMain={onNavigateMain} />;
+    return <CustomersScreen snapshot={snapshot} view={view} onViewChange={setView} onSave={saveCustomer} onChanged={onChanged} showSales={showSales} hideNavigation={hideNavigation} readOnly={readOnly} onReceive={receiveReceivable} onUpdateReceivable={updateReceivable} onCancelReceivable={cancelReceivable} onDeleteReceivable={deleteReceivable} allowPrint={allowPrint} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} onNavigateMain={onNavigateMain} onCreatePayableForCustomer={onCreatePayableForCustomer} />;
   }
 
   return (
@@ -6302,7 +6777,13 @@ function HistoryScreen({
                   >
             <div>
               <strong>{sale.type}{sale.tableNumber ? ` ${String(sale.tableNumber).padStart(3, "0")}` : ""}</strong>
-              <span>{new Date(sale.createdAt).toLocaleString("pt-BR")} | {sale.items.length} item(ns) | {sale.status}</span>
+              <span>
+                {new Date(sale.createdAt).toLocaleString("pt-BR")} | {sale.items.length} item(ns)
+                <em className={`pdv-sale-state ${sale.status.toLowerCase()}`}>
+                  {sale.status === "Cancelada" ? <AlertTriangle size={12} /> : sale.status === "Parcial" ? <Clock3 size={12} /> : <CheckCircle2 size={12} />}
+                  {sale.status === "Finalizada" ? "Pagamento concluido" : sale.status}
+                </em>
+              </span>
             </div>
             <span>{sale.payments.map((payment) => `${payment.method}: ${money(payment.amount)}${payment.description ? ` (${payment.description})` : ""}`).join(" + ")}</span>
             <b>{money(sale.total)}</b>
@@ -6495,10 +6976,10 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
     setDirty(true);
   };
   const applyPreset = (preset: "compact" | "normal" | "comfortable") => {
-    const presets: Record<typeof preset, PdvClientVisualSettings> = {
-      compact: { gridColumns: 7, categoryColumns: 7, tableColumns: 11, productCardHeight: 52, categoryCardHeight: 44, tableCardHeight: 74 },
-      normal: { gridColumns: 5, categoryColumns: 5, tableColumns: 9, productCardHeight: 60, categoryCardHeight: 52, tableCardHeight: 88 },
-      comfortable: { gridColumns: 5, categoryColumns: 5, tableColumns: 8, productCardHeight: 76, categoryCardHeight: 62, tableCardHeight: 104 }
+    const presets: Record<typeof preset, Partial<PdvClientVisualSettings>> = {
+      compact: { gridColumns: 7, categoryColumns: 7, tableColumns: 11, productCardHeight: 52, categoryCardHeight: 44, tableCardHeight: 74, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions) },
+      normal: { gridColumns: 5, categoryColumns: 5, tableColumns: 9, productCardHeight: 60, categoryCardHeight: 52, tableCardHeight: 88, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions) },
+      comfortable: { gridColumns: 5, categoryColumns: 5, tableColumns: 8, productCardHeight: 76, categoryCardHeight: 62, tableCardHeight: 104, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions) }
     };
     changeDraft(presets[preset]);
   };
@@ -6521,6 +7002,14 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
         <button onClick={() => applyPreset("normal")}>Normal</button>
         <button onClick={() => applyPreset("comfortable")}>Confortavel</button>
       </div>
+      <label className="pdv-switch-line pdv-local-visual-toggle">
+        <input type="checkbox" checked={Boolean(draft.vibrantMode)} onChange={(event) => changeDraft({ vibrantMode: event.target.checked })} />
+        <span><strong>Visual vibrante</strong><small>Deixa status, selecoes e alertas mais vivos somente neste computador.</small></span>
+      </label>
+      <label className="pdv-switch-line pdv-local-visual-toggle">
+        <input type="checkbox" checked={Boolean(draft.hideTableStatusDescriptions)} onChange={(event) => changeDraft({ hideTableStatusDescriptions: event.target.checked })} />
+        <span><strong>Mostrar somente indicadores das mesas</strong><small>Oculta os textos dos status nos cartoes e na legenda. Passe o mouse sobre um indicador para consultar seu significado.</small></span>
+      </label>
       <div className="pdv-advanced-grid">
         <article>
           <LayoutGrid size={22} />
@@ -6731,6 +7220,18 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
           <label className="pdv-setting-line"><span>Altura das categorias</span><input type="number" min={36} max={90} value={draft.categoryCardHeight || 64} onChange={(event) => changeDraft({ categoryCardHeight: Number(event.target.value || 64) })} /></label>
           <label className="pdv-setting-line"><span>Altura das mesas</span><input type="number" min={58} max={130} value={draft.tableCardHeight || 96} onChange={(event) => changeDraft({ tableCardHeight: Number(event.target.value || 96) })} /></label>
           <label className="pdv-setting-line"><span>Produtos por pagina na consulta</span><input type="number" min={10} max={100} step={5} value={draft.productLookupPageSize || 30} onChange={(event) => changeDraft({ productLookupPageSize: Number(event.target.value || 30) })} /></label>
+          <label className="pdv-switch-line">
+            <input type="checkbox" checked={Boolean(draft.productLookupQuantitiesEnabled)} onChange={(event) => changeDraft({ productLookupQuantitiesEnabled: event.target.checked })} />
+            Permitir informar a quantidade de cada produto na consulta multipla
+          </label>
+          <label className="pdv-switch-line pdv-local-visual-toggle">
+            <input type="checkbox" checked={Boolean(clientVisualSettings.vibrantMode)} onChange={(event) => onClientVisualSettingsChange?.({ vibrantMode: event.target.checked })} />
+            <span><strong>Visual vibrante neste computador</strong><small>Mais saturacao nos status, selecoes e alertas. Esta opcao nao e enviada para clientes nem para o servidor.</small></span>
+          </label>
+          <label className="pdv-switch-line pdv-local-visual-toggle">
+            <input type="checkbox" checked={Boolean(clientVisualSettings.hideTableStatusDescriptions)} onChange={(event) => onClientVisualSettingsChange?.({ hideTableStatusDescriptions: event.target.checked })} />
+            <span><strong>Mostrar somente indicadores das mesas</strong><small>Oculta as descricoes dos status nos cartoes e na legenda somente neste computador.</small></span>
+          </label>
         </div>}
 
         {section === "operation" && <div className="pdv-settings-form">

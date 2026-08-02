@@ -144,6 +144,19 @@ export interface PdvReceivablePayment {
   operationId?: string;
 }
 
+export type PdvFinancialAccountType = "receivable" | "payable";
+
+export interface PdvFinancialAuditEvent {
+  id: string;
+  accountType: PdvFinancialAccountType;
+  accountId: string;
+  action: "Criacao" | "Edicao" | "Pagamento" | "Cancelamento" | "Exclusao" | "Estorno";
+  createdAt: string;
+  description: string;
+  originDevice: string;
+  amount?: number;
+}
+
 export interface PdvReceivable {
   id: string;
   saleId: string;
@@ -153,22 +166,51 @@ export interface PdvReceivable {
   subtableName?: string;
   createdAt: string;
   dueDate?: string;
+  description?: string;
+  category?: string;
+  costCenter?: string;
+  documentNumber?: string;
+  paymentAccount?: string;
+  tags?: string[];
+  updatedAt?: string;
   originalAmount: number;
   receivedAmount: number;
   balance: number;
-  status: "Em aberto" | "Parcialmente recebida" | "Recebida" | "Vencida" | "Cancelada";
+  status: "Em aberto" | "Parcialmente recebida" | "Recebida" | "Vencida" | "Cancelada" | "Excluida";
   note: string;
   payments: PdvReceivablePayment[];
+  events?: PdvFinancialAuditEvent[];
 }
 
 export interface PdvReceivablePatch {
+  originalAmount?: number;
   dueDate?: string;
   note?: string;
+  description?: string;
+  category?: string;
+  costCenter?: string;
+  documentNumber?: string;
+  paymentAccount?: string;
+  tags?: string[];
   items?: PdvCartItem[];
   payments?: PdvReceivablePayment[];
 }
 
-export type PdvPayableStatus = "Em aberto" | "Parcialmente paga" | "Paga" | "Vencida" | "Cancelada";
+export interface PdvReceivableDraft {
+  id?: string;
+  customerId: string;
+  description: string;
+  dueDate?: string;
+  amount: number;
+  category?: string;
+  costCenter?: string;
+  documentNumber?: string;
+  paymentAccount?: string;
+  tags?: string[];
+  note?: string;
+}
+
+export type PdvPayableStatus = "Em aberto" | "Parcialmente paga" | "Paga" | "Vencida" | "Cancelada" | "Excluida";
 
 export interface PdvPayablePayment {
   id: string;
@@ -186,8 +228,17 @@ export interface PdvPayable {
   description: string;
   supplier: string;
   category: string;
+  costCenter: string;
   documentNumber: string;
+  paymentAccount: string;
+  tags: string[];
   createdAt: string;
+  updatedAt: string;
+  issueDate: string;
+  seriesId?: string;
+  seriesKind?: "Parcelamento" | "Recorrencia";
+  installmentNumber?: number;
+  installmentCount?: number;
   dueDate: string;
   amount: number;
   paidAmount: number;
@@ -195,6 +246,7 @@ export interface PdvPayable {
   status: PdvPayableStatus;
   note: string;
   payments: PdvPayablePayment[];
+  events: PdvFinancialAuditEvent[];
 }
 
 export interface PdvPayableDraft {
@@ -202,7 +254,17 @@ export interface PdvPayableDraft {
   description: string;
   supplier?: string;
   category?: string;
+  costCenter?: string;
   documentNumber?: string;
+  paymentAccount?: string;
+  tags?: string[];
+  issueDate?: string;
+  seriesId?: string;
+  seriesKind?: "Parcelamento" | "Recorrencia";
+  installmentNumber?: number;
+  installmentCount?: number;
+  recurrenceIntervalMonths?: number;
+  recurrenceCount?: number;
   dueDate: string;
   amount: number;
   note?: string;
@@ -275,6 +337,7 @@ export interface PdvSettings {
   categoryCardHeight?: number;
   tableCardHeight?: number;
   productLookupPageSize?: number;
+  productLookupQuantitiesEnabled?: boolean;
   stackIdenticalItems?: boolean;
   partialPaymentDescriptionEnabled?: boolean;
   skipPaymentConfirmation?: boolean;

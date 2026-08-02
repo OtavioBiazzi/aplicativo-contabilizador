@@ -54,18 +54,22 @@ const server = new LocalServer({
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
   savePdvTableItems: (number, items, subtables) => pdvStore.saveTableItems(number, items, subtables),
   transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections),
+  appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
   closePdvTable: (number, payments, discount, origin, operationId) => pdvStore.closeTable(number, payments, discount, origin, operationId),
   savePdvTablePartial: (number, items, payments, discount, origin, operationId, observations) => pdvStore.closeTablePartial(number, items, payments, discount, origin, operationId, observations),
   updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
   savePdvCategory: (draft) => pdvStore.saveCategory(draft),
   savePdvProduct: (draft) => pdvStore.saveProduct(draft),
   savePdvCustomer: (draft) => pdvStore.saveCustomer(draft),
+  savePdvReceivable: (draft) => pdvStore.saveReceivable(draft),
   receivePdvReceivable: (id, payment, origin, operationId) => pdvStore.receiveReceivable(id, payment, origin, operationId),
   updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
   cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
+  deletePdvReceivable: (id) => pdvStore.deleteReceivable(id),
   savePdvPayable: (draft) => pdvStore.savePayable(draft),
   payPdvPayable: (id, payment, origin, operationId) => pdvStore.payPayable(id, payment, origin, operationId),
   cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
+  deletePdvPayable: (id) => pdvStore.deletePayable(id),
   printPdvReceipt: async ({ sale }) => {
     remotePrintRequests += 1;
     return { ok: Boolean(sale?.id), message: "Impressao smoke recebida." };
@@ -224,6 +228,32 @@ const customerResponse = await fetch("http://127.0.0.1:43991/api/pdv/customers",
 });
 if (!customerResponse.ok) throw new Error(`Cliente nao conseguiu cadastrar cliente no servidor: ${await customerResponse.text()}`);
 const remoteCustomer = (await customerResponse.json()).customer;
+const manualReceivableId = crypto.randomUUID();
+const manualReceivableDraft = {
+  id: manualReceivableId,
+  customerId: remoteCustomer.id,
+  description: "Cobranca manual smoke",
+  dueDate: "2099-11-30",
+  amount: 88.5,
+  category: "Encomendas",
+  costCenter: "Balcao",
+  documentNumber: "MANUAL-01",
+  paymentAccount: "Caixa principal",
+  tags: ["manual", "rede"],
+  note: "Criada sem venda do PDV"
+};
+for (let attempt = 0; attempt < 2; attempt += 1) {
+  const response = await fetch("http://127.0.0.1:43991/api/pdv/receivables", { method: "POST", headers, body: JSON.stringify(manualReceivableDraft) });
+  if (!response.ok) throw new Error(`Cliente nao conseguiu criar conta a receber manual: ${await response.text()}`);
+}
+const manualSnapshot = await pdvStore.getSnapshot();
+const manualReceivable = manualSnapshot.receivables.find((entry) => entry.id === manualReceivableId);
+if (!manualReceivable || manualReceivable.balance !== 88.5 || manualReceivable.category !== "Encomendas"
+  || !manualReceivable.events.some((event) => event.action === "Criacao")
+  || manualSnapshot.receivables.filter((entry) => entry.id === manualReceivableId).length !== 1
+  || manualSnapshot.recentSales.some((sale) => sale.id === manualReceivable.saleId)) {
+  throw new Error("Conta a receber manual nao foi persistida de forma profissional e idempotente.");
+}
 const accountSaleResponse = await fetch("http://127.0.0.1:43991/api/pdv/sales/direct", {
   method: "POST",
   headers: { ...headers, "x-idempotency-key": crypto.randomUUID() },
@@ -241,7 +271,7 @@ const accountSaleResponse = await fetch("http://127.0.0.1:43991/api/pdv/sales/di
   })
 });
 if (!accountSaleResponse.ok) throw new Error(`Cliente nao conseguiu criar conta a receber no servidor: ${await accountSaleResponse.text()}`);
-const remoteReceivable = (await pdvStore.getSnapshot()).receivables.find((entry) => entry.customerId === remoteCustomer.id);
+const remoteReceivable = (await pdvStore.getSnapshot()).receivables.find((entry) => entry.customerId === remoteCustomer.id && entry.id !== manualReceivableId);
 if (!remoteReceivable || remoteReceivable.balance !== 20) throw new Error("Conta a receber remota nao apareceu no snapshot do servidor.");
 const remoteReceiptResponse = await fetch(`http://127.0.0.1:43991/api/pdv/receivables/${remoteReceivable.id}/payments`, {
   method: "POST",
@@ -264,33 +294,52 @@ if ((await pdvStore.getSnapshot()).receivables.find((entry) => entry.id === remo
 const reopenReceivableResponse = await fetch(`http://127.0.0.1:43991/api/pdv/receivables/${remoteReceivable.id}`, {
   method: "PATCH",
   headers,
-  body: JSON.stringify({ payments: [] })
+  body: JSON.stringify({ payments: [], description: "Encomenda smoke", category: "Vendas", costCenter: "Balcao", documentNumber: "REC-01", paymentAccount: "Caixa", tags: ["cliente", "teste"] })
 });
 if (!reopenReceivableResponse.ok) throw new Error(`Cliente nao conseguiu remover recebimento no servidor: ${await reopenReceivableResponse.text()}`);
 const reopenedRemoteReceivable = (await reopenReceivableResponse.json()).receivable;
-if (reopenedRemoteReceivable.status !== "Em aberto" || reopenedRemoteReceivable.receivedAmount !== 0 || reopenedRemoteReceivable.balance !== 20) {
+if (reopenedRemoteReceivable.status !== "Em aberto" || reopenedRemoteReceivable.receivedAmount !== 0 || reopenedRemoteReceivable.balance !== 20
+  || reopenedRemoteReceivable.category !== "Vendas" || reopenedRemoteReceivable.costCenter !== "Balcao"
+  || !reopenedRemoteReceivable.tags.includes("teste") || !reopenedRemoteReceivable.events.some((event) => event.action === "Edicao")) {
   throw new Error("Remocao remota do recebimento nao reabriu a pendencia.");
 }
 const persistedReopenedReceivable = (await pdvStore.getSnapshot()).receivables.find((entry) => entry.id === remoteReceivable.id);
 if (persistedReopenedReceivable?.status !== "Em aberto" || persistedReopenedReceivable.payments.length !== 0) {
   throw new Error("Pendencia reaberta remotamente nao permaneceu consistente no snapshot do servidor.");
 }
+const deleteReceivableResponse = await fetch(`http://127.0.0.1:43991/api/pdv/receivables/${remoteReceivable.id}`, { method: "DELETE", headers });
+if (!deleteReceivableResponse.ok || (await pdvStore.getSnapshot()).receivables.find((entry) => entry.id === remoteReceivable.id)?.status !== "Excluida") {
+  throw new Error("Conta a receber excluida nao permaneceu no historico com o status correto.");
+}
 
-const remotePayableResponse = await fetch("http://127.0.0.1:43991/api/pdv/payables", {
-  method: "POST",
-  headers,
-  body: JSON.stringify({
-    description: "Energia smoke rede",
-    supplier: "Companhia regional",
-    category: "Energia",
-    documentNumber: "FAT-2048",
-    dueDate: "2030-08-15",
-    amount: 125.4,
-    note: "Conta criada pelo cliente remoto"
-  })
-});
-if (!remotePayableResponse.ok) throw new Error(`Cliente nao criou conta a pagar no servidor: ${await remotePayableResponse.text()}`);
-const remotePayable = (await remotePayableResponse.json()).payable;
+const payableDraftId = crypto.randomUUID();
+const payableDraft = {
+  id: payableDraftId,
+  description: "Energia smoke rede",
+  supplier: "Companhia regional",
+  category: "Energia",
+  costCenter: "Loja principal",
+  documentNumber: "FAT-2048",
+  paymentAccount: "Banco smoke",
+  tags: ["fixa", "rede"],
+  issueDate: "2030-08-01",
+  dueDate: "2030-08-15",
+  amount: 125.4,
+  note: "Conta criada pelo cliente remoto"
+};
+let remotePayable;
+for (let attempt = 0; attempt < 2; attempt += 1) {
+  const remotePayableResponse = await fetch("http://127.0.0.1:43991/api/pdv/payables", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payableDraft)
+  });
+  if (!remotePayableResponse.ok) throw new Error(`Cliente nao criou conta a pagar no servidor: ${await remotePayableResponse.text()}`);
+  remotePayable = (await remotePayableResponse.json()).payable;
+}
+if ((await pdvStore.getSnapshot()).payables.filter((entry) => entry.id === payableDraftId).length !== 1) {
+  throw new Error("Reenvio de cadastro apos perda da resposta duplicou a conta a pagar.");
+}
 const payableOperationId = crypto.randomUUID();
 const remotePayablePayment = {
   id: crypto.randomUUID(),
@@ -309,11 +358,17 @@ for (let attempt = 0; attempt < 2; attempt += 1) {
   if (!response.ok) throw new Error(`Pagamento remoto da conta a pagar falhou: ${await response.text()}`);
 }
 const persistedRemotePayable = (await pdvStore.getSnapshot()).payables.find((entry) => entry.id === remotePayable.id);
-if (!persistedRemotePayable || persistedRemotePayable.status !== "Parcialmente paga" || persistedRemotePayable.balance !== 80 || persistedRemotePayable.payments.length !== 1) {
+if (!persistedRemotePayable || persistedRemotePayable.status !== "Parcialmente paga" || persistedRemotePayable.balance !== 80 || persistedRemotePayable.payments.length !== 1
+  || persistedRemotePayable.costCenter !== "Loja principal" || persistedRemotePayable.paymentAccount !== "Banco smoke"
+  || !persistedRemotePayable.tags.includes("rede") || !persistedRemotePayable.events.some((event) => event.action === "Pagamento")) {
   throw new Error("Conta a pagar remota nao preservou pagamento parcial idempotente.");
 }
 const forbiddenPayableCancel = await fetch(`http://127.0.0.1:43991/api/pdv/payables/${remotePayable.id}/cancel`, { method: "POST", headers });
 if (forbiddenPayableCancel.ok) throw new Error("Conta a pagar com pagamento foi cancelada indevidamente.");
+const deletePayableResponse = await fetch(`http://127.0.0.1:43991/api/pdv/payables/${remotePayable.id}`, { method: "DELETE", headers });
+if (!deletePayableResponse.ok || (await pdvStore.getSnapshot()).payables.find((entry) => entry.id === remotePayable.id)?.status !== "Excluida") {
+  throw new Error("Conta a pagar excluida nao permaneceu no historico com o status correto.");
+}
 
 const open = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });
 if (!open.ok) throw new Error(`Cliente nao conseguiu abrir mesa no servidor: ${await open.text()}`);
@@ -388,6 +443,19 @@ if (
   throw new Error("Transferencia remota nao permaneceu consistente no snapshot completo.");
 }
 
+const directTransferItem = { ...item, id: crypto.randomUUID(), productName: "Venda direta transferida", total: 12 };
+const directTransfer = await fetch("http://127.0.0.1:43991/api/pdv/tables/22/append", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ items: [directTransferItem], targetSubtable: "Destino" })
+});
+if (!directTransfer.ok) throw new Error(`Venda direta nao foi transferida para mesa: ${await directTransfer.text()}`);
+const directTransferSnapshot = await (await fetch("http://127.0.0.1:43991/api/pdv/snapshot", { headers })).json();
+const directTransferTarget = directTransferSnapshot.tables.find((table) => table.number === 22);
+if (directTransferTarget?.items.length !== 2 || !directTransferTarget.items.some((row) => row.productName === "Venda direta transferida" && row.subtableName === "Destino")) {
+  throw new Error("Transferir venda direta substituiu os produtos que ja estavam na mesa destino.");
+}
+
 // Regressao: ao mover entre submesas da mesma mesa, o endpoint retornava apenas
 // o restante da origem. O autosave do cliente gravava esse retorno parcial e
 // substituia os itens que ja existiam no destino.
@@ -436,8 +504,48 @@ if (
   || tableWithMainTransfer?.items.length !== 3
   || tableWithMainTransfer.items.filter((row) => !row.subtableName).length !== 1
   || tableWithMainTransfer.items.some((row) => row.id === networkSource.items[0].id && row.subtableName === "Origem")
+  || tableWithMainTransfer.subtables?.includes("Origem")
 ) {
   throw new Error("Transferencia da submesa para a mesa principal nao foi persistida corretamente.");
+}
+
+const multiAccountA = { ...item, id: crypto.randomUUID(), productName: "Conta A", subtableName: "Submesa A" };
+const multiAccountB = { ...item, id: crypto.randomUUID(), productName: "Conta B", subtableName: "Submesa B" };
+const multiTargetExisting = { ...item, id: crypto.randomUUID(), productName: "Produto existente", subtableName: "Unificada" };
+for (const [tableNumber, items, subtables] of [
+  [25, [multiAccountA, multiAccountB], ["Submesa A", "Submesa B"]],
+  [26, [multiTargetExisting], ["Unificada"]]
+]) {
+  const seeded = await fetch(`http://127.0.0.1:43991/api/pdv/tables/${tableNumber}/items`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ items, subtables })
+  });
+  if (!seeded.ok) throw new Error(`Nao foi possivel preparar transferencia multipla: ${await seeded.text()}`);
+}
+const multiAccountTransfer = await fetch("http://127.0.0.1:43991/api/pdv/tables/25/transfer", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({
+    targetTableNumber: 26,
+    selections: [
+      { itemId: multiAccountA.id, quantity: multiAccountA.quantity, subtableName: "Unificada" },
+      { itemId: multiAccountB.id, quantity: multiAccountB.quantity, subtableName: "Unificada" }
+    ]
+  })
+});
+if (!multiAccountTransfer.ok) throw new Error(`Transferencia multipla de submesas falhou: ${await multiAccountTransfer.text()}`);
+const multiAccountSnapshot = await (await fetch("http://127.0.0.1:43991/api/pdv/snapshot", { headers })).json();
+const multiAccountSource = multiAccountSnapshot.tables.find((table) => table.number === 25);
+const multiAccountTarget = multiAccountSnapshot.tables.find((table) => table.number === 26);
+if (
+  multiAccountSource?.items.length
+  || multiAccountSource?.subtables?.length
+  || multiAccountTarget?.items.length !== 3
+  || !multiAccountTarget.items.some((row) => row.id === multiTargetExisting.id)
+  || multiAccountTarget.items.filter((row) => row.subtableName === "Unificada").length !== 3
+) {
+  throw new Error("Transferencia de varias submesas nao mesclou corretamente no destino.");
 }
 
 const rapidFirstItem = { ...item, id: crypto.randomUUID(), productName: "Produto rapido 1" };
@@ -490,6 +598,19 @@ const reconnectSale = await pdvStore.saveSale({
   originDevice: "Servidor durante desconexao",
   operationId: crypto.randomUUID()
 });
+const reconnectPayable = await pdvStore.savePayable({
+  id: crypto.randomUUID(),
+  description: "Conta criada enquanto cliente estava desconectado",
+  supplier: "Fornecedor reconexao",
+  category: "Teste de rede",
+  costCenter: "Servidor",
+  paymentAccount: "Caixa principal",
+  tags: ["reconexao"],
+  issueDate: "2030-08-01",
+  dueDate: "2030-08-20",
+  amount: 77,
+  note: "Precisa aparecer no snapshot integral"
+});
 
 await server.start(43991, "smoke-password");
 const reconnectSocket = new WebSocket(`ws://127.0.0.1:43991/sync?password=smoke-password&device=Cliente%20reconectado&version=${encodeURIComponent(appVersion)}`);
@@ -511,8 +632,9 @@ if (
   || reconnectedTable?.items[0]?.subtableName !== "Submesa reconectada"
   || !reconnectedTable?.subtables?.includes("Submesa reconectada")
   || !snapshotAfterReconnect.recentSales.some((sale) => sale.id === reconnectSale.id)
+  || !snapshotAfterReconnect.payables.some((payable) => payable.id === reconnectPayable.id && payable.tags.includes("reconexao"))
 ) {
-  throw new Error("A sincronizacao completa apos reconectar nao restaurou mesa, submesa, produto e Historico.");
+  throw new Error("A sincronizacao completa apos reconectar nao restaurou mesas, Historico e dados financeiros.");
 }
 
 await new Promise((resolve) => {

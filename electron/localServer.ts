@@ -6,7 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
@@ -26,6 +26,7 @@ interface LocalServerOptions {
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
+  appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
   cancelPdvTable: (tableNumber: number, originDevice?: string) => Promise<PdvSale | null>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string, observations?: string) => Promise<PdvSale>;
@@ -35,12 +36,15 @@ interface LocalServerOptions {
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
   savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>;
   savePdvCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
+  savePdvReceivable: (draft: PdvReceivableDraft) => Promise<PdvReceivable>;
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, originDevice?: string, operationId?: string) => Promise<PdvReceivable>;
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   cancelPdvReceivable: (id: string) => Promise<void>;
+  deletePdvReceivable: (id: string) => Promise<void>;
   savePdvPayable: (draft: PdvPayableDraft) => Promise<PdvPayable>;
   payPdvPayable: (id: string, payment: PdvPayablePayment, originDevice?: string, operationId?: string) => Promise<PdvPayable>;
   cancelPdvPayable: (id: string) => Promise<void>;
+  deletePdvPayable: (id: string) => Promise<void>;
   printPdvReceipt: (payload: {
     sale: PdvSale;
     customer?: PdvCustomer;
@@ -362,6 +366,19 @@ export class LocalServer {
       }
     });
 
+    app.post("/api/pdv/tables/:number/append", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const targetTableNumber = Number(request.params.number);
+        const items = Array.isArray(request.body?.items) ? request.body.items as PdvCartItem[] : [];
+        await this.options.appendPdvTableItems(targetTableNumber, items, String(request.body?.targetSubtable || ""));
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel transferir a venda para a mesa." });
+      }
+    });
+
     app.patch("/api/pdv/sales/:id/payments", this.authorize("edit"), async (request, response) => {
       try {
         const payments = Array.isArray(request.body?.payments) ? request.body.payments : [];
@@ -390,6 +407,17 @@ export class LocalServer {
         response.status(201).json({ customer });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar o cliente." });
+      }
+    });
+
+    app.post("/api/pdv/receivables", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const receivable = await this.options.savePdvReceivable(request.body || {});
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.status(201).json({ receivable });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar a conta a receber." });
       }
     });
 
@@ -432,6 +460,17 @@ export class LocalServer {
       }
     });
 
+    app.delete("/api/pdv/receivables/:id", this.authorize("manageTables"), async (request, response) => {
+      try {
+        await this.options.deletePdvReceivable(request.params.id);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel excluir a conta." });
+      }
+    });
+
     app.post("/api/pdv/payables", this.authorize("manageTables"), async (request, response) => {
       try {
         const payable = await this.options.savePdvPayable(request.body || {});
@@ -468,6 +507,17 @@ export class LocalServer {
         response.json({ ok: true });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel cancelar a conta a pagar." });
+      }
+    });
+
+    app.delete("/api/pdv/payables/:id", this.authorize("manageTables"), async (request, response) => {
+      try {
+        await this.options.deletePdvPayable(request.params.id);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ ok: true });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel excluir a conta a pagar." });
       }
     });
 
