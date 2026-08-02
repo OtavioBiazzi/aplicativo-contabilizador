@@ -25,7 +25,7 @@ interface LocalServerOptions {
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
-  transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
+  transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string) => Promise<PdvCartItem[]>;
   appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
   cancelPdvTable: (tableNumber: number, originDevice?: string) => Promise<PdvSale | null>;
@@ -343,7 +343,8 @@ export class LocalServer {
         const sourceTableNumber = Number(request.params.number);
         const targetTableNumber = Number(request.body?.targetTableNumber);
         const selections = Array.isArray(request.body?.selections) ? request.body.selections as PdvTransferSelection[] : [];
-        const items = await this.options.transferPdvTableItems(sourceTableNumber, targetTableNumber, selections);
+        const operationId = String(request.header("x-idempotency-key") || "").trim() || undefined;
+        const items = await this.options.transferPdvTableItems(sourceTableNumber, targetTableNumber, selections, operationId);
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
         response.json({ ok: true, items });

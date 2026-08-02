@@ -615,7 +615,7 @@ async function bootstrap() {
     openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
     savePdvTableItems: (tableNumber, items, subtables) => pdvStore.saveTableItems(tableNumber, items, subtables),
-    transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections),
+    transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections, operationId) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId),
     appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
     updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
     savePdvCategory: (draft) => pdvStore.saveCategory(draft),
@@ -865,8 +865,8 @@ function registerIpc() {
     publishPdvChanged();
   });
 
-  ipcMain.handle("pdv:transferTableItems", async (_event, sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]): Promise<PdvCartItem[]> => {
-    const items = await pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections);
+  ipcMain.handle("pdv:transferTableItems", async (_event, sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string): Promise<PdvCartItem[]> => {
+    const items = await pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId || randomUUID());
     publishPdvChanged();
     return items;
   });

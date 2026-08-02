@@ -53,7 +53,7 @@ const server = new LocalServer({
   openPdvTable: (number, people, note) => pdvStore.openTable(number, people, note),
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
   savePdvTableItems: (number, items, subtables) => pdvStore.saveTableItems(number, items, subtables),
-  transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections),
+  transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections, operationId) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId),
   appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
   closePdvTable: (number, payments, discount, origin, operationId) => pdvStore.closeTable(number, payments, discount, origin, operationId),
   savePdvTablePartial: (number, items, payments, discount, origin, operationId, observations) => pdvStore.closeTablePartial(number, items, payments, discount, origin, operationId, observations),
@@ -546,6 +546,54 @@ if (
   || multiAccountTarget.items.filter((row) => row.subtableName === "Unificada").length !== 3
 ) {
   throw new Error("Transferencia de varias submesas nao mesclou corretamente no destino.");
+}
+
+// Transferir contas sem escolher uma submesa unica deve preservar cada nome no
+// destino. Repetir a mesma requisicao simula uma resposta perdida na rede e nao
+// pode duplicar os produtos.
+const preservedTestItem = { ...item, id: crypto.randomUUID(), productName: "Item da submesa Teste", subtableName: "Teste" };
+const preservedFamilyItem = { ...item, id: crypto.randomUUID(), productName: "Item da submesa Familia", subtableName: "Familia" };
+const preservedExistingItem = { ...item, id: crypto.randomUUID(), productName: "Item existente em Teste", subtableName: "Teste" };
+for (const [tableNumber, items, subtables] of [
+  [27, [preservedTestItem, preservedFamilyItem], ["Teste", "Familia"]],
+  [28, [preservedExistingItem], ["Teste"]]
+]) {
+  const seeded = await fetch(`http://127.0.0.1:43991/api/pdv/tables/${tableNumber}/items`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ items, subtables })
+  });
+  if (!seeded.ok) throw new Error(`Nao foi possivel preparar preservacao de submesas: ${await seeded.text()}`);
+}
+const preservedTransferOperation = crypto.randomUUID();
+const preservedTransferRequest = () => fetch("http://127.0.0.1:43991/api/pdv/tables/27/transfer", {
+  method: "POST",
+  headers: { ...headers, "x-idempotency-key": preservedTransferOperation },
+  body: JSON.stringify({
+    targetTableNumber: 28,
+    selections: [
+      { itemId: preservedTestItem.id, quantity: preservedTestItem.quantity, subtableName: "Teste" },
+      { itemId: preservedFamilyItem.id, quantity: preservedFamilyItem.quantity, subtableName: "Familia" }
+    ]
+  })
+});
+for (let attempt = 0; attempt < 2; attempt += 1) {
+  const response = await preservedTransferRequest();
+  if (!response.ok) throw new Error(`Transferencia idempotente de submesas falhou: ${await response.text()}`);
+}
+const preservedSnapshot = await (await fetch("http://127.0.0.1:43991/api/pdv/snapshot", { headers })).json();
+const preservedSource = preservedSnapshot.tables.find((table) => table.number === 27);
+const preservedTarget = preservedSnapshot.tables.find((table) => table.number === 28);
+if (
+  preservedSource?.items.length
+  || preservedSource?.subtables?.length
+  || preservedTarget?.items.length !== 3
+  || preservedTarget.items.filter((row) => row.subtableName === "Teste").length !== 2
+  || preservedTarget.items.filter((row) => row.subtableName === "Familia").length !== 1
+  || !preservedTarget.subtables?.includes("Teste")
+  || !preservedTarget.subtables?.includes("Familia")
+) {
+  throw new Error("Transferencia remota nao preservou e mesclou os nomes das submesas sem duplicar itens.");
 }
 
 const rapidFirstItem = { ...item, id: crypto.randomUUID(), productName: "Produto rapido 1" };

@@ -4369,6 +4369,7 @@ function HistoryPanel({
     return summary;
   }, { active: 0, activeTotal: 0, cancelled: 0, deleted: 0 }), [filtered]);
   const filteredTotal = roundMoney(filteredSummary.activeTotal);
+  const historyTotalHidden = settings.privacy.hideHeaderTotal || settings.privacy.hideReportTotals;
 
   useEffect(() => {
     setVisibleCount(HISTORY_PAGE_SIZE);
@@ -4465,7 +4466,7 @@ function HistoryPanel({
       <div className="history-summary-strip">
         <div><span>Resultados</span><strong>{filtered.length}</strong></div>
         <div><span>Ativos</span><strong>{filteredSummary.active}</strong></div>
-        <div><span>Total filtrado</span><strong>{formatCurrency(filteredTotal)}</strong></div>
+        <div><span>Total filtrado</span><strong className={historyTotalHidden ? "private-value" : ""}>{historyTotalHidden ? "Privado" : formatCurrency(filteredTotal)}</strong></div>
         <div><span>Cancelados</span><strong>{filteredSummary.cancelled}</strong></div>
         <div><span>Lixeira</span><strong>{filteredSummary.deleted}</strong></div>
       </div>
@@ -4489,13 +4490,16 @@ function HistoryPanel({
           <tbody>
             {visibleRows.map((entry) => {
               const { time } = formatDateTime(entry.createdAt);
+              const description = entry.description.trim();
+              const defaultTablePattern = entry.tableNumber ? new RegExp(`^mesa\\s*0*${entry.tableNumber}$`, "i") : null;
+              const customTableName = entry.tableNumber && description && !defaultTablePattern?.test(description) ? description : "";
               return (
                 <tr key={entry.id} className={entry.status !== "active" ? "muted-row" : ""}>
                   <td>{formatDateTime(entry.createdAt).date}</td>
                   <td>{time}</td>
                   <td>{entry.customType || entry.type}</td>
-                  <td>{entry.description}</td>
-                  <td>{entry.tableNumber || "-"}</td>
+                  <td>{entry.tableNumber ? "-" : description || "-"}</td>
+                  <td>{entry.tableNumber ? customTableName || entry.tableNumber : "-"}</td>
                   <td>{entry.busNumber || "-"}</td>
                   <td>{paymentLabelForEntry(entry)}</td>
                   <td>{formatCurrency(entry.finalValue)}</td>

@@ -21,8 +21,8 @@ contextBridge.exposeInMainWorld("caixa", {
   openPdvTable: (tableNumber: number, people?: number, note?: string) => ipcRenderer.invoke("pdv:openTable", tableNumber, people, note),
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => ipcRenderer.invoke("pdv:setTableStatus", tableNumber, status),
   savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => ipcRenderer.invoke("pdv:saveTableItems", tableNumber, items, subtables),
-  transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) =>
-    ipcRenderer.invoke("pdv:transferTableItems", sourceTableNumber, targetTableNumber, selections),
+  transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string) =>
+    ipcRenderer.invoke("pdv:transferTableItems", sourceTableNumber, targetTableNumber, selections, operationId),
   appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) =>
     ipcRenderer.invoke("pdv:appendTableItems", targetTableNumber, items, targetSubtable),
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => ipcRenderer.invoke("pdv:closeTable", tableNumber, payments, discount, operationId),

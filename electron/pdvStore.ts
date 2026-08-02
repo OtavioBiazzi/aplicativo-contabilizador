@@ -1260,9 +1260,25 @@ export class PdvStore {
     await this.persist();
   }
 
-  async transferTableItems(sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]): Promise<PdvCartItem[]> {
+  async transferTableItems(sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string): Promise<PdvCartItem[]> {
     sourceTableNumber = this.normalizeTableNumber(sourceTableNumber);
     targetTableNumber = this.normalizeTableNumber(targetTableNumber);
+    const normalizedOperationId = String(operationId || "").trim();
+    if (normalizedOperationId) {
+      const completed = selectAll<{ sourceTableNumber: number; targetTableNumber: number; sourceItemsJson: string }>(
+        this.requireDb(),
+        "SELECT source_table_number AS sourceTableNumber, target_table_number AS targetTableNumber, source_items_json AS sourceItemsJson FROM table_transfer_operations WHERE operation_id = ?",
+        [normalizedOperationId]
+      )[0];
+      if (completed) {
+        if (completed.sourceTableNumber !== sourceTableNumber || completed.targetTableNumber !== targetTableNumber) {
+          throw new Error("Esta transferencia ja foi usada com outra mesa de destino.");
+        }
+        const completedItems = JSON.parse(completed.sourceItemsJson || "[]") as PdvCartItem[];
+        validateCartItems(completedItems);
+        return completedItems;
+      }
+    }
     if (!Array.isArray(selections) || !selections.length) {
       throw new Error("Selecione ao menos um item para transferir.");
     }
@@ -1361,6 +1377,12 @@ export class PdvStore {
       }
       if (!remainingItems.length && !nextSourceSubtables.length && sourceTableNumber !== targetTableNumber) {
         db.run("DELETE FROM table_sessions WHERE table_number = ? AND status != 'Reservada'", [sourceTableNumber]);
+      }
+      if (normalizedOperationId) {
+        db.run(
+          "INSERT INTO table_transfer_operations (operation_id, source_table_number, target_table_number, source_items_json, created_at) VALUES (?, ?, ?, ?, ?)",
+          [normalizedOperationId, sourceTableNumber, targetTableNumber, JSON.stringify(sourceTableNumber === targetTableNumber ? nextTargetItems : remainingItems), new Date().toISOString()]
+        );
       }
       db.run("COMMIT");
     } catch (error) {
@@ -1991,6 +2013,13 @@ export class PdvStore {
       CREATE TABLE IF NOT EXISTS partial_operations (
         operation_id TEXT PRIMARY KEY,
         sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS table_transfer_operations (
+        operation_id TEXT PRIMARY KEY,
+        source_table_number INTEGER NOT NULL,
+        target_table_number INTEGER NOT NULL,
+        source_items_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS customers (
         id TEXT PRIMARY KEY,

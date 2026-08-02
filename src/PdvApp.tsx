@@ -88,7 +88,7 @@ function readClientVisualSettings(storageKey: string): Partial<PdvClientVisualSe
     }, {});
     if (typeof value.vibrantMode === "boolean") parsed.vibrantMode = value.vibrantMode;
     if (typeof value.hideTableStatusDescriptions === "boolean") parsed.hideTableStatusDescriptions = value.hideTableStatusDescriptions;
-    if (typeof value.hideTableStatusLegend === "boolean") parsed.hideTableStatusLegend = value.hideTableStatusLegend;
+    parsed.hideTableStatusLegend = typeof value.hideTableStatusLegend === "boolean" ? value.hideTableStatusLegend : true;
     return parsed;
   } catch {
     return {};
@@ -527,7 +527,7 @@ export function PdvApp({
       throw error;
     }
   };
-  const transferPdvTableItems = async (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => {
+  const transferPdvTableItems = async (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId: PdvOperationId = crypto.randomUUID()) => {
     // A transferencia deve partir da ultima versao visivel, inclusive quando o
     // autosave ainda nao teve tempo de enviar o produto recem-adicionado.
     if (activeTable?.number === sourceTableNumber && tableMutationRevision.current !== persistedTableMutationRevision.current) {
@@ -536,8 +536,8 @@ export function PdvApp({
       persistedTableMutationRevision.current = tableMutationRevision.current;
     }
     return remoteTablesActive && remoteSession
-      ? remotePdvRequest<{ ok: boolean; items: PdvCartItem[] }>(remoteSession, `/api/pdv/tables/${sourceTableNumber}/transfer`, { method: "POST", body: JSON.stringify({ targetTableNumber, selections }) }).then((result) => result.items)
-      : window.caixa.transferPdvTableItems(sourceTableNumber, targetTableNumber, selections);
+      ? remotePdvRequest<{ ok: boolean; items: PdvCartItem[] }>(remoteSession, `/api/pdv/tables/${sourceTableNumber}/transfer`, { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ targetTableNumber, selections }) }).then((result) => result.items)
+      : window.caixa.transferPdvTableItems(sourceTableNumber, targetTableNumber, selections, operationId);
   };
   const appendPdvTableItems = (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => remotePdvActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${targetTableNumber}/append`, { method: "POST", body: JSON.stringify({ items, targetSubtable }) }).then(() => undefined)
@@ -792,9 +792,18 @@ export function PdvApp({
     onDirectCartChange?.(cart.length > 0);
   }, [cart.length, onDirectCartChange]);
 
-  const applyFreshOpenTable = (next: PdvSnapshot, tableNumber: number) => {
+  const applyFreshOpenTable = (next: PdvSnapshot, tableNumber: number, closeWhenRemoved = false) => {
     const fresh = next.tables.find((table) => table.number === tableNumber);
     if (!fresh) return;
+    if (closeWhenRemoved && tableCart.length > 0 && fresh.status === "Livre" && fresh.items.length === 0 && !(fresh.subtables || []).length) {
+      setActiveTable(null);
+      setTableCart([]);
+      setCurrentSubtable("");
+      setSelectedTableItemIds([]);
+      setPartialSelectedItemIds([]);
+      setToast(`A Mesa ${String(tableNumber).padStart(3, "0")} foi fechada em outro computador.`);
+      return;
+    }
     setActiveTable((current) => samePdvValue(current, fresh) ? current : fresh);
     setTableCart((current) => samePdvValue(current, fresh.items) ? current : fresh.items);
     setTablePeople((current) => current === (fresh.people || 1) ? current : fresh.people || 1);
@@ -823,7 +832,7 @@ export function PdvApp({
       && tableAutosaveTimer.current === null
       && tableMutationRevision.current === persistedTableMutationRevision.current
     ) {
-      applyFreshOpenTable(snapshotOverride, activeTable.number);
+      applyFreshOpenTable(snapshotOverride, activeTable.number, true);
     }
   }, [snapshotOverride]);
 
@@ -836,7 +845,7 @@ export function PdvApp({
       && tableAutosaveTimer.current === null
       && tableMutationRevision.current === persistedTableMutationRevision.current
     ) {
-      applyFreshOpenTable(remoteSession.snapshot, activeTable.number);
+      applyFreshOpenTable(remoteSession.snapshot, activeTable.number, true);
     }
   }, [remoteSession?.snapshot]);
 
@@ -849,7 +858,7 @@ export function PdvApp({
     }
     const fresh = snapshot.tables.find((table) => table.number === activeTable.number);
     if (fresh && !samePdvValue(tableCart, fresh.items)) {
-      applyFreshOpenTable(snapshot, activeTable.number);
+      applyFreshOpenTable(snapshot, activeTable.number, remotePdvActive);
     }
   }, [snapshot, activeTable?.number, tableCart, tableSaveState]);
 
@@ -1235,8 +1244,6 @@ export function PdvApp({
       return;
     }
     await persistTableBeforeAction();
-    await setPdvTableStatus(activeTable.number, "Fechamento");
-    setActiveTable((current) => current ? { ...current, status: "Fechamento" } : current);
     setTableCloseScope(scope);
     setPartialItemsModalOpen(false);
     setPartialValueModalOpen(false);
@@ -1664,9 +1671,25 @@ export function PdvApp({
                     {snapshot.settings.tablePeopleEnabled && <small>Pessoas: {table.people || "-"}</small>}
                     {table.note && <small className="pdv-table-note" title={table.note}>Obs.: {table.note}</small>}
                     {searchDetails.subtables.length > 0 && (
-                      <small className="pdv-table-search-match" title={searchDetails.subtables.join(", ")}>
-                        Submesa: {searchDetails.subtables.join(", ")}
-                      </small>
+                      <div className="pdv-table-search-matches" aria-label="Submesas encontradas">
+                        {searchDetails.subtables.map((name) => (
+                          <span
+                            key={name}
+                            className="pdv-table-search-match"
+                            role="button"
+                            tabIndex={0}
+                            title={`Abrir submesa ${name}`}
+                            onClick={(event) => { event.stopPropagation(); openTable(table, name); }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                openTable(table, name);
+                              }
+                            }}
+                          >{name}</span>
+                        ))}
+                      </div>
                     )}
                     {searchDetails.products.length > 0 && (
                       <small className="pdv-table-search-match" title={searchDetails.products.join(", ")}>
@@ -2025,7 +2048,7 @@ function PdvSaleScreen(props: {
   onOpenTransferredTable?: (tableNumber: number, subtableName?: string) => void | Promise<void>;
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
-  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
+  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: PdvOperationId) => Promise<PdvCartItem[]>;
   appendPdvTableItems?: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   onCancelWholeTable?: () => void | Promise<void>;
 }) {
@@ -2373,11 +2396,16 @@ function PdvSaleScreen(props: {
             }
           }}
         >
+          {visibleCart.length > 0 && (
+            <div className="pdv-cart-columns" aria-hidden="true">
+              <span>Produto</span><span>Qtde</span><span>Unitario</span><span>Total</span>
+            </div>
+          )}
           {visibleCart.map((item, index) => (
             <article
               key={item.id}
               data-cart-item-id={item.id}
-              title={item.productName}
+              title={[item.productName, item.subtableName, item.note, unpaidQuantity(item) <= 0.009 ? "Pago" : item.paidQuantity ? `Restam ${formatQuantity(unpaidQuantity(item))}` : "", adjustedItemOriginalTotal(item) !== null ? `Original ${money(adjustedItemOriginalTotal(item)!)}; final ${money(item.total)}` : ""].filter(Boolean).join(" | ")}
               className={`${activeItemId === item.id ? "selected" : ""} ${unpaidQuantity(item) <= 0.009 ? "paid" : ""}`.trim()}
               onClick={() => props.setSelectedItemIds?.([item.id])}
               onContextMenu={(event) => {
@@ -2387,16 +2415,12 @@ function PdvSaleScreen(props: {
               }}
               onDoubleClick={() => runItemAction("remove", item)}
             >
-              <div>
+              <div className="pdv-cart-product-cell">
                 <strong>{index + 1}. {item.productName}</strong>
-                <span>{item.measureLabel || formatQuantity(item.quantity)} x {money(item.unitPrice)}{item.subtableName ? ` | ${item.subtableName}` : ""}{item.note ? ` | ${item.note}` : ""}{unpaidQuantity(item) <= 0.009 ? " | Pago" : item.paidQuantity ? ` | Restam ${formatQuantity(unpaidQuantity(item))}` : ""}</span>
-                {adjustedItemOriginalTotal(item) !== null && (
-                  <small className="pdv-cart-price-adjustment">
-                    Original <s>{money(adjustedItemOriginalTotal(item)!)}</s> | Final {money(item.total)}
-                  </small>
-                )}
               </div>
-              <b>{money(props.activeTableNumber ? unpaidItemTotal(item) : item.total)}</b>
+              <span className="pdv-cart-quantity">{item.measureLabel || formatQuantity(item.quantity)}</span>
+              <span className="pdv-cart-unit-price">{money(item.unitPrice)}</span>
+              <b className="pdv-cart-line-total">{money(props.activeTableNumber ? unpaidItemTotal(item) : item.total)}</b>
             </article>
           ))}
           {!visibleCart.length && <div className="pdv-empty">Nenhum produto lancado nesta conta.</div>}
@@ -2640,7 +2664,7 @@ function PdvSaleScreen(props: {
           <SplitItemModal
             item={splitItem}
             onCancel={() => setSplitItem(null)}
-            onConfirm={(people) => {
+            onConfirm={(people, singleShare) => {
               const totalCents = Math.round(splitItem.total * 100);
               const discountCents = Math.round(splitItem.discount * 100);
               const baseTotalCents = Math.floor(totalCents / people);
@@ -2657,7 +2681,8 @@ function PdvSaleScreen(props: {
                 measureLabel: `Parte ${index + 1}/${people}`,
                 note: [splitItem.note, `Parte ${index + 1} de ${people}`].filter(Boolean).join(" | ")
               }));
-              updateVisibleCart((current) => current.flatMap((item) => item.id === splitItem.id ? parts : [item]));
+              const insertedParts = singleShare ? [parts[0]] : parts;
+              updateVisibleCart((current) => current.flatMap((item) => item.id === splitItem.id ? insertedParts : [item]));
               props.setSelectedItemIds?.([parts[0].id]);
               setSplitItem(null);
             }}
@@ -2748,14 +2773,15 @@ function SplitItemModal({
 }: {
   item: PdvCartItem;
   onCancel: () => void;
-  onConfirm: (people: number) => void;
+  onConfirm: (people: number, singleShare: boolean) => void;
 }) {
   const [people, setPeople] = useState(2);
+  const [singleShare, setSingleShare] = useState(false);
   const totalCents = Math.round(item.total * 100);
   const baseCents = Math.floor(totalCents / people);
   const remainder = totalCents % people;
   const parts = Array.from({ length: people }, (_, index) => (baseCents + (index >= people - remainder ? 1 : 0)) / 100);
-  useModalConfirmShortcut(() => onConfirm(people), onCancel, people >= 2);
+  useModalConfirmShortcut(() => onConfirm(people, singleShare), onCancel, people >= 2);
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
       <section className="pdv-payment-modal pdv-split-item-modal" tabIndex={-1} autoFocus>
@@ -2783,10 +2809,14 @@ function SplitItemModal({
             </div>
           ))}
         </div>
+        <label className="pdv-split-single-option">
+          <input type="checkbox" checked={singleShare} onChange={(event) => setSingleShare(event.target.checked)} />
+          <span><strong>Lancar somente uma parte no carrinho</strong><small>Substitui o produto original por uma unica parte com o preco ja dividido.</small></span>
+        </label>
         {remainder > 0 && <small className="pdv-split-item-note">Os {remainder} centavo(s) restantes foram distribuidos nas ultimas partes.</small>}
         <div className="pdv-action-row">
           <button className="pdv-danger-button" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="pdv-primary-button" type="button" onClick={() => onConfirm(people)}>Dividir item</button>
+          <button className="pdv-primary-button" type="button" onClick={() => onConfirm(people, singleShare)}>{singleShare ? "Lancar uma parte" : "Dividir item"}</button>
         </div>
       </section>
     </div>
@@ -3039,7 +3069,7 @@ function SubtableManagerModal({
     controls[(index + direction + controls.length) % controls.length]?.focus();
   };
   return (
-    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+    <div className="pdv-modal-backdrop pdv-nested-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="pdv-payment-modal pdv-subtable-manager-modal" onKeyDownCapture={navigateControls}>
         <div className="pdv-section-head">
           <div>
@@ -4278,7 +4308,7 @@ function TransferListModal({
   accountMode?: boolean;
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
-  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
+  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: PdvOperationId) => Promise<PdvCartItem[]>;
   selectAllInitially?: boolean;
   preferredTargetSubtable?: string;
   onCancel: () => void;
@@ -4287,11 +4317,12 @@ function TransferListModal({
   const transferableCart = cart.filter((item) => unpaidQuantity(item) > 0.009);
   const [selectedIds, setSelectedIds] = useState<string[]>(() => selectAllInitially ? transferableCart.map((item) => item.id) : []);
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(transferableCart.map((item) => [item.id, String(unpaidQuantity(item)).replace(".", ",")])));
-  const [targetTableNumber, setTargetTableNumber] = useState(() => tables.find((table) => table.number !== sourceTableNumber)?.number || sourceTableNumber);
-  const [targetSubtable, setTargetSubtable] = useState(preferredTargetSubtable);
+  const [targetTableNumber, setTargetTableNumber] = useState(() => sourceTableNumber > 0 && tables.some((table) => table.number === sourceTableNumber) ? sourceTableNumber : tables[0]?.number || 0);
+  const [targetSubtable, setTargetSubtable] = useState(preferredTargetSubtable || (sourceTableNumber > 0 ? "__choose__" : ""));
   const [creatingTargetSubtable, setCreatingTargetSubtable] = useState(Boolean(preferredTargetSubtable));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const transferOperationId = useRef<PdvOperationId>(crypto.randomUUID());
   const selectedItems = transferableCart.filter((item) => selectedIds.includes(item.id));
   const selectedTotal = roundMoney(selectedItems.reduce((total, item) => {
     const quantity = transferQuantity(item, quantities[item.id]);
@@ -4323,15 +4354,23 @@ function TransferListModal({
   const destinationIsOrigin = (subtable: string) => targetTableNumber === sourceTableNumber
     && selectedItems.length > 0
     && selectedItems.some((item) => (item.subtableName || "") === subtable);
+  const preserveSourceAccounts = accountMode && targetSubtable === "__preserve__";
+  const destinationChosen = targetSubtable !== "__choose__" && (!creatingTargetSubtable || Boolean(targetSubtable.trim()));
+  const explicitTargetSubtable = preserveSourceAccounts || !destinationChosen ? "" : targetSubtable.trim();
+  const destinationForItem = (item: PdvCartItem) => preserveSourceAccounts ? (item.subtableName || "") : explicitTargetSubtable;
   const selectAll = () => setSelectedIds(transferableCart.map((item) => item.id));
   const clearSelection = () => setSelectedIds([]);
   const confirm = async () => {
     if (busy || !selectedItems.length || !targetTable) {
       return;
     }
+    if (!destinationChosen) {
+      setNotice("Escolha a conta ou submesa de destino.");
+      return;
+    }
     if (
       targetTableNumber === sourceTableNumber
-      && selectedItems.some((item) => (item.subtableName || "") === targetSubtable.trim())
+      && selectedItems.some((item) => (item.subtableName || "") === destinationForItem(item))
     ) {
       setNotice("O destino tambem esta entre as contas de origem. Escolha outra mesa ou submesa.");
       return;
@@ -4341,19 +4380,20 @@ function TransferListModal({
       const selections: PdvTransferSelection[] = selectedItems.map((item) => ({
         itemId: item.id,
         quantity: transferQuantity(item, quantities[item.id]),
-        subtableName: targetSubtable.trim() || undefined
+        subtableName: destinationForItem(item) || undefined
       }));
       let nextSource: PdvCartItem[];
       if (transferPdvTableItems) {
-        nextSource = await transferPdvTableItems(sourceTableNumber, targetTableNumber, selections);
+        nextSource = await transferPdvTableItems(sourceTableNumber, targetTableNumber, selections, transferOperationId.current);
       } else {
-        const movedItems = selectedItems.map((item) => splitCartItemForTransfer(item, transferQuantity(item, quantities[item.id]), targetSubtable.trim()));
+        const movedItems = selectedItems.map((item) => splitCartItemForTransfer(item, transferQuantity(item, quantities[item.id]), destinationForItem(item)));
         await (openPdvTable || window.caixa.openPdvTable)(targetTableNumber, targetTable.people || 1, targetTable.note || "");
         await (savePdvTableItems || window.caixa.savePdvTableItems)(targetTableNumber, [...targetTable.items, ...movedItems]);
         nextSource = selectedItems.reduce((items, item) => subtractCartItemQuantity(items, item.id, transferQuantity(item, quantities[item.id])), cart);
         await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
       }
-      onTransferred(nextSource, targetTableNumber, targetSubtable.trim() || undefined);
+      const preservedDestinations = [...new Set(selectedItems.map((item) => destinationForItem(item)).filter(Boolean))];
+      onTransferred(nextSource, targetTableNumber, explicitTargetSubtable || (preservedDestinations.length === 1 ? preservedDestinations[0] : undefined));
     } catch (error) {
       setBusy(false);
       setNotice(error instanceof Error ? error.message : "Nao foi possivel transferir os produtos. Tente novamente.");
@@ -4368,7 +4408,7 @@ function TransferListModal({
           <div>
             <span className="pdv-eyebrow">{sourceTableNumber > 0 ? accountMode ? "Transferir contas" : "Transferir produtos" : "Destino da venda"}</span>
             <h1>{sourceTableNumber > 0 ? accountMode ? "Transferir principal e submesas" : "Escolha os itens da mesa" : "Transferir venda para uma mesa"}</h1>
-            <p>{accountMode ? "Selecione uma ou varias contas e envie todos os produtos para um unico destino." : "Marque os produtos, ajuste a quantidade de cada um e escolha o destino."}</p>
+            <p>{accountMode ? "Mantenha cada nome de submesa no destino ou escolha uma unica conta para reunir os produtos." : "Marque os produtos, ajuste a quantidade de cada um e escolha o destino."}</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
@@ -4376,8 +4416,9 @@ function TransferListModal({
           <label>
             <span>Mesa destino</span>
             <select value={targetTableNumber} onChange={(event) => {
-              setTargetTableNumber(Number(event.target.value));
-              setTargetSubtable(preferredTargetSubtable);
+              const nextTableNumber = Number(event.target.value);
+              setTargetTableNumber(nextTableNumber);
+              setTargetSubtable(preferredTargetSubtable || (accountMode && nextTableNumber !== sourceTableNumber ? "__preserve__" : sourceTableNumber > 0 ? "__choose__" : ""));
               setCreatingTargetSubtable(Boolean(preferredTargetSubtable));
             }}>
               {tables.map((table) => (
@@ -4400,6 +4441,8 @@ function TransferListModal({
                 setTargetSubtable(value === "__new__" ? "" : value);
               }}
             >
+              {sourceTableNumber > 0 && <option value="__choose__" disabled>Selecione o destino...</option>}
+              {accountMode && <option value="__preserve__" disabled={targetTableNumber === sourceTableNumber}>Manter conta principal e nomes das submesas{targetTableNumber === sourceTableNumber ? " (mesa atual)" : ""}</option>}
               <option value="" disabled={destinationIsOrigin("")}>Mesa principal{destinationIsOrigin("") ? " (origem)" : ""}</option>
               {existingSubtables.map((name) => <option key={name} value={name} disabled={destinationIsOrigin(name)}>{name}{destinationIsOrigin(name) ? " (origem)" : ""}</option>)}
               <option value="__temporary__">Criar submesa temporaria</option>
@@ -4442,7 +4485,7 @@ function TransferListModal({
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Voltar</button>
-          <button className="pdv-primary-button" disabled={busy || !selectedItems.length} onClick={confirm}>{busy ? "Transferindo..." : "Transferir selecionados"}</button>
+          <button className="pdv-primary-button" disabled={busy || !selectedItems.length || !destinationChosen} onClick={confirm}>{busy ? "Transferindo..." : "Transferir selecionados"}</button>
         </div>
         {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
@@ -4631,16 +4674,17 @@ function TransferItemModal({
   cart: PdvCartItem[];
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
-  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[]) => Promise<PdvCartItem[]>;
+  transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: PdvOperationId) => Promise<PdvCartItem[]>;
   onCancel: () => void;
   onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number, targetSubtable?: string) => void;
 }) {
   const [targetTableNumber, setTargetTableNumber] = useState(sourceTableNumber);
-  const [targetSubtable, setTargetSubtable] = useState(item.subtableName || "");
+  const [targetSubtable, setTargetSubtable] = useState("__choose__");
   const [creatingTargetSubtable, setCreatingTargetSubtable] = useState(false);
   const [quantityText, setQuantityText] = useState(formatQuantity(item.quantity));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const transferOperationId = useRef<PdvOperationId>(crypto.randomUUID());
   const targetTable = tables.find((table) => table.number === targetTableNumber);
   const existingSubtables = [...new Set([...(targetTable?.subtables || []), ...(targetTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
   const destinationIsOrigin = (subtable: string) => targetTableNumber === sourceTableNumber && subtable === (item.subtableName || "");
@@ -4655,6 +4699,10 @@ function TransferItemModal({
       setNotice("Mesa destino nao encontrada.");
       return;
     }
+    if (targetSubtable === "__choose__" || (creatingTargetSubtable && !targetSubtable.trim())) {
+      setNotice("Escolha a conta ou submesa de destino.");
+      return;
+    }
     if (targetTableNumber === sourceTableNumber && (targetSubtable || "") === (item.subtableName || "")) {
       setNotice("Escolha outra mesa ou outra submesa.");
       return;
@@ -4663,7 +4711,7 @@ function TransferItemModal({
     try {
       let nextSource: PdvCartItem[];
       if (transferPdvTableItems) {
-        nextSource = await transferPdvTableItems(sourceTableNumber, targetTableNumber, [{ itemId: item.id, quantity, subtableName: targetSubtable.trim() || undefined }]);
+        nextSource = await transferPdvTableItems(sourceTableNumber, targetTableNumber, [{ itemId: item.id, quantity, subtableName: targetSubtable.trim() || undefined }], transferOperationId.current);
       } else {
         const transferItem = splitCartItemForTransfer(item, quantity, targetSubtable.trim());
         await (openPdvTable || window.caixa.openPdvTable)(targetTableNumber, target.people || 1, target.note || "");
@@ -4695,7 +4743,7 @@ function TransferItemModal({
             <span>Mesa destino</span>
             <select value={targetTableNumber} onChange={(event) => {
               setTargetTableNumber(Number(event.target.value));
-              setTargetSubtable("");
+              setTargetSubtable("__choose__");
               setCreatingTargetSubtable(false);
             }}>
               {tables.map((table) => (
@@ -4717,6 +4765,7 @@ function TransferItemModal({
                 setTargetSubtable(value === "__new__" ? "" : value);
               }}
             >
+              <option value="__choose__" disabled>Selecione o destino...</option>
               <option value="" disabled={destinationIsOrigin("")}>Mesa principal{destinationIsOrigin("") ? " (origem)" : ""}</option>
               {existingSubtables.map((name) => <option key={name} value={name} disabled={destinationIsOrigin(name)}>{name}{destinationIsOrigin(name) ? " (origem)" : ""}</option>)}
               <option value="__new__">Criar nova submesa...</option>
@@ -4741,7 +4790,7 @@ function TransferItemModal({
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
-          <button className="pdv-primary-button" disabled={busy} onClick={confirm}>{busy ? "Transferindo..." : "Transferir"}</button>
+          <button className="pdv-primary-button" disabled={busy || targetSubtable === "__choose__" || (creatingTargetSubtable && !targetSubtable.trim())} onClick={confirm}>{busy ? "Transferindo..." : "Transferir"}</button>
         </div>
         {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
@@ -6966,7 +7015,7 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
   );
 }
 
-function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot: PdvSnapshot; settings: Partial<PdvClientVisualSettings>; onChange: (patch: Partial<PdvClientVisualSettings>) => void }) {
+function ClientVisualSettingsScreen({ snapshot, settings, onChange, externalActionsRef, onDirtyChange }: { snapshot: PdvSnapshot; settings: Partial<PdvClientVisualSettings>; onChange: (patch: Partial<PdvClientVisualSettings>) => void; externalActionsRef?: React.MutableRefObject<PdvAdvancedSettingsActions | null>; onDirtyChange?: (dirty: boolean) => void }) {
   const visible = useMemo(() => ({ ...snapshot.settings, ...settings }), [snapshot.settings, settings]);
   const [draft, setDraft] = useState<Partial<PdvClientVisualSettings>>(visible);
   const [dirty, setDirty] = useState(false);
@@ -6977,6 +7026,24 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
     setDraft((current) => ({ ...current, ...patch }));
     setDirty(true);
   };
+  const saveChanges = async () => {
+    onChange(draft);
+    setDirty(false);
+  };
+  const discardChanges = () => {
+    setDraft(visible);
+    setDirty(false);
+  };
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (!externalActionsRef) return;
+    externalActionsRef.current = { save: saveChanges, discard: discardChanges };
+    return () => {
+      externalActionsRef.current = null;
+    };
+  }, [externalActionsRef, draft, visible]);
   const applyPreset = (preset: "compact" | "normal" | "comfortable") => {
     const presets: Record<typeof preset, Partial<PdvClientVisualSettings>> = {
       compact: { gridColumns: 7, categoryColumns: 7, tableColumns: 11, productCardHeight: 52, categoryCardHeight: 44, tableCardHeight: 74, vibrantMode: Boolean(draft.vibrantMode), hideTableStatusDescriptions: Boolean(draft.hideTableStatusDescriptions), hideTableStatusLegend: Boolean(draft.hideTableStatusLegend) },
@@ -6993,10 +7060,10 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange }: { snapshot
           <h1>Ajustes deste computador</h1>
           <p>As regras do PDV acompanham o servidor. Aqui voce altera somente o tamanho e a distribuicao visual desta tela.</p>
         </div>
-        <div className="pdv-action-row">
-          <button className="pdv-ghost-button" disabled={!dirty} onClick={() => { setDraft(visible); setDirty(false); }}>Descartar</button>
-          <button className="pdv-primary-button" disabled={!dirty} onClick={() => { onChange(draft); setDirty(false); }}>Salvar alteracoes</button>
-        </div>
+        {!externalActionsRef && <div className="pdv-action-row">
+          <button className="pdv-ghost-button" disabled={!dirty} onClick={discardChanges}>Descartar</button>
+          <button className="pdv-primary-button" disabled={!dirty} onClick={() => void saveChanges()}>Salvar alteracoes</button>
+        </div>}
       </div>
       <div className="pdv-visual-presets" aria-label="Densidade visual deste computador">
         <span>Densidade</span>
@@ -7117,7 +7184,7 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
     };
   });
   if (readOnly) {
-    return <ClientVisualSettingsScreen snapshot={snapshot} settings={clientVisualSettings} onChange={(patch) => onClientVisualSettingsChange?.(patch)} />;
+    return <ClientVisualSettingsScreen snapshot={snapshot} settings={clientVisualSettings} onChange={(patch) => onClientVisualSettingsChange?.(patch)} externalActionsRef={externalActionsRef} onDirtyChange={onDirtyChange} />;
   }
   const applyVisualPreset = (preset: "compact" | "normal" | "comfortable") => {
     const presets: Record<typeof preset, Partial<PdvSettings>> = {
