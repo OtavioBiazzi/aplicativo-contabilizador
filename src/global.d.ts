@@ -35,7 +35,7 @@ export interface CaixaApi {
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string) => Promise<PdvCartItem[]>;
   appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string) => Promise<PdvSale>;
-  cancelPdvTable: (tableNumber: number) => Promise<PdvSale | null>;
+  cancelPdvTable: (tableNumber: number, subtableName?: string) => Promise<PdvSale | null>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string) => Promise<PdvSale>;
   cancelPdvSale: (id: string) => Promise<void>;
   updatePdvSalePayments: (id: string, payments: PdvPayment[]) => Promise<PdvSale>;

@@ -56,6 +56,7 @@ const server = new LocalServer({
   transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections, operationId) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId),
   appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
   closePdvTable: (number, payments, discount, origin, operationId) => pdvStore.closeTable(number, payments, discount, origin, operationId),
+  cancelPdvTable: (number, origin, subtableName) => pdvStore.cancelTable(number, origin, subtableName),
   savePdvTablePartial: (number, items, payments, discount, origin, operationId, observations) => pdvStore.closeTablePartial(number, items, payments, discount, origin, operationId, observations),
   updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
   savePdvCategory: (draft) => pdvStore.saveCategory(draft),
@@ -437,10 +438,29 @@ const networkTarget = transferNetworkSnapshot.tables.find((table) => table.numbe
 if (
   remoteTransferBody.items[0]?.quantity !== 2
   || networkSource?.items[0]?.quantity !== 2
+  || !networkSource?.subtables?.includes("Origem")
   || networkTarget?.items[0]?.quantity !== 1
   || networkTarget?.items[0]?.subtableName !== "Destino"
 ) {
   throw new Error("Transferencia remota nao permaneceu consistente no snapshot completo.");
+}
+
+await pdvStore.openTable(29);
+await pdvStore.saveTableItems(29, [], ["Submesa remota vazia"]);
+const remoteEmptyCancel = await fetch("http://127.0.0.1:43991/api/pdv/tables/29/cancel", {
+  method: "POST",
+  headers,
+  body: JSON.stringify({ subtableName: "Submesa remota vazia" })
+});
+const remoteEmptyCancelBody = await remoteEmptyCancel.json();
+const remoteEmptyCancelSnapshot = await (await fetch("http://127.0.0.1:43991/api/pdv/snapshot", { headers })).json();
+if (
+  !remoteEmptyCancel.ok
+  || remoteEmptyCancelBody.sale?.status !== "Cancelada"
+  || remoteEmptyCancelBody.sale?.description !== "Submesa remota vazia"
+  || remoteEmptyCancelSnapshot.tables.find((table) => table.number === 29)?.subtables?.includes("Submesa remota vazia")
+) {
+  throw new Error("Cliente remoto nao conseguiu cancelar e auditar uma submesa vazia.");
 }
 
 const directTransferItem = { ...item, id: crypto.randomUUID(), productName: "Venda direta transferida", total: 12 };

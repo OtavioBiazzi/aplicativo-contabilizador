@@ -360,7 +360,7 @@ export class PdvStore {
           String(draft.note || "").trim()
         ]
       );
-      this.writeFinancialEvent(db, "payable", id, existing ? "Edicao" : "Criacao", existing ? "Dados da conta atualizados." : "Conta a pagar cadastrada.", "Este computador");
+      this.writeFinancialEvent(db, "payable", id, existing ? "Edicao" : "Criacao", existing ? "Dados da conta atualizados." : "Conta a pagar cadastrada.", "Servidor");
       if (draft.payments !== undefined) {
         db.run("DELETE FROM payable_payments WHERE payable_id = ?", [id]);
         for (const payment of payments) {
@@ -393,7 +393,7 @@ export class PdvStore {
   async payPayable(
     payableId: string,
     payment: PdvPayablePayment,
-    originDevice = "Este computador",
+    originDevice = "Servidor",
     operationId?: string
   ): Promise<PdvPayable> {
     const payable = this.getPayables().find((item) => item.id === payableId);
@@ -441,7 +441,7 @@ export class PdvStore {
     if (!payable) throw new Error("Conta a pagar nao encontrada.");
     if (payable.paidAmount > 0.009) throw new Error("Uma conta com pagamentos nao pode ser cancelada.");
     this.requireDb().run("UPDATE payables SET status = 'Cancelada' WHERE id = ?", [id]);
-    this.writeFinancialEvent(this.requireDb(), "payable", id, "Cancelamento", "Conta a pagar cancelada.", "Este computador");
+    this.writeFinancialEvent(this.requireDb(), "payable", id, "Cancelamento", "Conta a pagar cancelada.", "Servidor");
     await this.persist();
   }
 
@@ -449,7 +449,7 @@ export class PdvStore {
     const payable = this.getPayables().find((item) => item.id === id);
     if (!payable) throw new Error("Conta a pagar nao encontrada.");
     this.requireDb().run("UPDATE payables SET status = 'Excluida' WHERE id = ?", [id]);
-    this.writeFinancialEvent(this.requireDb(), "payable", id, "Exclusao", "Conta movida para o historico de excluidas.", "Este computador");
+    this.writeFinancialEvent(this.requireDb(), "payable", id, "Exclusao", "Conta movida para o historico de excluidas.", "Servidor");
     await this.persist();
   }
 
@@ -563,7 +563,7 @@ export class PdvStore {
           String(draft.category || "").trim(), String(draft.costCenter || "").trim(), String(draft.documentNumber || "").trim(),
           String(draft.paymentAccount || "").trim(), JSON.stringify(normalizeStringList(draft.tags)), createdAt]
       );
-      this.writeFinancialEvent(db, "receivable", id, "Criacao", "Conta a receber cadastrada manualmente.", "Este computador");
+      this.writeFinancialEvent(db, "receivable", id, "Criacao", "Conta a receber cadastrada manualmente.", "Servidor");
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -576,7 +576,7 @@ export class PdvStore {
   async receiveReceivable(
     receivableId: string,
     payment: PdvReceivablePayment,
-    originDevice = "Este computador",
+    originDevice = "Servidor",
     operationId?: string
   ): Promise<PdvReceivable> {
     const receivable = this.getReceivables().find((item) => item.id === receivableId);
@@ -630,7 +630,7 @@ export class PdvStore {
     if (!receivable) throw new Error("Conta a receber nao encontrada.");
     if (receivable.receivedAmount > 0.009) throw new Error("Uma conta com recebimentos nao pode ser cancelada sem estornar os pagamentos.");
     this.requireDb().run("UPDATE receivables SET status = 'Cancelada' WHERE id = ?", [id]);
-    this.writeFinancialEvent(this.requireDb(), "receivable", id, "Cancelamento", "Conta a receber cancelada.", "Este computador");
+    this.writeFinancialEvent(this.requireDb(), "receivable", id, "Cancelamento", "Conta a receber cancelada.", "Servidor");
     await this.persist();
   }
 
@@ -638,7 +638,7 @@ export class PdvStore {
     const receivable = this.getReceivables().find((item) => item.id === id);
     if (!receivable) throw new Error("Conta a receber nao encontrada.");
     this.requireDb().run("UPDATE receivables SET status = 'Excluida' WHERE id = ?", [id]);
-    this.writeFinancialEvent(this.requireDb(), "receivable", id, "Exclusao", "Conta movida para o historico de excluidas.", "Este computador");
+    this.writeFinancialEvent(this.requireDb(), "receivable", id, "Exclusao", "Conta movida para o historico de excluidas.", "Servidor");
     await this.persist();
   }
 
@@ -701,7 +701,7 @@ export class PdvStore {
           id
         ]
       );
-      this.writeFinancialEvent(db, "receivable", id, "Edicao", "Dados da conta a receber atualizados.", "Este computador");
+      this.writeFinancialEvent(db, "receivable", id, "Edicao", "Dados da conta a receber atualizados.", "Servidor");
       if (financialOnly && patch.originalAmount !== undefined) {
         db.run("UPDATE sales SET subtotal = ?, discount = 0, total = ?, description = ? WHERE id = ?", [originalAmount, originalAmount, patch.description === undefined ? receivable.description || sale.description || "Conta a receber" : String(patch.description || "").trim(), sale.id]);
         const linkedPayment = selectAll<{ paymentId: string }>(db, "SELECT payment_id AS paymentId FROM receivables WHERE id = ?", [id])[0];
@@ -738,7 +738,7 @@ export class PdvStore {
           payment.received ?? null,
           payment.change ?? 0,
           payment.description?.trim() || "",
-          payment.originDevice || "Este computador",
+          payment.originDevice || "Servidor",
           payment.operationId || null
         ]));
         statement.free();
@@ -1439,7 +1439,7 @@ export class PdvStore {
     await this.persist();
   }
 
-  async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string): Promise<PdvSale> {
+  async closeTable(tableNumber: number, payments: PdvPayment[], discount = 0, originDevice = "Servidor", operationId?: string): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     if (operationId) {
       const existing = this.getSaleByOperationId(operationId);
@@ -1477,38 +1477,62 @@ export class PdvStore {
     return sale;
   }
 
-  async cancelTable(tableNumber: number, originDevice = "Este computador"): Promise<PdvSale | null> {
+  async cancelTable(tableNumber: number, originDevice = "Servidor", subtableName?: string): Promise<PdvSale | null> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     const table = this.getTables().find((item) => item.number === tableNumber);
-    if (!table) return null;
+    const cancelMainOnly = subtableName === "__main__";
+    const normalizedSubtable = cancelMainOnly ? "" : String(subtableName || "").trim();
+    if (!table?.sessionId) return null;
+    if (normalizedSubtable && !(table.subtables || []).includes(normalizedSubtable) && !table.items.some((item) => (item.subtableName || "") === normalizedSubtable)) {
+      return null;
+    }
     const pendingItems = table.items.flatMap((item) => {
+      if (cancelMainOnly && item.subtableName) return [];
+      if (normalizedSubtable && (item.subtableName || "") !== normalizedSubtable) return [];
       const quantity = unpaidQuantity(item);
       if (quantity <= 0.009) return [];
       const ratio = item.quantity ? quantity / item.quantity : 1;
       return [{ ...item, quantity, paidQuantity: 0, discount: roundMoney(item.discount * ratio), total: unpaidItemTotal(item) }];
     });
     const db = this.requireDb();
-    const sale = pendingItems.length
-      ? {
-          ...createSale({
-          type: "Mesa",
-          tableNumber,
-          tableSessionId: table.sessionId,
-          status: "Cancelada",
-          items: pendingItems,
-          discount: 0,
-          payments: [],
-          originDevice,
-          observations: table.note
-          }),
-          payments: []
-        }
-      : null;
+    const sale = {
+      ...createSale({
+        type: "Mesa",
+        tableNumber,
+        tableSessionId: table.sessionId,
+        status: "Cancelada",
+        items: pendingItems,
+        discount: 0,
+        payments: [],
+        originDevice,
+        description: normalizedSubtable || table.note || `Mesa ${tableNumber}`,
+        observations: normalizedSubtable ? `Submesa cancelada: ${normalizedSubtable}.` : cancelMainOnly ? "Mesa principal cancelada." : table.note
+      }),
+      payments: []
+    };
+    const remainingItems = cancelMainOnly
+      ? table.items.filter((item) => Boolean(item.subtableName))
+      : normalizedSubtable
+        ? table.items.filter((item) => (item.subtableName || "") !== normalizedSubtable)
+      : [];
+    const remainingSubtables = cancelMainOnly
+      ? table.subtables || []
+      : normalizedSubtable
+        ? (table.subtables || []).filter((name) => name !== normalizedSubtable)
+      : [];
     db.run("BEGIN IMMEDIATE");
     try {
-      if (sale) insertSale(db, sale);
+      insertSale(db, sale);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
-      db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
+      if (cancelMainOnly || normalizedSubtable) {
+        if (remainingItems.length) writeTableItems(db, tableNumber, remainingItems);
+        db.run(
+          "UPDATE table_sessions SET subtables_json = ?, status = CASE WHEN status = 'Reservada' THEN status ELSE 'Ocupada' END WHERE table_number = ?",
+          [JSON.stringify(remainingSubtables), tableNumber]
+        );
+      } else {
+        db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
+      }
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -1518,7 +1542,7 @@ export class PdvStore {
     return sale;
   }
 
-  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Este computador", operationId?: string, observations = ""): Promise<PdvSale> {
+  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Servidor", operationId?: string, observations = ""): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     if (operationId) {
       const operation = selectAll<{ saleId: string }>(this.requireDb(), "SELECT sale_id AS saleId FROM partial_operations WHERE operation_id = ?", [operationId])[0];
@@ -1894,7 +1918,7 @@ export class PdvStore {
       `INSERT INTO financial_audit_events
        (id, account_type, account_id, action, created_at, description, origin_device, amount)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [randomUUID(), accountType, accountId, action, new Date().toISOString(), description, originDevice || "Este computador", amount ?? null]
+      [randomUUID(), accountType, accountId, action, new Date().toISOString(), description, originDevice || "Servidor", amount ?? null]
     );
   }
 
@@ -1982,7 +2006,7 @@ export class PdvStore {
          total REAL NOT NULL,
          description TEXT NOT NULL DEFAULT '',
          observations TEXT NOT NULL DEFAULT '',
-         origin_device TEXT NOT NULL DEFAULT 'Este computador',
+         origin_device TEXT NOT NULL DEFAULT 'Servidor',
          operation_id TEXT UNIQUE
       );
       CREATE TABLE IF NOT EXISTS sale_items (
@@ -2053,7 +2077,7 @@ export class PdvStore {
         received REAL,
         change REAL,
         description TEXT NOT NULL DEFAULT '',
-        origin_device TEXT NOT NULL DEFAULT 'Este computador',
+        origin_device TEXT NOT NULL DEFAULT 'Servidor',
         operation_id TEXT UNIQUE
       );
       CREATE TABLE IF NOT EXISTS payables (
@@ -2075,7 +2099,7 @@ export class PdvStore {
         method TEXT NOT NULL,
         amount REAL NOT NULL,
         description TEXT NOT NULL DEFAULT '',
-        origin_device TEXT NOT NULL DEFAULT 'Este computador',
+        origin_device TEXT NOT NULL DEFAULT 'Servidor',
         operation_id TEXT UNIQUE
       );
       CREATE TABLE IF NOT EXISTS financial_audit_events (
@@ -2085,7 +2109,7 @@ export class PdvStore {
         action TEXT NOT NULL,
         created_at TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
-        origin_device TEXT NOT NULL DEFAULT 'Este computador',
+        origin_device TEXT NOT NULL DEFAULT 'Servidor',
         amount REAL
       );
     `);
@@ -2115,7 +2139,7 @@ export class PdvStore {
     addColumnIfMissing(db, "sales", "description", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sales", "observations", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sales", "table_session_id", "TEXT");
-    addColumnIfMissing(db, "sales", "origin_device", "TEXT NOT NULL DEFAULT 'Este computador'");
+    addColumnIfMissing(db, "sales", "origin_device", "TEXT NOT NULL DEFAULT 'Servidor'");
     addColumnIfMissing(db, "sales", "operation_id", "TEXT");
     addColumnIfMissing(db, "sales", "financial_only", "INTEGER NOT NULL DEFAULT 0");
     addColumnIfMissing(db, "sale_payments", "description", "TEXT NOT NULL DEFAULT ''");
@@ -2307,7 +2331,7 @@ function insertSale(db: Database, sale: PdvSale) {
     sale.total,
     sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta"),
     sale.observations || "",
-    sale.originDevice || "Este computador",
+    sale.originDevice || "Servidor",
     sale.operationId || null
   ]);
   const itemStatement = db.prepare(
@@ -2542,7 +2566,7 @@ function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]
   statement.free();
 }
 
-function createSale(input: { type: PdvSale["type"]; tableNumber?: number; tableSessionId?: string; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string; observations?: string }): PdvSale {
+function createSale(input: { type: PdvSale["type"]; tableNumber?: number; tableSessionId?: string; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string; observations?: string; description?: string }): PdvSale {
   const subtotal = roundMoney(input.items.reduce((total, item) => total + item.total, 0));
   const discount = Math.min(subtotal, roundMoney(Math.max(0, input.discount)));
   const total = Math.max(0, roundMoney(subtotal - discount));
@@ -2557,9 +2581,9 @@ function createSale(input: { type: PdvSale["type"]; tableNumber?: number; tableS
     subtotal,
     discount,
     total,
-    description: input.tableNumber ? `Mesa ${input.tableNumber}` : input.type === "Mesa" ? "Mesa" : input.type === "Onibus" ? "Venda de onibus" : "Venda",
+    description: input.description?.trim() || (input.tableNumber ? `Mesa ${input.tableNumber}` : input.type === "Mesa" ? "Mesa" : input.type === "Onibus" ? "Venda de onibus" : "Venda"),
     observations: input.observations?.trim() || "",
-    originDevice: input.originDevice || "Este computador",
+    originDevice: input.originDevice || "Servidor",
     operationId: input.operationId,
     payments,
     items: input.items

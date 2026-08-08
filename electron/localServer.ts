@@ -28,7 +28,7 @@ interface LocalServerOptions {
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string) => Promise<PdvCartItem[]>;
   appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
-  cancelPdvTable: (tableNumber: number, originDevice?: string) => Promise<PdvSale | null>;
+  cancelPdvTable: (tableNumber: number, originDevice?: string, subtableName?: string) => Promise<PdvSale | null>;
   savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string, observations?: string) => Promise<PdvSale>;
   updatePdvSalePayments: (saleId: string, payments: PdvPayment[]) => Promise<PdvSale>;
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
@@ -526,7 +526,8 @@ export class LocalServer {
       try {
         const sale = await this.options.cancelPdvTable(
           Number(request.params.number),
-          String(request.header("x-device-name") || "Cliente remoto")
+          String(request.header("x-device-name") || "Cliente remoto"),
+          String(request.body?.subtableName || "").trim() || undefined
         );
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();

@@ -304,7 +304,7 @@ function ledgerEntryToReportRecord(entry: LedgerEntry): ReportRecord {
     discount: roundMoney(Math.max(0, entry.originalValue - entry.finalValue)),
     total: roundMoney(entry.finalValue),
     tableNumber: entry.tableNumber || "",
-    originDevice: entry.originDevice || "Este computador",
+    originDevice: entry.originDevice || "Servidor",
     description: entry.description || "Lancamento antigo",
     observations: entry.observations || "",
     payments,

@@ -526,6 +526,38 @@ if ((await store.getSnapshot()).tables.find((table) => table.number === 11)?.sta
   throw new Error("Cancelamento auditavel nao liberou a mesa.");
 }
 
+await store.openTable(12, 1, "Mesa vazia cancelada");
+const emptyCancelledSale = await store.cancelTable(12, "Servidor");
+if (!emptyCancelledSale || emptyCancelledSale.items.length || pdvSaleToLedgerEntry(emptyCancelledSale).customType !== "Mesa cancelada") {
+  throw new Error("Mesa aberta sem produtos nao gerou registro de cancelamento no Historico.");
+}
+
+await store.openTable(13);
+await store.saveTableItems(13, [{
+  id: crypto.randomUUID(),
+  productId: baseProduct.id,
+  productName: "Item da principal preservado",
+  categoryName: category.name,
+  quantity: 1,
+  baseUnitPrice: 8,
+  unitPrice: 8,
+  discount: 0,
+  total: 8
+}], ["Submesa vazia"]);
+const emptySubtableSale = await store.cancelTable(13, "Servidor", "Submesa vazia");
+const emptySubtableLedger = emptySubtableSale ? pdvSaleToLedgerEntry(emptySubtableSale) : null;
+const tableThirteen = (await store.getSnapshot()).tables.find((table) => table.number === 13);
+if (
+  !emptySubtableSale
+  || emptySubtableSale.items.length
+  || emptySubtableLedger?.customType !== "Submesa cancelada"
+  || emptySubtableLedger.description !== "Submesa vazia"
+  || tableThirteen?.items.length !== 1
+  || tableThirteen?.subtables.includes("Submesa vazia")
+) {
+  throw new Error("Cancelamento de submesa vazia nao preservou a mesa principal ou nao gerou Historico identificavel.");
+}
+
 await store.openTable(7, 2, "Smoke mesa");
 await store.saveTableItems(7, [{
   id: crypto.randomUUID(),
@@ -641,7 +673,7 @@ if (!savedSale || savedSale.items[0].complements?.[0]?.name !== complement.name)
 if (snapshot.recentSales.find((item) => item.id === cancelled.id)?.status !== "Cancelada") {
   throw new Error("Cancelamento nao foi persistido corretamente.");
 }
-if (store.getSales({ status: "Cancelada" }).length !== 2 || store.getSales({ status: "Finalizada" }).some((item) => item.id === cancelled.id)) {
+if (store.getSales({ status: "Cancelada" }).length < 4 || store.getSales({ status: "Finalizada" }).some((item) => item.id === cancelled.id)) {
   throw new Error("Filtro de status das vendas PDV nao funcionou corretamente.");
 }
 

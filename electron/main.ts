@@ -652,8 +652,8 @@ async function bootstrap() {
       sendToAll("entries:changed");
       return sale;
     },
-    cancelPdvTable: async (tableNumber, originDevice) => {
-      const sale = await pdvStore.cancelTable(tableNumber, originDevice);
+    cancelPdvTable: async (tableNumber, originDevice, subtableName) => {
+      const sale = await pdvStore.cancelTable(tableNumber, originDevice, subtableName);
       await exportLedgerIfEnabled();
       sendToAll("entries:changed");
       return sale;
@@ -872,7 +872,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
-    const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Este computador", operationId || randomUUID());
+    const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Servidor", operationId || randomUUID());
     await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
@@ -884,8 +884,8 @@ function registerIpc() {
     publishPdvChanged();
   });
 
-  ipcMain.handle("pdv:cancelTable", async (_event, tableNumber: number): Promise<PdvSale | null> => {
-    const sale = await pdvStore.cancelTable(tableNumber, "Este computador");
+  ipcMain.handle("pdv:cancelTable", async (_event, tableNumber: number, subtableName?: string): Promise<PdvSale | null> => {
+    const sale = await pdvStore.cancelTable(tableNumber, "Servidor", subtableName);
     await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
@@ -893,7 +893,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string): Promise<PdvSale> => {
-    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Este computador", operationId || randomUUID(), observations);
+    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Servidor", operationId || randomUUID(), observations);
     await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();
@@ -922,7 +922,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("pdv:receiveReceivable", async (_event, id: string, payment: PdvReceivablePayment, operationId?: string): Promise<PdvReceivable> => {
-    const receivable = await pdvStore.receiveReceivable(id, payment, "Este computador", operationId || randomUUID());
+    const receivable = await pdvStore.receiveReceivable(id, payment, "Servidor", operationId || randomUUID());
     publishPdvChanged();
     return receivable;
   });
@@ -956,7 +956,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("pdv:payPayable", async (_event, id: string, payment: PdvPayablePayment, operationId?: string): Promise<PdvPayable> => {
-    const payable = await pdvStore.payPayable(id, payment, "Este computador", operationId || randomUUID());
+    const payable = await pdvStore.payPayable(id, payment, "Servidor", operationId || randomUUID());
     publishPdvChanged();
     return payable;
   });

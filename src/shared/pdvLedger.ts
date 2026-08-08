@@ -20,6 +20,16 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
   // real fica em paymentBreakdown e e a fonte dos filtros, relatorios e Excel.
   const paymentMethod = pdvPaymentToLegacyMethod(sale.payments[0]?.method || "Nao definido");
   const paymentsDescription = buildPaymentsDescription(sale.payments);
+  const cancelledSubtable = sale.status === "Cancelada"
+    ? sale.observations?.match(/(?:^|\s)Submesa cancelada:\s*(.+?)(?:\.|$)/i)?.[1]?.trim() || ""
+    : "";
+  const closedSubtable = sale.status === "Parcial"
+    ? sale.observations?.match(/(?:^|\s)Submesa:\s*(.+?)(?:\.|$)/i)?.[1]?.trim() || ""
+    : "";
+  const subtableName = cancelledSubtable || closedSubtable;
+  const originDevice = !sale.originDevice || sale.originDevice === "Este computador" || sale.originDevice === "PDV local"
+    ? "Servidor"
+    : sale.originDevice;
 
   return {
     id: `pdv-${sale.id}`,
@@ -33,16 +43,16 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
     roundingStep: 0.01,
     roundingDirection: "nearest",
     difference: -Math.abs(sale.discount || 0),
-    description: sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta"),
+    description: subtableName || sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta"),
     tableNumber: sale.tableNumber ? String(sale.tableNumber) : "",
     busNumber: "",
     paymentMethod,
     paidWith: sale.payments.reduce((total, payment) => total + (payment.received || payment.amount), 0),
     change: sale.payments.reduce((total, payment) => total + (payment.change || 0), 0),
-    observations: `${sale.observations ? `${sale.observations} ` : ""}${sale.status === "Parcial" ? "Fechamento parcial de mesa. " : ""}${paymentsDescription}`,
-    originDevice: sale.originDevice || "PDV local",
+    observations: `${sale.observations ? `${sale.observations} ` : ""}${sale.status === "Parcial" ? "Fechamento parcial de mesa. " : ""}${sale.status === "Cancelada" && !sale.payments.length ? "" : paymentsDescription}`.trim(),
+    originDevice,
     status: sale.status === "Cancelada" ? "cancelled" : sale.status === "deleted" ? "deleted" : "active",
-    customType: sale.status === "Parcial" ? "Mesa parcial" : sale.type,
+    customType: cancelledSubtable ? "Submesa cancelada" : closedSubtable ? "Submesa fechada" : sale.status === "Cancelada" && sale.type === "Mesa" ? "Mesa cancelada" : sale.status === "Parcial" ? "Mesa parcial" : sale.type,
     sourceSaleId: sale.id,
     paymentBreakdown: sale.payments.map((payment) => ({
       method: pdvPaymentToLegacyMethod(payment.method || "Nao definido"),

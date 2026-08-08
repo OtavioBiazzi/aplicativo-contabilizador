@@ -57,17 +57,17 @@
 #root .pdv-cart-columns,
 #root .pdv-cart-list article {
   display: grid !important;
-  grid-template-columns: minmax(0, 1fr) 58px 80px 88px !important;
+  grid-template-columns: minmax(0, 1fr) 42px 64px 72px !important;
   align-items: center;
-  gap: 6px !important;
+  gap: 2px !important;
 }
 
 #root .pdv-cart-columns {
   position: sticky;
   top: 0;
   z-index: 2;
-  min-height: 25px;
-  padding: 3px 8px;
+  min-height: 21px;
+  padding: 2px 4px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
   color: var(--muted);
@@ -81,11 +81,24 @@
   text-align: right;
 }
 
-#root .pdv-cart-list article,
-#root .pdv-cart-area.cart-compact .pdv-cart-list article,
+#root .pdv-cart-area.cart-normal .pdv-cart-list article {
+  min-height: 28px !important;
+  padding: 3px 5px !important;
+}
+
+#root .pdv-cart-area.cart-compact .pdv-cart-list article {
+  min-height: 23px !important;
+  padding: 1px 4px !important;
+}
+
 #root .pdv-cart-area.cart-ultra .pdv-cart-list article {
-  min-height: 31px !important;
-  padding: 4px 8px !important;
+  min-height: 19px !important;
+  padding: 0 3px !important;
+}
+
+#root .pdv-cart-area.cart-comfortable .pdv-cart-list article {
+  min-height: 38px !important;
+  padding: 6px 8px !important;
 }
 
 #root .pdv-cart-list article > .pdv-cart-product-cell {
@@ -99,7 +112,7 @@
   color: inherit;
   font-size: .76rem !important;
   line-height: 1.1;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -107,10 +120,20 @@
   min-width: 0;
   overflow: hidden;
   color: inherit;
-  font-size: .72rem !important;
+  font-size: .68rem !important;
   line-height: 1;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
+}
+
+#root .pdv-cart-area.cart-ultra .pdv-cart-list :is(.pdv-cart-product-cell strong, .pdv-cart-quantity, .pdv-cart-unit-price, .pdv-cart-line-total) {
+  font-size: .62rem !important;
+  line-height: 1 !important;
+}
+
+#root .pdv-cart-area.cart-comfortable .pdv-cart-list :is(.pdv-cart-product-cell strong, .pdv-cart-quantity, .pdv-cart-unit-price, .pdv-cart-line-total) {
+  font-size: .84rem !important;
+  line-height: 1.15 !important;
 }
 
 :root[data-simple-mode="true"] #root :is(.pdv-cart-area, .pdv-cart-list, .pdv-cart-list article, .pdv-total-box, .pdv-total-box > strong) {
@@ -152,23 +175,40 @@
 #root .pdv-split-single-option > span { display: grid; gap: 2px; }
 #root .pdv-split-single-option small { color: var(--muted) !important; -webkit-text-fill-color: var(--muted) !important; }
 #root .pdv-partial-items-modal .pdv-transfer-list { gap: 3px !important; }
-#root .pdv-partial-items-modal .pdv-transfer-list > button { min-height: 36px !important; padding: 4px 7px !important; }
+#root .pdv-partial-items-modal .pdv-transfer-list > button { min-height: 28px !important; padding: 2px 5px !important; }
 #root .pdv-partial-items-modal .pdv-transfer-list :is(span, small, strong) { line-height: 1.05 !important; }
 
+#root .pdv-cart-density button {
+  width: 27px !important;
+  height: 23px !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  font-size: 1rem !important;
+}
+
 #root .modules-popover {
-  bottom: 10px !important;
-  max-height: none !important;
+  top: calc(100% + 7px) !important;
+  bottom: auto !important;
+  max-height: calc(100dvh - 112px) !important;
   overflow-y: auto !important;
 }
 
 @media (max-width: 900px), (max-height: 720px) {
-  #root .modules-popover { top: 92px !important; bottom: 8px !important; }
+  #root .modules-popover {
+    position: fixed !important;
+    top: 78px !important;
+    right: 10px !important;
+    left: 10px !important;
+    bottom: auto !important;
+    max-height: calc(100dvh - 86px) !important;
+    width: auto !important;
+  }
 }
 
 @media (max-width: 720px) {
   #root .pdv-cart-columns,
   #root .pdv-cart-list article {
-    grid-template-columns: minmax(0, 1fr) 46px 68px 74px !important;
-    gap: 4px !important;
+    grid-template-columns: minmax(0, 1fr) 38px 56px 64px !important;
+    gap: 2px !important;
   }
 }

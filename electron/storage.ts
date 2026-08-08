@@ -84,7 +84,7 @@ export class LedgerStore {
       paidWith: roundMoney(cash?.paidWith ?? draft.paidWith ?? 0),
       change: roundMoney(cash?.change ?? 0),
       observations: draft.observations || "",
-      originDevice: draft.originDevice || "Este computador",
+      originDevice: draft.originDevice || "Servidor",
       status: "active",
       customType: draft.customType,
       splitDetails: split,

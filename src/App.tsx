@@ -296,6 +296,7 @@ interface StoredHistoryFilters {
   minimumValue: string;
   maximumValue: string;
   originFilter: string;
+  movementFilter: string;
 }
 
 interface RemoteSocketMessage {
@@ -328,18 +329,19 @@ function loadHistoryFilters(rememberPeriod = false): StoredHistoryFilters {
   const defaults: StoredHistoryFilters = {
     query: "",
     type: "Todos",
-    statusFilter: "active",
+    statusFilter: "todos",
     paymentFilter: "Todos",
     dateFrom: "",
     dateTo: "",
     minimumValue: "",
     maximumValue: "",
-    originFilter: "Todos"
+    originFilter: "Todos",
+    movementFilter: "Todos"
   };
   try {
     const stored = JSON.parse(window.localStorage.getItem(HISTORY_FILTERS_STORAGE_KEY) || "{}") as Partial<StoredHistoryFilters>;
     const merged = { ...defaults, ...stored };
-    if (merged.statusFilter === "visiveis") merged.statusFilter = "active";
+    if (merged.statusFilter === "visiveis") merged.statusFilter = "todos";
     return rememberPeriod ? merged : { ...merged, dateFrom: "", dateTo: "" };
   } catch {
     return defaults;
@@ -350,6 +352,14 @@ function parseOptionalHistoryValue(value: string): number | null {
   if (!value.trim()) return null;
   const parsed = parseMoney(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeHistorySearch(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").trim();
+}
+
+function displayOriginDevice(value?: string): string {
+  return !value || value === "Este computador" || value === "PDV local" ? "Servidor" : value;
 }
 
 const CASH_LINKED_TYPES: Array<{ value: EntryType; label: string }> = [
@@ -4282,14 +4292,23 @@ function HistoryPanel({
   const [minimumValue, setMinimumValue] = useState(savedFilters.minimumValue);
   const [maximumValue, setMaximumValue] = useState(savedFilters.maximumValue);
   const [originFilter, setOriginFilter] = useState(savedFilters.originFilter);
+  const [movementFilter, setMovementFilter] = useState(savedFilters.movementFilter);
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const [details, setDetails] = useState<PdvSale | null>(null);
   const [receiptSale, setReceiptSale] = useState<PdvSale | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ entry: LedgerEntry; permanent: boolean } | null>(null);
   const [visibleCount, setVisibleCount] = useState(HISTORY_PAGE_SIZE);
   const deferredQuery = useDeferredValue(query);
-  const originOptions = useMemo(() => ["Todos", ...new Set(entries.map((entry) => entry.originDevice).filter(Boolean))], [entries]);
+  const originOptions = useMemo(() => ["Todos", ...new Set(entries.map((entry) => displayOriginDevice(entry.originDevice)).filter(Boolean))], [entries]);
   const pdvSaleById = useMemo(() => new Map(pdvSales.map((sale) => [sale.id, sale])), [pdvSales]);
+  const customerSaleIds = useMemo(() => new Set([
+    ...pdvReceivables.map((item) => item.saleId).filter(Boolean),
+    ...pdvSales.filter((sale) => sale.payments.some((payment) => Boolean(payment.customerId || payment.customerName))).map((sale) => sale.id)
+  ]), [pdvReceivables, pdvSales]);
+  const historyTypeOptions = useMemo(() => [
+    "Todos",
+    ...new Set([...ENTRY_TYPES, ...entries.map((entry) => entry.customType).filter(Boolean) as string[]])
+  ], [entries]);
 
   useEffect(() => {
     if (!focusDate) {
@@ -4297,9 +4316,10 @@ function HistoryPanel({
     }
     setDateFrom(focusDate.date);
     setDateTo(focusDate.date);
-    setStatusFilter("active");
+    setStatusFilter("todos");
     setPaymentFilter("Todos");
     setType("Todos");
+    setMovementFilter("Todos");
     setQuery("");
     setVisibleCount(HISTORY_PAGE_SIZE);
   }, [focusDate?.nonce]);
@@ -4315,17 +4335,18 @@ function HistoryPanel({
       dateTo: "",
       minimumValue,
       maximumValue,
-      originFilter
+      originFilter,
+      movementFilter
     }));
-  }, [query, type, statusFilter, paymentFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, settings.rememberHistoryPeriod]);
+  }, [query, type, statusFilter, paymentFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, movementFilter, settings.rememberHistoryPeriod]);
 
   const filtered = useMemo(() => {
-    const search = deferredQuery.trim().toLocaleLowerCase("pt-BR");
+    const searchTerms = deferredQuery.split(",").map(normalizeHistorySearch).filter(Boolean);
     const minimum = parseOptionalHistoryValue(minimumValue);
     const maximum = parseOptionalHistoryValue(maximumValue);
     return entries.filter((entry) => {
       const sale = entry.sourceSaleId ? pdvSaleById.get(entry.sourceSaleId) : undefined;
-      const sameType = type === "Todos" || entry.type === type;
+      const sameType = type === "Todos" || entry.type === type || entry.customType === type;
       const sameStatus =
         statusFilter === "todos" ||
         (statusFilter === "visiveis" && entry.status !== "deleted") ||
@@ -4334,13 +4355,22 @@ function HistoryPanel({
         (statusFilter === "deleted" && entry.status === "deleted");
       const dateKey = getLocalDateKey(entry.createdAt);
       const sameDate = (!dateFrom || dateKey >= dateFrom) && (!dateTo || dateKey <= dateTo);
-      const sameOrigin = originFilter === "Todos" || entry.originDevice === originFilter;
+      const normalizedOrigin = displayOriginDevice(entry.originDevice);
+      const sameOrigin = originFilter === "Todos" || normalizedOrigin === originFilter;
       const samePayment = paymentFilter === "Todos" || entry.paymentMethod === paymentFilter || Boolean(entry.paymentBreakdown?.some((item) => item.method === paymentFilter));
       const sameValue = (minimum === null || entry.finalValue >= minimum) && (maximum === null || entry.finalValue <= maximum);
-      if (!sameType || !sameStatus || !sameDate || !sameOrigin || !samePayment || !sameValue) {
+      const movementMatches = movementFilter === "Todos"
+        || (movementFilter === "Mesas canceladas" && entry.customType === "Mesa cancelada")
+        || (movementFilter === "Submesas canceladas" && entry.customType === "Submesa cancelada")
+        || (movementFilter === "Com cliente" && Boolean(entry.sourceSaleId && customerSaleIds.has(entry.sourceSaleId)))
+        || (movementFilter === "Servidor" && normalizedOrigin === "Servidor")
+        || (movementFilter === "Clientes remotos" && normalizedOrigin !== "Servidor")
+        || (movementFilter === "Fechamentos parciais" && entry.customType === "Mesa parcial")
+        || (movementFilter === "Vendas diretas" && entry.type === "Venda" && !entry.tableNumber);
+      if (!sameType || !sameStatus || !sameDate || !sameOrigin || !samePayment || !sameValue || !movementMatches) {
         return false;
       }
-      if (!search) {
+      if (!searchTerms.length) {
         return true;
       }
       const haystack = [
@@ -4352,10 +4382,11 @@ function HistoryPanel({
         paymentLabelForEntry(entry),
         ...(sale?.items.flatMap((item) => [item.productName, item.categoryName, item.note, item.subtableName, ...(item.complements || []).map((part) => part.name)]) || []),
         ...(sale?.payments.flatMap((item) => [item.method, item.description]) || [])
-      ].join(" ").toLocaleLowerCase("pt-BR");
-      return haystack.includes(search);
+      ].join(" ");
+      const normalizedHaystack = normalizeHistorySearch(haystack);
+      return searchTerms.every((term) => normalizedHaystack.includes(term));
     });
-  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, pdvSaleById]);
+  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, movementFilter, pdvSaleById, customerSaleIds]);
   const visibleRows = filtered.slice(0, visibleCount);
   const filteredSummary = useMemo(() => filtered.reduce((summary, entry) => {
     if (entry.status === "active") {
@@ -4373,7 +4404,7 @@ function HistoryPanel({
 
   useEffect(() => {
     setVisibleCount(HISTORY_PAGE_SIZE);
-  }, [deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, paymentFilter, originFilter]);
+  }, [deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, paymentFilter, originFilter, movementFilter]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     try {
@@ -4409,17 +4440,16 @@ function HistoryPanel({
         <label className="field">
           <span>Tipo</span>
           <select value={type} onChange={(event) => setType(event.target.value)}>
-            <option>Todos</option>
-            {ENTRY_TYPES.map((item) => <option key={item}>{item}</option>)}
+            {historyTypeOptions.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
         <label className="field">
           <span>Status</span>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="todos">Todos</option>
             <option value="active">Ativos</option>
             <option value="cancelled">Cancelados</option>
             <option value="deleted">Lixeira</option>
-            <option value="todos">Todos</option>
           </select>
         </label>
         <label className="field">
@@ -4434,6 +4464,12 @@ function HistoryPanel({
           <span>Origem</span>
           <select value={originFilter} onChange={(event) => setOriginFilter(event.target.value)}>
             {originOptions.map((origin) => <option key={origin}>{origin}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>Movimento</span>
+          <select value={movementFilter} onChange={(event) => setMovementFilter(event.target.value)}>
+            {["Todos", "Mesas canceladas", "Submesas canceladas", "Com cliente", "Servidor", "Clientes remotos", "Fechamentos parciais", "Vendas diretas"].map((movement) => <option key={movement}>{movement}</option>)}
           </select>
         </label>
         <label className="field">
@@ -4453,13 +4489,14 @@ function HistoryPanel({
         <button className="ghost-button history-clear-filters" type="button" onClick={() => {
           setQuery("");
           setType("Todos");
-          setStatusFilter("active");
+          setStatusFilter("todos");
           setPaymentFilter("Todos");
           setDateFrom(todayFilter);
           setDateTo(todayFilter);
           setMinimumValue("");
           setMaximumValue("");
           setOriginFilter("Todos");
+          setMovementFilter("Todos");
         }}><RotateCcw size={15} /> Limpar</button>
       </div>
 
@@ -4493,13 +4530,14 @@ function HistoryPanel({
               const description = entry.description.trim();
               const defaultTablePattern = entry.tableNumber ? new RegExp(`^mesa\\s*0*${entry.tableNumber}$`, "i") : null;
               const customTableName = entry.tableNumber && description && !defaultTablePattern?.test(description) ? description : "";
+              const isSubtableRecord = entry.customType?.startsWith("Submesa") || (entry.customType === "Mesa parcial" && Boolean(customTableName));
               return (
                 <tr key={entry.id} className={entry.status !== "active" ? "muted-row" : ""}>
                   <td>{formatDateTime(entry.createdAt).date}</td>
                   <td>{time}</td>
                   <td>{entry.customType || entry.type}</td>
-                  <td>{entry.tableNumber ? "-" : description || "-"}</td>
-                  <td>{entry.tableNumber ? customTableName || entry.tableNumber : "-"}</td>
+                  <td>{entry.tableNumber ? isSubtableRecord ? description : "-" : description || "-"}</td>
+                  <td>{entry.tableNumber ? entry.tableNumber : "-"}</td>
                   <td>{entry.busNumber || "-"}</td>
                   <td>{paymentLabelForEntry(entry)}</td>
                   <td>{formatCurrency(entry.finalValue)}</td>
@@ -4725,7 +4763,7 @@ function HistoryReceiptModal({
   const [printers, setPrinters] = useState<Array<{ name: string; displayName: string; isDefault: boolean }>>([]);
   const [printerName, setPrinterName] = useState("");
   const availablePrintTargets: ReceiptPrintTarget[] = [
-    { id: "local", label: "Este computador" },
+    { id: "local", label: "Servidor" },
     ...(onPrintServer ? [{ id: "server", label: "Computador servidor" }] : []),
     ...printDevices.map((device) => ({ id: device.id, label: device.name }))
   ];
@@ -4853,7 +4891,7 @@ function HistoryReceiptModal({
             <label className="field">
               <span>Imprimir em</span>
               <select value={printDestination} onChange={(event) => { setPrintDestination(event.target.value); saveReceiptPrintDestination(event.target.value, availablePrintTargets); }}>
-                <option value="local">Este computador</option>
+                <option value="local">Servidor</option>
                 {onPrintServer && <option value="server">Computador servidor</option>}
                 {printDevices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
               </select>
