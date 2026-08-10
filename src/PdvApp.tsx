@@ -818,6 +818,22 @@ export function PdvApp({
     lastPersistedTableMeta.current = { number: fresh.number, people: fresh.people || 1, note: fresh.note || "" };
   };
 
+  const openTransferredTable = async (tableNumber: number, subtableName?: string) => {
+    // Direciona imediatamente para o destino. A leitura direta seguinte evita
+    // reutilizar uma requisicao de snapshot iniciada antes da transferencia.
+    setTab("tables");
+    resetTableMutationTracking();
+    if (snapshot) {
+      applyFreshOpenTable(snapshot, tableNumber);
+    }
+    setCurrentSubtable(subtableName || "");
+    setSelectedTableItemIds([]);
+    const refreshed = await getPdvSnapshot();
+    setSnapshot(refreshed);
+    applyFreshOpenTable(refreshed, tableNumber);
+    setCurrentSubtable(subtableName || "");
+  };
+
   useEffect(() => {
     if (snapshotOverride !== undefined) {
       if (snapshotOverride) setSnapshot(snapshotOverride);
@@ -1580,14 +1596,7 @@ export function PdvApp({
             saleMode={directSaleMode}
             setSaleMode={setDirectSaleMode}
             appendPdvTableItems={appendPdvTableItems}
-            onOpenTransferredTable={async (tableNumber, subtableName) => {
-              const refreshed = await load();
-              setTab("tables");
-              resetTableMutationTracking();
-              applyFreshOpenTable(refreshed, tableNumber);
-              setCurrentSubtable(subtableName || "");
-              setSelectedTableItemIds([]);
-            }}
+            onOpenTransferredTable={openTransferredTable}
           />
         )}
 
@@ -1781,13 +1790,7 @@ export function PdvApp({
             onDeleteAllSubtables={deleteAllSubtables}
             onMoveSelectedToSubtable={moveSelectedItemsToSubtable}
             onRenameSubtable={renameSubtable}
-            onOpenTransferredTable={async (tableNumber, subtableName) => {
-              const refreshed = await load();
-              resetTableMutationTracking();
-              applyFreshOpenTable(refreshed, tableNumber);
-              setCurrentSubtable(subtableName || "");
-              setSelectedTableItemIds([]);
-            }}
+            onOpenTransferredTable={openTransferredTable}
             openPdvTable={openPdvTable}
             savePdvTableItems={savePdvTableItems}
             transferPdvTableItems={transferPdvTableItems}
@@ -2536,6 +2539,7 @@ function PdvSaleScreen(props: {
             tables={props.snapshot.tables}
             sourceTableNumber={props.activeTableNumber}
             sourceSubtableNames={transferListMode === "accounts" ? subtableNames : []}
+            currentSourceSubtable={props.currentSubtable || ""}
             accountMode={transferListMode === "accounts"}
             openPdvTable={props.openPdvTable}
             savePdvTableItems={props.savePdvTableItems}
@@ -2547,8 +2551,11 @@ function PdvSaleScreen(props: {
               setTransferAllOnOpen(false);
               setTransferPreferredSubtable("");
             }}
-            onTransferred={(nextSource, targetTableNumber, targetSubtable) => {
+            onTransferred={(nextSource, targetTableNumber, targetSubtable, emptiedSourceSubtables) => {
               props.setCart(nextSource);
+              if (emptiedSourceSubtables.length) {
+                persistSubtableNames(subtableNames.filter((name) => !emptiedSourceSubtables.includes(name)));
+              }
               props.setSelectedItemIds?.(nextSource.at(-1) ? [nextSource.at(-1)!.id] : []);
               setTransferListMode(null);
               setTransferAllOnOpen(false);
@@ -2595,7 +2602,15 @@ function PdvSaleScreen(props: {
             transferPdvTableItems={props.transferPdvTableItems}
             onCancel={() => setTransferItem(null)}
             onTransferred={(nextSource, targetTableNumber, targetSubtable) => {
+              const sourceSubtable = transferItem?.subtableName || "";
+              const emptiedSourceSubtable = sourceSubtable
+                && !nextSource.some((item) => (item.subtableName || "") === sourceSubtable)
+                ? sourceSubtable
+                : "";
               props.setCart(nextSource);
+              if (emptiedSourceSubtable) {
+                persistSubtableNames(subtableNames.filter((name) => name !== emptiedSourceSubtable));
+              }
               props.setSelectedItemIds?.([]);
               setTransferItem(null);
               void props.onOpenTransferredTable?.(targetTableNumber, targetSubtable);
@@ -2655,6 +2670,7 @@ function PdvSaleScreen(props: {
           <ProductLookupModal
             products={props.snapshot.products.filter((product) => product.active && product.showOnPdv)}
             pageSize={props.settings.productLookupPageSize || 30}
+            defaultQuantity={props.quantity}
             quantitiesEnabled={Boolean(props.settings.productLookupQuantitiesEnabled)}
             onCancel={() => setProductLookupOpen(false)}
             onSelect={(selectedProducts) => {
@@ -2830,16 +2846,19 @@ function SplitItemModal({
 function ProductLookupModal({
   products,
   pageSize,
+  defaultQuantity,
   quantitiesEnabled,
   onCancel,
   onSelect
 }: {
   products: PdvProduct[];
   pageSize: number;
+  defaultQuantity: number;
   quantitiesEnabled: boolean;
   onCancel: () => void;
   onSelect: (products: Array<{ product: PdvProduct; quantity: number }>) => void;
 }) {
+  const normalizedDefaultQuantity = Math.max(1, Math.min(999, Math.floor(defaultQuantity || 1)));
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -2886,8 +2905,8 @@ function ProductLookupModal({
     onSelect(items.map((product) => ({
       product,
       quantity: product.unitMode === "unidade" && quantitiesEnabled
-        ? Math.max(1, Math.min(999, Math.floor(quantities[product.id] || 1)))
-        : 1
+        ? Math.max(1, Math.min(999, Math.floor(quantities[product.id] || normalizedDefaultQuantity)))
+        : product.unitMode === "unidade" ? normalizedDefaultQuantity : 1
     })));
   };
 
@@ -2938,7 +2957,7 @@ function ProductLookupModal({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel, onSelect, active?.id, visibleIds, selectedIds.join("|"), selectionAnchor, notice]);
+  }, [onCancel, onSelect, active?.id, visibleIds, selectedIds.join("|"), selectionAnchor, notice, quantities, normalizedDefaultQuantity]);
 
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
@@ -2988,7 +3007,7 @@ function ProductLookupModal({
                     type="number"
                     min={1}
                     max={999}
-                    value={quantities[product.id] || 1}
+                    value={quantities[product.id] || normalizedDefaultQuantity}
                     disabled={product.unitMode !== "unidade"}
                     aria-label={`Quantidade de ${product.name}`}
                     onChange={(event) => setQuantities((current) => ({ ...current, [product.id]: Math.max(1, Math.min(999, Math.floor(Number(event.target.value) || 1))) }))}
@@ -4296,6 +4315,7 @@ function TransferListModal({
   tables,
   sourceTableNumber,
   sourceSubtableNames = [],
+  currentSourceSubtable = "",
   accountMode = false,
   openPdvTable,
   savePdvTableItems,
@@ -4309,6 +4329,7 @@ function TransferListModal({
   tables: PdvOpenTable[];
   sourceTableNumber: number;
   sourceSubtableNames?: string[];
+  currentSourceSubtable?: string;
   accountMode?: boolean;
   openPdvTable?: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   savePdvTableItems?: (tableNumber: number, items: PdvCartItem[]) => Promise<void>;
@@ -4316,14 +4337,20 @@ function TransferListModal({
   selectAllInitially?: boolean;
   preferredTargetSubtable?: string;
   onCancel: () => void;
-  onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number, targetSubtable?: string) => void;
+  onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number, targetSubtable: string | undefined, emptiedSourceSubtables: string[]) => void;
 }) {
   const transferableCart = cart.filter((item) => unpaidQuantity(item) > 0.009);
+  const initialTargetTableNumber = sourceTableNumber > 0 && tables.some((table) => table.number === sourceTableNumber) ? sourceTableNumber : tables[0]?.number || 0;
+  const initialTargetTable = tables.find((table) => table.number === initialTargetTableNumber);
+  const initialTargetSubtables = [...new Set([...(initialTargetTable?.subtables || []), ...(initialTargetTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
+  const startsWithTemporarySubtable = sourceTableNumber > 0 && initialTargetTableNumber === sourceTableNumber && !preferredTargetSubtable;
+  const initialTargetSubtable = preferredTargetSubtable || (startsWithTemporarySubtable ? temporarySubtableName(initialTargetSubtables) : "");
   const [selectedIds, setSelectedIds] = useState<string[]>(() => selectAllInitially ? transferableCart.map((item) => item.id) : []);
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(transferableCart.map((item) => [item.id, String(unpaidQuantity(item)).replace(".", ",")])));
-  const [targetTableNumber, setTargetTableNumber] = useState(() => sourceTableNumber > 0 && tables.some((table) => table.number === sourceTableNumber) ? sourceTableNumber : tables[0]?.number || 0);
-  const [targetSubtable, setTargetSubtable] = useState(preferredTargetSubtable || "");
-  const [creatingTargetSubtable, setCreatingTargetSubtable] = useState(Boolean(preferredTargetSubtable));
+  const [targetTableNumber, setTargetTableNumber] = useState(initialTargetTableNumber);
+  const [targetSubtable, setTargetSubtable] = useState(initialTargetSubtable);
+  const [creatingTargetSubtable, setCreatingTargetSubtable] = useState(Boolean(initialTargetSubtable));
+  const [temporaryTargetSubtable, setTemporaryTargetSubtable] = useState(startsWithTemporarySubtable);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const transferOperationId = useRef<PdvOperationId>(crypto.randomUUID());
@@ -4397,7 +4424,10 @@ function TransferListModal({
         await (savePdvTableItems || window.caixa.savePdvTableItems)(sourceTableNumber, nextSource);
       }
       const preservedDestinations = [...new Set(selectedItems.map((item) => destinationForItem(item)).filter(Boolean))];
-      onTransferred(nextSource, targetTableNumber, explicitTargetSubtable || (preservedDestinations.length === 1 ? preservedDestinations[0] : undefined));
+      const emptiedSourceSubtables = [...new Set(selectedItems
+        .map((item) => item.subtableName || "")
+        .filter((name) => name && !nextSource.some((item) => (item.subtableName || "") === name)))];
+      onTransferred(nextSource, targetTableNumber, explicitTargetSubtable || (preservedDestinations.length === 1 ? preservedDestinations[0] : undefined), emptiedSourceSubtables);
     } catch (error) {
       setBusy(false);
       setNotice(error instanceof Error ? error.message : "Nao foi possivel transferir os produtos. Tente novamente.");
@@ -4422,8 +4452,12 @@ function TransferListModal({
             <select value={targetTableNumber} onChange={(event) => {
               const nextTableNumber = Number(event.target.value);
               setTargetTableNumber(nextTableNumber);
-              setTargetSubtable(preferredTargetSubtable || "");
-              setCreatingTargetSubtable(Boolean(preferredTargetSubtable));
+              const nextTable = tables.find((table) => table.number === nextTableNumber);
+              const nextSubtables = [...new Set([...(nextTable?.subtables || []), ...(nextTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
+              const shouldCreateTemporary = nextTableNumber === sourceTableNumber && !preferredTargetSubtable;
+              setTargetSubtable(preferredTargetSubtable || (shouldCreateTemporary ? temporarySubtableName(nextSubtables) : ""));
+              setCreatingTargetSubtable(Boolean(preferredTargetSubtable) || shouldCreateTemporary);
+              setTemporaryTargetSubtable(shouldCreateTemporary);
             }}>
               {tables.map((table) => (
                 <option key={table.number} value={table.number}>Mesa {String(table.number).padStart(3, "0")} - {table.status}{table.number === sourceTableNumber ? " (mesa atual)" : ""}</option>
@@ -4433,15 +4467,17 @@ function TransferListModal({
           <label>
             <span>Submesa destino</span>
             <select
-              value={creatingTargetSubtable ? "__new__" : targetSubtable}
+              value={creatingTargetSubtable ? temporaryTargetSubtable ? "__temporary__" : "__new__" : targetSubtable}
               onChange={(event) => {
                 const value = event.target.value;
                 if (value === "__temporary__") {
                   setTargetSubtable(temporarySubtableName(existingSubtables));
                   setCreatingTargetSubtable(true);
+                  setTemporaryTargetSubtable(true);
                   return;
                 }
                 setCreatingTargetSubtable(value === "__new__");
+                setTemporaryTargetSubtable(false);
                 setTargetSubtable(value === "__new__" ? "" : value);
               }}
             >
@@ -4451,7 +4487,7 @@ function TransferListModal({
               <option value="__temporary__">Criar submesa temporaria</option>
               <option value="__new__">Criar nova submesa...</option>
             </select>
-            {creatingTargetSubtable && <input autoFocus value={targetSubtable} onChange={(event) => setTargetSubtable(event.target.value)} placeholder="Nome da nova submesa" />}
+            {creatingTargetSubtable && !temporaryTargetSubtable && <input autoFocus value={targetSubtable} onChange={(event) => setTargetSubtable(event.target.value)} placeholder="Nome da nova submesa" />}
           </label>
           <Metric title="Selecionado" value={money(selectedTotal)} />
         </div>
@@ -4461,7 +4497,8 @@ function TransferListModal({
             {sourceScopes.map((scope) => {
               const scopeIds = transferableCart.filter((item) => (item.subtableName || "") === scope.key).map((item) => item.id);
               const selected = scopeIds.length > 0 && scopeIds.every((id) => selectedIds.includes(id));
-              return <button type="button" className={selected ? "selected" : ""} disabled={!scope.count} key={scope.key || "__main__"} onClick={() => toggleScope(scope.key)}>{scope.label} <small>{scope.count}</small></button>;
+              const isCurrent = scope.key === currentSourceSubtable;
+              return <button type="button" className={selected ? "selected" : ""} disabled={!scope.count} key={scope.key || "__main__"} onClick={() => toggleScope(scope.key)}>{scope.label}{isCurrent ? " (atual)" : ""} <small>{scope.count}</small></button>;
             })}
           </div>
         )}
@@ -4681,9 +4718,13 @@ function TransferItemModal({
   onCancel: () => void;
   onTransferred: (nextSource: PdvCartItem[], targetTableNumber: number, targetSubtable?: string) => void;
 }) {
+  const initialTargetTable = tables.find((table) => table.number === sourceTableNumber);
+  const initialTargetSubtables = [...new Set([...(initialTargetTable?.subtables || []), ...(initialTargetTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
+  const initialTemporarySubtable = temporarySubtableName(initialTargetSubtables);
   const [targetTableNumber, setTargetTableNumber] = useState(sourceTableNumber);
-  const [targetSubtable, setTargetSubtable] = useState("");
-  const [creatingTargetSubtable, setCreatingTargetSubtable] = useState(false);
+  const [targetSubtable, setTargetSubtable] = useState(initialTemporarySubtable);
+  const [creatingTargetSubtable, setCreatingTargetSubtable] = useState(true);
+  const [temporaryTargetSubtable, setTemporaryTargetSubtable] = useState(true);
   const [quantityText, setQuantityText] = useState(formatQuantity(item.quantity));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -4745,9 +4786,14 @@ function TransferItemModal({
           <label>
             <span>Mesa destino</span>
             <select value={targetTableNumber} onChange={(event) => {
-              setTargetTableNumber(Number(event.target.value));
-              setTargetSubtable("");
-              setCreatingTargetSubtable(false);
+              const nextTableNumber = Number(event.target.value);
+              const nextTable = tables.find((table) => table.number === nextTableNumber);
+              const nextSubtables = [...new Set([...(nextTable?.subtables || []), ...(nextTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
+              const shouldCreateTemporary = nextTableNumber === sourceTableNumber;
+              setTargetTableNumber(nextTableNumber);
+              setTargetSubtable(shouldCreateTemporary ? temporarySubtableName(nextSubtables) : "");
+              setCreatingTargetSubtable(shouldCreateTemporary);
+              setTemporaryTargetSubtable(shouldCreateTemporary);
             }}>
               {tables.map((table) => (
                 <option key={table.number} value={table.number}>Mesa {String(table.number).padStart(3, "0")} - {table.status}{table.number === sourceTableNumber ? " (mesa atual)" : ""}</option>
@@ -4761,24 +4807,33 @@ function TransferItemModal({
           <label>
             <span>Submesa destino</span>
             <select
-              value={creatingTargetSubtable ? "__new__" : targetSubtable}
+              value={creatingTargetSubtable ? temporaryTargetSubtable ? "__temporary__" : "__new__" : targetSubtable}
               onChange={(event) => {
                 const value = event.target.value;
+                if (value === "__temporary__") {
+                  setTargetSubtable(temporarySubtableName(existingSubtables));
+                  setCreatingTargetSubtable(true);
+                  setTemporaryTargetSubtable(true);
+                  return;
+                }
                 setCreatingTargetSubtable(value === "__new__");
+                setTemporaryTargetSubtable(false);
                 setTargetSubtable(value === "__new__" ? "" : value);
               }}
             >
               <option value="" disabled={destinationIsOrigin("")}>Mesa principal{destinationIsOrigin("") ? " (origem)" : ""}</option>
               {existingSubtables.map((name) => <option key={name} value={name} disabled={destinationIsOrigin(name)}>{name}{destinationIsOrigin(name) ? " (origem)" : ""}</option>)}
+              <option value="__temporary__">Criar submesa temporaria</option>
               <option value="__new__">Criar nova submesa...</option>
             </select>
-            {creatingTargetSubtable && <input autoFocus value={targetSubtable} onChange={(event) => setTargetSubtable(event.target.value)} placeholder="Nome da nova submesa" />}
+            {creatingTargetSubtable && !temporaryTargetSubtable && <input autoFocus value={targetSubtable} onChange={(event) => setTargetSubtable(event.target.value)} placeholder="Nome da nova submesa" />}
             <button
               className="pdv-ghost-button pdv-temporary-subtable-button"
               type="button"
               onClick={() => {
                 setTargetSubtable(temporarySubtableName(existingSubtables));
                 setCreatingTargetSubtable(true);
+                setTemporaryTargetSubtable(true);
               }}
             >
               + Submesa temporaria
