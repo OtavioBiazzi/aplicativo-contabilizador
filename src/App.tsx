@@ -2534,7 +2534,7 @@ export function App() {
         {pdvMainTab && (
           <div className="pdv-module-panel pdv-direct-panel">
             <PdvApp
-              key={`${pdvMainTab}-${pdvViewNonce}`}
+              key={`pdv-main-${pdvViewNonce}`}
               embedded
               initialTab={pdvMainTab}
               hideTopbar
@@ -2558,6 +2558,7 @@ export function App() {
                 ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) })
                 : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)}
               onNavigateMain={(tab) => requestNavigation(tab)}
+              onOperationalTabChange={(tab) => setActiveTab(tab)}
             />
           </div>
         )}

@@ -48,9 +48,12 @@ type TableCloseScope =
   | { kind: "all" }
   | { kind: "main" }
   | { kind: "subtable"; subtableName: string };
+type AdvancedSplitPart = { id: string; name: string; amount: number; weight: number };
+type AdvancedSplitMode = "value" | "products";
+type AdvancedSplitResult = { parts: AdvancedSplitPart[]; assignments: Record<string, string>; roundingStep: number; roundingDirection: RoundDirection; mode: AdvancedSplitMode; equalValues: boolean };
 type CheckoutTarget =
   | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean; saleType?: PdvSale["type"]; operationId?: PdvOperationId }
-  | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[]; operationId: PdvOperationId }
+  | { kind: "table"; table: PdvOpenTable; total: number; discount: number; initialPayments?: PdvPayment[]; adjustedItems?: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-scope"; table: PdvOpenTable; scope: Exclude<TableCloseScope, { kind: "all" }>; total: number; discount: number; initialPayments?: PdvPayment[]; items: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-subtable"; table: PdvOpenTable; subtableName: string; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
@@ -165,10 +168,15 @@ function tableSearchDetails(table: PdvOpenTable, rawQuery: string): { matches: b
   const productCommand = query.match(/^produtos?\s*:\s*(.*)$/);
   if (productCommand) {
     const productQueries = productCommand[1].split(",").map((value) => value.trim()).filter(Boolean);
-    const matchingProducts = [...new Set(table.items
-      .filter((item) => productQueries.some((productQuery) => fuzzySearchMatch(item.productName, productQuery)))
-      .map((item) => item.productName))];
-    return { matches: matchingProducts.length > 0, subtables: [], products: matchingProducts };
+    const productsByQuery = productQueries.map((productQuery) => table.items
+      .filter((item) => fuzzySearchMatch(item.productName, productQuery))
+      .map((item) => item.productName));
+    const matchingProducts = [...new Set(productsByQuery.flat())];
+    return {
+      matches: productQueries.length > 0 && productsByQuery.every((matches) => matches.length > 0),
+      subtables: [],
+      products: matchingProducts
+    };
   }
 
   const tableNumberQuery = query.replace(/^mesa\s*/, "").trim();
@@ -219,8 +227,80 @@ function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+function roundToMultiple(value: number, step: number, direction: RoundDirection): number {
+  const safeStep = Math.max(0.01, step || 0.01);
+  const units = value / safeStep;
+  const roundedUnits = direction === "up" ? Math.ceil(units) : direction === "down" ? Math.floor(units) : Math.round(units);
+  return roundMoney(Math.max(safeStep, roundedUnits * safeStep));
+}
+
 function roundQuantity(value: number): number {
   return Math.round((value + Number.EPSILON) * 1_000) / 1_000;
+}
+
+function allocateItemsBySplitValue(items: PdvCartItem[], parts: AdvancedSplitPart[]): PdvCartItem[] {
+  const remainingByPart = new Map(parts.map((part) => [part.id, Math.round(part.amount * 100)]));
+  const allocated: PdvCartItem[] = [];
+  const targetCents = [...remainingByPart.values()].reduce((sum, value) => sum + value, 0);
+  const sourceTotal = items.reduce((sum, item) => sum + item.total, 0);
+  let effectiveCentsUsed = 0;
+  let partIndex = 0;
+  for (const [itemIndex, item] of items.entries()) {
+    const availableTargetCents = Math.max(0, targetCents - effectiveCentsUsed);
+    const effectiveItemCents = itemIndex === items.length - 1
+      ? availableTargetCents
+      : Math.min(availableTargetCents, Math.max(0, Math.round(targetCents * (sourceTotal > 0 ? item.total / sourceTotal : 0))));
+    effectiveCentsUsed += effectiveItemCents;
+    let itemRemaining = effectiveItemCents;
+    while (itemRemaining > 0 && partIndex < parts.length) {
+      const part = parts[partIndex];
+      const partRemaining = remainingByPart.get(part.id) || 0;
+      if (partRemaining <= 0) {
+        partIndex += 1;
+        continue;
+      }
+      const cents = Math.min(itemRemaining, partRemaining);
+      const quantity = Math.max(0.001, item.quantity || 1);
+      allocated.push({
+        ...item,
+        id: cents === effectiveItemCents ? item.id : crypto.randomUUID(),
+        quantity,
+        measureLabel: item.measureLabel,
+        unitPrice: item.unitPrice,
+        baseUnitPrice: item.baseUnitPrice,
+        discount: item.discount,
+        total: cents / 100,
+        paidQuantity: undefined,
+        subtableName: part.name,
+        note: [item.note, `Valor rateado para ${part.name}: ${money(cents / 100)}`].filter(Boolean).join(" | ")
+      });
+      itemRemaining -= cents;
+      remainingByPart.set(part.id, partRemaining - cents);
+      if ((remainingByPart.get(part.id) || 0) <= 0) partIndex += 1;
+    }
+  }
+  return allocated;
+}
+
+function adjustItemsToFinancialTotal(items: PdvCartItem[], targetTotal: number): PdvCartItem[] {
+  const targetCents = Math.max(0, Math.round(targetTotal * 100));
+  const sourceTotal = items.reduce((sum, item) => sum + item.total, 0);
+  let usedCents = 0;
+  return items.map((item, index) => {
+    const available = Math.max(0, targetCents - usedCents);
+    const cents = index === items.length - 1
+      ? available
+      : Math.min(available, Math.max(0, Math.round(targetCents * (sourceTotal > 0 ? item.total / sourceTotal : 0))));
+    usedCents += cents;
+    return {
+      ...item,
+      unitPrice: item.unitPrice,
+      baseUnitPrice: item.baseUnitPrice,
+      discount: item.discount,
+      total: cents / 100,
+      note: [item.note, `Valor ajustado pelo rateio: ${money(cents / 100)}`].filter(Boolean).join(" | ")
+    };
+  });
 }
 
 function formatQuantity(value: number): string {
@@ -412,6 +492,7 @@ export function PdvApp({
   receiptPrintTargets = [],
   onRemoteReceiptPrint,
   onNavigateMain,
+  onOperationalTabChange,
   onCreatePayableForCustomer,
   advancedSettingsActionsRef,
   onAdvancedSettingsDirtyChange
@@ -433,6 +514,7 @@ export function PdvApp({
   receiptPrintTargets?: Array<{ id: string; label: string }>;
   onRemoteReceiptPrint?: (targetId: string, payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
   onNavigateMain?: (tab: "history" | "reports") => void;
+  onOperationalTabChange?: (tab: "sale" | "tables") => void;
   onCreatePayableForCustomer?: (customer: PdvCustomer) => void;
   advancedSettingsActionsRef?: React.MutableRefObject<PdvAdvancedSettingsActions | null>;
   onAdvancedSettingsDirtyChange?: (dirty: boolean) => void;
@@ -448,6 +530,8 @@ export function PdvApp({
   const [discount, setDiscount] = useState(0);
   const [tableFilter, setTableFilter] = useState<PdvTableStatus | "Todas">("Todas");
   const [tableSearch, setTableSearch] = useState("");
+  const [tableProductFilterOpen, setTableProductFilterOpen] = useState(false);
+  const [keepTableProductFilter, setKeepTableProductFilter] = useState(false);
   const [pendingSyncTick, setPendingSyncTick] = useState(0);
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine);
   const [activeTable, setActiveTable] = useState<PdvOpenTable | null>(null);
@@ -468,6 +552,8 @@ export function PdvApp({
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
   const [completedReceipt, setCompletedReceipt] = useState<{ sale: PdvSale; receivable?: PdvReceivable } | null>(null);
   const [tableCloseMenuOpen, setTableCloseMenuOpen] = useState(false);
+  const [advancedSplitRequest, setAdvancedSplitRequest] = useState<{ total: number; discount: number } | null>(null);
+  const [advancedSplitReturn, setAdvancedSplitReturn] = useState<{ request: { total: number; discount: number }; draft: AdvancedSplitResult } | null>(null);
   const [tableCloseScope, setTableCloseScope] = useState<TableCloseScope>({ kind: "all" });
   const [partialItemsModalOpen, setPartialItemsModalOpen] = useState(false);
   const [partialValueModalOpen, setPartialValueModalOpen] = useState(false);
@@ -480,6 +566,8 @@ export function PdvApp({
     setClientVisualSettings(readClientVisualSettings(visualSettingsStorageKey));
   }, [visualSettingsStorageKey]);
   const tableAutosaveTimer = useRef<number | null>(null);
+  const closePreparationInFlight = useRef(false);
+  const closeSubmissionInFlight = useRef(false);
   // Todas as gravacoes da mesa passam por esta fila. Sem isso, uma resposta antiga
   // podia terminar depois da mais nova e repor no banco uma versao desatualizada.
   const tableSaveChain = useRef<Promise<void>>(Promise.resolve());
@@ -832,6 +920,7 @@ export function PdvApp({
     setSnapshot(refreshed);
     applyFreshOpenTable(refreshed, tableNumber);
     setCurrentSubtable(subtableName || "");
+    onOperationalTabChange?.("tables");
   };
 
   useEffect(() => {
@@ -883,6 +972,9 @@ export function PdvApp({
   }, [snapshot, activeTable?.number, tableCart, tableSaveState]);
 
   useEffect(() => {
+    if (tab === initialTab) {
+      return;
+    }
     setTab(initialTab);
     if (initialTab === "tables") {
       setActiveTable(null);
@@ -940,6 +1032,28 @@ export function PdvApp({
   const saleTotal = useMemo(() => roundMoney(cart.reduce((total, item) => total + item.total, 0)), [cart]);
   const saleFinal = Math.max(0, roundMoney(saleTotal - discount));
   const tableTotal = useMemo(() => roundMoney(tableCart.reduce((total, item) => total + unpaidItemTotal(item), 0)), [tableCart]);
+  const openAccountReceiptPreview = (items: PdvCartItem[], tableNumber?: number, subtableName = "") => {
+    const receiptItems = items.map((item) => ({ ...item }));
+    const subtotal = roundMoney(receiptItems.reduce((total, item) => total + item.total, 0));
+    setCompletedReceipt({
+      sale: {
+        id: `preview-${crypto.randomUUID()}`,
+        createdAt: new Date().toISOString(),
+        type: tableNumber ? "Mesa" : directSaleMode,
+        tableNumber,
+        tableSessionId: tableNumber ? activeTable?.sessionId : undefined,
+        status: "Finalizada",
+        subtotal,
+        discount: tableNumber ? 0 : discount,
+        total: Math.max(0, roundMoney(subtotal - (tableNumber ? 0 : discount))),
+        description: subtableName ? `Submesa ${subtableName}` : tableNumber ? `Mesa ${String(tableNumber).padStart(3, "0")}` : directSaleMode,
+        observations: "Pre-visualizacao antes do pagamento.",
+        originDevice: remoteSession?.deviceName || "Servidor",
+        payments: [],
+        items: receiptItems
+      }
+    });
+  };
   const partialSalesForActiveTable = activeTable ? snapshot?.recentSales.filter((sale) => sale.type === "Mesa" && sale.status === "Parcial" && (
     activeTable.sessionId
       ? sale.tableSessionId === activeTable.sessionId || (!sale.tableSessionId && Boolean(activeTable.openedAt) && sale.tableNumber === activeTable.number && sale.createdAt >= activeTable.openedAt!)
@@ -950,7 +1064,9 @@ export function PdvApp({
     const latestTableStatus = activeTable
       ? snapshot?.tables.find((table) => table.number === activeTable.number)?.status || activeTable.status
       : undefined;
-    if (latestTableStatus === "Fechamento" && !bypassReopen) {
+    const closingCurrentAccount = !currentSubtable
+      || (tableCloseScope.kind === "subtable" && tableCloseScope.subtableName === currentSubtable);
+    if (latestTableStatus === "Fechamento" && closingCurrentAccount && !bypassReopen) {
       setConfirmRequest({
         title: "Conta em processo de fechamento",
         message: "Existe uma conta desta mesa em processo de fechamento. Deseja realmente adicionar este produto?",
@@ -1035,9 +1151,11 @@ export function PdvApp({
 
   const openTable = async (table: PdvOpenTable, requestedSubtable = "") => {
     try {
-      // A busca serve somente para localizar. Depois de entrar, voltar ao mapa
-      // deve sempre mostrar todas as mesas novamente.
-      setTableSearch("");
+      // Buscas comuns servem apenas para localizar. O filtro visual de produtos
+      // permanece ativo ate o operador limpa-lo explicitamente.
+      if (!keepTableProductFilter || !/^produtos?\s*:/i.test(tableSearch.trim())) {
+        setTableSearch("");
+      }
       if (table.status === "Livre") {
         await openPdvTable(table.number, 1, "");
         // Evita uma segunda ida completa ao servidor apenas para abrir uma mesa
@@ -1127,7 +1245,11 @@ export function PdvApp({
       return;
     }
     if (action === "history") {
-      setTab("history");
+      if (onNavigateMain) {
+        onNavigateMain("history");
+      } else {
+        setTab("history");
+      }
       return;
     }
     if (action === "cancel") {
@@ -1303,22 +1425,27 @@ export function PdvApp({
   };
 
   const requestCloseSubtable = async (name: string) => {
-    if (!activeTable) {
+    if (!activeTable || closePreparationInFlight.current) {
       return;
     }
-    const scope: TableCloseScope = { kind: "subtable", subtableName: name };
-    const selected = itemsForCloseScope(tableCart, scope);
-    if (!selected.length) {
-      setToast("Essa submesa nao tem itens para fechar.");
-      return;
+    closePreparationInFlight.current = true;
+    try {
+      const scope: TableCloseScope = { kind: "subtable", subtableName: name };
+      const selected = itemsForCloseScope(tableCart, scope);
+      if (!selected.length) {
+        setToast("Essa submesa nao tem itens para fechar.");
+        return;
+      }
+      await persistTableBeforeAction();
+      // Fechar uma submesa nao bloqueia as demais contas da mesa. O escopo
+      // permanece local ao modal e a mesa continua operacional na rede.
+      setTableCloseScope(scope);
+      setPartialItemsModalOpen(false);
+      setPartialValueModalOpen(false);
+      setTableCloseMenuOpen(true);
+    } finally {
+      closePreparationInFlight.current = false;
     }
-    await persistTableBeforeAction();
-    await setPdvTableStatus(activeTable.number, "Fechamento");
-    setActiveTable((current) => current ? { ...current, status: "Fechamento" } : current);
-    setTableCloseScope(scope);
-    setPartialItemsModalOpen(false);
-    setPartialValueModalOpen(false);
-    setTableCloseMenuOpen(true);
   };
 
   const deleteSubtable = async (name: string) => {
@@ -1419,12 +1546,15 @@ export function PdvApp({
   };
 
   const confirmCloseTable = async (payments: PdvPayment[]) => {
-    if (!activeTable) {
+    if (!activeTable || closeSubmissionInFlight.current) {
       return;
     }
+    closeSubmissionInFlight.current = true;
     setBusy(true);
     try {
-      await savePdvTableItems(activeTable.number, tableCart, subtableNames);
+      const adjustedById = new Map(checkoutTarget?.kind === "table" ? (checkoutTarget.adjustedItems || []).map((item) => [item.id, item]) : []);
+      const finalTableCart = adjustedById.size ? tableCart.map((item) => adjustedById.get(item.id) || item) : tableCart;
+      await savePdvTableItems(activeTable.number, finalTableCart, subtableNames);
       const tableDiscount = checkoutTarget?.kind === "table" ? checkoutTarget.discount : 0;
       const sale = await closePdvTable(activeTable.number, payments, tableDiscount, checkoutTarget?.kind === "table" ? checkoutTarget.operationId : undefined);
       setToast(`Mesa ${String(activeTable.number).padStart(3, "0")} fechada.`);
@@ -1438,11 +1568,16 @@ export function PdvApp({
       }
       await maybePrintSale(sale, latest);
     } finally {
+      closeSubmissionInFlight.current = false;
       setBusy(false);
     }
   };
 
   const confirmPartialTable = async (target: Extract<CheckoutTarget, { kind: "table-scope" | "table-partial-items" | "table-subtable" | "table-partial-manual" }>, payments: PdvPayment[], observations = "") => {
+    if (closeSubmissionInFlight.current) {
+      return;
+    }
+    closeSubmissionInFlight.current = true;
     setBusy(true);
     try {
       const partialDiscount = target.kind === "table-scope" ? target.discount : 0;
@@ -1474,7 +1609,8 @@ export function PdvApp({
         setCheckoutTarget(null);
         setTableCloseScope({ kind: "all" });
         setToast(scope.kind === "subtable" ? `Submesa ${scope.subtableName} fechada.` : "Mesa principal fechada. As submesas continuam abertas.");
-        const refreshed = await load();
+        const refreshed = await getPdvSnapshot();
+        setSnapshot(refreshed);
         if (refreshed.settings.receiptOpenAfterSale) {
           setCompletedReceipt({ sale, receivable: refreshed.receivables.find((item) => item.saleId === sale.id) });
         }
@@ -1505,6 +1641,7 @@ export function PdvApp({
         setPartialItemsModalOpen(true);
       }
     } finally {
+      closeSubmissionInFlight.current = false;
       setBusy(false);
     }
   };
@@ -1546,6 +1683,10 @@ export function PdvApp({
     const matchesStatus = tableFilter === "Todas" || table.status === tableFilter;
     return matchesStatus && tableSearchDetails(table, tableSearch).matches;
   });
+  const activeProductFilterTerms = (normalizeTableSearch(tableSearch).match(/^produtos?\s*:\s*(.*)$/)?.[1] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
   const activeCloseItems = activeTable ? itemsForCloseScope(tableCart, tableCloseScope) : [];
   const activeCloseTotal = roundMoney(activeCloseItems.reduce((total, item) => total + item.total, 0));
 
@@ -1592,6 +1733,7 @@ export function PdvApp({
             setSelectedItemIds={setSelectedDirectItemIds}
             finishLabel="Receber e finalizar"
             onFinish={finishDirectSale}
+            onPreviewReceipt={(items) => openAccountReceiptPreview(items)}
             settings={visibleSettings}
             saleMode={directSaleMode}
             setSaleMode={setDirectSaleMode}
@@ -1614,7 +1756,13 @@ export function PdvApp({
                     aria-label="Buscar mesa ou submesa"
                     value={tableSearch}
                     onChange={(event) => setTableSearch(event.target.value)}
-                    placeholder="Ex.: mesa 12, submesa Oliveira ou produtos: coca-cola"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && /^produtos?\s*:?/i.test(tableSearch.trim())) {
+                        event.preventDefault();
+                        setTableProductFilterOpen(true);
+                      }
+                    }}
+                    placeholder="Mesa, submesa ou digite Produtos: e pressione Enter"
                   />
                   {tableSearch && (
                     <button type="button" aria-label="Limpar busca de mesas" onClick={() => setTableSearch("")}>
@@ -1622,6 +1770,15 @@ export function PdvApp({
                     </button>
                   )}
                 </label>
+                <button
+                  type="button"
+                  className={`pdv-product-filter-trigger ${activeProductFilterTerms.length ? "active" : ""}`}
+                  onClick={() => setTableProductFilterOpen(true)}
+                  title="Filtrar mesas pela combinacao de produtos"
+                >
+                  <Search size={15} /> Produtos
+                  {activeProductFilterTerms.length > 0 && <small>{activeProductFilterTerms.length}</small>}
+                </button>
                 {(["Todas", "Livre", "Ocupada", "Fechamento", "Reservada"] as const).map((status) => (
                   <button className={`${status.toLowerCase()} ${tableFilter === status ? "active" : ""}`} key={status} onClick={() => setTableFilter(status)}>
                     {status}
@@ -1773,6 +1930,7 @@ export function PdvApp({
             setDiscount={() => undefined}
             finishLabel="Fechar conta"
             onFinish={requestCloseTable}
+            onPreviewReceipt={(items) => openAccountReceiptPreview(items, activeTable.number, currentSubtable)}
             tablePeople={tablePeople}
             tableNote={tableNote}
             activeTableNumber={activeTable.number}
@@ -1843,6 +2001,12 @@ export function PdvApp({
           }}
           showDescription={Boolean(checkoutTarget.kind !== "direct" && checkoutTarget.kind !== "table")}
           onCancel={() => {
+            if ((checkoutTarget.kind === "table" || checkoutTarget.kind === "table-scope") && advancedSplitReturn) {
+              setCheckoutTarget(null);
+              setTableCloseMenuOpen(true);
+              setAdvancedSplitRequest(advancedSplitReturn.request);
+              return;
+            }
             if (checkoutTarget.kind === "table-partial-items") {
               // Restaurar seleÃ§Ã£o anterior ao voltar do pagamento
               setPartialSelectedItemIds(checkoutTarget.items.map((i) => i.id));
@@ -1855,14 +2019,15 @@ export function PdvApp({
               setCheckoutTarget(null);
             }
           }}
-          onConfirm={(payments, observations) => {
+          onConfirm={async (payments, observations) => {
             if (checkoutTarget.kind === "direct") {
-              return confirmDirectSale(payments, checkoutTarget.items || cart, checkoutTarget.saleType, checkoutTarget.operationId);
+              await confirmDirectSale(payments, checkoutTarget.items || cart, checkoutTarget.saleType, checkoutTarget.operationId);
             } else if (checkoutTarget.kind === "table") {
-              return confirmCloseTable(payments);
+              await confirmCloseTable(payments);
             } else {
-              return confirmPartialTable(checkoutTarget, payments, observations);
+              await confirmPartialTable(checkoutTarget, payments, observations);
             }
+            setAdvancedSplitReturn(null);
           }}
         />
       )}
@@ -1875,17 +2040,24 @@ export function PdvApp({
             : tableCloseScope.kind === "main" ? "Mesa principal" : undefined}
           roundingStep={snapshot.settings.roundingStep ?? remoteSession?.roundingStep ?? roundingStep}
           roundingDirection={snapshot.settings.roundingDirection ?? remoteSession?.roundingDirection ?? roundingDirection}
+          suspended={Boolean(advancedSplitRequest)}
           onPeopleChange={updateLocalTablePeople}
           onCancel={() => {
+            const shouldReleaseTableStatus = tableCloseScope.kind !== "subtable";
+            setAdvancedSplitRequest(null);
             setTableCloseMenuOpen(false);
             setTableCloseScope({ kind: "all" });
-            void setPdvTableStatus(activeTable.number, "Ocupada");
-            setActiveTable((current) => current ? { ...current, status: "Ocupada" } : current);
+            if (shouldReleaseTableStatus) {
+              void setPdvTableStatus(activeTable.number, "Ocupada");
+              setActiveTable((current) => current ? { ...current, status: "Ocupada" } : current);
+            }
           }}
           onPartialItems={() => {
+            setAdvancedSplitRequest(null);
             setTableCloseMenuOpen(false);
             setPartialItemsModalOpen(true);
           }}
+          onAdvancedSplit={(total, discount) => setAdvancedSplitRequest({ total, discount })}
           onCloseTotal={(total, discount, initialPayments) => {
             setTableCloseMenuOpen(false);
             if (tableCloseScope.kind === "all") {
@@ -1923,10 +2095,13 @@ export function PdvApp({
           onResetPaidItems={resetPaidItemStates}
           onComplete={finalizeFullyPaidTable}
           onCancel={() => {
+            const shouldReleaseTableStatus = tableCloseScope.kind !== "subtable";
             setPartialItemsModalOpen(false);
             setTableCloseScope({ kind: "all" });
-            void setPdvTableStatus(activeTable.number, "Ocupada");
-            setActiveTable((current) => current ? { ...current, status: "Ocupada" } : current);
+            if (shouldReleaseTableStatus) {
+              void setPdvTableStatus(activeTable.number, "Ocupada");
+              setActiveTable((current) => current ? { ...current, status: "Ocupada" } : current);
+            }
           }}
           onConfirm={(items) => {
             setPartialItemsModalOpen(false);
@@ -2005,6 +2180,51 @@ export function PdvApp({
           }}
         />
       )}
+      {!checkoutTarget && tableCloseMenuOpen && advancedSplitRequest && activeTable && (
+        <AdvancedAccountSplitModal
+          items={activeCloseItems}
+          total={advancedSplitRequest.total}
+          initialPeople={Math.max(2, tablePeople || 2)}
+          initialResult={advancedSplitReturn?.draft}
+          onCancel={() => { setAdvancedSplitRequest(null); setAdvancedSplitReturn(null); }}
+          onPreparePayments={(result) => {
+            const dividedTotal = roundMoney(result.parts.reduce((sum, part) => sum + part.amount, 0));
+            const adjustedScopeItems = adjustItemsToFinancialTotal(activeCloseItems, dividedTotal + advancedSplitRequest.discount);
+            const payments = result.parts.map<PdvPayment>((part) => ({ id: crypto.randomUUID(), method: "Nao definido", amount: part.amount, description: part.name }));
+            setAdvancedSplitReturn({ request: advancedSplitRequest, draft: result });
+            setAdvancedSplitRequest(null);
+            setTableCloseMenuOpen(false);
+            if (tableCloseScope.kind === "all") {
+              setCheckoutTarget({ kind: "table", table: activeTable, total: dividedTotal, discount: advancedSplitRequest.discount, initialPayments: payments, adjustedItems: adjustedScopeItems, operationId: crypto.randomUUID() });
+            } else {
+              setCheckoutTarget({ kind: "table-scope", table: activeTable, scope: tableCloseScope, total: dividedTotal, discount: advancedSplitRequest.discount, initialPayments: payments, items: adjustedScopeItems, operationId: crypto.randomUUID() });
+            }
+          }}
+          onCreateSubtables={async (result) => {
+            const names = result.parts.map((part) => part.name.trim()).filter(Boolean);
+            const scopedIds = new Set(activeCloseItems.map((item) => item.id));
+            const distributedScopeItems = result.mode === "value"
+              ? allocateItemsBySplitValue(activeCloseItems, result.parts)
+              : result.parts.flatMap((part) => adjustItemsToFinancialTotal(
+                activeCloseItems.filter((item) => result.assignments[item.id] === part.id),
+                part.amount
+              ).map((item) => ({ ...item, subtableName: part.name })));
+            const nextItems = [...tableCart.filter((item) => !scopedIds.has(item.id)), ...distributedScopeItems];
+            const previousScopeName = tableCloseScope.kind === "subtable" ? tableCloseScope.subtableName : "";
+            const nextSubtables = [...new Set([...subtableNames.filter((name) => name !== previousScopeName), ...names])];
+            markTableMutation();
+            setTableCart(nextItems);
+            setSubtableNames(nextSubtables);
+            await queueTableSave({ tableNumber: activeTable.number, people: tablePeople, note: tableNote, items: nextItems, subtables: nextSubtables, mutationRevision: tableMutationRevision.current });
+            setCurrentSubtable(names[0] || "");
+            setAdvancedSplitReturn(null);
+            setAdvancedSplitRequest(null);
+            setTableCloseMenuOpen(false);
+            setTableCloseScope({ kind: "all" });
+            setToast(`${names.length} submesa(s) preparada(s) com a divisao.`);
+          }}
+        />
+      )}
       {completedReceipt && (
         <PdvReceiptDraftModal
           sale={completedReceipt.sale}
@@ -2016,6 +2236,19 @@ export function PdvApp({
           onRemotePrint={onRemoteReceiptPrint}
           onClose={() => setCompletedReceipt(null)}
           onNotice={setNotice}
+        />
+      )}
+      {tableProductFilterOpen && (
+        <TableProductFilterModal
+          products={snapshot.products.filter((product) => product.active && product.showOnPdv)}
+          initialTerms={activeProductFilterTerms}
+          keepAfterOpen={keepTableProductFilter}
+          onCancel={() => setTableProductFilterOpen(false)}
+          onApply={(terms, keepAfterOpen) => {
+            setTableSearch(terms.length ? `Produtos: ${terms.join(", ")}` : "");
+            setKeepTableProductFilter(keepAfterOpen);
+            setTableProductFilterOpen(false);
+          }}
         />
       )}
     </div>
@@ -2040,6 +2273,7 @@ function PdvSaleScreen(props: {
   setCart: (items: PdvCartItem[] | ((current: PdvCartItem[]) => PdvCartItem[])) => void;
   setDiscount: (value: number) => void;
   onFinish: () => void;
+  onPreviewReceipt?: (items: PdvCartItem[]) => void;
   tablePeople?: number;
   tableNote?: string;
   activeTableNumber?: number;
@@ -2279,6 +2513,9 @@ function PdvSaleScreen(props: {
     if (action === "split") {
       setSplitItem(item);
     }
+    if (action === "receipt") {
+      props.onPreviewReceipt?.(visibleCart);
+    }
     if (action === "remove") {
       setRemoveRequest(item);
     }
@@ -2452,6 +2689,7 @@ function PdvSaleScreen(props: {
             <button onClick={() => runItemAction("down", itemMenu.item)}>Mover para baixo</button>
             <button onClick={() => runItemAction("before", itemMenu.item)}>Colocar antes de outro item</button>
             <button onClick={() => runItemAction("after", itemMenu.item)}>Colocar depois de outro item</button>
+            <button disabled={!visibleCart.length} onClick={() => runItemAction("receipt", itemMenu.item)}><ReceiptText size={14} /> Exibir recibo da conta</button>
             <button className="danger" onClick={() => runItemAction("remove", itemMenu.item)}>Remover/cancelar produto</button>
           </ContextMenu>
         )}
@@ -2837,6 +3075,108 @@ function SplitItemModal({
         <div className="pdv-action-row">
           <button className="pdv-danger-button" type="button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" type="button" onClick={() => onConfirm(people, singleShare)}>{singleShare ? "Lancar uma parte" : "Dividir item"}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TableProductFilterModal({
+  products,
+  initialTerms,
+  keepAfterOpen,
+  onCancel,
+  onApply
+}: {
+  products: PdvProduct[];
+  initialTerms: string[];
+  keepAfterOpen: boolean;
+  onCancel: () => void;
+  onApply: (terms: string[], keepAfterOpen: boolean) => void;
+}) {
+  const initialSelection = initialTerms.map((term) => (
+    products.find((product) => normalizeTableSearch(product.name) === normalizeTableSearch(term))?.name || term
+  ));
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<string[]>([...new Set(initialSelection)]);
+  const [keepFilter, setKeepFilter] = useState(keepAfterOpen);
+  const normalizedQuery = normalizeTableSearch(query);
+  const visibleProducts = products
+    .filter((product) => !normalizedQuery || [product.name, product.categoryName, product.sku || "", product.barcode || ""]
+      .some((value) => normalizeTableSearch(value).includes(normalizedQuery)))
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR", { numeric: true }));
+  const toggle = (name: string) => {
+    setSelected((current) => current.some((item) => normalizeTableSearch(item) === normalizeTableSearch(name))
+      ? current.filter((item) => normalizeTableSearch(item) !== normalizeTableSearch(name))
+      : [...current, name]);
+  };
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [onCancel]);
+
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+      <section className="pdv-payment-modal pdv-product-lookup-modal pdv-table-product-filter-modal" role="dialog" aria-modal="true" aria-label="Filtrar mesas por produtos">
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Pesquisa combinada</span>
+            <h1>Mesas com todos estes produtos</h1>
+            <p>Selecione dois ou mais produtos para localizar somente mesas que contenham a combinacao completa.</p>
+          </div>
+          <button className="pdv-icon-button" type="button" onClick={onCancel} aria-label="Fechar filtro"><X size={18} /></button>
+        </div>
+        <label className="pdv-product-lookup-search">
+          <Search size={18} />
+          <input
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && visibleProducts[0]) {
+                event.preventDefault();
+                toggle(visibleProducts[0].name);
+                setQuery("");
+              }
+            }}
+            placeholder="Nome, codigo, codigo de barras ou grupo"
+          />
+          <span>{visibleProducts.length} encontrado(s)</span>
+        </label>
+        <div className="pdv-table-product-filter-selected" aria-label="Produtos exigidos no filtro">
+          <strong>Produtos obrigatorios</strong>
+          <div>
+            {selected.map((name) => <button type="button" key={name} onClick={() => toggle(name)}>{name}<X size={13} /></button>)}
+            {!selected.length && <span>Nenhum produto selecionado. Clique nos produtos abaixo para montar o filtro.</span>}
+          </div>
+        </div>
+        <label className="pdv-table-product-filter-persistence">
+          <input type="checkbox" checked={keepFilter} onChange={(event) => setKeepFilter(event.target.checked)} />
+          <span><strong>Manter filtro ao entrar e sair da mesa</strong><small>Desative para limpar a pesquisa automaticamente ao abrir um resultado.</small></span>
+        </label>
+        <div className="pdv-table-product-filter-list">
+          {visibleProducts.map((product) => {
+            const active = selected.some((name) => normalizeTableSearch(name) === normalizeTableSearch(product.name));
+            return (
+              <button type="button" className={active ? "selected" : ""} key={product.id} onClick={() => toggle(product.name)}>
+                <span className="pdv-product-lookup-check">{active && <Check size={15} strokeWidth={3} />}</span>
+                <span><strong>{product.name}</strong><small>{product.categoryName}{product.barcode ? ` · ${product.barcode}` : ""}</small></span>
+                <b>{money(product.price)}</b>
+              </button>
+            );
+          })}
+          {!visibleProducts.length && <div className="pdv-empty">Nenhum produto encontrado.</div>}
+        </div>
+        <div className="pdv-action-row">
+          <button className="pdv-ghost-button" type="button" disabled={!selected.length} onClick={() => setSelected([])}>Limpar filtro</button>
+          <button className="pdv-danger-button" type="button" onClick={onCancel}>Cancelar</button>
+          <button className="pdv-primary-button" type="button" onClick={() => onApply(selected, keepFilter)}>Aplicar {selected.length ? `(${selected.length})` : ""}</button>
         </div>
       </section>
     </div>
@@ -3341,6 +3681,7 @@ function PaymentModal({
   const [notice, setNotice] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [observations, setObservations] = useState("");
+  const [preparedPaymentToDefine, setPreparedPaymentToDefine] = useState<PdvPayment | null>(null);
   const [focusedPaymentIndex, setFocusedPaymentIndex] = useState(0);
   const finishLocked = useRef(false);
   const paid = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
@@ -3372,6 +3713,10 @@ function PaymentModal({
     }
     if (remaining > 0.009) {
       setNotice("Ainda existe valor restante para fechar a conta.");
+      return;
+    }
+    if (payments.some((payment) => payment.method === "Nao definido")) {
+      setNotice("Defina a forma de pagamento de cada parte antes de finalizar.");
       return;
     }
     if (!skipConfirmation && !confirming) {
@@ -3482,9 +3827,9 @@ function PaymentModal({
             <article key={payment.id}>
               <strong>{payment.method}</strong>
               <span>{money(payment.amount)}{payment.change ? ` | Troco ${money(payment.change)}` : ""}{payment.description ? ` | ${payment.description}` : ""}</span>
-              <button className="pdv-icon-button" title="Editar pagamento" onClick={() => { setEditingPayment(payment); setPaymentEntryMethod(payment.method); }}>
-                <Pencil size={15} />
-              </button>
+              {payment.method === "Nao definido"
+                ? <button className="pdv-icon-button pdv-define-payment-button" title="Definir forma de pagamento" onClick={() => setPreparedPaymentToDefine(payment)}><Wallet size={15} /></button>
+                : <button className="pdv-icon-button" title="Editar pagamento" onClick={() => { setEditingPayment(payment); setPaymentEntryMethod(payment.method); }}><Pencil size={15} /></button>}
               <button className="pdv-icon-button" onClick={() => setPayments((current) => current.filter((item) => item.id !== payment.id))}>
                 <Trash2 size={16} />
               </button>
@@ -3545,6 +3890,16 @@ function PaymentModal({
           )
         )}
         {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
+        {preparedPaymentToDefine && (
+          <PaymentMethodCorrectionModal
+            payment={preparedPaymentToDefine}
+            onCancel={() => setPreparedPaymentToDefine(null)}
+            onConfirm={(payment) => {
+              setPayments((current) => current.map((item) => item.id === payment.id ? payment : item));
+              setPreparedPaymentToDefine(null);
+            }}
+          />
+        )}
         {!skipConfirmation && confirming && (
           <PdvConfirmModal
             title={confirmLabel === "Finalizar conta" ? "Confirmar fechamento" : "Confirmar pagamentos"}
@@ -3563,17 +3918,18 @@ function PaymentMethodCorrectionModal({ payment, onCancel, onConfirm }: { paymen
   const [receivedText, setReceivedText] = useState(String(payment.received || payment.amount).replace(".", ","));
   const received = roundMoney(Math.max(0, parseBrazilianNumber(receivedText)));
   const invalidCash = method === "Dinheiro" && received + 0.009 < payment.amount;
+  const invalidMethod = method === "Nao definido";
   const correctedPayment: PdvPayment = method === "Dinheiro"
     ? { ...payment, method, received: Math.max(payment.amount, received), change: roundMoney(Math.max(0, received - payment.amount)) }
     : { ...payment, method, received: undefined, change: undefined };
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); onCancel(); }
-      if (event.key === "Enter" && !invalidCash) { event.preventDefault(); void onConfirm(correctedPayment); }
+      if (event.key === "Enter" && !invalidCash && !invalidMethod) { event.preventDefault(); void onConfirm(correctedPayment); }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [method, receivedText, invalidCash, onCancel, onConfirm]);
+  }, [method, receivedText, invalidCash, invalidMethod, onCancel, onConfirm]);
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
       <section className="pdv-payment-modal pdv-confirm-modal pdv-payment-correction-modal">
@@ -3592,7 +3948,7 @@ function PaymentMethodCorrectionModal({ payment, onCancel, onConfirm }: { paymen
         </div>}
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
-          <button className="pdv-primary-button" disabled={invalidCash} onClick={() => void onConfirm(correctedPayment)}>Salvar correcao</button>
+          <button className="pdv-primary-button" disabled={invalidCash || invalidMethod} onClick={() => void onConfirm(correctedPayment)}>Salvar correcao</button>
         </div>
       </section>
     </div>
@@ -4190,7 +4546,7 @@ function ItemEditModal({
       ? formatQuantity(roundQuantity(((item.discount || 0) / gross) * 100)).replace(".", ",")
       : ""
   );
-  const [priceText, setPriceText] = useState(String(isMeasured ? item.total : item.unitPrice).replace(".", ","));
+  const [priceText, setPriceText] = useState(String(item.total).replace(".", ","));
   const [note, setNote] = useState(item.note || "");
   const discountByValue = Math.max(0, parseBrazilianNumber(discountValueText));
   const discountByPercent = roundMoney(gross * (Math.max(0, parseBrazilianNumber(discountPercentText)) / 100));
@@ -4217,9 +4573,9 @@ function ItemEditModal({
     }
     if (mode === "price") {
       const value = Math.max(0, parseBrazilianNumber(priceText));
-      // Em produtos por peso, o preco cadastrado por kg/g continua intacto.
-      // Esta acao altera somente o valor final deste lancamento.
-      onConfirm(isMeasured ? { total: roundMoney(value) } : { unitPrice: value });
+      // O preco unitario cadastrado continua sendo a referencia visual e fiscal.
+      // A alteracao vale somente para o total deste lancamento.
+      onConfirm({ total: roundMoney(value) });
       return;
     }
     onConfirm({ note });
@@ -4285,7 +4641,7 @@ function ItemEditModal({
           )}
           {mode === "price" && (
             <label>
-              <span>{isMeasured ? "Valor final apenas neste lancamento" : "Preco apenas neste lancamento"}</span>
+              <span>Valor final apenas neste lancamento</span>
               <input autoFocus inputMode="decimal" value={priceText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setPriceText(event.target.value)} />
             </label>
           )}
@@ -4299,7 +4655,7 @@ function ItemEditModal({
         <div className="pdv-payment-summary">
           <Metric title={isMeasured ? "Peso" : "Quantidade"} value={isMeasured ? item.measureLabel || formatQuantity(item.quantity) : formatQuantity(item.quantity)} />
           <Metric title={isMeasured ? "Preco por kg/g" : "Unitario"} value={money(item.unitPrice)} />
-          <Metric title="Total final" value={money(mode === "price" && isMeasured ? parseBrazilianNumber(priceText) : mode === "discount" ? previewTotal : item.total)} />
+          <Metric title="Total final" value={money(mode === "price" ? parseBrazilianNumber(priceText) : mode === "discount" ? previewTotal : item.total)} />
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
@@ -5187,15 +5543,190 @@ function DirectDiscountModal({
   );
 }
 
+function AdvancedAccountSplitModal({
+  items,
+  total,
+  initialPeople,
+  initialResult,
+  onCancel,
+  onPreparePayments,
+  onCreateSubtables
+}: {
+  items: PdvCartItem[];
+  total: number;
+  initialPeople: number;
+  initialResult?: AdvancedSplitResult | null;
+  onCancel: () => void;
+  onPreparePayments: (result: AdvancedSplitResult) => void;
+  onCreateSubtables: (result: AdvancedSplitResult) => void | Promise<void>;
+}) {
+  const initialRoundingStep = initialResult?.roundingStep || 0.25;
+  const initialRoundingDirection = initialResult?.roundingDirection || "nearest";
+  const makeParts = (count: number): AdvancedSplitPart[] => {
+    const equalAmount = roundToMultiple(total / count, initialRoundingStep, initialRoundingDirection);
+    return Array.from({ length: count }, (_, index) => ({
+      id: crypto.randomUUID(),
+      name: `Pessoa ${index + 1}`,
+      amount: equalAmount,
+      weight: 1
+    }));
+  };
+  const [parts, setParts] = useState<AdvancedSplitPart[]>(() => initialResult?.parts.map((part) => ({ ...part })) || makeParts(Math.max(2, Math.min(20, initialPeople))));
+  const [assignments, setAssignments] = useState<Record<string, string>>(() => initialResult ? { ...initialResult.assignments } : Object.fromEntries(items.map((item) => [item.id, ""] as const)));
+  const [roundingStep, setRoundingStep] = useState(initialRoundingStep);
+  const [roundingDirection, setRoundingDirection] = useState<RoundDirection>(initialRoundingDirection);
+  const [mode, setMode] = useState<AdvancedSplitMode>(initialResult?.mode || "value");
+  const [equalValues, setEqualValues] = useState(initialResult?.equalValues ?? true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const allocated = roundMoney(parts.reduce((sum, part) => sum + part.amount, 0));
+  const difference = roundMoney(total - allocated);
+  const namesValid = parts.every((part) => part.name.trim()) && new Set(parts.map((part) => normalizeTableSearch(part.name))).size === parts.length;
+  const allAssigned = items.every((item) => Boolean(assignments[item.id]));
+  const allPartsHaveProducts = parts.every((part) => items.some((item) => assignments[item.id] === part.id));
+  const valid = namesValid && allocated > 0 && (equalValues || Math.abs(difference) <= 0.009);
+
+  const resizeParts = (count: number) => {
+    const next = makeParts(Math.max(2, Math.min(20, count)));
+    if (equalValues) {
+      const amount = roundToMultiple(total / next.length, roundingStep, roundingDirection);
+      next.forEach((part) => { part.amount = amount; });
+    }
+    setParts(next);
+    setAssignments(Object.fromEntries(items.map((item, index) => [item.id, next[index % next.length].id])));
+  };
+  const distributeEqually = () => {
+    const next = makeParts(parts.length).map((part, index) => ({ ...part, id: parts[index].id, name: parts[index].name, weight: parts[index].weight }));
+    if (equalValues) {
+      const amount = roundToMultiple(total / next.length, roundingStep, roundingDirection);
+      next.forEach((part) => { part.amount = amount; });
+    }
+    setParts(next);
+  };
+  const distributeByWeight = () => {
+    const totalWeight = parts.reduce((sum, part) => sum + Math.max(0, part.weight), 0);
+    if (totalWeight <= 0) return;
+    let usedCents = 0;
+    const totalCents = Math.round(total * 100);
+    const weighted = parts.map((part, index) => {
+      const cents = index === parts.length - 1 ? totalCents - usedCents : Math.round(totalCents * Math.max(0, part.weight) / totalWeight);
+      usedCents += cents;
+      return { ...part, amount: cents / 100 };
+    });
+    let roundedUsed = 0;
+    setParts(weighted.map((part, index) => {
+      if (index === weighted.length - 1) return { ...part, amount: roundMoney(Math.max(0, total - roundedUsed)) };
+      const amount = roundToMultiple(part.amount, roundingStep, roundingDirection);
+      roundedUsed += amount;
+      return { ...part, amount };
+    }));
+  };
+  const roundBySelectedMultiple = (step = roundingStep, direction = roundingDirection) => {
+    if (equalValues) {
+      const amount = roundToMultiple(total / parts.length, step, direction);
+      setParts((current) => current.map((part) => ({ ...part, amount })));
+      return;
+    }
+    let allocatedBeforeLast = 0;
+    const rounded = parts.map((part, index) => {
+      if (index === parts.length - 1) return { ...part, amount: roundMoney(Math.max(0, total - allocatedBeforeLast)) };
+      const amount = roundToMultiple(part.amount, step, direction);
+      allocatedBeforeLast += amount;
+      return { ...part, amount };
+    });
+    setParts(rounded);
+  };
+  const assignAutomatically = () => setAssignments(Object.fromEntries(items.map((item, index) => [item.id, parts[index % parts.length].id])));
+  const result = (): AdvancedSplitResult => ({ parts, assignments, roundingStep, roundingDirection, mode, equalValues });
+
+  useEffect(() => {
+    if (Object.values(assignments).every(Boolean) || !parts.length) return;
+    assignAutomatically();
+  }, []);
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !notice) {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [notice, onCancel]);
+
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+      <section className="pdv-payment-modal pdv-advanced-split-modal" role="dialog" aria-modal="true" aria-label="Divisao avancada da conta">
+        <div className="pdv-section-head">
+          <div><span className="pdv-eyebrow">Fechamento avancado</span><h1>Dividir conta com controle total</h1><p>Nomeie as partes, ajuste valores e distribua os produtos antes de pagar ou criar submesas.</p></div>
+          <button className="pdv-icon-button" type="button" onClick={onCancel}><X size={18} /></button>
+        </div>
+        <div className="pdv-advanced-split-toolbar">
+          <label><span>Pessoas / partes</span><div className="pdv-inline-stepper"><input type="number" min={2} max={20} value={parts.length} onChange={(event) => resizeParts(Number(event.target.value) || 2)} /><button type="button" onClick={() => resizeParts(parts.length - 1)}>-</button><button type="button" onClick={() => resizeParts(parts.length + 1)}>+</button></div></label>
+          <button className="pdv-ghost-button" type="button" onClick={distributeEqually}>Dividir igualmente</button>
+          <button className="pdv-ghost-button" type="button" disabled={equalValues} onClick={distributeByWeight}>Calcular por multiplicador</button>
+          <button className="pdv-ghost-button" type="button" onClick={assignAutomatically}>Distribuir produtos</button>
+        </div>
+        <div className="pdv-advanced-split-mode" role="group" aria-label="Forma de criar as submesas">
+          <button type="button" className={mode === "value" ? "active" : ""} onClick={() => setMode("value")}><strong>Ratear por valor</strong><small>Garante que cada submesa receba a cota definida, fracionando valores dos lançamentos quando necessário.</small></button>
+          <button type="button" className={mode === "products" ? "active" : ""} onClick={() => setMode("products")}><strong>Separar produtos</strong><small>Você escolhe manualmente para qual pessoa ou submesa cada produto será enviado.</small></button>
+          <label><input type="checkbox" checked={equalValues} onChange={(event) => { const checked = event.target.checked; setEqualValues(checked); if (checked) { const amount = roundToMultiple(total / parts.length, roundingStep, roundingDirection); setParts((current) => current.map((part) => ({ ...part, amount }))); } }} /><span><strong>Manter valores equivalentes</strong><small>Todos pagam exatamente o mesmo valor no múltiplo escolhido; a diferença vira ajuste de arredondamento.</small></span></label>
+        </div>
+        <div className="pdv-advanced-rounding">
+          <div><strong>Aproximação automática</strong><small>No equivalente, todos usam o mesmo múltiplo. No personalizado, a última parte compensa a diferença.</small></div>
+          <label><span>Múltiplo</span><select value={roundingStep} onChange={(event) => { const step = Number(event.target.value); setRoundingStep(step); if (equalValues) roundBySelectedMultiple(step, roundingDirection); }}><option value={0.01}>R$ 0,01</option><option value={0.05}>R$ 0,05</option><option value={0.1}>R$ 0,10</option><option value={0.25}>R$ 0,25</option><option value={0.5}>R$ 0,50</option><option value={1}>R$ 1,00</option></select></label>
+          <label><span>Direção</span><select value={roundingDirection} onChange={(event) => { const direction = event.target.value as RoundDirection; setRoundingDirection(direction); if (equalValues) roundBySelectedMultiple(roundingStep, direction); }}><option value="nearest">Mais próximo</option><option value="up">Para cima</option><option value="down">Para baixo</option></select></label>
+          <button className="pdv-ghost-button" type="button" onClick={() => roundBySelectedMultiple()}>Aproximar agora</button>
+        </div>
+        <div className="pdv-advanced-split-summary">
+          <span>Total original <b>{money(total)}</b></span><span>Total dividido <b>{money(allocated)}</b></span><span className={!equalValues && Math.abs(difference) > 0.009 ? "invalid" : "valid"}>{difference < -0.009 ? "Acrescimo de arredondamento" : difference > 0.009 ? "Reducao de arredondamento" : "Diferenca"} <b>{money(Math.abs(difference))}</b></span>
+        </div>
+        <div className="pdv-advanced-split-parts">
+          {parts.map((part, index) => (
+            <article key={part.id}>
+              <b>{index + 1}</b>
+              <label><span>Nome / submesa</span><input value={part.name} onChange={(event) => setParts((current) => current.map((item) => item.id === part.id ? { ...item, name: event.target.value } : item))} /></label>
+              <label><span>Valor</span><input disabled={equalValues} inputMode="decimal" value={String(part.amount).replace(".", ",")} onFocus={(event) => event.currentTarget.select()} onBlur={() => roundBySelectedMultiple()} onChange={(event) => setParts((current) => current.map((item) => item.id === part.id ? { ...item, amount: Math.max(0, parseBrazilianNumber(event.target.value)) } : item))} /></label>
+              <label><span>Multiplicador</span><input disabled={equalValues} type="number" min={0} step="0.5" value={part.weight} onChange={(event) => setParts((current) => current.map((item) => item.id === part.id ? { ...item, weight: Math.max(0, Number(event.target.value) || 0) } : item))} /></label>
+              {mode === "products" && (() => {
+                const productsTotal = roundMoney(items.filter((item) => assignments[item.id] === part.id).reduce((sum, item) => sum + item.total, 0));
+                const adjustment = roundMoney(part.amount - productsTotal);
+                return <small className={`pdv-advanced-product-adjustment ${Math.abs(adjustment) > 0.009 ? "changed" : "exact"}`}>Produtos: {money(productsTotal)} · {Math.abs(adjustment) <= 0.009 ? "divisão exata" : `${adjustment > 0 ? "acréscimo" : "redução"} de ${money(Math.abs(adjustment))} no total`}</small>;
+              })()}
+            </article>
+          ))}
+        </div>
+        {mode === "products" && <div className="pdv-advanced-split-products">
+          <div><strong>Produtos por parte</strong><small>Cada linha pode ser enviada a uma pessoa ou submesa diferente.</small></div>
+          {items.map((item) => (
+            <label key={item.id}><span><strong>{item.productName}</strong><small>{formatQuantity(item.quantity)} × {money(item.unitPrice)}</small></span><b>{money(item.total)}</b><select value={assignments[item.id] || ""} onChange={(event) => setAssignments((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Escolher parte</option>{parts.map((part) => <option value={part.id} key={part.id}>{part.name}</option>)}</select></label>
+          ))}
+        </div>}
+        {!namesValid && <p className="pdv-form-error">Use nomes preenchidos e diferentes para cada parte.</p>}
+        {mode === "products" && parts.some((part) => Math.abs(part.amount - items.filter((item) => assignments[item.id] === part.id).reduce((sum, item) => sum + item.total, 0)) > 0.009) && <p className="pdv-advanced-adjustment-notice">A seleção de produtos não fecha exatamente os valores. O preço unitário original continuará visível; somente o total de cada lançamento receberá o ajuste indicado.</p>}
+        {mode === "products" && allAssigned && !allPartsHaveProducts && <p className="pdv-form-error">Envie ao menos um produto para cada parte ou use o modo Ratear por valor.</p>}
+        <div className="pdv-action-row pdv-advanced-split-actions">
+          <button className="pdv-danger-button" type="button" onClick={onCancel}>Voltar</button>
+          <button className="pdv-ghost-button" type="button" disabled={!valid || (mode === "products" && (!allAssigned || !allPartsHaveProducts)) || saving} onClick={async () => { setSaving(true); try { await onCreateSubtables(result()); } catch (error) { setNotice(error instanceof Error ? error.message : "Nao foi possivel criar as submesas."); } finally { setSaving(false); } }}>Criar submesas por {mode === "value" ? "valor" : "produto"}</button>
+          <button className="pdv-primary-button" type="button" disabled={!valid || saving} onClick={() => onPreparePayments(result())}>Preparar pagamentos</button>
+        </div>
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
+      </section>
+    </div>
+  );
+}
+
 function TableCloseMenu({
   table,
   subtotal,
   scopeLabel,
   roundingStep: configuredRoundingStep,
   roundingDirection: configuredRoundingDirection,
+  suspended = false,
   onPeopleChange,
   onCancel,
   onPartialItems,
+  onAdvancedSplit,
   onCloseTotal
 }: {
   table: PdvOpenTable;
@@ -5203,9 +5734,11 @@ function TableCloseMenu({
   scopeLabel?: string;
   roundingStep?: number;
   roundingDirection?: RoundDirection;
+  suspended?: boolean;
   onPeopleChange?: (people: number) => void;
   onCancel: () => void;
   onPartialItems: () => void;
+  onAdvancedSplit: (total: number, discount: number) => void;
   onCloseTotal: (total: number, discount: number, initialPayments?: PdvPayment[]) => void;
 }) {
   const [discountValue, setDiscountValue] = useState("");
@@ -5246,6 +5779,7 @@ function TableCloseMenu({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (suspended) return;
     const target = event.target as HTMLElement;
     if (event.key === "Escape") {
       event.preventDefault();
@@ -5286,7 +5820,7 @@ function TableCloseMenu({
     };
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [focusedAction, total, discount]);
+  }, [focusedAction, total, discount, suspended]);
 
   return (
     <div className="pdv-modal-backdrop">
@@ -5322,7 +5856,7 @@ function TableCloseMenu({
         </div>
         <div className="pdv-close-split">
           <div>
-            <strong>Dividir por pessoas</strong>
+            <span className="pdv-close-split-title"><strong>Dividir por pessoas</strong><button type="button" onClick={() => onAdvancedSplit(total, discount)}>Avancado</button></span>
             <span>Aproximacao: {String(roundingStep).replace(".", ",")} / {roundingDirection}</span>
           </div>
           <div className="pdv-inline-stepper">
@@ -7769,6 +8303,11 @@ function isMeasuredCartItem(item: PdvCartItem): boolean {
   return /\bg\s*$/i.test(item.measureLabel || "");
 }
 
+function hasAdjustedLineTotal(item: PdvCartItem): boolean {
+  const calculated = roundMoney(Math.max(0, item.quantity * item.unitPrice - item.discount));
+  return Math.abs(roundMoney(item.total) - calculated) > 0.01;
+}
+
 function expandIndividualUnits(item: PdvCartItem, enabled = false): PdvCartItem[] {
   if (!enabled || !Number.isInteger(item.quantity) || item.quantity <= 1 || item.measureLabel) {
     return [item];
@@ -7825,7 +8364,7 @@ function splitCartItemForTransfer(item: PdvCartItem, quantity: number, subtableN
     quantity: roundQuantity(quantity),
     subtableName,
     discount,
-    total: isMeasuredCartItem(item)
+    total: isMeasuredCartItem(item) || hasAdjustedLineTotal(item)
       ? Math.max(0, roundMoney(item.total * ratio))
       : Math.max(0, roundMoney(quantity * item.unitPrice - discount))
   };
@@ -7858,7 +8397,7 @@ function subtractCartItemQuantity(items: PdvCartItem[], id: string, quantity: nu
       ...item,
       quantity: nextQuantity,
       discount,
-      total: isMeasuredCartItem(item)
+      total: isMeasuredCartItem(item) || hasAdjustedLineTotal(item)
         ? Math.max(0, roundMoney(item.total * ratio))
         : Math.max(0, roundMoney(nextQuantity * item.unitPrice - discount))
     }];
@@ -7875,6 +8414,11 @@ function updateCartItem(items: PdvCartItem[], id: string, patch: Partial<Pick<Pd
     const unitPrice = patch.unitPrice ?? item.unitPrice;
     const measureLabel = patch.measureLabel ?? item.measureLabel;
     const isMeasured = /\bg\s*$/i.test(measureLabel || "");
+    const quantityChanged = patch.quantity !== undefined && Math.abs(quantity - item.quantity) > 0.0001;
+    const adjustedTotal = hasAdjustedLineTotal(item);
+    const proportionalTotal = quantityChanged && item.quantity > 0
+      ? Math.max(0, roundMoney(item.total * (quantity / item.quantity)))
+      : item.total;
     return {
       ...item,
       quantity,
@@ -7882,7 +8426,7 @@ function updateCartItem(items: PdvCartItem[], id: string, patch: Partial<Pick<Pd
       discount,
       note: patch.note ?? item.note,
       measureLabel,
-      total: patch.total ?? (isMeasured ? item.total : Math.max(0, roundMoney(quantity * unitPrice - discount)))
+      total: patch.total ?? (isMeasured || adjustedTotal ? proportionalTotal : Math.max(0, roundMoney(quantity * unitPrice - discount)))
     };
   });
 }

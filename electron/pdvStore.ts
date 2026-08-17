@@ -2610,13 +2610,11 @@ function validateCartItems(items: PdvCartItem[]) {
     if (item.paidQuantity !== undefined && (!Number.isFinite(item.paidQuantity) || item.paidQuantity < 0 || item.paidQuantity > item.quantity + 0.009)) {
       throw new Error(`Estado de pagamento invalido para ${item.productName}.`);
     }
-    // Produtos por peso podem receber um valor final digitado pelo operador.
-    // Nesse caso, o peso serve para consulta e nao deve recalcular o total.
-    if (!item.measureLabel) {
-      const expectedTotal = roundMoney(Math.max(0, item.quantity * item.unitPrice - item.discount));
-      if (Math.abs(roundMoney(item.total) - expectedTotal) > 0.01) {
-        throw new Error(`Total invalido para ${item.productName}.`);
-      }
+    // O total pode ser ajustado por rateio, arredondamento ou por uma alteracao
+    // exclusiva do lancamento. O unitario permanece com o valor original para
+    // consulta, portanto nao deve ser usado para rejeitar esse total ajustado.
+    if (item.total > 100000000) {
+      throw new Error(`Total invalido para ${item.productName}.`);
     }
   });
 }

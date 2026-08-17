@@ -340,6 +340,23 @@ if (exactMeasuredTableSale.total !== 2 || exactMeasuredTableSale.items[0]?.total
   throw new Error("Fechamento da mesa alterou o valor final de produto por peso.");
 }
 
+await store.openTable(15);
+await store.saveTableItems(15, [{
+  id: crypto.randomUUID(),
+  productId: baseProduct.id,
+  productName: "Produto com total ajustado",
+  categoryName: category.name,
+  quantity: 2,
+  baseUnitPrice: 10,
+  unitPrice: 10,
+  discount: 0,
+  total: 21
+}]);
+const adjustedTotalTable = (await store.getSnapshot()).tables.find((table) => table.number === 15);
+if (adjustedTotalTable?.items[0]?.unitPrice !== 10 || adjustedTotalTable.items[0]?.total !== 21) {
+  throw new Error("Mesa nao preservou o unitario original e o total ajustado do lancamento.");
+}
+
 const receivableCustomer = await store.saveCustomer({
   name: "Cliente conta smoke",
   document: "12345678900",
@@ -663,6 +680,29 @@ const firstClose = await store.closeTable(8, [{ id: crypto.randomUUID(), method:
 const repeatedClose = await store.closeTable(8, [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }], 0, "smoke", operationId);
 if (firstClose.id !== repeatedClose.id || store.getSales({}).filter((item) => item.operationId === operationId).length !== 1) {
   throw new Error("Fechamento repetido nao foi protegido por chave de operacao.");
+}
+
+await store.openTable(14);
+const repeatedPartialItem = {
+  id: crypto.randomUUID(),
+  productId: baseProduct.id,
+  productName: baseProduct.name,
+  categoryName: category.name,
+  quantity: 2,
+  baseUnitPrice: 10,
+  unitPrice: 10,
+  discount: 0,
+  total: 20,
+  subtableName: "Idempotencia"
+};
+await store.saveTableItems(14, [repeatedPartialItem], ["Idempotencia"]);
+const partialOperationId = crypto.randomUUID();
+const partialSelection = [{ ...repeatedPartialItem, quantity: 1, total: 10, subtableName: "Idempotencia" }];
+const partialPayment = [{ id: crypto.randomUUID(), method: "Pix", amount: 10 }];
+const firstPartialClose = await store.closeTablePartial(14, partialSelection, partialPayment, 0, "Smoke local", partialOperationId);
+const repeatedPartialClose = await store.closeTablePartial(14, partialSelection, partialPayment, 0, "Smoke local", partialOperationId);
+if (firstPartialClose.id !== repeatedPartialClose.id || store.getSales({}).filter((item) => item.operationId === partialOperationId).length !== 1) {
+  throw new Error("Fechamento parcial repetido duplicou a venda ou o pagamento.");
 }
 
 const snapshot = await store.getSnapshot();
