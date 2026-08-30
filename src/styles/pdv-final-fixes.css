@@ -199,6 +199,32 @@
   -webkit-text-fill-color: #36566e !important;
   opacity: 1 !important;
 }
+
+#root .pdv-cart-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: .8rem;
+  white-space: nowrap;
+}
+
+#root .pdv-cart-compressed-indicator {
+  display: inline;
+  width: auto;
+  border: 0;
+  padding: 0;
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+  font-size: inherit;
+  font-style: normal;
+  font-weight: 850;
+  line-height: inherit;
+}
+
+#root .pdv-cart-list article.compressed .pdv-cart-product-cell strong {
+  color: #0b5f91;
+  -webkit-text-fill-color: #0b5f91;
+}
 #root .pdv-partial-items-modal .pdv-transfer-list { gap: 3px !important; }
 #root .pdv-partial-items-modal .pdv-transfer-list { max-height: min(62vh, 540px) !important; }
 #root .pdv-partial-items-modal .pdv-transfer-list > button { min-height: 31px !important; padding: 2px 6px !important; gap: 1px 7px !important; }

@@ -35,6 +35,7 @@ import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptP
 import { downloadFinancialCsv } from "./shared/financialExport";
 
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
+type CartDisplayItem = PdvCartItem & { compressedMemberIds: string[]; compressedLineCount: number };
 export type PdvAdvancedSection = "tables" | "appearance" | "operation" | "printing" | "data";
 type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; appVersion: string; connectedAt?: string; roundingStep?: number; roundingDirection?: RoundDirection; allowPrint?: boolean; allowEdit?: boolean; snapshot?: PdvSnapshot | null; permissions?: { allowClientCustomization: boolean; manageTables?: boolean } };
 type PendingRemoteTable = { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; updatedAt: string; attempts?: number; lastError?: string };
@@ -225,6 +226,17 @@ function reportPeriodRange(period: "today" | "yesterday" | "week" | "month"): { 
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function calculateDiscountAdjustment(subtotal: number, valueText: string, percentText: string): number {
+  const signedAmount = (text: string, amount: number) => {
+    if (!text.trim()) return 0;
+    return text.trim().startsWith("+") ? -Math.abs(amount) : Math.abs(amount);
+  };
+  const valueAdjustment = signedAmount(valueText, parseBrazilianNumber(valueText));
+  const percentAdjustment = signedAmount(percentText, subtotal * (parseBrazilianNumber(percentText) / 100));
+  const adjustment = roundMoney(valueAdjustment + percentAdjustment);
+  return adjustment >= 0 ? Math.min(subtotal, adjustment) : Math.max(-100000000, adjustment);
 }
 
 function roundToMultiple(value: number, step: number, direction: RoundDirection): number {
@@ -566,6 +578,8 @@ export function PdvApp({
     setClientVisualSettings(readClientVisualSettings(visualSettingsStorageKey));
   }, [visualSettingsStorageKey]);
   const tableAutosaveTimer = useRef<number | null>(null);
+  const directCartCompressed = useRef(false);
+  const tableCartCompressed = useRef(false);
   const closePreparationInFlight = useRef(false);
   const closeSubmissionInFlight = useRef(false);
   // Todas as gravacoes da mesa passam por esta fila. Sem isso, uma resposta antiga
@@ -1090,11 +1104,11 @@ export function PdvApp({
     const item = createCartItem(product, resolvedQuantity.quantity, [], resolvedQuantity.unitPrice, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "", resolvedQuantity.measureLabel, resolvedQuantity.finalTotal);
     const items = expandIndividualUnits(item, Boolean(snapshot?.settings.individualUnitItems));
     if (activeTable) {
-      updateLocalTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
+      updateLocalTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems && !tableCartCompressed.current));
       setQuantity(1);
       return;
     }
-    setCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
+    setCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems && !directCartCompressed.current));
     setQuantity(1);
   };
   const addProductBatch = (items: Array<{ product: PdvProduct; quantity: number }>) => {
@@ -1278,9 +1292,9 @@ export function PdvApp({
       : [];
     const items = [mainItem, ...separateComplements].flatMap((item) => expandIndividualUnits(item, Boolean(snapshot?.settings.individualUnitItems)));
     if (activeTable) {
-      updateLocalTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
+      updateLocalTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems && !tableCartCompressed.current));
     } else {
-      setCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems));
+      setCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems && !directCartCompressed.current));
     }
     setQuantity(1);
     setPendingProduct(null);
@@ -1739,6 +1753,7 @@ export function PdvApp({
             setSaleMode={setDirectSaleMode}
             appendPdvTableItems={appendPdvTableItems}
             onOpenTransferredTable={openTransferredTable}
+            onCompressionChange={(compressed) => { directCartCompressed.current = compressed; }}
           />
         )}
 
@@ -1952,6 +1967,7 @@ export function PdvApp({
             openPdvTable={openPdvTable}
             savePdvTableItems={savePdvTableItems}
             transferPdvTableItems={transferPdvTableItems}
+            onCompressionChange={(compressed) => { tableCartCompressed.current = compressed; }}
             onCancelWholeTable={async (mainOnly) => {
               await cancelPdvTable(activeTable.number, mainOnly ? "__main__" : undefined);
               setSelectedTableItemIds([]);
@@ -2299,6 +2315,7 @@ function PdvSaleScreen(props: {
   transferPdvTableItems?: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: PdvOperationId) => Promise<PdvCartItem[]>;
   appendPdvTableItems?: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   onCancelWholeTable?: (mainOnly?: boolean) => void | Promise<void>;
+  onCompressionChange?: (compressed: boolean) => void;
 }) {
   const visibleCart = props.activeTableNumber && props.settings.subtablesEnabled
     ? props.cart.filter((item) => (item.subtableName || "") === (props.currentSubtable || ""))
@@ -2319,7 +2336,13 @@ function PdvSaleScreen(props: {
   const subtotal = roundMoney(visibleCart.reduce((total, item) => total + (props.activeTableNumber ? unpaidItemTotal(item) : item.total), 0));
   const finalTotal = Math.max(0, roundMoney(subtotal - props.discount));
   const cartListRef = useRef<HTMLDivElement | null>(null);
-  const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: PdvCartItem } | null>(null);
+  const [cartCompressed, setCartCompressed] = useState(false);
+  const compressedCart = useMemo(() => compressCartForDisplay(visibleCart), [visibleCart]);
+  const displayedCart: CartDisplayItem[] = cartCompressed
+    ? compressedCart
+    : visibleCart.map((item) => ({ ...item, compressedMemberIds: [item.id], compressedLineCount: 1 }));
+  const canCompressCart = compressedCart.length < visibleCart.length;
+  const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: CartDisplayItem } | null>(null);
   const [transferItem, setTransferItem] = useState<PdvCartItem | null>(null);
   const [transferListMode, setTransferListMode] = useState<"items" | "accounts" | null>(null);
   const [transferAllOnOpen, setTransferAllOnOpen] = useState(false);
@@ -2359,12 +2382,13 @@ function PdvSaleScreen(props: {
   const requestedItemId = props.selectedItemIds?.[0] || "";
   const previousRequestedIndex = previousVisibleItemIds.current.indexOf(requestedItemId);
   const positionalFallback = requestedItemId && previousRequestedIndex >= 0
-    ? visibleCart[Math.min(previousRequestedIndex, Math.max(0, visibleCart.length - 1))]?.id
+    ? displayedCart[Math.min(previousRequestedIndex, Math.max(0, displayedCart.length - 1))]?.id
     : "";
-  const activeItemId = requestedItemId && visibleCart.some((item) => item.id === requestedItemId)
-    ? requestedItemId
-    : positionalFallback || visibleCart.at(-1)?.id || "";
-  const activeItem = visibleCart.find((item) => item.id === activeItemId) || visibleCart.at(-1) || null;
+  const requestedDisplayItem = requestedItemId
+    ? displayedCart.find((item) => item.compressedMemberIds.includes(requestedItemId))
+    : undefined;
+  const activeItemId = requestedDisplayItem?.id || positionalFallback || displayedCart.at(-1)?.id || "";
+  const activeItem = displayedCart.find((item) => item.id === activeItemId) || displayedCart.at(-1) || null;
   const subtableNames = [...new Set([...(props.subtableNames || []), ...props.cart.map((item) => item.subtableName || "").filter(Boolean)])];
   const operationalDensity = (props.settings.productCardHeight || 60) <= 54 ? "compact" : (props.settings.productCardHeight || 60) >= 70 ? "comfortable" : "normal";
   const cartAreaRef = useRef<HTMLElement | null>(null);
@@ -2406,6 +2430,8 @@ function PdvSaleScreen(props: {
   useEffect(() => {
     window.localStorage.setItem("caixa.pdv.cart-list-height", String(cartListHeight));
   }, [cartListHeight]);
+
+  useEffect(() => () => props.onCompressionChange?.(false), []);
 
   const startResize = (axis: "horizontal" | "vertical" | "cart-height", event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -2464,16 +2490,16 @@ function PdvSaleScreen(props: {
     if (!activeItemId || !cartListRef.current) return;
     const item = cartListRef.current.querySelector<HTMLElement>(`[data-cart-item-id="${activeItemId}"]`);
     item?.scrollIntoView({ block: "nearest", behavior: "auto" });
-  }, [activeItemId, visibleCart.length, visibleCart.at(-1)?.id]);
+  }, [activeItemId, displayedCart.length, displayedCart.at(-1)?.id]);
 
   const selectCartItemByDirection = (direction: -1 | 1) => {
-    if (!props.setSelectedItemIds || !visibleCart.length) {
+    if (!props.setSelectedItemIds || !displayedCart.length) {
       return;
     }
-    const currentId = activeItemId || visibleCart[visibleCart.length - 1].id;
-    const currentIndex = Math.max(0, visibleCart.findIndex((item) => item.id === currentId));
-    const nextIndex = Math.max(0, Math.min(visibleCart.length - 1, currentIndex + direction));
-    props.setSelectedItemIds([visibleCart[nextIndex].id]);
+    const currentId = activeItemId || displayedCart[displayedCart.length - 1].id;
+    const currentIndex = Math.max(0, displayedCart.findIndex((item) => item.id === currentId));
+    const nextIndex = Math.max(0, Math.min(displayedCart.length - 1, currentIndex + direction));
+    props.setSelectedItemIds([displayedCart[nextIndex].id]);
   };
 
   const selectAfterRemoving = (id: string) => {
@@ -2491,48 +2517,63 @@ function PdvSaleScreen(props: {
     if (!last) {
       return;
     }
-    updateVisibleCart((current) => mergeCartItem(current, { ...last, id: crypto.randomUUID(), quantity: 1, measureLabel: "", total: roundMoney(last.unitPrice) }, props.snapshot.settings.stackIdenticalItems));
+    updateVisibleCart((current) => mergeCartItem(current, { ...last, id: crypto.randomUUID(), quantity: 1, measureLabel: "", total: roundMoney(last.unitPrice) }, props.snapshot.settings.stackIdenticalItems && !cartCompressed));
   };
   const runItemAction = async (action: string, item: PdvCartItem) => {
     setItemMenu(null);
+    if (action === "compress") {
+      setCartCompressed(true);
+      props.onCompressionChange?.(true);
+      return;
+    }
+    if (action === "decompress") {
+      setCartCompressed(false);
+      props.onCompressionChange?.(false);
+      return;
+    }
+    const sourceItem = visibleCart.find((row) => row.id === item.id) || item;
+    if (cartCompressed && action !== "receipt") {
+      setCartCompressed(false);
+      props.onCompressionChange?.(false);
+    }
     if (action === "quantity") {
-      setEditingItem({ item, mode: "quantity" });
+      setEditingItem({ item: sourceItem, mode: "quantity" });
     }
     if (action === "discount-value") {
-      setEditingItem({ item, mode: "discount", discountKind: "value" });
+      setEditingItem({ item: sourceItem, mode: "discount", discountKind: "value" });
     }
     if (action === "discount-percent") {
-      setEditingItem({ item, mode: "discount", discountKind: "percent" });
+      setEditingItem({ item: sourceItem, mode: "discount", discountKind: "percent" });
     }
     if (action === "price") {
-      setEditingItem({ item, mode: "price" });
+      setEditingItem({ item: sourceItem, mode: "price" });
     }
     if (action === "note") {
-      setEditingItem({ item, mode: "note" });
+      setEditingItem({ item: sourceItem, mode: "note" });
     }
     if (action === "split") {
-      setSplitItem(item);
+      setSplitItem(sourceItem);
     }
     if (action === "receipt") {
       props.onPreviewReceipt?.(visibleCart);
     }
     if (action === "remove") {
-      setRemoveRequest(item);
+      setRemoveRequest(sourceItem);
     }
     if (action === "up") {
-      updateVisibleCart((current) => moveCartItem(current, item.id, -1));
+      updateVisibleCart((current) => moveCartItem(current, sourceItem.id, -1));
     }
     if (action === "down") {
-      updateVisibleCart((current) => moveCartItem(current, item.id, 1));
+      updateVisibleCart((current) => moveCartItem(current, sourceItem.id, 1));
     }
     if (action === "before" || action === "after") {
-      setMovingItem({ item, after: action === "after" });
+      setMovingItem({ item: sourceItem, after: action === "after" });
     }
     if (action === "transfer-table") {
-      setTransferItem(item);
+      setTransferItem(sourceItem);
     }
     if (action === "transfer-subtable") {
-      setTransferItem(item);
+      setTransferItem(sourceItem);
     }
   };
   return (
@@ -2609,7 +2650,10 @@ function PdvSaleScreen(props: {
         <div className="pdv-cart-head">
           <div className="pdv-cart-title">
             <h2>Carrinho</h2>
-            <span>{formatQuantity(visibleCart.reduce((total, item) => total + item.quantity, 0))} item(ns)</span>
+            <span className="pdv-cart-meta">
+              {formatQuantity(visibleCart.reduce((total, item) => total + item.quantity, 0))} item(ns)
+              {cartCompressed && <em className="pdv-cart-compressed-indicator">Comprimido</em>}
+            </span>
           </div>
           <button className="pdv-cart-product-search" type="button" title="Consultar todos os produtos" onClick={() => setProductLookupOpen(true)}>
             <Search size={18} />
@@ -2650,12 +2694,12 @@ function PdvSaleScreen(props: {
           <div className="pdv-cart-columns" aria-hidden="true">
             <span>Produto</span><span>Qtde</span><span>Unitario</span><span>Total</span>
           </div>
-          {visibleCart.map((item, index) => (
+          {displayedCart.map((item, index) => (
             <article
               key={item.id}
               data-cart-item-id={item.id}
               title={[item.productName, item.subtableName, item.note, unpaidQuantity(item) <= 0.009 ? "Pago" : item.paidQuantity ? `Restam ${formatQuantity(unpaidQuantity(item))}` : "", adjustedItemOriginalTotal(item) !== null ? `Original ${money(adjustedItemOriginalTotal(item)!)}; final ${money(item.total)}` : ""].filter(Boolean).join(" | ")}
-              className={`${activeItemId === item.id ? "selected" : ""} ${unpaidQuantity(item) <= 0.009 ? "paid" : ""}`.trim()}
+              className={`${activeItemId === item.id ? "selected" : ""} ${unpaidQuantity(item) <= 0.009 ? "paid" : ""} ${item.compressedLineCount > 1 ? "compressed" : ""}`.trim()}
               onClick={() => props.setSelectedItemIds?.([item.id])}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -2677,6 +2721,9 @@ function PdvSaleScreen(props: {
         <div className="pdv-resize-handle pdv-resize-cart-height" role="separator" aria-label="Redimensionar altura da lista do carrinho" title="Arraste para aumentar ou diminuir a lista do carrinho" onPointerDown={(event) => startResize("cart-height", event)} />
         {itemMenu && (
           <ContextMenu x={itemMenu.x} y={itemMenu.y} onClose={() => setItemMenu(null)}>
+            {cartCompressed
+              ? <button onClick={() => runItemAction("decompress", itemMenu.item)}>Descomprimir carrinho</button>
+              : <button disabled={!canCompressCart} onClick={() => runItemAction("compress", itemMenu.item)}>Comprimir produtos repetidos</button>}
             <button onClick={() => runItemAction("quantity", itemMenu.item)}>Alterar quantidade</button>
             <button onClick={() => runItemAction("discount-value", itemMenu.item)}>Desconto em R$</button>
             <button onClick={() => runItemAction("discount-percent", itemMenu.item)}>Desconto em %</button>
@@ -2696,7 +2743,7 @@ function PdvSaleScreen(props: {
         {!props.activeTableNumber && (
           <div className="pdv-direct-utility-actions">
             <button className="pdv-ghost-button pdv-direct-discount-button" disabled={!props.cart.length} onClick={() => setDirectDiscountOpen(true)}>
-              Desconto da venda{props.discount > 0 ? `: ${money(props.discount)}` : ""}
+              {props.discount < 0 ? "Acrescimo da venda" : "Desconto da venda"}{props.discount !== 0 ? `: ${money(Math.abs(props.discount))}` : ""}
             </button>
             <button
               className="pdv-ghost-button"
@@ -4548,9 +4595,7 @@ function ItemEditModal({
   );
   const [priceText, setPriceText] = useState(String(item.total).replace(".", ","));
   const [note, setNote] = useState(item.note || "");
-  const discountByValue = Math.max(0, parseBrazilianNumber(discountValueText));
-  const discountByPercent = roundMoney(gross * (Math.max(0, parseBrazilianNumber(discountPercentText)) / 100));
-  const previewDiscount = Math.min(gross, roundMoney(discountByValue + discountByPercent));
+  const previewDiscount = calculateDiscountAdjustment(gross, discountValueText, discountPercentText);
   const previewTotal = Math.max(0, roundMoney(gross - previewDiscount));
 
   const confirm = () => {
@@ -4568,7 +4613,11 @@ function ItemEditModal({
       return;
     }
     if (mode === "discount") {
-      onConfirm(isMeasured ? { discount: previewDiscount, total: previewTotal } : { discount: previewDiscount });
+      onConfirm(previewDiscount < 0
+        ? { discount: 0, total: previewTotal }
+        : isMeasured
+          ? { discount: previewDiscount, total: previewTotal }
+          : { discount: previewDiscount });
       return;
     }
     if (mode === "price") {
@@ -4584,7 +4633,7 @@ function ItemEditModal({
   const title = mode === "quantity"
     ? "Alterar quantidade"
     : mode === "discount"
-      ? "Desconto do item"
+      ? "Desconto ou acrescimo do item"
       : mode === "price"
         ? "Alterar preco"
         : "Observacao do item";
@@ -4637,6 +4686,7 @@ function ItemEditModal({
                   placeholder="0"
                 />
               </label>
+              <small className="pdv-wide-field">Digite <b>+</b> antes do valor para acrescentar em vez de descontar.</small>
             </>
           )}
           {mode === "price" && (
@@ -4655,6 +4705,7 @@ function ItemEditModal({
         <div className="pdv-payment-summary">
           <Metric title={isMeasured ? "Peso" : "Quantidade"} value={isMeasured ? item.measureLabel || formatQuantity(item.quantity) : formatQuantity(item.quantity)} />
           <Metric title={isMeasured ? "Preco por kg/g" : "Unitario"} value={money(item.unitPrice)} />
+          {mode === "discount" && previewDiscount !== 0 && <Metric title={previewDiscount < 0 ? "Acrescimo" : "Desconto"} value={money(Math.abs(previewDiscount))} />}
           <Metric title="Total final" value={money(mode === "price" ? parseBrazilianNumber(priceText) : mode === "discount" ? previewTotal : item.total)} />
         </div>
         <div className="pdv-action-row">
@@ -5490,12 +5541,9 @@ function DirectDiscountModal({
   onCancel: () => void;
   onConfirm: (discount: number) => void;
 }) {
-  const [discountValue, setDiscountValue] = useState(String(discount || "").replace(".", ","));
+  const [discountValue, setDiscountValue] = useState(discount < 0 ? `+${String(Math.abs(discount)).replace(".", ",")}` : String(discount || "").replace(".", ","));
   const [discountPercent, setDiscountPercent] = useState("");
-  const calculatedDiscount = Math.min(
-    subtotal,
-    roundMoney(parseBrazilianNumber(discountValue) + subtotal * (parseBrazilianNumber(discountPercent) / 100))
-  );
+  const calculatedDiscount = calculateDiscountAdjustment(subtotal, discountValue, discountPercent);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === "Escape") {
@@ -5514,29 +5562,29 @@ function DirectDiscountModal({
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Venda direta</span>
-            <h1>Aplicar desconto</h1>
-            <p>O desconto vale somente para esta venda.</p>
+            <h1>Aplicar desconto ou acrescimo</h1>
+            <p>Use + antes do numero para somar ao valor desta venda.</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel} aria-label="Fechar"><X size={18} /></button>
         </div>
         <div className="pdv-payment-summary">
           <Metric title="Subtotal" value={money(subtotal)} />
-          <Metric title="Desconto" value={money(calculatedDiscount)} />
+          <Metric title={calculatedDiscount < 0 ? "Acrescimo" : "Desconto"} value={money(Math.abs(calculatedDiscount))} />
           <Metric title="Total final" value={money(Math.max(0, roundMoney(subtotal - calculatedDiscount)))} />
         </div>
         <div className="pdv-editor-grid pdv-close-discounts">
           <label>
             <span>Desconto em R$</span>
-            <input autoFocus inputMode="decimal" value={discountValue} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDiscountValue(event.target.value)} placeholder="0,00" />
+            <input autoFocus inputMode="decimal" value={discountValue} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDiscountValue(event.target.value)} placeholder="0,00 ou +10,00" />
           </label>
           <label>
             <span>Desconto em %</span>
-            <input inputMode="decimal" value={discountPercent} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDiscountPercent(event.target.value)} placeholder="0" />
+            <input inputMode="decimal" value={discountPercent} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDiscountPercent(event.target.value)} placeholder="0 ou +10" />
           </label>
         </div>
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
-          <button className="pdv-primary-button" onClick={() => onConfirm(calculatedDiscount)}>Aplicar desconto</button>
+          <button className="pdv-primary-button" onClick={() => onConfirm(calculatedDiscount)}>Aplicar ajuste</button>
         </div>
       </section>
     </div>
@@ -5747,7 +5795,7 @@ function TableCloseMenu({
   const [roundingStep, setRoundingStep] = useState(configuredRoundingStep || 0.01);
   const [roundingDirection, setRoundingDirection] = useState<RoundDirection>(configuredRoundingDirection || "nearest");
   const [focusedAction, setFocusedAction] = useState(0);
-  const discount = Math.min(subtotal, roundMoney(parseBrazilianNumber(discountValue) + subtotal * (parseBrazilianNumber(discountPercent) / 100)));
+  const discount = calculateDiscountAdjustment(subtotal, discountValue, discountPercent);
   const total = Math.max(0, roundMoney(subtotal - discount));
   const split = calculateSplit(total, people, roundingStep, roundingDirection, false);
   const splitPreview = Array.from({ length: Math.max(1, people) }, (_, index) => ({
@@ -5829,13 +5877,13 @@ function TableCloseMenu({
           <div>
             <span className="pdv-eyebrow">Fechar conta</span>
             <h1>{scopeLabel ? `${scopeLabel} · ` : "Mesa "}{String(table.number).padStart(3, "0")}</h1>
-            <p>Revise desconto, divisao por pessoas e escolha como fechar.</p>
+            <p>Revise desconto ou acrescimo, divisao por pessoas e escolha como fechar.</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
         <div className="pdv-payment-summary">
           <Metric title="Total bruto" value={money(subtotal)} />
-          <Metric title="Desconto" value={money(discount)} />
+          <Metric title={discount < 0 ? "Acrescimo" : "Desconto"} value={money(Math.abs(discount))} />
           <Metric title="Total final" value={money(total)} />
         </div>
         <div className="pdv-editor-grid pdv-close-discounts">
@@ -5844,14 +5892,14 @@ function TableCloseMenu({
             <input value={discountValue} onChange={(event) => {
               setDiscountValue(event.target.value);
               if (event.target.value) setDiscountPercent("");
-            }} placeholder="0,00" />
+            }} placeholder="0,00 ou +10,00" />
           </label>
           <label>
             <span>Desconto em %</span>
             <input value={discountPercent} onChange={(event) => {
               setDiscountPercent(event.target.value);
               if (event.target.value) setDiscountValue("");
-            }} placeholder="0" />
+            }} placeholder="0 ou +10" />
           </label>
         </div>
         <div className="pdv-close-split">
@@ -8156,7 +8204,7 @@ function SaleDetailModal({ sale, onClose, onCancel, canCancel = true }: { sale: 
         <div ref={detailScrollRef} className="pdv-sale-detail-scroll" tabIndex={0}>
           <div className="pdv-payment-summary">
             <Metric title="Subtotal" value={money(sale.subtotal)} />
-            <Metric title="Desconto" value={money(sale.discount)} />
+            <Metric title={sale.discount < 0 ? "Acrescimo" : "Desconto"} value={money(Math.abs(sale.discount))} />
             <Metric title="Total final" value={money(sale.total)} />
           </div>
           <div className="pdv-detail-columns">
@@ -8168,7 +8216,7 @@ function SaleDetailModal({ sale, onClose, onCancel, canCancel = true }: { sale: 
                   <span>{formatQuantity(item.quantity)} x {money(item.unitPrice)} | {item.categoryName}{item.subtableName ? ` | ${item.subtableName}` : ""}</span>
                   {adjustedItemOriginalTotal(item) !== null && (
                     <small className="pdv-detail-price-adjustment">
-                      Original <s>{money(adjustedItemOriginalTotal(item)!)}</s> | Desconto {money(Math.max(0, adjustedItemOriginalTotal(item)! - item.total))} | Final {money(item.total)}
+                      Original <s>{money(adjustedItemOriginalTotal(item)!)}</s> | {item.total > adjustedItemOriginalTotal(item)! ? "Acrescimo" : "Desconto"} {money(Math.abs(adjustedItemOriginalTotal(item)! - item.total))} | Final {money(item.total)}
                     </small>
                   )}
                   <b>{money(item.total)}</b>
@@ -8303,6 +8351,43 @@ function isMeasuredCartItem(item: PdvCartItem): boolean {
   return /\bg\s*$/i.test(item.measureLabel || "");
 }
 
+function compressCartForDisplay(items: PdvCartItem[]): CartDisplayItem[] {
+  const compressed: CartDisplayItem[] = [];
+  const groupIndexes = new Map<string, number>();
+  items.forEach((item) => {
+    const canGroup = !isMeasuredCartItem(item) && !item.measureLabel;
+    const key = canGroup
+      ? JSON.stringify([
+        item.productId,
+        item.productName,
+        item.categoryName,
+        item.unitPrice,
+        item.baseUnitPrice ?? item.unitPrice,
+        item.subtableName || "",
+        item.note || "",
+        item.complements || []
+      ])
+      : `unique:${item.id}`;
+    const existingIndex = groupIndexes.get(key);
+    if (existingIndex === undefined) {
+      groupIndexes.set(key, compressed.length);
+      compressed.push({ ...item, compressedMemberIds: [item.id], compressedLineCount: 1 });
+      return;
+    }
+    const existing = compressed[existingIndex];
+    compressed[existingIndex] = {
+      ...existing,
+      quantity: roundQuantity(existing.quantity + item.quantity),
+      paidQuantity: roundQuantity((existing.paidQuantity || 0) + (item.paidQuantity || 0)),
+      discount: roundMoney(existing.discount + item.discount),
+      total: roundMoney(existing.total + item.total),
+      compressedMemberIds: [...existing.compressedMemberIds, item.id],
+      compressedLineCount: existing.compressedLineCount + 1
+    };
+  });
+  return compressed;
+}
+
 function hasAdjustedLineTotal(item: PdvCartItem): boolean {
   const calculated = roundMoney(Math.max(0, item.quantity * item.unitPrice - item.discount));
   return Math.abs(roundMoney(item.total) - calculated) > 0.01;
@@ -8434,6 +8519,10 @@ function updateCartItem(items: PdvCartItem[], id: string, patch: Partial<Pick<Pd
 function adjustedItemOriginalTotal(item: PdvCartItem): number | null {
   if (item.discount > 0.009) {
     return roundMoney(item.total + item.discount);
+  }
+  const regularTotal = roundMoney(item.quantity * item.unitPrice);
+  if (!item.measureLabel && Math.abs(regularTotal - item.total) > 0.009) {
+    return regularTotal;
   }
   if (!item.measureLabel && item.baseUnitPrice !== undefined && Math.abs(item.baseUnitPrice - item.unitPrice) > 0.009) {
     return roundMoney(item.quantity * item.baseUnitPrice);

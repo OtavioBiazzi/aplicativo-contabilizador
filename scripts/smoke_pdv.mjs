@@ -288,6 +288,15 @@ const exactAmountSale = await store.saveSale({
 if (exactAmountSale.total !== 2 || exactAmountSale.payments[0]?.amount !== 2) {
   throw new Error("Venda direta de R$ 2,00 perdeu centavos indevidamente.");
 }
+const surchargeSale = await store.saveSale({
+  type: "Venda direta",
+  items: [{ ...exactAmountSale.items[0], id: crypto.randomUUID(), productName: "Produto com acrescimo", total: 2 }],
+  discount: -0.5,
+  payments: [{ id: crypto.randomUUID(), method: "Pix", amount: 2.5 }]
+});
+if (surchargeSale.subtotal !== 2 || surchargeSale.discount !== -0.5 || surchargeSale.total !== 2.5 || surchargeSale.payments[0]?.amount !== 2.5) {
+  throw new Error("Acrescimo informado com + nao foi preservado no fechamento da venda.");
+}
 const busSale = await store.saveSale({
   type: "Onibus",
   items: [{ ...exactAmountSale.items[0], id: crypto.randomUUID(), productName: "Venda onibus smoke", total: 2 }],

@@ -2568,7 +2568,12 @@ function writeTableItems(db: Database, tableNumber: number, items: PdvCartItem[]
 
 function createSale(input: { type: PdvSale["type"]; tableNumber?: number; tableSessionId?: string; status?: PdvSale["status"]; items: PdvCartItem[]; discount: number; payments: PdvPayment[]; originDevice?: string; operationId?: string; observations?: string; description?: string }): PdvSale {
   const subtotal = roundMoney(input.items.reduce((total, item) => total + item.total, 0));
-  const discount = Math.min(subtotal, roundMoney(Math.max(0, input.discount)));
+  const requestedDiscount = Number.isFinite(input.discount) ? roundMoney(input.discount) : 0;
+  // Valor negativo representa acrescimo. O nome do campo e mantido por
+  // compatibilidade com o banco, a rede e versoes anteriores do aplicativo.
+  const discount = requestedDiscount >= 0
+    ? Math.min(subtotal, requestedDiscount)
+    : Math.max(-100000000, requestedDiscount);
   const total = Math.max(0, roundMoney(subtotal - discount));
   const payments = normalizePaymentsForTotal(input.payments, total);
   return {

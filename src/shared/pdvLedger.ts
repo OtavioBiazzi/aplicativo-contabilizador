@@ -42,7 +42,7 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
     perPerson: sale.total,
     roundingStep: 0.01,
     roundingDirection: "nearest",
-    difference: -Math.abs(sale.discount || 0),
+    difference: -(sale.discount || 0),
     description: subtableName || sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta"),
     tableNumber: sale.tableNumber ? String(sale.tableNumber) : "",
     busNumber: "",

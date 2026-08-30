@@ -4679,7 +4679,7 @@ function HistorySaleDetailModal({ sale, onClose, onReceipt }: { sale: PdvSale; o
         <div ref={scrollRef} className="history-detail-scroll" tabIndex={0}>
           <div className="history-detail-summary">
             <Metric label="Subtotal" value={formatCurrency(sale.subtotal)} />
-            <Metric label="Desconto" value={formatCurrency(sale.discount)} />
+            <Metric label={sale.discount < 0 ? "Acrescimo" : "Desconto"} value={formatCurrency(Math.abs(sale.discount))} />
             <Metric label="Total" value={formatCurrency(sale.total)} />
           </div>
           <div className="history-detail-list">
@@ -4688,8 +4688,8 @@ function HistorySaleDetailModal({ sale, onClose, onReceipt }: { sale: PdvSale; o
               <div key={item.id}>
                 <span>
                   {formatReportQuantity(item.quantity)}x {item.productName}{item.complements?.length ? ` + ${item.complements.map((part) => part.name).join(" + ")}` : ""}
-                  {(item.discount > 0 || (item.baseUnitPrice && Math.abs(item.baseUnitPrice - item.unitPrice) > 0.009)) && (
-                    <small>Original {formatCurrency((item.baseUnitPrice || item.unitPrice) * item.quantity)} | Desconto {formatCurrency(Math.max(0, (item.baseUnitPrice || item.unitPrice) * item.quantity - item.total))}</small>
+                  {(item.discount > 0 || Math.abs(item.unitPrice * item.quantity - item.total) > 0.009 || (item.baseUnitPrice && Math.abs(item.baseUnitPrice - item.unitPrice) > 0.009)) && (
+                    <small>Original {formatCurrency((item.baseUnitPrice || item.unitPrice) * item.quantity)} | {item.total > (item.baseUnitPrice || item.unitPrice) * item.quantity ? "Acrescimo" : "Desconto"} {formatCurrency(Math.abs((item.baseUnitPrice || item.unitPrice) * item.quantity - item.total))}</small>
                   )}
                 </span>
                 <b>{formatCurrency(item.total)}</b>

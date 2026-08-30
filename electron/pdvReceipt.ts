@@ -205,7 +205,7 @@ export function buildPdvReceiptHtml(
     ${items}
     <div class="divider dashed"></div>
     <div class="row"><span>Subtotal</span><b>${money(sale.subtotal)}</b></div>
-    <div class="row"><span>Desconto</span><b>${money(sale.discount)}</b></div>
+    <div class="row"><span>${sale.discount < 0 ? "Acrescimo" : "Desconto"}</span><b>${money(Math.abs(sale.discount))}</b></div>
     <div class="row total"><span>Total</span><b>${money(sale.total)}</b></div>
     <div class="divider"></div>
     <div class="row"><span>Total pago</span><b>${money(paidTotal)}</b></div>
