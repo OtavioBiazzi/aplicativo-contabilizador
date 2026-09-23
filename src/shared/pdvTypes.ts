@@ -108,6 +108,32 @@ export interface PdvPayment {
   dueDate?: string;
 }
 
+export interface PdvCashMovement {
+  id: string;
+  type: "Abertura" | "Suprimento" | "Sangria";
+  amount: number;
+  createdAt: string;
+  note?: string;
+  originDevice?: string;
+}
+
+export interface PdvCashShift {
+  id: string;
+  status: "Aberto" | "Fechado";
+  openedAt: string;
+  closedAt?: string;
+  openingAmount: number;
+  expectedAmount: number;
+  countedAmount?: number;
+  difference?: number;
+  originDevice?: string;
+  responsible?: string;
+  openingNote?: string;
+  closingNote?: string;
+  closingDevice?: string;
+  movements: PdvCashMovement[];
+}
+
 export interface PdvCustomer {
   id: string;
   name: string;
@@ -316,6 +342,8 @@ export interface PdvSnapshot {
   customers: PdvCustomer[];
   receivables: PdvReceivable[];
   payables: PdvPayable[];
+  currentCashShift?: PdvCashShift;
+  recentCashShifts: PdvCashShift[];
   settings: PdvSettings;
   dataFile: string;
 }
@@ -368,6 +396,7 @@ export interface PdvSettings {
   receiptAllowClientPrint?: boolean;
   receiptGroupIdenticalItems?: boolean;
   receiptUseColor?: boolean;
+  cashControlMode?: "automatic" | "manual";
 }
 
 export interface PdvProductImportResult {
@@ -399,3 +428,6 @@ export interface PdvExportFilters {
   status?: "Todos" | PdvSale["status"];
   table?: string;
 }
+
+/** A full account scope, distinct from paying only selected items. */
+export type PdvCloseScope = { kind: "main" | "subtable"; subtableName?: string; sessionId: string };

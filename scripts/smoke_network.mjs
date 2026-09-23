@@ -57,7 +57,7 @@ const server = new LocalServer({
   appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
   closePdvTable: (number, payments, discount, origin, operationId) => pdvStore.closeTable(number, payments, discount, origin, operationId),
   cancelPdvTable: (number, origin, subtableName) => pdvStore.cancelTable(number, origin, subtableName),
-  savePdvTablePartial: (number, items, payments, discount, origin, operationId, observations) => pdvStore.closeTablePartial(number, items, payments, discount, origin, operationId, observations),
+  savePdvTablePartial: (number, items, payments, discount, origin, operationId, observations, closeScope) => pdvStore.closeTablePartial(number, items, payments, discount, origin, operationId, observations, closeScope),
   updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
   savePdvCategory: (draft) => pdvStore.saveCategory(draft),
   savePdvProduct: (draft) => pdvStore.saveProduct(draft),
@@ -704,6 +704,21 @@ if (
 ) {
   throw new Error("A sincronizacao completa apos reconectar nao restaurou mesas, Historico e dados financeiros.");
 }
+
+// A remote account close must remove its scope in the same operation.
+const scopeItem = { ...reconnectItem, id: crypto.randomUUID(), subtableName: "Ronaldo" };
+const untouchedItem = { ...scopeItem, id: crypto.randomUUID(), subtableName: "Ana" };
+await pdvStore.openTable(25, 2);
+await pdvStore.saveTableItems(25, [scopeItem, untouchedItem], ["Ronaldo", "Ana"]);
+const scopeTable = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 25);
+const scopePayload = { items: [scopeItem], payments: [{ id: crypto.randomUUID(), method: "Pix", amount: scopeItem.total }], closeScope: { kind: "subtable", subtableName: "Ronaldo", sessionId: scopeTable.sessionId } };
+const closeRemoteScope = (operationId) => fetch("http://127.0.0.1:43991/api/pdv/tables/25/partial", { method: "POST", headers: { ...headers, "x-idempotency-key": operationId }, body: JSON.stringify(scopePayload) });
+const concurrentScopes = await Promise.all([closeRemoteScope("network-scope-1"), closeRemoteScope("network-scope-2")]);
+if (concurrentScopes.filter((response) => response.ok).length !== 1) throw new Error("Fechamento remoto concorrente duplicou a conta.");
+const winningId = concurrentScopes[0].ok ? "network-scope-1" : "network-scope-2";
+if (!(await closeRemoteScope(winningId)).ok) throw new Error("Reenvio remoto nao recuperou o fechamento.");
+const afterScope = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 25);
+if (afterScope.subtables.includes("Ronaldo") || afterScope.items.length !== 1 || afterScope.items[0].subtableName !== "Ana") throw new Error("Submesa remota nao foi removida atomicamente.");
 
 await new Promise((resolve) => {
   reconnectSocket.once("close", resolve);

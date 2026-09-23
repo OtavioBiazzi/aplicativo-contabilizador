@@ -1,3 +1,4 @@
+import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
@@ -5,6 +6,7 @@ import {
   BarChart3,
   Boxes,
   CalendarDays,
+  Clock,
   ChevronDown,
   Check,
   Copy,
@@ -52,7 +54,7 @@ import {
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
 import { PaymentAmountModal, PdvApp } from "./PdvApp";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
-import type { PdvCustomer, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
+import type { PdvCashShift, PdvCustomer, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
 import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
 import { downloadFinancialCsv } from "./shared/financialExport";
 import {
@@ -192,7 +194,8 @@ interface ReportFocusPeriod {
 }
 
 interface HistoryFocusDate {
-  date: string;
+  date?: string;
+  tableNumber?: number;
   nonce: number;
 }
 
@@ -242,37 +245,50 @@ const MODULE_GROUPS: Array<{
     label: string;
     description: string;
     icon: typeof Send;
+    settingsCategory?: SettingsCategory;
+    reportTab?: ProfessionalReportTab;
     comingSoon?: boolean;
   }>;
 }> = [
   {
-    label: "Operacao",
+    label: "Cadastros",
     items: [
-      { key: "sale", label: "Venda", description: "Venda direta e lancamento rapido de produtos", icon: Send },
-      { key: "tables", label: "Mesas", description: "Mapa de mesas, submesas e comandas", icon: LayoutPanelTop },
-      { key: "history", label: "Historico", description: "Vendas, pagamentos e recibos anteriores", icon: History }
+      { key: "clients", label: "Clientes", description: "Cadastro, historico e contas vinculadas aos clientes", icon: Users },
+      { key: "settings", settingsCategory: "pdv", label: "Produtos", description: "Produtos, categorias, importacao e adicionais", icon: LayoutPanelTop },
+      { key: "settings", settingsCategory: "pdvTables", label: "Mesas", description: "Quantidade, submesas e contas separadas", icon: Utensils }
     ]
   },
   {
     label: "Financeiro",
     items: [
-      { key: "clients", label: "Clientes", description: "Cadastro, historico e contas vinculadas aos clientes", icon: Users },
-      { key: "receivables", label: "Contas a receber", description: "Pendencias, recebimentos, vencimentos e historico", icon: ReceiptText },
-      { key: "payables", label: "Contas a pagar", description: "Fornecedores, despesas, pagamentos e historico", icon: Wallet }
-    ]
-  },
-  {
-    label: "Analise",
-    items: [
       { key: "dashboard", label: "Visao geral", description: "Vendas, mesas, estoque e alertas do dia", icon: Gauge },
-      { key: "reports", label: "Relatorios", description: "Resultados, produtos e formas de pagamento", icon: BarChart3 }
+      { key: "receivables", label: "Contas a receber", description: "Pendencias, recebimentos, vencimentos e historico", icon: ReceiptText },
+      { key: "payables", label: "Contas a pagar", description: "Fornecedores, despesas, pagamentos e historico", icon: Wallet },
+      { key: "settings", settingsCategory: "pdvOperation", label: "Operacoes", description: "Lancamentos, divisao, agrupamento e fechamento", icon: Wallet }
     ]
   },
   {
-    label: "Sistema",
+    label: "Relatorios",
+    items: [
+      { key: "reports", reportTab: "overview", label: "Resumo de vendas", description: "Totais, ticket medio e comparativo do periodo", icon: BarChart3 },
+      { key: "reports", reportTab: "products", label: "Produtos por categoria", description: "Quantidades e arquivo de producao, com valores opcionais", icon: Boxes },
+      { key: "reports", reportTab: "payments", label: "Formas de pagamento", description: "Meios de pagamento e valores do periodo", icon: Wallet },
+      { key: "reports", reportTab: "accounts", label: "Recebimentos", description: "Contas recebidas, pendencias e vencimentos", icon: ReceiptText },
+      { key: "reports", reportTab: "tables", label: "Mesas e vendas", description: "Movimento e desempenho das mesas", icon: LayoutGrid },
+      { key: "reports", reportTab: "times", label: "Horarios", description: "Movimento por faixa de horario", icon: Clock },
+      { key: "reports", reportTab: "audit", label: "Auditoria", description: "Cancelamentos, descontos e alteracoes", icon: ShieldCheck }
+    ]
+  },
+  {
+    label: "Configuracoes",
     items: [
       { key: "server", label: "Rede", description: "Servidor, clientes e sincronizacao", icon: Server },
-      { key: "settings", label: "Ajustes", description: "Preferencias gerais e operacao do PDV", icon: Settings }
+      { key: "settings", settingsCategory: "appearance", label: "Aparencia", description: "Tema, cores, densidade e formato da interface", icon: Palette },
+      { key: "settings", settingsCategory: "printing", label: "Impressao", description: "Recibo, impressora, papel, logotipo e PDF", icon: ReceiptText },
+      { key: "settings", settingsCategory: "files", label: "Planilha e backup", description: "Exportacao, pasta, colunas e copias de seguranca", icon: FileSpreadsheet },
+      { key: "settings", settingsCategory: "privacy", label: "Privacidade", description: "Controle das informacoes mostradas na tela", icon: ShieldCheck },
+      { key: "settings", settingsCategory: "updates", label: "Atualizacoes", description: "Consulta e instalacao de novas versoes", icon: Download },
+      { key: "settings", settingsCategory: "advanced", label: "Backup e diagnostico", description: "Restauracao e ferramentas administrativas", icon: DatabaseBackup }
     ]
   }
 ];
@@ -285,6 +301,18 @@ const QUICK_ENTRY_MODE_STORAGE_PREFIX = "caixaQuickEntryMode";
 const HISTORY_FILTERS_STORAGE_KEY = "caixaHistoryFiltersV2";
 const REMOTE_ENTRY_LIMIT = 0;
 const HISTORY_PAGE_SIZE = 160;
+const STARTUP_ROLE_STORAGE_KEY = "caixa.startup-role.v1";
+
+function startupConnectionMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (/failed to fetch|fetch failed|networkerror|network request failed/i.test(message)) {
+    return "Servidor indisponivel. Nova tentativa automatica em alguns segundos.";
+  }
+  if (message.includes("Defina uma senha")) {
+    return "Configure uma senha no menu Rede para disponibilizar este caixa aos clientes.";
+  }
+  return message.replace(/^Error invoking remote method '[^']+': Error:\s*/i, "") || fallback;
+}
 
 interface StoredHistoryFilters {
   query: string;
@@ -920,6 +948,9 @@ function normalizeSettingsDraft(current: AppSettings, patch: Partial<AppSettings
         : cloneValue(defaults.quickTabs)
   };
   merged.headerPinnedModules = normalizeHeaderPinnedModules(merged.headerPinnedModules);
+  // A operacao principal foi consolidada no PDV simples. Instalacoes antigas
+  // que ainda guardavam o modo classico migram automaticamente.
+  merged.operationMode = "pdv";
   return {
     ...merged,
     visibleColumns: merged.spreadsheetMode === "simple" ? SIMPLE_COLUMNS : merged.visibleColumns,
@@ -1200,7 +1231,10 @@ export function App() {
   const [remotePdvReceivables, setRemotePdvReceivables] = useState<PdvReceivable[]>([]);
   const [remotePdvSnapshot, setRemotePdvSnapshot] = useState<PdvSnapshot | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("sale");
+  const [activeTab, setActiveTab] = useState<TabKey>("tables");
+  const [baseOperationalTab, setBaseOperationalTab] = useState<"sale" | "tables">("tables");
+  const [moduleWindowOffset, setModuleWindowOffset] = useState({ x: 0, y: 0 });
+  const moduleWindowDrag = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [payableCreateRequest, setPayableCreateRequest] = useState<{ supplier: string; nonce: number } | null>(null);
   const [pdvViewNonce, setPdvViewNonce] = useState(0);
   const [pdvDirectCartActive, setPdvDirectCartActive] = useState(false);
@@ -1215,12 +1249,26 @@ export function App() {
   const totalMenuRef = useRef<HTMLDivElement | null>(null);
   const [modulesMenuOpen, setModulesMenuOpen] = useState(false);
   const modulesMenuRef = useRef<HTMLDivElement | null>(null);
+  const managerialMenuRef = useRef<HTMLElement | null>(null);
   const [reportFocus, setReportFocus] = useState<ReportFocusPeriod | null>(null);
+  const [reportWindowTab, setReportWindowTab] = useState<ProfessionalReportTab | null>(null);
   const [historyFocus, setHistoryFocus] = useState<HistoryFocusDate | null>(null);
   const [settingsFocus, setSettingsFocus] = useState<{ category: SettingsCategory; nonce: number } | null>(null);
+  const [settingsWindowCategory, setSettingsWindowCategory] = useState<SettingsCategory | null>(null);
   const [remoteSession, setRemoteSession] = useState<RemoteClientSession | null>(null);
   const [remoteMessage, setRemoteMessage] = useState("");
   const [remoteLoading, setRemoteLoading] = useState(false);
+  const [startupRole, setStartupRole] = useState<"server" | "client" | null>(() => {
+    if (IS_FLOATING_WINDOW) return "server";
+    const stored = window.localStorage.getItem(STARTUP_ROLE_STORAGE_KEY);
+    return stored === "server" || stored === "client" ? stored : null;
+  });
+  const [rememberStartupRole, setRememberStartupRole] = useState(false);
+  const [startupRoleBusy, setStartupRoleBusy] = useState(false);
+  const [editingStartupConnection, setEditingStartupConnection] = useState(false);
+  const [startupConnectionAutomatic, setStartupConnectionAutomatic] = useState(false);
+  const [startupConnectionHost, setStartupConnectionHost] = useState("");
+  const [startupConnectionPassword, setStartupConnectionPassword] = useState("");
   const [versionMismatch, setVersionMismatch] = useState<VersionMismatchState | null>(null);
   const [startupUpdateInfo, setStartupUpdateInfo] = useState<UpdateInfo | null>(null);
   const [installingPromptUpdate, setInstallingPromptUpdate] = useState(false);
@@ -1250,7 +1298,7 @@ export function App() {
       if (!totalMenuRef.current?.contains(event.target as Node)) {
         setTotalMenuOpen(false);
       }
-      if (!modulesMenuRef.current?.contains(event.target as Node)) {
+      if (!modulesMenuRef.current?.contains(event.target as Node) && !managerialMenuRef.current?.contains(event.target as Node)) {
         setModulesMenuOpen(false);
       }
     };
@@ -1425,6 +1473,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (startupRole !== "client") return;
     const syncStoredRemoteSession = () => {
       const stored = readStoredRemoteSession();
       const current = remoteSessionRef.current;
@@ -1452,20 +1501,20 @@ export function App() {
 
     window.addEventListener("storage", handleStorage);
     return () => window.removeEventListener("storage", handleStorage);
-  }, [settings, server]);
+  }, [settings, server, startupRole]);
 
   useEffect(() => {
-    if (!settings || !server || IS_FLOATING_WINDOW) {
+    if (!settings || !server || IS_FLOATING_WINDOW || !startupRole) {
       return;
     }
 
     const auto = settings.server.autoConnection;
-    if (!auto || auto.mode === "none") {
+    if (!auto) {
       autoConnectionAttemptKey.current = null;
       return;
     }
 
-    if (auto.mode === "server") {
+    if (startupRole === "server") {
       if (server.running || remoteSession) {
         return;
       }
@@ -1481,14 +1530,15 @@ export function App() {
           showToast("success", "Servidor automatico aberto neste PC.");
         })
         .catch((error) => {
-          setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel abrir o servidor automatico.");
-          showToast("error", error instanceof Error ? error.message : "Nao foi possivel abrir o servidor automatico.");
+          const message = startupConnectionMessage(error, "Nao foi possivel abrir o servidor automatico.");
+          setRemoteMessage(message);
+          showToast("error", message);
         });
       return;
     }
 
-    if (auto.mode === "client") {
-      if (server.running || remoteSession || !auto.host || !auto.password) {
+    if (startupRole === "client") {
+      if (server.running || remoteSession || auto.mode !== "client" || !auto.host || editingStartupConnection) {
         return;
       }
       const key = `client:${auto.host}:${auto.password}:${auto.deviceName}:${settings.server.port}`;
@@ -1498,7 +1548,19 @@ export function App() {
       autoConnectionAttemptKey.current = key;
       void connectRemoteClient(auto.host, auto.password, auto.deviceName || "App cliente", { quiet: true, auto: true });
     }
-  }, [settings, server, remoteSession]);
+  }, [settings, server, remoteSession, startupRole, editingStartupConnection]);
+
+  useEffect(() => {
+    if (startupRole !== "client" || !settings || !server || server.running || remoteSession || settings.server.autoConnection.mode !== "client" || !settings.server.autoConnection.host || versionMismatch || editingStartupConnection) {
+      return;
+    }
+    const retry = window.setInterval(() => {
+      if (remoteLoading || startupRoleBusy) return;
+      const auto = settings.server.autoConnection;
+      void connectRemoteClient(auto.host, auto.password, auto.deviceName || "App cliente", { quiet: true, auto: true });
+    }, 5000);
+    return () => window.clearInterval(retry);
+  }, [startupRole, settings, server?.running, remoteSession, remoteLoading, startupRoleBusy, versionMismatch, editingStartupConnection]);
 
   useEffect(() => {
     const interval = window.setInterval(() => setCurrentDateKey(getLocalDateKey()), 30000);
@@ -1604,10 +1666,11 @@ export function App() {
 
   const commandMode = (type: EntryType) => {
     setActiveTab("sale");
+    setBaseOperationalTab("sale");
     setModeCommand({ type, nonce: Date.now() });
   };
 
-  const saveSettings = async (next: AppSettings) => {
+  const saveSettings = async (next: AppSettings, options?: { silent?: boolean }) => {
     const currentRemote = remoteSessionRef.current;
     if (currentRemote?.permissions.allowClientCustomization && settings) {
       const serverPatch = remoteServerSettingsPatch(settings, next);
@@ -1620,24 +1683,35 @@ export function App() {
     }
     const saved = await window.caixa.saveSettings(next);
     setSettings(saved);
-    showToast("success", currentRemote?.permissions.allowClientCustomization ? "Configuracoes salvas neste cliente e no servidor." : "Configuracoes salvas.");
+    if (!options?.silent) {
+      showToast("success", currentRemote?.permissions.allowClientCustomization ? "Configuracoes salvas neste cliente e no servidor." : "Configuracoes salvas.");
+    }
   };
 
   const toggleHeaderPrivacy = async () => {
     if (!settings) {
       return;
     }
-    await saveSettings({
+    const previous = settings;
+    const next = {
       ...settings,
       privacy: {
         ...settings.privacy,
         hideHeaderTotal: !settings.privacy.hideHeaderTotal
       }
-    });
+    };
+    setSettings(next);
     setTotalMenuOpen(false);
+    try {
+      await saveSettings(next, { silent: true });
+    } catch (error) {
+      setSettings(previous);
+      showToast("error", error instanceof Error ? error.message : "Nao foi possivel atualizar a privacidade.");
+    }
   };
 
   const openTodayReport = () => {
+    setReportWindowTab(null);
     setReportFocus({ from: currentDateKey, to: currentDateKey, nonce: Date.now() });
     requestNavigation("reports");
     setTotalMenuOpen(false);
@@ -1988,7 +2062,8 @@ export function App() {
       remoteSessionRef.current = connectedSession;
       setVersionMismatch(null);
       if (connectedSession.clientPolicy.operationMode === "pdv") {
-        setActiveTab("sale");
+        setActiveTab("tables");
+        setBaseOperationalTab("tables");
       }
       remoteReconnectAttempt.current = 0;
       writeStoredRemoteSession({ baseUrl, password, deviceName: connectedSession.deviceName });
@@ -2006,7 +2081,7 @@ export function App() {
       } else if (!options.auto) {
         writeStoredRemoteSession(null);
       }
-      setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel conectar.");
+      setRemoteMessage(startupConnectionMessage(error, "Nao foi possivel conectar."));
       if (!options.quiet) {
         showToast("error", error instanceof Error ? error.message : "Nao foi possivel conectar.");
       }
@@ -2240,20 +2315,78 @@ export function App() {
   const requestNavigation = (nextTab: TabKey) => {
     const targetTab = nextTab;
     const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
-    if (mode === "pdv" && activeTab === "sale" && targetTab !== "sale" && pdvDirectCartActive) {
+    if (mode === "pdv" && baseOperationalTab === "sale" && targetTab !== "sale" && pdvDirectCartActive) {
       setPdvNavigationRequest(targetTab);
       return;
     }
-    if (activeTab === targetTab && (targetTab === "tables" || targetTab === "sale")) {
+    if (baseOperationalTab === targetTab && (targetTab === "tables" || targetTab === "sale")) {
       setPdvViewNonce((nonce) => nonce + 1);
     }
+    if (targetTab === "sale" || targetTab === "tables") {
+      setBaseOperationalTab(targetTab);
+      setModuleWindowOffset({ x: 0, y: 0 });
+    } else if (activeTab !== targetTab) {
+      setModuleWindowOffset({ x: 0, y: 0 });
+    }
     setActiveTab(targetTab);
+  };
+
+  const selectStartupRole = async (role: "server" | "client") => {
+    if (!settings || !server || startupRoleBusy) return;
+    if (rememberStartupRole) window.localStorage.setItem(STARTUP_ROLE_STORAGE_KEY, role);
+    else window.localStorage.removeItem(STARTUP_ROLE_STORAGE_KEY);
+    const auto = settings.server.autoConnection;
+    autoConnectionAttemptKey.current = role === "server"
+      ? `server:${settings.server.port}:${settings.server.password}`
+      : `client:${auto.host}:${auto.password}:${auto.deviceName}:${settings.server.port}`;
+    setStartupRole(role);
+    setStartupRoleBusy(true);
+    setRemoteMessage("");
+    try {
+      if (role === "server") {
+        if (remoteSession) disconnectRemoteClient();
+        if (!server.running) setServer(await window.caixa.startServer(settings.server.port, settings.server.password));
+        return;
+      }
+      if (server.running) setServer(await window.caixa.stopServer());
+      if (!auto.host) throw new Error("Configure o endereco do servidor em Rede antes de entrar como cliente.");
+      await connectRemoteClient(auto.host, auto.password, auto.deviceName || "App cliente", { quiet: true, auto: true });
+    } catch (error) {
+      const message = startupConnectionMessage(error, "Nao foi possivel iniciar este modo.");
+      setRemoteMessage(message);
+      if (role === "server") showToast("error", message);
+    } finally {
+      setStartupRoleBusy(false);
+    }
+  };
+
+  const saveStartupClientConnection = async () => {
+    if (!settings || startupRoleBusy) return;
+    const host = startupConnectionHost.trim();
+    if (!host) { setRemoteMessage("Informe o IP ou endereco do servidor."); return; }
+    const password = startupConnectionPassword;
+    const auto = settings.server.autoConnection;
+    const next = { ...settings, server: { ...settings.server, autoConnection: { ...auto, mode: startupConnectionAutomatic ? "client" as const : "none" as const, host, password } } };
+    setStartupRoleBusy(true);
+    setRemoteMessage("");
+    try {
+      await saveSettings(next, { silent: true });
+      setVersionMismatch(null);
+      autoConnectionAttemptKey.current = `client:${host}:${password}:${auto.deviceName}:${settings.server.port}`;
+      setEditingStartupConnection(false);
+      await connectRemoteClient(host, password, auto.deviceName || "App cliente", { quiet: true, auto: true });
+    } catch (error) {
+      setRemoteMessage(startupConnectionMessage(error, "Nao foi possivel salvar a conexao."));
+    } finally {
+      setStartupRoleBusy(false);
+    }
   };
 
   useEffect(() => {
     const mode = remoteSession?.clientPolicy.operationMode || settings?.operationMode;
     if (mode === "legacy" && activeTab === "tables") {
       setActiveTab("sale");
+      setBaseOperationalTab("sale");
     }
   }, [remoteSession?.clientPolicy.operationMode, settings?.operationMode, activeTab]);
 
@@ -2272,6 +2405,50 @@ export function App() {
       <div className="boot-screen">
         <div className="pulse-mark" />
         <strong>Carregando Caixa PDV...</strong>
+      </div>
+    );
+  }
+
+  if (!IS_FLOATING_WINDOW && !startupRole) {
+    return (
+      <div className="startup-role-screen">
+        <section className="startup-role-card">
+          <div className="startup-role-heading"><span>Modo de operacao</span><h1>Como este computador sera usado?</h1><p>Escolha o papel deste computador. Voce pode alterar a opcao depois no menu Rede.</p></div>
+          <div className="startup-role-options">
+            <button type="button" disabled={startupRoleBusy} onClick={() => void selectStartupRole("server")}><span><Server size={30} /></span><strong>Entrar como Servidor</strong><small>Abre o caixa principal e disponibiliza os dados para os outros computadores.</small></button>
+            <button type="button" disabled={startupRoleBusy} onClick={() => void selectStartupRole("client")}><span><Laptop size={30} /></span><strong>Entrar como Cliente</strong><small>Conecta automaticamente ao servidor usando a configuracao de Auto Conexao.</small></button>
+          </div>
+          <label className="startup-role-remember"><input type="checkbox" checked={rememberStartupRole} onChange={(event) => setRememberStartupRole(event.target.checked)} /><span><strong>Manter esta opcao como padrao</strong><small>Na proxima abertura, este menu sera ignorado.</small></span></label>
+          {remoteMessage && <p className="startup-role-message">{remoteMessage}</p>}
+        </section>
+      </div>
+    );
+  }
+
+  if (!IS_FLOATING_WINDOW && startupRole === "client" && !remoteSession) {
+    const auto = settings.server.autoConnection;
+    const startupMessage = auto.mode !== "client" && remoteMessage.startsWith("Servidor indisponivel.")
+      ? "Servidor indisponivel. Confira o endereco ou tente novamente."
+      : remoteMessage;
+    return (
+      <div className="startup-role-screen">
+        <section className="startup-role-card startup-connection-card">
+          <div className="startup-connection-pulse"><Wifi size={30} /></div>
+          <span>Modo Cliente</span><h1>{auto.mode === "client" ? "Aguardando conexao com o servidor..." : "Conexao manual com o servidor"}</h1>
+          <p>{auto.host ? `${auto.mode === "client" ? "Tentando conectar" : "Endereco salvo"} em ${auto.host}.` : "O endereco do servidor ainda nao foi configurado."}</p>
+          {startupMessage && <p className={`startup-role-message ${startupMessage.startsWith("Servidor indisponivel.") ? "is-pending" : ""}`}>{startupMessage}</p>}
+          <div className="startup-role-actions">
+            <button type="button" disabled={startupRoleBusy || !auto.host} onClick={() => void selectStartupRole("client")}><RefreshCw size={16} /> Tentar novamente</button>
+            <button type="button" onClick={() => { setStartupConnectionHost(auto.host); setStartupConnectionPassword(auto.password); setStartupConnectionAutomatic(auto.mode === "client"); setRemoteMessage(""); setEditingStartupConnection((current) => !current); }}>Alterar conexao</button>
+            <button type="button" onClick={() => { window.localStorage.removeItem(STARTUP_ROLE_STORAGE_KEY); setStartupRole(null); setRemoteMessage(""); }}>Escolher outro modo</button>
+          </div>
+          {editingStartupConnection && <form className="startup-connection-editor" onSubmit={(event) => { event.preventDefault(); void saveStartupClientConnection(); }}>
+            <label><span>IP ou endereco do servidor</span><input autoFocus value={startupConnectionHost} onChange={(event) => setStartupConnectionHost(event.target.value)} placeholder="192.168.1.10:4317" autoComplete="off" /></label>
+            <label><span>Senha do servidor</span><input type="password" value={startupConnectionPassword} onChange={(event) => setStartupConnectionPassword(event.target.value)} autoComplete="off" /></label>
+            <label className="startup-connection-auto"><input type="checkbox" checked={startupConnectionAutomatic} onChange={(event) => setStartupConnectionAutomatic(event.target.checked)} /><span>Conectar automaticamente quando o servidor estiver disponivel</span></label>
+            <button type="submit" disabled={startupRoleBusy}>{startupRoleBusy ? "Conectando..." : "Salvar e conectar"}</button>
+          </form>}
+        </section>
       </div>
     );
   }
@@ -2314,6 +2491,16 @@ export function App() {
   }
 
   const header = headerForTab(activeTab, displaySummary.count);
+  const selectedSettingsModule = MODULE_GROUPS.flatMap((group) => group.items)
+    .find((item) => item.key === "settings" && item.settingsCategory === settingsWindowCategory);
+  const selectedReportModule = activeTab === "reports" ? MODULE_GROUPS.flatMap((group) => group.items)
+    .find((item) => item.key === "reports" && item.reportTab === reportWindowTab)
+    : undefined;
+  const moduleHeader = selectedSettingsModule
+    ? { ...header, eyebrow: "Configuracao", title: selectedSettingsModule.label }
+    : selectedReportModule
+      ? { ...header, eyebrow: "Relatorio", title: selectedReportModule.label }
+      : header;
   const effectiveOperationMode = remoteSession?.clientPolicy.operationMode || settings.operationMode;
   const legacyMode = effectiveOperationMode === "legacy";
   const visibleTabItems = TAB_ITEMS.filter((item) => {
@@ -2322,31 +2509,23 @@ export function App() {
     }
     return true;
   });
-  const headerPinnedModules = normalizeHeaderPinnedModules(settings.headerPinnedModules);
-  const primaryTabItems = visibleTabItems.filter((item) => item.key !== "settings" && headerPinnedModules.includes(item.key));
-  const settingsPinnedItem = visibleTabItems.find((item) => item.key === "settings" && headerPinnedModules.includes(item.key));
+  const primaryTabItems = visibleTabItems.filter((item) => item.key === "sale" || item.key === "tables");
   const availableModuleGroups = MODULE_GROUPS
     .map((group) => ({
       ...group,
       items: group.items.filter((item) => (
         visibleTabItems.some((visibleItem) => visibleItem.key === item.key)
-        && !headerPinnedModules.includes(item.key)
+        && !(["sale", "tables", "history"] as TabKey[]).includes(item.key)
       ))
     }))
     .filter((group) => group.items.length > 0);
   const availableModuleKeys = new Set(availableModuleGroups.flatMap((group) => group.items.map((item) => item.key)));
-  const hasAvailableModules = availableModuleGroups.length > 0;
   const secondaryTabActive = availableModuleKeys.has(activeTab);
-  const headerControlCount = primaryTabItems.length + (hasAvailableModules ? 1 : 0) + (settingsPinnedItem ? 1 : 0);
-  const pdvMainTab = activeTab === "tables"
-    ? (legacyMode ? null : "tables")
-    : activeTab === "sale" && !legacyMode
-      ? "sale"
-      : null;
-  const financialMainTab = (["clients", "receivables", "payables"] as TabKey[]).includes(activeTab);
+  const pdvMainTab = legacyMode ? null : baseOperationalTab;
+  const moduleWindowOpen = !(["sale", "tables"] as TabKey[]).includes(activeTab);
 
   return (
-    <div className={`app-shell ${pdvMainTab ? "pdv-main-mode" : ""} ${settings.hideHeaderBrand ? "header-brand-hidden" : ""}`}>
+    <div className={`app-shell ${pdvMainTab ? "pdv-main-mode" : ""} professional-shell`}>
       <div className="window-titlebar" onDoubleClick={() => void window.caixa.toggleMaximizeWindow()}>
         <div className="window-titlebar-label">
           <img src={CDA_ICON_SRC} alt="" draggable={false} />
@@ -2359,107 +2538,7 @@ export function App() {
         </div>
       </div>
       <aside className="sidebar app-topbar">
-        {!settings.hideHeaderBrand && (
-          <div className="brand-block">
-            <div className="brand-mark">
-              <img src={CDA_ICON_SRC} alt="Caixa PDV" draggable={false} />
-            </div>
-            <div>
-              <strong>Caixa PDV</strong>
-              <span>{legacyMode ? "Caixa classico" : remoteSession ? "Cliente do caixa principal" : "PDV local rapido"}</span>
-            </div>
-          </div>
-        )}
-
-        <nav className={`tabs primary-tabs ${headerControlCount > 6 ? "header-tabs-dense" : ""}`} aria-label="Navegacao principal">
-          {primaryTabItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.key}
-                className={`${activeTab === item.key ? "active" : ""} ${item.key === "dashboard" ? "header-dashboard-tab" : ""}`.trim()}
-                onClick={() => requestNavigation(item.key)}
-              >
-                <Icon size={18} />
-                {item.label}
-              </button>
-            );
-          })}
-          {hasAvailableModules && (
-            <div className="modules-menu-wrap" ref={modulesMenuRef}>
-              <button
-                type="button"
-                className={`modules-trigger ${secondaryTabActive ? "active" : ""}`}
-                aria-haspopup="menu"
-                aria-expanded={modulesMenuOpen}
-                onClick={() => {
-                  setModulesMenuOpen((open) => !open);
-                  setTotalMenuOpen(false);
-                }}
-              >
-                <LayoutGrid size={18} />
-                Modulos
-                <ChevronDown className={modulesMenuOpen ? "open" : ""} size={15} />
-              </button>
-              {modulesMenuOpen && (
-                <div className="modules-popover" role="menu" aria-label="Modulos do sistema">
-                  <div className="modules-popover-head">
-                    <div>
-                      <strong>Modulos do sistema</strong>
-                      <span>Somente os atalhos que nao estao fixados no cabecalho.</span>
-                    </div>
-                    <button type="button" className="modules-close" aria-label="Fechar modulos" onClick={() => setModulesMenuOpen(false)}>
-                      <X size={17} />
-                    </button>
-                  </div>
-                  <div className="modules-groups">
-                    {availableModuleGroups.map((group) => (
-                      <section key={group.label} className="modules-group">
-                        <span className="modules-group-label">{group.label}</span>
-                        {group.items.map((item) => {
-                          const Icon = item.icon;
-                          const isActive = activeTab === item.key;
-                          return (
-                            <button
-                              key={item.key}
-                              type="button"
-                              role="menuitem"
-                              className={isActive ? "active" : ""}
-                              disabled={item.comingSoon}
-                              onClick={() => {
-                                requestNavigation(item.key);
-                                setModulesMenuOpen(false);
-                              }}
-                            >
-                              <Icon size={19} />
-                              <span>
-                                <strong>{item.label}</strong>
-                                <small>{item.description}</small>
-                              </span>
-                              {item.comingSoon && <b>Em breve</b>}
-                            </button>
-                          );
-                        })}
-                      </section>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          {settingsPinnedItem && (
-            <button
-              type="button"
-              className={`header-settings-shortcut ${activeTab === "settings" ? "active" : ""}`}
-              onClick={() => requestNavigation("settings")}
-            >
-              <Settings size={18} />
-              Ajustes
-            </button>
-          )}
-        </nav>
-
-        <div className="total-menu-wrap" ref={totalMenuRef}>
+        <div className="total-menu-wrap professional-total" ref={totalMenuRef}>
           <button
             type="button"
             className="sidebar-card topbar-card topbar-card-button"
@@ -2470,7 +2549,7 @@ export function App() {
               setModulesMenuOpen(false);
             }}
           >
-            <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total hoje"}</span>
+            <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total do dia"}</span>
             <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "private-value" : ""}>
               {settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Privado" : formatCurrency(displaySummary.total)}
             </strong>
@@ -2478,37 +2557,47 @@ export function App() {
           </button>
           {totalMenuOpen && canUseTotalMenu && (
             <div className="total-popover" role="menu">
-              <div>
-                <strong>Hoje</strong>
-                <span>{displaySummary.count} lancamento(s)</span>
-              </div>
-              <button type="button" onClick={toggleHeaderPrivacy}>
-                <Eye size={16} />
-                {settings.privacy.hideHeaderTotal ? "Mostrar total no topo" : "Ativar privacidade"}
-              </button>
-              <button type="button" onClick={openTodayReport}>
-                <BarChart3 size={16} />
-                Relatorio deste dia
-              </button>
-              <button type="button" onClick={() => {
-                setHistoryFocus({ date: currentDateKey, nonce: Date.now() });
-                requestNavigation("history");
-                setTotalMenuOpen(false);
-              }}>
-                <History size={16} />
-                Historico de hoje
-              </button>
-              <button type="button" onClick={() => {
-                setSettingsFocus({ category: "privacy", nonce: Date.now() });
-                requestNavigation("settings");
-                setTotalMenuOpen(false);
-              }}>
-                <Settings size={16} />
-                Ajustes de privacidade
-              </button>
+              <div><strong>Hoje</strong><span>{displaySummary.count} lancamento(s)</span></div>
+              <button type="button" onClick={toggleHeaderPrivacy}><Eye size={16} />{settings.privacy.hideHeaderTotal ? "Mostrar total no topo" : "Ativar privacidade"}</button>
+              <button type="button" onClick={openTodayReport}><BarChart3 size={16} />Relatorio deste dia</button>
+              <button type="button" onClick={() => { setHistoryFocus({ date: currentDateKey, nonce: Date.now() }); requestNavigation("history"); setTotalMenuOpen(false); }}><History size={16} />Historico de hoje</button>
+              <button type="button" onClick={() => { setSettingsWindowCategory("privacy"); setSettingsFocus({ category: "privacy", nonce: Date.now() }); requestNavigation("settings"); setTotalMenuOpen(false); }}><Settings size={16} />Ajustes de privacidade</button>
             </div>
           )}
         </div>
+
+        <nav className="tabs primary-tabs professional-primary-tabs" aria-label="Navegacao principal">
+          {primaryTabItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.key}
+                className={`${activeTab === item.key ? "active" : ""} ${item.key === "dashboard" ? "header-dashboard-tab" : ""}`.trim()}
+                onClick={() => requestNavigation(item.key)}
+              >
+                <Icon size={22} />
+                {item.label}
+              </button>
+            );
+          })}
+          <button type="button" className={activeTab === "history" ? "active" : ""} onClick={() => requestNavigation("history")}>
+            <History size={22} />
+            Caixa
+          </button>
+          <div className="modules-menu-wrap" ref={modulesMenuRef}>
+            <button
+              type="button"
+              className={`modules-trigger header-settings-icon ${secondaryTabActive ? "active" : ""}`}
+              aria-label="Abrir Menu Gerencial"
+              title="Menu Gerencial"
+              aria-haspopup="dialog"
+              aria-expanded={modulesMenuOpen}
+              onClick={() => { setModulesMenuOpen((open) => !open); setTotalMenuOpen(false); }}
+            >
+              <Settings size={24} />
+            </button>
+          </div>
+        </nav>
         {legacyMode && (
           <button className="pin-button" type="button" onClick={togglePinned}>
             <Pin size={18} />
@@ -2518,8 +2607,46 @@ export function App() {
 
       </aside>
 
-      <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : financialMainTab ? "admin-workspace financial-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>
-        {!pdvMainTab && !financialMainTab && (
+      {modulesMenuOpen && (
+        <div className="managerial-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setModulesMenuOpen(false); }}>
+          <section ref={managerialMenuRef} className="managerial-menu" role="dialog" aria-modal="true" aria-labelledby="managerial-menu-title">
+            <div className="managerial-menu-head">
+              <div><span>Administracao</span><h2 id="managerial-menu-title">Menu Gerencial</h2><p>Cadastros, financeiro, relatorios e configuracoes em um so lugar.</p></div>
+              <button type="button" aria-label="Fechar Menu Gerencial" onClick={() => setModulesMenuOpen(false)}><X size={22} /></button>
+            </div>
+            <div className="managerial-menu-grid">
+              {availableModuleGroups.map((group) => (
+                <section key={group.label} className="managerial-group">
+                  <h3>{group.label}</h3>
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button key={`${item.key}-${item.settingsCategory || item.label}`} type="button" className={activeTab === item.key && (!item.settingsCategory || settingsWindowCategory === item.settingsCategory) && (item.key !== "reports" || reportWindowTab === (item.reportTab || null)) ? "active" : ""} onClick={() => {
+                        if (item.key === "reports") setReportWindowTab(item.reportTab || null);
+                        else setReportWindowTab(null);
+                        if (item.settingsCategory) {
+                          setSettingsWindowCategory(item.settingsCategory);
+                          setSettingsFocus({ category: item.settingsCategory, nonce: Date.now() });
+                        } else if (item.key !== "settings") {
+                          setSettingsWindowCategory(null);
+                        }
+                        requestNavigation(item.key);
+                        setModulesMenuOpen(false);
+                      }}>
+                        <span className="managerial-item-icon"><Icon size={23} /></span>
+                        <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                      </button>
+                    );
+                  })}
+                </section>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
+      <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>
+        {!pdvMainTab && (
           <header className="workspace-header">
             <div>
               <span className="eyebrow">{header.eyebrow}</span>
@@ -2557,8 +2684,11 @@ export function App() {
               onRemoteReceiptPrint={remoteSession
                 ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) })
                 : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)}
-              onNavigateMain={(tab) => requestNavigation(tab)}
-              onOperationalTabChange={(tab) => setActiveTab(tab)}
+              onNavigateMain={(tab, tableNumber) => {
+                if (tab === "history" && tableNumber) setHistoryFocus({ tableNumber, nonce: Date.now() });
+                requestNavigation(tab);
+              }}
+              onOperationalTabChange={(tab) => requestNavigation(tab)}
             />
           </div>
         )}
@@ -2585,7 +2715,55 @@ export function App() {
           </div>
         )}
 
-        {activeTab === "history" && !pdvMainTab && (
+        {moduleWindowOpen && (
+          <div className="module-window-backdrop">
+            <section
+              className="module-window-shell"
+              style={{ transform: `translate(calc(-50% + ${moduleWindowOffset.x}px), calc(-50% + ${moduleWindowOffset.y}px))` }}
+              role="dialog"
+              aria-modal="true"
+              aria-label={moduleHeader.title}
+            >
+              <header
+                className="module-window-titlebar"
+                onPointerDown={(event) => {
+                  if ((event.target as HTMLElement).closest("button")) return;
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  moduleWindowDrag.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: moduleWindowOffset.x, originY: moduleWindowOffset.y };
+                }}
+                onPointerMove={(event) => {
+                  const drag = moduleWindowDrag.current;
+                  if (!drag || drag.pointerId !== event.pointerId) return;
+                  setModuleWindowOffset({ x: drag.originX + event.clientX - drag.startX, y: drag.originY + event.clientY - drag.startY });
+                }}
+                onPointerUp={(event) => {
+                  if (moduleWindowDrag.current?.pointerId === event.pointerId) moduleWindowDrag.current = null;
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                }}
+              >
+                <div><span>{moduleHeader.eyebrow}</span><strong>{moduleHeader.title}</strong></div>
+                <button type="button" className="module-window-close" title="Fechar" aria-label="Fechar" onClick={() => { setActiveTab(baseOperationalTab); setSettingsWindowCategory(null); setModuleWindowOffset({ x: 0, y: 0 }); }}><X size={16} /></button>
+              </header>
+              <div className="module-window-body">
+        {activeTab === "history" && (
+          <div className="cash-history-workspace">
+          {(((remoteSession ? remotePdvSnapshot : pdvSnapshot)?.settings.cashControlMode || "automatic") === "manual" || Boolean((remoteSession ? remotePdvSnapshot : pdvSnapshot)?.currentCashShift)) && <CashControlPanel
+            shift={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.currentCashShift}
+            history={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.recentCashShifts || []}
+            onAction={async (mode, amount, note, responsible) => {
+              if (remoteSession) {
+                const route = mode === "open" ? "/api/pdv/cash-shift/open" : mode === "close" ? "/api/pdv/cash-shift/close" : "/api/pdv/cash-shift/movements";
+                const body = mode === "open" ? { openingAmount: amount, responsible, note } : mode === "close" ? { countedAmount: amount, note } : { type: mode === "supply" ? "Suprimento" : "Sangria", amount, note };
+                await remoteRequest(remoteSession, route, { method: "POST", body: JSON.stringify(body) });
+                await refreshRemote(remoteSession);
+              } else {
+                if (mode === "open") await window.caixa.openPdvCashShift(amount, responsible, note);
+                else if (mode === "close") await window.caixa.closePdvCashShift(amount, note);
+                else await window.caixa.addPdvCashMovement(mode === "supply" ? "Suprimento" : "Sangria", amount, note);
+                await reloadPdv();
+              }
+            }}
+          />}
           <HistoryPanel
             entries={historyEntries}
             settings={settings}
@@ -2613,6 +2791,7 @@ export function App() {
               showToast("success", "Lancamento remoto restaurado.");
             } : undefined}
           />
+          </div>
         )}
 
         {activeTab === "dashboard" && (
@@ -2622,13 +2801,14 @@ export function App() {
             remoteConnected={Boolean(remoteSession)}
             connectedDevices={remoteSession ? 1 : server.devices.length}
             canViewTotals={canViewRemoteTotals}
-            onOpenReports={() => requestNavigation("reports")}
+            onOpenReports={() => { setReportWindowTab(null); requestNavigation("reports"); }}
             onOpenClients={() => {
               requestNavigation("receivables");
             }}
             onOpenPayables={() => requestNavigation("payables")}
             onOpenTables={() => requestNavigation("tables")}
             onOpenProducts={() => {
+              setSettingsWindowCategory("pdv");
               setSettingsFocus({ category: "pdv", nonce: Date.now() });
               requestNavigation("settings");
             }}
@@ -2725,7 +2905,7 @@ export function App() {
         )}
 
         {activeTab === "reports" && (
-            <ProfessionalReportsPanel entries={historyEntries} pdvSales={historyPdvSales} receivables={remoteSession ? remotePdvReceivables : pdvSnapshot?.receivables || []} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
+            <ProfessionalReportsPanel entries={historyEntries} pdvSales={historyPdvSales} receivables={remoteSession ? remotePdvReceivables : pdvSnapshot?.receivables || []} settings={settings} summary={displaySummary} exportStatus={exportStatus} remoteClientActive={Boolean(remoteSession)} canViewTotals={canViewRemoteTotals} canViewEntryValues={canViewRemoteEntryValues} focusPeriod={reportFocus} focusTab={reportWindowTab} onFocusConsumed={() => setReportFocus(null)} onOpenOutputDirectory={async () => {
               if (remoteSession) {
                 showToast("info", "A pasta de Excel deve ser aberta no computador servidor.");
                 return;
@@ -2776,6 +2956,7 @@ export function App() {
               remoteSession={remoteSession}
               remoteClientActive={Boolean(remoteSession)}
               remoteClientPermissions={remoteSession?.permissions}
+              standalone
               focusCategory={settingsFocus}
               onFocusCategoryConsumed={() => setSettingsFocus(null)}
               onSave={saveSettings}
@@ -2783,6 +2964,10 @@ export function App() {
               onImportLedger={importLedgerFile}
               onImportLedgerFolder={importLedgerFolder}
             />
+        )}
+              </div>
+            </section>
+          </div>
         )}
       </main>
 
@@ -2808,6 +2993,7 @@ export function App() {
             setPdvNavigationRequest(null);
             setPdvDirectCartActive(false);
             setPdvViewNonce((nonce) => nonce + 1);
+            if (nextTab === "sale" || nextTab === "tables") setBaseOperationalTab(nextTab);
             setActiveTab(nextTab);
           }}
         />
@@ -2870,6 +3056,7 @@ function PayablesPanel({
   const [cancelRequest, setCancelRequest] = useState<PdvPayable | null>(null);
   const [deleteRequest, setDeleteRequest] = useState<PdvPayable | null>(null);
   const [busy, setBusy] = useState(false);
+  const [recordView, setRecordView] = useState(false);
   const [newSupplier, setNewSupplier] = useState("");
 
   useEffect(() => {
@@ -2893,7 +3080,7 @@ function PayablesPanel({
       payable.note
     ].some((value) => value.toLocaleLowerCase("pt-BR").includes(normalizedQuery));
     const statusMatch = status === "Todos"
-      || (status === "Em aberto" && ["Em aberto", "Parcialmente paga"].includes(payable.status))
+      || (status === "Em aberto" && ["Em aberto", "Parcialmente paga", "Vencida"].includes(payable.status))
       || (status === "Vencidas" && payable.status === "Vencida")
       || (status === "Pagas" && payable.status === "Paga")
       || (status === "Canceladas" && payable.status === "Cancelada")
@@ -2901,6 +3088,13 @@ function PayablesPanel({
       || (status === "Historico" && ["Paga", "Cancelada", "Excluida"].includes(payable.status));
     return inPeriod && queryMatch && statusMatch;
   });
+  useEffect(() => {
+    setSelected((current) => current ? visible.find((item) => item.id === current.id) || null : null);
+  }, [payables, from, to, query, status]);
+  const validSelection = selected && visible.some((item) => item.id === selected.id) ? selected : null;
+  const canChange = !readOnly && !!validSelection && !["Cancelada", "Excluida"].includes(validSelection.status);
+  const canPay = canChange && (validSelection?.balance || 0) > 0.009;
+  const sevenDays = getLocalDateKey(new Date(new Date(`${today}T12:00:00`).getTime() + 7 * 86400000));
   const active = visible.filter((payable) => !["Cancelada", "Excluida"].includes(payable.status));
   const openBalance = roundMoney(active.reduce((sum, payable) => sum + payable.balance, 0));
   const overdue = active.filter((payable) => payable.status === "Vencida");
@@ -2929,13 +3123,23 @@ function PayablesPanel({
         <div className="financial-head-actions"><button className="pdv-ghost-button" onClick={() => downloadFinancialCsv(`contas-a-pagar-${today}.csv`, ["Descricao", "Fornecedor", "Categoria", "Centro de custo", "Documento", "Emissao", "Vencimento", "Valor", "Pago", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"], visible.map((item) => [item.description, item.supplier, item.category, item.costCenter, item.documentNumber, item.issueDate, item.dueDate, item.amount, item.paidAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note]))}><Download size={16} /> Exportar</button>{!readOnly && <button className="pdv-primary-button" onClick={() => setEditing("new")}><Plus size={17} /> Nova conta</button>}</div>
       </div>
 
-      <div className="financial-metrics">
-        <button onClick={() => setStatus("Em aberto")}><span>Saldo em aberto</span><strong>{formatCurrency(openBalance)}</strong><small>{active.filter((item) => !["Paga", "Cancelada", "Excluida"].includes(item.status)).length} conta(s)</small></button>
-        <button className={overdue.length ? "warning" : ""} onClick={() => setStatus("Vencidas")}><span>Vencidas</span><strong>{formatCurrency(overdue.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{overdue.length} pendencia(s)</small></button>
-        <button onClick={() => { setFrom(today); setTo(today); setStatus("Todos"); }}><span>Vence hoje</span><strong>{formatCurrency(dueToday.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{dueToday.length} conta(s)</small></button>
-        <button onClick={() => setStatus("Todos")}><span>Proximos 7 dias</span><strong>{formatCurrency(dueNextSevenDays.reduce((sum, item) => sum + item.balance, 0))}</strong><small>{dueNextSevenDays.length} vencimento(s)</small></button>
-        <button onClick={() => setStatus("Pagas")}><span>Pago no recorte</span><strong>{formatCurrency(paidInPeriod)}</strong><small>{active.filter((item) => item.paidAmount > 0).length} conta(s) com pagamento</small></button>
+      <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
+        <button disabled={readOnly} onClick={() => setEditing("new")}><Plus /><span>Novo</span></button>
+        <button disabled={!canChange} onClick={() => validSelection && setEditing(validSelection)}><Edit3 /><span>Alterar</span></button>
+        <button disabled={readOnly || !validSelection || validSelection.status === "Excluida"} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>Excluir</span></button>
+        <button className="primary-command" disabled={!canPay} onClick={() => validSelection && setPaying(validSelection)}><Wallet /><span>Pagar</span></button>
+        <button disabled={!canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
+        <button disabled={!validSelection} onClick={() => setRecordView(true)}><ReceiptText /><span>Registro</span></button>
+        <span className="finance-command-divider" />
+        <button className={status === "Em aberto" ? "active" : ""} onClick={() => { setStatus("Em aberto"); setRecordView(false); }}><CalendarDays /><span>Contas a pagar</span></button>
+        <button className={status === "Pagas" ? "active" : ""} onClick={() => { setStatus("Pagas"); setRecordView(false); }}><Check /><span>Contas pagas</span></button>
       </div>
+      <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
+        <button role="tab" aria-selected={!recordView} onClick={() => setRecordView(false)}>Pesquisa</button>
+        <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => setRecordView(true)}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
+        <span>Duplo clique em uma linha para consultar o registro</span>
+      </div>
+      <div className="finance-period-shortcuts"><span>Vencimento</span><button onClick={() => { setFrom(today); setTo(today); setStatus("Em aberto"); }}>Hoje</button><button onClick={() => { setFrom(today); setTo(sevenDays); setStatus("Em aberto"); }}>Próximos 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencidas"); }}>Vencidas</button></div>
 
       <div className="financial-filters">
         <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, fornecedor, categoria, documento ou tag" /></label>
@@ -2945,35 +3149,23 @@ function PayablesPanel({
         <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Exibir tudo</button>
       </div>
 
-      <div className="financial-master-detail">
-        <div className="financial-account-list">
-          <div className="financial-account-list-head"><span>Conta</span><span>Vencimento</span><span>Valor</span><span>Saldo</span><span>Situacao</span><span>Acoes</span></div>
-          {visible.map((payable) => (
-            <article key={payable.id} className={`${payable.status === "Vencida" ? "overdue" : ""} ${selected?.id === payable.id ? "selected" : ""}`} onClick={() => setSelected(payable)}>
-              <div><strong>{payable.description}</strong><small>{payable.supplier || "Fornecedor nao informado"}{payable.category ? ` · ${payable.category}` : ""}</small></div>
-              <time>{new Date(`${payable.dueDate}T12:00:00`).toLocaleDateString("pt-BR")}</time>
-              <b>{formatCurrency(payable.amount)}</b>
-              <b>{formatCurrency(payable.balance)}</b>
-              <span className={`financial-status status-${payable.status.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-")}`}>{payable.status}</span>
-              <div className="payable-row-actions">
-                {!readOnly && !["Paga", "Cancelada", "Excluida"].includes(payable.status) && <button title="Registrar pagamento" onClick={(event) => { event.stopPropagation(); setPaying(payable); }}><Wallet size={15} /></button>}
-                {!readOnly && !["Cancelada", "Excluida"].includes(payable.status) && <button title="Editar conta" onClick={(event) => { event.stopPropagation(); setEditing(payable); }}><Edit3 size={15} /></button>}
-                {!readOnly && payable.paidAmount <= 0.009 && !["Cancelada", "Excluida"].includes(payable.status) && <button className="danger" title="Cancelar conta" onClick={(event) => { event.stopPropagation(); setCancelRequest(payable); }}><X size={15} /></button>}
-                {!readOnly && payable.status !== "Excluida" && <button className="danger" title="Mover para excluidas" onClick={(event) => { event.stopPropagation(); setDeleteRequest(payable); }}><Trash2 size={15} /></button>}
-              </div>
-            </article>
-          ))}
-          {!visible.length && (
-            <div className="financial-detail-empty">
-              <CalendarDays size={30} />
-              <strong>Nenhuma conta neste recorte</strong>
-              <span>Ajuste os filtros ou cadastre o primeiro vencimento.</span>
-            </div>
-          )}
-        </div>
+      <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
+        <FinancialGrid id="payables" rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
+          { key: "issue", label: "Emissão", value: (item) => item.issueDate, render: (item) => item.issueDate ? new Date(`${item.issueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
+          { key: "document", label: "Documento", value: (item) => item.documentNumber || "—" },
+          { key: "description", label: "Descrição / fornecedor", required: true, value: (item) => item.description, render: (item) => <div className="finance-cell-title"><strong>{item.description}</strong><small>{item.supplier || "Fornecedor não informado"}</small></div> },
+          { key: "category", label: "Categoria", value: (item) => item.category || "—" },
+          { key: "due", label: "Vencimento", value: (item) => item.dueDate, render: (item) => item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
+          { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || "—" },
+          { key: "amount", label: "Valor", numeric: true, value: (item) => item.amount, render: (item) => formatCurrency(item.amount) },
+          { key: "paid", label: "Pago", numeric: true, value: (item) => item.paidAmount, render: (item) => formatCurrency(item.paidAmount) },
+          { key: "balance", label: "Saldo", numeric: true, required: true, value: (item) => item.balance, render: (item) => <strong>{formatCurrency(item.balance)}</strong> },
+          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <FinancialStatus value={item.status} /> }
+        ]} totals={<><span>Totais do filtro <small>Sem canceladas e excluídas</small></span><span>A pagar <strong>{formatCurrency(openBalance)}</strong></span><span>Pago <strong>{formatCurrency(paidInPeriod)}</strong></span></>} />
         <aside className="financial-account-detail">
           {selected ? (
             <>
+              <button className="finance-back" onClick={() => setRecordView(false)}>← Voltar à pesquisa</button>
               <div className="financial-detail-title"><span className="pdv-eyebrow">Detalhes da conta</span><h3>{selected.description}</h3><p>{selected.note || "Sem observacoes."}</p></div>
               <dl>
                 <div><dt>Fornecedor</dt><dd>{selected.supplier || "Nao informado"}</dd></div>
@@ -4249,6 +4441,45 @@ function TodayPanel({
   );
 }
 
+function CashControlPanel({ shift, history, onAction }: {
+  shift?: PdvCashShift;
+  history: PdvCashShift[];
+  onAction: (mode: "open" | "supply" | "withdraw" | "close", amount: number, note: string, responsible: string) => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"open" | "supply" | "withdraw" | "close" | null>(null);
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [responsible, setResponsible] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const open = (next: typeof mode) => { setMode(next); setAmount(next === "close" ? (shift?.expectedAmount || 0).toFixed(2).replace(".", ",") : "0,00"); setNote(""); setResponsible(shift?.responsible || ""); setError(""); };
+  const confirm = async () => {
+    if (!mode || busy) return;
+    if (mode === "open" && !responsible.trim()) { setError("Informe o responsavel pela abertura."); return; }
+    if (mode === "close" && Math.abs(parseMoney(amount) - (shift?.expectedAmount || 0)) >= 0.005 && !note.trim()) { setError("Explique a diferenca entre o valor contado e o esperado."); return; }
+    setBusy(true); setError("");
+    try { await onAction(mode, parseMoney(amount), note.trim(), responsible.trim()); setMode(null); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Nao foi possivel concluir."); }
+    finally { setBusy(false); }
+  };
+  return (
+    <section className="cash-control-panel">
+      <div className="cash-control-state"><span>{shift ? "Caixa aberto" : "Caixa manual fechado"}</span><strong>{shift ? formatCurrency(shift.expectedAmount) : "Sem turno manual"}</strong><small>{shift ? `Responsavel: ${shift.responsible || shift.originDevice} · Aberto em ${formatDateTime(shift.openedAt).date} ${formatDateTime(shift.openedAt).time}` : history[0] ? `Ultimo fechamento: ${formatCurrency(history[0].countedAmount || 0)} · Diferenca: ${formatCurrency(history[0].difference || 0)}` : "Abra um turno para controlar o dinheiro fisico."}</small></div>
+      <div className="cash-control-actions">
+        {!shift ? <button onClick={() => open("open")}><Plus size={17} /> Abrir caixa</button> : <><button onClick={() => open("supply")}><Plus size={17} /> Suprimento</button><button onClick={() => open("withdraw")}><ArrowDown size={17} /> Sangria</button><button className="cash-close-button" onClick={() => open("close")}><X size={17} /> Fechar caixa</button></>}
+      </div>
+      {mode && <div className="cash-control-form">
+        {mode === "open" && <label><span>Responsavel</span><input autoFocus value={responsible} onChange={(event) => setResponsible(event.target.value)} placeholder="Nome de quem abre o caixa" /></label>}
+        <label><span>{mode === "open" ? "Valor inicial" : mode === "close" ? "Valor contado" : "Valor"}</span><input autoFocus={mode !== "open"} inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+        {mode === "close" && <div className="cash-close-preview"><span>Esperado: <strong>{formatCurrency(shift?.expectedAmount || 0)}</strong></span><span>Diferenca: <strong>{formatCurrency(parseMoney(amount) - (shift?.expectedAmount || 0))}</strong></span></div>}
+        <label className="cash-note-field"><span>{mode === "close" ? "Observacao do fechamento" : "Observacao"}</span><input value={note} onChange={(event) => setNote(event.target.value)} placeholder={mode === "close" ? "Obrigatoria quando houver diferenca" : "Opcional"} /></label>
+        <div className="cash-form-actions"><button onClick={() => setMode(null)}>Cancelar</button><button className="primary-button" disabled={busy} onClick={() => void confirm()}>{busy ? "Salvando..." : "Confirmar"}</button></div>
+        {error && <small>{error}</small>}
+      </div>}
+    </section>
+  );
+}
+
 function HistoryPanel({
   entries,
   settings,
@@ -4294,6 +4525,7 @@ function HistoryPanel({
   const [maximumValue, setMaximumValue] = useState(savedFilters.maximumValue);
   const [originFilter, setOriginFilter] = useState(savedFilters.originFilter);
   const [movementFilter, setMovementFilter] = useState(savedFilters.movementFilter);
+  const [tableNumberFilter, setTableNumberFilter] = useState("");
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const [details, setDetails] = useState<PdvSale | null>(null);
   const [receiptSale, setReceiptSale] = useState<PdvSale | null>(null);
@@ -4315,8 +4547,9 @@ function HistoryPanel({
     if (!focusDate) {
       return;
     }
-    setDateFrom(focusDate.date);
-    setDateTo(focusDate.date);
+    setDateFrom(focusDate.date || "");
+    setDateTo(focusDate.date || "");
+    setTableNumberFilter(focusDate.tableNumber ? String(focusDate.tableNumber) : "");
     setStatusFilter("todos");
     setPaymentFilter("Todos");
     setType("Todos");
@@ -4368,7 +4601,8 @@ function HistoryPanel({
         || (movementFilter === "Clientes remotos" && normalizedOrigin !== "Servidor")
         || (movementFilter === "Fechamentos parciais" && entry.customType === "Mesa parcial")
         || (movementFilter === "Vendas diretas" && entry.type === "Venda" && !entry.tableNumber);
-      if (!sameType || !sameStatus || !sameDate || !sameOrigin || !samePayment || !sameValue || !movementMatches) {
+      const sameTable = !tableNumberFilter || Number(entry.tableNumber || 0) === Number(tableNumberFilter.replace(/^0+/, "") || 0);
+      if (!sameType || !sameStatus || !sameDate || !sameOrigin || !samePayment || !sameValue || !movementMatches || !sameTable) {
         return false;
       }
       if (!searchTerms.length) {
@@ -4387,7 +4621,7 @@ function HistoryPanel({
       const normalizedHaystack = normalizeHistorySearch(haystack);
       return searchTerms.every((term) => normalizedHaystack.includes(term));
     });
-  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, movementFilter, pdvSaleById, customerSaleIds]);
+  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, movementFilter, tableNumberFilter, pdvSaleById, customerSaleIds]);
   const visibleRows = filtered.slice(0, visibleCount);
   const filteredSummary = useMemo(() => filtered.reduce((summary, entry) => {
     if (entry.status === "active") {
@@ -4405,7 +4639,7 @@ function HistoryPanel({
 
   useEffect(() => {
     setVisibleCount(HISTORY_PAGE_SIZE);
-  }, [deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, paymentFilter, originFilter, movementFilter]);
+  }, [deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, paymentFilter, originFilter, movementFilter, tableNumberFilter]);
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     try {
@@ -4480,6 +4714,10 @@ function HistoryPanel({
           </select>
         </label>
         <label className="field">
+          <span>Mesa exata</span>
+          <input inputMode="numeric" value={tableNumberFilter} onChange={(event) => setTableNumberFilter(event.target.value.replace(/\D/g, ""))} placeholder="001" />
+        </label>
+        <label className="field">
           <span>Valor minimo</span>
           <input inputMode="decimal" value={minimumValue} onChange={(event) => setMinimumValue(event.target.value)} placeholder="R$ 0,00" />
         </label>
@@ -4498,6 +4736,7 @@ function HistoryPanel({
           setMaximumValue("");
           setOriginFilter("Todos");
           setMovementFilter("Todos");
+          setTableNumberFilter("");
         }}><RotateCcw size={15} /> Limpar</button>
       </div>
 
@@ -5170,6 +5409,18 @@ function EditEntryModal({
 
 type ProfessionalReportTab = "overview" | "products" | "payments" | "accounts" | "tables" | "times" | "audit";
 
+function professionalReportTitle(tab: ProfessionalReportTab): string {
+  return {
+    overview: "Resumo de vendas",
+    products: "Produtos por categoria",
+    payments: "Formas de pagamento",
+    accounts: "Recebimentos",
+    tables: "Mesas e vendas",
+    times: "Horarios",
+    audit: "Auditoria"
+  }[tab];
+}
+
 function ProfessionalReportsPanel({
   entries,
   pdvSales,
@@ -5180,6 +5431,7 @@ function ProfessionalReportsPanel({
   canViewTotals = true,
   canViewEntryValues = true,
   focusPeriod,
+  focusTab,
   onFocusConsumed,
   onOpenOutputDirectory,
   onExport,
@@ -5195,6 +5447,7 @@ function ProfessionalReportsPanel({
   canViewTotals?: boolean;
   canViewEntryValues?: boolean;
   focusPeriod?: ReportFocusPeriod | null;
+  focusTab?: ProfessionalReportTab | null;
   onFocusConsumed?: () => void;
   onOpenOutputDirectory: () => Promise<void>;
   onExport: () => Promise<void>;
@@ -5202,6 +5455,8 @@ function ProfessionalReportsPanel({
 }) {
   const initialPeriod = useMemo(() => currentMonthPeriod(), []);
   const [tab, setTab] = useState<ProfessionalReportTab>("overview");
+  const activeReportTab = focusTab || tab;
+  useEffect(() => { setTab(focusTab || "overview"); }, [focusTab]);
   const [from, setFrom] = useState(initialPeriod.from);
   const [to, setTo] = useState(initialPeriod.to);
   const [type, setType] = useState("Todos");
@@ -5211,6 +5466,8 @@ function ProfessionalReportsPanel({
   const [query, setQuery] = useState("");
   const [productQuery, setProductQuery] = useState("");
   const [category, setCategory] = useState("Todos");
+  const [includeProductPrices, setIncludeProductPrices] = useState(false);
+  const [includeProductValues, setIncludeProductValues] = useState(false);
   const [showSensitive, setShowSensitive] = useState(canViewTotals && !settings.privacy.hideReportTotals);
   const deferredQuery = useDeferredValue(query);
   const deferredProductQuery = useDeferredValue(productQuery);
@@ -5246,14 +5503,14 @@ function ProfessionalReportsPanel({
     .map((product) => product.category)
     .filter(Boolean))], [catalogProducts]);
   const visibleProducts = useMemo(() => {
-    const search = deferredProductQuery.trim().toLocaleLowerCase("pt-BR");
+    const search = normalizeHistorySearch(deferredProductQuery);
     return catalogProducts.filter((product) =>
       (category === "Todos" || product.category === category)
-      && (!search || `${product.name} ${product.category}`.toLocaleLowerCase("pt-BR").includes(search))
+      && (!search || normalizeHistorySearch(`${product.name} ${product.category}`).includes(search))
     );
   }, [catalogProducts, category, deferredProductQuery]);
   const exportIds = filteredRecords.map((record) => record.source === "pdv" ? `pdv-${record.id}` : record.id);
-  const exportLabel = [from || "inicio", to || "hoje", type, payment, tab].join("-").replace(/\s+/g, "-").toLowerCase();
+  const exportLabel = [from || "inicio", to || "hoje", type, payment, activeReportTab].join("-").replace(/\s+/g, "-").toLowerCase();
   const dateIsInRange = (value: string) => {
     const key = getLocalDateKey(new Date(value));
     return (!from || key >= from) && (!to || key <= to);
@@ -5312,7 +5569,7 @@ function ProfessionalReportsPanel({
       <header className="professional-report-head">
         <div>
           <span className="eyebrow">Inteligencia do caixa</span>
-          <h2>Painel do periodo</h2>
+          <h2>{professionalReportTitle(activeReportTab)}</h2>
           <p className="muted-copy">Venda, Mesas e Onibus analisados na mesma base. Os totais abaixo usam o mesmo recorte da exportacao.</p>
         </div>
         <div className="report-actions">
@@ -5321,8 +5578,8 @@ function ProfessionalReportsPanel({
             {canViewTotals ? "Mostrar valores" : "Valores bloqueados"}
           </label>
           <button className="ghost-button" onClick={onOpenOutputDirectory} disabled={remoteClientActive}><FolderOpen size={17} /> Pasta</button>
-          <button className="ghost-button" onClick={onExport} disabled={remoteClientActive}><FileSpreadsheet size={17} /> Planilha operacional</button>
-          <button className="primary-button" onClick={() => onExportFiltered(exportIds, exportLabel)} disabled={remoteClientActive || !filteredRecords.length}><Download size={17} /> Exportar recorte</button>
+          {activeReportTab !== "products" && <button className="ghost-button" onClick={onExport} disabled={remoteClientActive}><FileSpreadsheet size={17} /> Planilha operacional</button>}
+          {activeReportTab !== "products" && <button className="primary-button" onClick={() => onExportFiltered(exportIds, exportLabel)} disabled={remoteClientActive || !filteredRecords.length}><Download size={17} /> Exportar recorte</button>}
         </div>
       </header>
 
@@ -5359,7 +5616,7 @@ function ProfessionalReportsPanel({
         }}><RotateCcw size={15} /> Limpar</button>
       </div>
 
-      <nav className="professional-report-tabs" aria-label="Tipos de relatorio">
+      {!focusTab && <nav className="professional-report-tabs" aria-label="Tipos de relatorio">
         {([
           ["overview", "Visao geral"],
           ["products", "Produtos"],
@@ -5369,11 +5626,11 @@ function ProfessionalReportsPanel({
           ["times", "Horarios"],
           ["audit", "Auditoria"]
         ] as Array<[ProfessionalReportTab, string]>).map(([key, label]) => (
-          <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
+          <button key={key} className={activeReportTab === key ? "active" : ""} onClick={() => setTab(key)}>{label}</button>
         ))}
-      </nav>
+      </nav>}
 
-      {tab === "overview" && (
+      {activeReportTab === "overview" && (
         <div className="professional-report-content">
           <div className="report-kpi-grid">
             <ProfessionalMetric label="Total vendido liquido" value={showTotals ? formatCurrency(dataset.total) : "Restrito"} detail={comparisonLabel(dataset.total, previousDataset.total, showTotals)} />
@@ -5402,7 +5659,7 @@ function ProfessionalReportsPanel({
         </div>
       )}
 
-      {tab === "products" && (
+      {activeReportTab === "products" && (
         <div className="professional-report-content">
           <div className="report-kpi-grid">
             <ProfessionalMetric label="Itens vendidos" value={formatReportQuantity(catalogProducts.reduce((sum, product) => sum + product.quantity, 0))} detail={`${catalogProducts.length} produto(s) diferente(s)`} />
@@ -5420,6 +5677,19 @@ function ProfessionalReportsPanel({
             <label className="field"><span>Pesquisar produto</span><input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Nome do produto" /></label>
             <label className="field"><span>Categoria</span><select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
             <span>{visibleProducts.length} produto(s)</span>
+          </div>
+          <div className="professional-product-export">
+            <span>Produto, categoria e quantidade sempre incluidos. Adicione se desejar:</span>
+            <label><input type="checkbox" checked={includeProductPrices && showTotals} disabled={!showTotals} onChange={(event) => setIncludeProductPrices(event.target.checked)} /> Preço médio</label>
+            <label><input type="checkbox" checked={includeProductValues && showTotals} disabled={!showTotals} onChange={(event) => setIncludeProductValues(event.target.checked)} /> Valor total</label>
+            <button type="button" className="ghost-button" disabled={!visibleProducts.length} onClick={() => {
+              const withPrices = showTotals && includeProductPrices;
+              const withValues = showTotals && includeProductValues;
+              const headers = ["Produto", "Categoria", "Quantidade", ...(withPrices ? ["Preço médio"] : []), ...(withValues ? ["Valor total"] : [])];
+              const rows = visibleProducts.map((product) => [product.name, product.category, formatReportQuantity(product.quantity), ...(withPrices ? [product.averagePrice.toFixed(2).replace(".", ",")] : []), ...(withValues ? [product.revenue.toFixed(2).replace(".", ",")] : [])]);
+              const categoryName = category === "Todos" ? "todas-categorias" : category.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
+              downloadFinancialCsv(`produtos-${categoryName}-${from || "inicio"}-${to || "hoje"}.csv`, headers, rows);
+            }}><Download size={16} /> Exportar quantidades</button>
           </div>
           <div className="professional-report-chart-grid">
             <ReportBars title="Mais vendidos" rows={visibleProducts.slice(0, 10).map((product) => [product.name, product.quantity])} showValues valueFormatter={formatReportQuantity} />
@@ -5441,7 +5711,7 @@ function ProfessionalReportsPanel({
         </div>
       )}
 
-      {tab === "payments" && (
+      {activeReportTab === "payments" && (
         <div className="professional-report-content">
           <div className="report-kpi-grid">
             <ProfessionalMetric label="Pagamentos" value={String(dataset.activeRecords.reduce((sum, record) => sum + record.payments.length, 0))} detail={`${dataset.byPayment.length} forma(s) utilizada(s)`} />
@@ -5478,7 +5748,7 @@ function ProfessionalReportsPanel({
         </div>
       )}
 
-      {tab === "tables" && (
+      {activeReportTab === "tables" && (
         <div className="professional-report-content">
           <div className="report-kpi-grid">
             <ProfessionalMetric label="Mesas fechadas" value={String(dataset.activeRecords.filter((record) => record.type === "Mesa").length)} detail={`${dataset.partialCount} parcial(is)`} />
@@ -5494,7 +5764,7 @@ function ProfessionalReportsPanel({
         </div>
       )}
 
-      {tab === "accounts" && (
+      {activeReportTab === "accounts" && (
         <div className="professional-report-content">
           <div className="report-kpi-grid">
             <ProfessionalMetric label="Contas geradas" value={showTotals ? formatCurrency(receivableIssued) : "Restrito"} detail={`${periodReceivables.length} conta(s) no periodo`} />
@@ -5540,7 +5810,7 @@ function ProfessionalReportsPanel({
         </div>
       )}
 
-      {tab === "times" && (
+      {activeReportTab === "times" && (
         <div className="professional-report-content">
           <div className="professional-report-chart-grid wide">
             <ReportBars title="Faturamento por hora" rows={dataset.byHour} showValues={showTotals} />
@@ -5550,7 +5820,7 @@ function ProfessionalReportsPanel({
         </div>
       )}
 
-      {tab === "audit" && (
+      {activeReportTab === "audit" && (
         <div className="professional-report-content">
           <div className="report-kpi-grid">
             <ProfessionalMetric label="Cancelamentos" value={String(dataset.cancelledCount)} detail={showTotals ? formatCurrency(dataset.cancelledTotal) : "Valor restrito"} tone={dataset.cancelledCount ? "warning" : "normal"} />
@@ -6159,12 +6429,15 @@ function ServerPanel({
   const [port, setPort] = useState(settings.server.port);
   const [password, setPassword] = useState(settings.server.password);
   const [permissions, setPermissions] = useState(settings.server.permissions);
-  const [mode, setMode] = useState<ServerPanelMode>("create");
-  const [connectHost, setConnectHost] = useState(settings.server.autoConnection.mode === "client" ? settings.server.autoConnection.host : server.url || "");
-  const [connectPassword, setConnectPassword] = useState(settings.server.autoConnection.mode === "client" ? settings.server.autoConnection.password : "");
+  const [mode, setMode] = useState<ServerPanelMode>(remoteSession ? "connect" : "create");
+  const [editConnectedConnection, setEditConnectedConnection] = useState(false);
+  const [connectHost, setConnectHost] = useState(settings.server.autoConnection.host || server.url || "");
+  const [connectPassword, setConnectPassword] = useState(settings.server.autoConnection.password);
   const [connectDeviceName, setConnectDeviceName] = useState(settings.server.autoConnection.deviceName || "App cliente");
   const [autoStartServer, setAutoStartServer] = useState(settings.server.autoConnection.mode === "server");
   const [autoConnectClient, setAutoConnectClient] = useState(settings.server.autoConnection.mode === "client");
+
+  useEffect(() => { if (remoteSession) setMode("connect"); }, [Boolean(remoteSession)]);
 
   useEffect(() => {
     setPort(settings.server.port);
@@ -6172,11 +6445,9 @@ function ServerPanel({
     setPermissions(settings.server.permissions);
     setAutoStartServer(settings.server.autoConnection.mode === "server");
     setAutoConnectClient(settings.server.autoConnection.mode === "client");
-    if (settings.server.autoConnection.mode === "client") {
-      setConnectHost(settings.server.autoConnection.host);
-      setConnectPassword(settings.server.autoConnection.password);
-      setConnectDeviceName(settings.server.autoConnection.deviceName || "App cliente");
-    }
+    setConnectHost(settings.server.autoConnection.host);
+    setConnectPassword(settings.server.autoConnection.password);
+    setConnectDeviceName(settings.server.autoConnection.deviceName || "App cliente");
   }, [settings.server.port, settings.server.password, settings.server.permissions, settings.server.autoConnection]);
 
   const start = async () => {
@@ -6210,31 +6481,29 @@ function ServerPanel({
     onToast("info", "Servidor desligado.");
   };
 
-  const connectRemote = async () => {
-    const nextAutoConnection = autoConnectClient
-      ? {
-          mode: "client" as const,
-          host: connectHost.trim(),
-          password: connectPassword,
-          deviceName: connectDeviceName.trim() || "App cliente"
-        }
-      : settings.server.autoConnection.mode === "client"
-        ? { ...settings.server.autoConnection, mode: "none" as const }
-        : settings.server.autoConnection;
-    const connected = await onConnectRemote(connectHost, connectPassword, connectDeviceName);
-    if (!connected) {
-      return;
-    }
+  const saveLocalConnection = async () => {
+    if (!connectHost.trim()) throw new Error("Informe o endereco do servidor.");
+    const nextAutoConnection = {
+      mode: autoConnectClient ? "client" as const : "none" as const,
+      host: connectHost.trim(),
+      password: connectPassword,
+      deviceName: connectDeviceName.trim() || "App cliente"
+    };
     await onSaveSettings({
       ...settings,
       server: {
         ...settings.server,
-        port,
-        password,
-        permissions,
         autoConnection: nextAutoConnection
       }
     });
+  };
+  const connectRemote = async () => {
+    try {
+      await saveLocalConnection();
+      if (await onConnectRemote(connectHost, connectPassword, connectDeviceName)) setEditConnectedConnection(false);
+    } catch (error) {
+      onToast("error", error instanceof Error ? error.message : "Nao foi possivel salvar a conexao.");
+    }
   };
   const connectDisabledByServer = server.running && !remoteSession;
 
@@ -6243,18 +6512,18 @@ function ServerPanel({
       <div className="server-hero">
         <div>
           <span className="eyebrow">Rede local</span>
-          <h2>{server.running ? "Servidor ativo" : "Servidor desligado"}</h2>
-          <p>Use esta area para abrir o caixa principal na rede ou orientar outro computador a conectar com senha.</p>
+          <h2>{remoteSession ? "Cliente conectado" : server.running ? "Servidor ativo" : "Servidor desligado"}</h2>
+          <p>{remoteSession ? "A conexao deste computador e configurada aqui; os dados operacionais vem do servidor." : "Use esta area para abrir o caixa principal na rede ou orientar outro computador a conectar com senha."}</p>
         </div>
         <div className="server-url">
           <Laptop size={24} />
-          <strong>{server.running ? server.url : "Aguardando abertura"}</strong>
-          <span>{server.ips.join(" | ") || "Nenhum IP local encontrado"}</span>
+          <strong>{remoteSession ? remoteSession.baseUrl : server.running ? server.url : "Aguardando abertura"}</strong>
+          <span>{remoteSession ? `Este computador: ${remoteSession.deviceName}` : server.ips.join(" | ") || "Nenhum IP local encontrado"}</span>
         </div>
       </div>
 
       <div className="subtab-row">
-        <button className={mode === "create" ? "active" : ""} onClick={() => setMode("create")}><RadioTower size={16} /> Criar servidor</button>
+        {!remoteSession && <button className={mode === "create" ? "active" : ""} onClick={() => setMode("create")}><RadioTower size={16} /> Criar servidor</button>}
         <button
           className={mode === "connect" ? "active" : ""}
           disabled={connectDisabledByServer}
@@ -6263,7 +6532,7 @@ function ServerPanel({
         >
           <PlugZap size={16} /> Conectar
         </button>
-        <button className={mode === "permissions" ? "active" : ""} onClick={() => setMode("permissions")}><ShieldCheck size={16} /> Permissoes</button>
+        {!remoteSession && <button className={mode === "permissions" ? "active" : ""} onClick={() => setMode("permissions")}><ShieldCheck size={16} /> Permissoes</button>}
       </div>
 
       {mode === "create" && (
@@ -6311,7 +6580,7 @@ function ServerPanel({
             <strong>Conectar este computador a outro caixa</strong>
             <span>{remoteSession ? "Operando como cliente remoto" : "Para quando outro PC esta com o servidor aberto"}</span>
           </div>
-          {!remoteSession ? (
+          {!remoteSession || editConnectedConnection ? (
             <>
               <div className="entry-grid">
                 <label className="field description-field">
@@ -6341,14 +6610,16 @@ function ServerPanel({
               </div>
               {remoteMessage && <p className="settings-note">{remoteMessage}</p>}
               <div className="submit-row">
+                <button className="ghost-button" disabled={!connectHost.trim()} onClick={() => void saveLocalConnection().catch((error) => onToast("error", error instanceof Error ? error.message : "Nao foi possivel salvar a conexao."))}>Salvar neste computador</button>
                 <button
                   className="primary-button"
-                  disabled={!connectHost || !connectPassword || remoteLoading}
+                  disabled={!connectHost || remoteLoading}
                   onClick={connectRemote}
                 >
                   {remoteLoading ? <RefreshCw size={18} className="spin" /> : <PlugZap size={18} />}
                   Conectar no app
                 </button>
+                {remoteSession && <button className="ghost-button" onClick={() => setEditConnectedConnection(false)}>Voltar</button>}
                 <button
                   className="ghost-button"
                   disabled={!connectHost}
@@ -6366,18 +6637,10 @@ function ServerPanel({
               </div>
             </>
           ) : (
-            <RemoteClientWorkspace
-              session={remoteSession}
-              settings={settings}
-              message={remoteMessage}
-              loading={remoteLoading}
-              onRefresh={onRefreshRemote}
-              onDisconnect={onDisconnectRemote}
-              onSubmit={onSubmitRemote}
-              onEdit={onEditRemote}
-              onCancel={onCancelRemote}
-              onDelete={onDeleteRemote}
-            />
+            <div className="submit-row">
+              <button className="ghost-button" onClick={() => setEditConnectedConnection(true)}>Alterar conexao deste computador</button>
+              <button className="danger-button" onClick={onDisconnectRemote}><X size={16} /> Desconectar</button>
+            </div>
           )}
         </section>
       )}
@@ -6616,6 +6879,7 @@ function SettingsPanel({
   remoteSession,
   remoteClientActive,
   remoteClientPermissions,
+  standalone = false,
   focusCategory,
   onFocusCategoryConsumed,
   onSave,
@@ -6627,14 +6891,16 @@ function SettingsPanel({
   remoteSession: RemoteClientSession | null;
   remoteClientActive: boolean;
   remoteClientPermissions?: ServerPermissions | null;
+  standalone?: boolean;
   focusCategory?: { category: SettingsCategory; nonce: number } | null;
   onFocusCategoryConsumed?: () => void;
-  onSave: (settings: AppSettings) => Promise<void>;
+  onSave: (settings: AppSettings, options?: { silent?: boolean }) => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
   onImportLedger: () => Promise<void>;
   onImportLedgerFolder: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState(settings);
+  const [categorySearch, setCategorySearch] = useState("");
   const [category, setCategory] = useState<SettingsCategory>("appearance");
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -6646,6 +6912,8 @@ function SettingsPanel({
   const [settingsConfirm, setSettingsConfirm] = useState<{ title: string; message: string; action: () => void | Promise<void>; confirmLabel?: string; danger?: boolean } | null>(null);
   const pdvSettingsActionsRef = useRef<PdvAdvancedSettingsActions | null>(null);
   const [pdvSettingsDirty, setPdvSettingsDirty] = useState(false);
+  const [autoSaveState, setAutoSaveState] = useState<"saved" | "pending" | "saving" | "error">("saved");
+  const lastSavedSettingsRef = useRef(JSON.stringify(settings));
   const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
   const effectiveSettingsOperationMode = remoteSession?.clientPolicy.operationMode || draft.operationMode;
   const remoteLockedCategoryList: SettingsCategory[] = ["operation", "defaults", "profiles", "files", "pdv", "pdvTables", "pdvOperation", "printing", "server", "advanced"];
@@ -6653,7 +6921,14 @@ function SettingsPanel({
   const remoteServerEditableCategories = new Set<SettingsCategory>(["operation", "defaults", "pdvTables", "pdvOperation", "printing"]);
   const remoteLockMessage = "Esta parte continua restrita ao computador servidor. Ative a permissao de personalizacao para os ajustes operacionais e de impressao.";
 
-  useEffect(() => setDraft(settings), [settings]);
+  useEffect(() => {
+    const serialized = JSON.stringify(settings);
+    if (serialized !== lastSavedSettingsRef.current) {
+      lastSavedSettingsRef.current = serialized;
+      setDraft(settings);
+      setAutoSaveState("saved");
+    }
+  }, [settings]);
 
   useEffect(() => {
     if (focusCategory) {
@@ -6700,6 +6975,45 @@ function SettingsPanel({
     }
     action();
   };
+
+  useEffect(() => {
+    const serializedDraft = JSON.stringify(draft);
+    const draftChanged = serializedDraft !== lastSavedSettingsRef.current;
+    if (!draftChanged && !pdvSettingsDirty) {
+      setAutoSaveState("saved");
+      return;
+    }
+    setAutoSaveState("pending");
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        if (
+          remoteClientActive &&
+          JSON.stringify(remoteLockedSettingsSnapshot(settings, remoteCustomizationAllowed)) !==
+            JSON.stringify(remoteLockedSettingsSnapshot(draft, remoteCustomizationAllowed))
+        ) {
+          setAutoSaveState("error");
+          onToast("error", "Esta configuracao e controlada pelo servidor e nao pode ser alterada neste cliente.");
+          setDraft(settings);
+          return;
+        }
+        try {
+          setAutoSaveState("saving");
+          if (draftChanged) {
+            await onSave(draft, { silent: true });
+            lastSavedSettingsRef.current = serializedDraft;
+          }
+          if (pdvSettingsDirty) {
+            await pdvSettingsActionsRef.current?.save();
+          }
+          setAutoSaveState("saved");
+        } catch (error) {
+          setAutoSaveState("error");
+          onToast("error", error instanceof Error ? error.message : "Nao foi possivel salvar as configuracoes automaticamente.");
+        }
+      })();
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [draft, pdvSettingsDirty, remoteClientActive, remoteCustomizationAllowed, settings]);
 
   const chooseFolder = async () => {
     const folder = await window.caixa.chooseOutputDirectory();
@@ -6891,7 +7205,7 @@ function SettingsPanel({
       }
       setDraft((current) => normalizeSettingsDraft(current, result.settings));
       setCategory("advanced");
-      onToast("info", "Configuracoes importadas para revisao. Clique em Salvar para aplicar.");
+      onToast("info", "Configuracoes importadas e prontas para salvamento automatico.");
     } catch (error) {
       onToast("error", error instanceof Error ? error.message : "Nao foi possivel importar configuracoes.");
     }
@@ -7060,41 +7374,11 @@ function SettingsPanel({
     }
   };
 
-  const persistSettingsDraft = async () => {
-    await onSave(draft);
-    if (pdvSettingsDirty) {
-      await pdvSettingsActionsRef.current?.save();
-    }
-  };
-
-  const saveDraft = async () => {
-    if (
-      remoteClientActive &&
-      JSON.stringify(remoteLockedSettingsSnapshot(settings, remoteCustomizationAllowed)) !==
-        JSON.stringify(remoteLockedSettingsSnapshot(draft, remoteCustomizationAllowed))
-    ) {
-      onToast("error", "Nao salvei: esse rascunho altera configuracoes controladas pelo servidor. Desconecte do caixa principal para editar essas partes.");
-      return;
-    }
-    const warnings = settingsChangeWarnings(settings, draft);
-    if (warnings.length) {
-      setSettingsConfirm({
-        title: "Salvar configuracoes sensiveis?",
-        message: `Essas configuracoes alteram ${warnings.join(", ")}. Confira antes de aplicar.`,
-        confirmLabel: "Salvar mesmo assim",
-        action: persistSettingsDraft
-      });
-      return;
-    }
-    await persistSettingsDraft();
-  };
-
   const settingsCategories: Array<{ key: SettingsCategory; label: string; description: string; icon: typeof Settings }> = [
     { key: "appearance", label: "Aparencia", description: "Tema, cor, densidade e formato geral da interface.", icon: Palette },
-    { key: "operation", label: "Modo de operacao", description: "Alterna entre o PDV novo e o caixa classico preservado.", icon: MonitorUp },
     { key: "defaults", label: "Vendas", description: "Tipo, pessoas e arredondamento usados por padrao.", icon: Send },
     { key: "profiles", label: "Perfis", description: "Perfis para alternar entre PC, notebook e tela pequena.", icon: MonitorUp },
-    { key: "floating", label: "Barra fixa", description: "Janela flutuante, tamanho, posicao, campos e tema do Caixa Classico.", icon: Pin },
+    { key: "floating", label: "Barra auxiliar", description: "Janela flutuante, tamanho, posicao, campos e tema.", icon: Pin },
     { key: "quick", label: "Barra rapida", description: "Abas e atalhos visuais usados dentro da barra fixa classica.", icon: LayoutPanelTop },
     { key: "pdv", label: "Produtos", description: "Produtos, categorias, importacao, favoritos, unidade, kg, grama e adicionais.", icon: LayoutPanelTop },
     { key: "pdvTables", label: "Mesas", description: "Quantidade de mesas, submesas e contas separadas.", icon: Utensils },
@@ -7116,7 +7400,7 @@ function SettingsPanel({
       // posicao, tamanho e tema da barra continuam locais em Barra fixa.
       return !(remoteClientActive && !remoteCustomizationAllowed && item.key === "quick");
     }
-    return !["defaults", "profiles", "floating", "quick", "shortcuts"].includes(item.key);
+    return !["operation", "defaults", "profiles", "floating", "quick", "shortcuts"].includes(item.key);
   });
   const activeCategory = visibleSettingsCategories.find((item) => item.key === category) || visibleSettingsCategories[0];
   const filePreview = filePreviewForSettings(draft);
@@ -7131,7 +7415,7 @@ function SettingsPanel({
 
   useEffect(() => {
     if (!visibleSettingsCategories.some((item) => item.key === category)) {
-      setCategory("operation");
+      setCategory("appearance");
     }
   }, [category, effectiveSettingsOperationMode]);
 
@@ -7153,10 +7437,12 @@ function SettingsPanel({
   });
 
   return (
-    <section className="panel settings-panel">
+    <section className={`panel settings-panel settings-refined ${standalone ? "settings-standalone" : ""}`}>
       <div className="settings-layout">
-        <aside className="settings-nav">
-          {visibleSettingsCategories.map((item) => {
+        {!standalone && <aside className="settings-nav">
+          <label className="settings-category-search"><span>Localizar configuração</span><input type="search" placeholder="Aparência, impressão, rede..." value={categorySearch} onChange={(event) => setCategorySearch(event.target.value)} /></label>
+          {categorySearch && !visibleSettingsCategories.some((item) => `${item.label} ${item.description}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(categorySearch.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase())) && <p className="settings-search-empty">Nenhuma categoria encontrada.</p>}
+          {visibleSettingsCategories.filter((item) => `${item.label} ${item.description}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().includes(categorySearch.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase())).map((item) => {
             const Icon = item.icon;
             const locked = isRemoteLockedCategory(item.key);
             return (
@@ -7167,11 +7453,11 @@ function SettingsPanel({
                 title={locked ? "Controlado pelo computador servidor enquanto conectado como cliente" : item.description}
               >
                 <Icon size={16} />
-                {item.label}
+                <span><strong>{item.label}</strong><small>{item.description}</small></span>
               </button>
             );
           })}
-        </aside>
+        </aside>}
 
         <div className="settings-content">
           <div className={`settings-hero ${isRemoteLockedCategory(category) ? "remote-locked-hero" : ""}`}>
@@ -7190,6 +7476,9 @@ function SettingsPanel({
               )}
             </div>
             <div className="preset-row settings-presets" aria-label="Acoes da categoria">
+              <span className={`settings-autosave-status ${autoSaveState}`}>
+                {autoSaveState === "saving" ? "Salvando..." : autoSaveState === "pending" ? "Alteracoes pendentes" : autoSaveState === "error" ? "Erro ao salvar" : "Salvo automaticamente"}
+              </span>
               <button className="ghost-button" type="button" onClick={() => lockedClick(category, () => {
                 resetCategory(category);
                 if (activePdvAdvancedSection) {
@@ -7201,18 +7490,9 @@ function SettingsPanel({
 
       <div className="settings-grid">
         <section className={categoryClass("appearance")}>
-          <label className="field"><span>Tema</span>
-            <select
-              value={draft.theme === "dark" || draft.theme === "datacaixa-dark" ? "dark" : "datacaixa"}
-              onChange={(event) => {
-                const theme = event.target.value as AppSettings["theme"];
-                setDraft((current) => ({ ...current, theme, accentColor: themeDefaultAccent(theme) }));
-              }}
-            >
-              <option value="datacaixa">Claro</option>
-              <option value="dark">Escuro</option>
-            </select>
-          </label>
+          <div className="settings-theme-picker"><span>Tema do aplicativo</span><div>
+            {(["datacaixa", "dark"] as const).map((theme) => <button type="button" key={theme} className={`settings-theme-option ${theme === "dark" ? "theme-dark" : "theme-light"} ${((draft.theme === "dark" || draft.theme === "datacaixa-dark") ? "dark" : "datacaixa") === theme ? "selected" : ""}`} aria-pressed={((draft.theme === "dark" || draft.theme === "datacaixa-dark") ? "dark" : "datacaixa") === theme} onClick={() => setDraft((current) => ({ ...current, theme, accentColor: themeDefaultAccent(theme) }))}><span className="settings-theme-thumbnail"><i /><b /><b /><b /></span><strong>{theme === "dark" ? "Escuro" : "Claro"}</strong><small>{theme === "dark" ? "Contraste suave para ambientes escuros" : "Leitura nítida para o dia a dia"}</small></button>)}
+          </div><small>A alteracao e aplicada automaticamente. O layout de Venda e Mesas e mantido.</small></div>
           <label className="field"><span>Cor principal</span><input type="color" value={draft.accentColor} onChange={(event) => update("accentColor", event.target.value)} /></label>
           <label className="field"><span>Tamanho dos campos</span>
             <select value={draft.fieldSize} onChange={(event) => update("fieldSize", event.target.value as AppSettings["fieldSize"])}>
@@ -7256,33 +7536,6 @@ function SettingsPanel({
             <input type="checkbox" checked={draft.hideHeaderBrand} onChange={(event) => update("hideHeaderBrand", event.target.checked)} />
             Ocultar marca Caixa PDV no cabecalho
           </label>
-          <div className="header-module-settings">
-            <div>
-              <strong>Modulos fixados no cabecalho</strong>
-              <span>Sem limite de atalhos. O que for fixado sai do menu Modulos; Ajustes fica separado no canto direito.</span>
-            </div>
-            <div className="header-module-options">
-              {TAB_ITEMS.map((item) => {
-                const selectedModules = normalizeHeaderPinnedModules(draft.headerPinnedModules);
-                const checked = selectedModules.includes(item.key);
-                return (
-                  <label key={item.key} className={checked ? "selected" : ""}>
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => update(
-                        "headerPinnedModules",
-                        checked
-                          ? selectedModules.filter((key) => key !== item.key)
-                          : [...selectedModules, item.key]
-                      )}
-                    />
-                    {item.label}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
         </section>
 
         <section className={categoryClass("floating", "settings-group wide")} {...remoteSectionProps("floating")}>
@@ -7361,24 +7614,6 @@ function SettingsPanel({
               </article>
             ))}
           </div>
-        </section>
-
-        <section className={categoryClass("operation")}>
-          <label className="field"><span>Interface principal</span>
-            <select value={effectiveSettingsOperationMode} disabled={remoteClientActive} onChange={(event) => update("operationMode", event.target.value as AppSettings["operationMode"])}>
-              <option value="pdv">PDV novo integrado</option>
-              <option value="legacy">Caixa classico preservado</option>
-            </select>
-          </label>
-          <p className="settings-note">
-            Cada modo mostra apenas as configuracoes e telas do seu proprio fluxo. O modo Classico preserva lancamento rapido e barra fixa; o PDV concentra venda, mesas, produtos e fechamento.
-          </p>
-          {effectiveSettingsOperationMode === "legacy" && (
-            <div className="settings-warning">
-              <strong>Modo de compatibilidade ativo</strong>
-              <span>Venda volta para o fluxo antigo. Abra a barra fixa pelo topo; Mesas e Produtos ficam ocultos para nao misturar os fluxos.</span>
-            </div>
-          )}
         </section>
 
         <section className={categoryClass("defaults")} {...remoteSectionProps("defaults")}>
@@ -7909,7 +8144,7 @@ function SettingsPanel({
               confirmLabel: "Restaurar configuracoes",
               action: () => {
                 setDraft(createSettingsFallback(draft));
-                onToast("info", "Configuracoes restauradas. Salve para aplicar.");
+                onToast("info", "Configuracoes restauradas e prontas para salvamento automatico.");
               }
             })}>
               <RotateCcw size={16} /> Restaurar tudo
@@ -7958,14 +8193,6 @@ function SettingsPanel({
         </div>
       </div>
 
-      <div className="submit-row sticky-save">
-        <button className="primary-button" onClick={saveDraft}><Save size={18} /> Salvar configuracoes</button>
-        <button className="ghost-button" onClick={() => {
-          setDraft(settings);
-          pdvSettingsActionsRef.current?.discard();
-          onToast("info", "Alteracoes descartadas.");
-        }}>Descartar</button>
-      </div>
       {settingsConfirm && (
         <SettingsConfirmModal
           title={settingsConfirm.title}
@@ -8125,7 +8352,7 @@ function titleForTab(tab: TabKey): string {
     receivables: "Contas a receber",
     payables: "Contas a pagar",
     reports: "Relatorios",
-    server: "Servidor local",
+    server: "Rede",
     settings: "Ajuste"
   };
   return map[tab];

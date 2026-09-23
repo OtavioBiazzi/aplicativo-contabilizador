@@ -29,7 +29,7 @@ import type {
   UpdateInstallResult,
   UpdateInfo
 } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCloseScope, PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -614,13 +614,16 @@ async function bootstrap() {
     },
     openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
-    savePdvTableItems: (tableNumber, items, subtables) => pdvStore.saveTableItems(tableNumber, items, subtables),
+    savePdvTableItems: (tableNumber, items, subtables, baseItemIds) => pdvStore.saveTableItems(tableNumber, items, subtables, baseItemIds),
     transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections, operationId) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId),
     appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
     updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
     savePdvCategory: (draft) => pdvStore.saveCategory(draft),
     savePdvProduct: (draft) => pdvStore.saveProduct(draft),
     savePdvSettings: (patch) => pdvStore.saveSettings(patch),
+    openPdvCashShift: (openingAmount, originDevice, responsible, note) => pdvStore.openCashShift(openingAmount, originDevice, responsible, note),
+    addPdvCashMovement: (type, amount, note, originDevice) => pdvStore.addCashMovement(type, amount, note, originDevice),
+    closePdvCashShift: (countedAmount, originDevice, note) => pdvStore.closeCashShift(countedAmount, originDevice, note),
     savePdvCustomer: (draft) => pdvStore.saveCustomer(draft),
     savePdvReceivable: (draft) => pdvStore.saveReceivable(draft),
     receivePdvReceivable: (id, payment, originDevice, operationId) => pdvStore.receiveReceivable(id, payment, originDevice, operationId),
@@ -658,8 +661,8 @@ async function bootstrap() {
       sendToAll("entries:changed");
       return sale;
     },
-    savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId, observations) => {
-      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId, observations);
+    savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId, observations, closeScope) => {
+      const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId, observations, closeScope);
       await exportLedgerIfEnabled();
       sendToAll("entries:changed");
       return sale;
@@ -771,6 +774,9 @@ function registerIpc() {
     publishPdvChanged();
     return settings;
   });
+  ipcMain.handle("pdv:cashShift:open", async (_event, openingAmount: number, responsible?: string, note?: string) => { const shift = await pdvStore.openCashShift(openingAmount, "Servidor", responsible, note); publishPdvChanged(); return shift; });
+  ipcMain.handle("pdv:cashShift:movement", async (_event, type: "Suprimento" | "Sangria", amount: number, note?: string) => { const shift = await pdvStore.addCashMovement(type, amount, note); publishPdvChanged(); return shift; });
+  ipcMain.handle("pdv:cashShift:close", async (_event, countedAmount: number, note?: string) => { const shift = await pdvStore.closeCashShift(countedAmount, "Servidor", note); publishPdvChanged(); return shift; });
 
   ipcMain.handle("pdv:updateProducts", async (_event, ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => {
     await pdvStore.updateProducts(ids, patch);
@@ -860,8 +866,8 @@ function registerIpc() {
     publishPdvChanged();
   });
 
-  ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[], subtables?: string[]) => {
-    await pdvStore.saveTableItems(tableNumber, items, subtables);
+  ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[]) => {
+    await pdvStore.saveTableItems(tableNumber, items, subtables, baseItemIds);
     publishPdvChanged();
   });
 
@@ -892,8 +898,8 @@ function registerIpc() {
     return sale;
   });
 
-  ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string): Promise<PdvSale> => {
-    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Servidor", operationId || randomUUID(), observations);
+  ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string, closeScope?: PdvCloseScope): Promise<PdvSale> => {
+    const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Servidor", operationId || randomUUID(), observations, closeScope);
     await exportLedgerIfEnabled();
     sendToAll("entries:changed");
     publishPdvChanged();

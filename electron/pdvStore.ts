@@ -4,6 +4,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import initSqlJs, { type Database, type SqlJsStatic, type SqlValue } from "sql.js";
 import type {
+  PdvCloseScope,
+  PdvCashShift,
   PdvCartItem,
   PdvCategory,
   PdvCategoryDraft,
@@ -79,7 +81,8 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   receiptFooter: "Obrigado pela preferencia.",
   receiptAllowClientPrint: true,
   receiptGroupIdenticalItems: true,
-  receiptUseColor: false
+  receiptUseColor: false,
+  cashControlMode: "automatic"
 };
 const PDV_BACKUP_DIRECTORY = "pdv-backups";
 
@@ -125,8 +128,8 @@ export class PdvStore {
         throw new Error("Banco PDV ainda nao existe.");
       }
       this.db = new this.sql.Database(await fs.readFile(this.dbFilePath));
-      if (this.databaseUserVersion() < 2) {
-        await this.backupSqliteDaily("antes-migracao-v2");
+      if (this.databaseUserVersion() < 3) {
+        await this.backupSqliteDaily("antes-migracao-v3");
       }
     } catch (error) {
       if (existingDatabase) {
@@ -150,7 +153,7 @@ export class PdvStore {
       }
       throw error;
     }
-    this.requireDb().run("PRAGMA user_version = 2");
+    this.requireDb().run("PRAGMA user_version = 3");
     await this.persist();
   }
 
@@ -189,6 +192,8 @@ export class PdvStore {
       customers: this.getCustomers(),
       receivables: this.getReceivables(),
       payables: this.getPayables(),
+      currentCashShift: this.getCurrentCashShift(),
+      recentCashShifts: this.getCashShiftHistory(),
       settings: this.getSettings(),
       dataFile: this.dbFilePath
     };
@@ -772,6 +777,81 @@ export class PdvStore {
     return next;
   }
 
+  getCurrentCashShift(): PdvCashShift | undefined {
+    const raw = selectAll<{ value: string }>(this.requireDb(), "SELECT value FROM pdv_settings WHERE key = 'cash_shift_current'")[0]?.value;
+    if (!raw) return undefined;
+    try {
+      return this.withCashExpected(JSON.parse(raw) as PdvCashShift);
+    } catch {
+      return undefined;
+    }
+  }
+
+  getCashShiftHistory(): PdvCashShift[] {
+    const raw = selectAll<{ value: string }>(this.requireDb(), "SELECT value FROM pdv_settings WHERE key = 'cash_shift_history'")[0]?.value;
+    if (!raw) return [];
+    try {
+      const value = JSON.parse(raw);
+      return Array.isArray(value) ? value.slice(0, 30) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async openCashShift(openingAmount: number, originDevice = "Servidor", responsible = "", openingNote = ""): Promise<PdvCashShift> {
+    if (this.getCurrentCashShift()) throw new Error("Ja existe um caixa aberto.");
+    const amount = roundMoney(Math.max(0, Number(openingAmount) || 0));
+    const now = new Date().toISOString();
+    const shift: PdvCashShift = {
+      id: randomUUID(), status: "Aberto", openedAt: now, openingAmount: amount,
+      expectedAmount: amount, originDevice, responsible: String(responsible || originDevice).trim(), openingNote: String(openingNote || "").trim(),
+      movements: [{ id: randomUUID(), type: "Abertura", amount, createdAt: now, originDevice }]
+    };
+    await this.writeJsonSetting("cash_shift_current", shift);
+    return shift;
+  }
+
+  async addCashMovement(type: "Suprimento" | "Sangria", amount: number, note = "", originDevice = "Servidor"): Promise<PdvCashShift> {
+    const shift = this.getCurrentCashShift();
+    if (!shift) throw new Error("Abra o caixa antes de registrar movimentacoes.");
+    const normalizedAmount = roundMoney(Math.max(0, Number(amount) || 0));
+    if (normalizedAmount <= 0) throw new Error("Informe um valor maior que zero.");
+    shift.movements.push({ id: randomUUID(), type, amount: normalizedAmount, note: String(note || "").trim(), createdAt: new Date().toISOString(), originDevice });
+    await this.writeJsonSetting("cash_shift_current", shift);
+    return this.withCashExpected(shift);
+  }
+
+  async closeCashShift(countedAmount: number, originDevice = "Servidor", closingNote = ""): Promise<PdvCashShift> {
+    const current = this.getCurrentCashShift();
+    if (!current) throw new Error("Nao existe caixa aberto.");
+    const expectedAmount = this.withCashExpected(current).expectedAmount;
+    const counted = roundMoney(Math.max(0, Number(countedAmount) || 0));
+    const difference = roundMoney(counted - expectedAmount);
+    const note = String(closingNote || "").trim();
+    if (Math.abs(difference) > 0.009 && !note) throw new Error("Informe uma observacao para justificar a diferenca do caixa.");
+    const closed: PdvCashShift = { ...current, status: "Fechado", closedAt: new Date().toISOString(), expectedAmount, countedAmount: counted, difference, closingNote: note, closingDevice: originDevice };
+    await this.writeJsonSetting("cash_shift_history", [closed, ...this.getCashShiftHistory()].slice(0, 30));
+    this.requireDb().run("DELETE FROM pdv_settings WHERE key = 'cash_shift_current'");
+    await this.persist();
+    return closed;
+  }
+
+  private withCashExpected(shift: PdvCashShift): PdvCashShift {
+    const salesCash = this.getSales().filter((sale) => sale.status !== "Cancelada" && sale.createdAt >= shift.openedAt && (!shift.closedAt || sale.createdAt <= shift.closedAt)).flatMap((sale) => sale.payments).filter((payment) => payment.method === "Dinheiro").reduce((sum, payment) => sum + payment.amount, 0);
+    const periodFilter = `created_at >= ?${shift.closedAt ? " AND created_at <= ?" : ""}`;
+    const periodParams = shift.closedAt ? [shift.openedAt, shift.closedAt] : [shift.openedAt];
+    const receivedCash = selectAll<{ total: number }>(this.requireDb(), `SELECT COALESCE(SUM(amount), 0) AS total FROM receivable_payments WHERE method = 'Dinheiro' AND ${periodFilter}`, periodParams)[0]?.total || 0;
+    const paidCash = selectAll<{ total: number }>(this.requireDb(), `SELECT COALESCE(SUM(amount), 0) AS total FROM payable_payments WHERE method = 'Dinheiro' AND ${periodFilter}`, periodParams)[0]?.total || 0;
+    const supplies = shift.movements.filter((item) => item.type === "Suprimento").reduce((sum, item) => sum + item.amount, 0);
+    const withdrawals = shift.movements.filter((item) => item.type === "Sangria").reduce((sum, item) => sum + item.amount, 0);
+    return { ...shift, expectedAmount: roundMoney(shift.openingAmount + salesCash + receivedCash - paidCash + supplies - withdrawals) };
+  }
+
+  private async writeJsonSetting(key: string, value: unknown): Promise<void> {
+    this.requireDb().run("INSERT INTO pdv_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, JSON.stringify(value)]);
+    await this.persist();
+  }
+
   async updateProducts(ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }): Promise<void> {
     if (!ids.length) {
       return;
@@ -1179,25 +1259,41 @@ export class PdvStore {
     await this.persist();
   }
 
-  async saveTableItems(tableNumber: number, items: PdvCartItem[], subtables?: string[]): Promise<void> {
+  async saveTableItems(tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[]): Promise<void> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     validateCartItems(items);
     const db = this.requireDb();
+    for (const item of items) {
+      if (selectAll(db, "SELECT item_id FROM closed_table_items WHERE item_id = ?", [item.id]).length) {
+        throw new Error("Esta conta já foi fechada em outro terminal. Atualize a mesa antes de continuar.");
+      }
+    }
     const currentSession = selectAll<{ status: PdvTableStatus; subtablesJson: string }>(
       db,
       "SELECT status, subtables_json AS subtablesJson FROM table_sessions WHERE table_number = ? LIMIT 1",
       [tableNumber]
     )[0];
     const currentItems = this.getTableItems(tableNumber);
-    const nextSubtables = subtables === undefined ? parseSubtableNames(currentSession?.subtablesJson) : normalizeSubtableNames(subtables);
+    const baseline = Array.isArray(baseItemIds) ? new Set(baseItemIds.map(String)) : null;
+    // Cada terminal informa os itens que conhecia ao abrir/atualizar a mesa.
+    // Itens incluidos por outro terminal depois dessa base sao preservados;
+    // alteracoes e remocoes dos itens conhecidos continuam sendo aplicadas.
+    const concurrentItems = baseline ? currentItems.filter((item) => !baseline.has(item.id) && !items.some((candidate) => candidate.id === item.id)) : [];
+    const resolvedItems = baseline ? [...items, ...concurrentItems] : items;
+    const currentSubtables = parseSubtableNames(currentSession?.subtablesJson);
+    const nextSubtables = subtables === undefined
+      ? currentSubtables
+      : baseline
+        ? normalizeSubtableNames([...subtables, ...currentSubtables])
+        : normalizeSubtableNames(subtables);
     if (
       (items.length > 0 || !currentSession || currentSession.status === "Reservada") &&
-      tableItemsPersistenceKey(currentItems) === tableItemsPersistenceKey(items) &&
+      tableItemsPersistenceKey(currentItems) === tableItemsPersistenceKey(resolvedItems) &&
       JSON.stringify(parseSubtableNames(currentSession?.subtablesJson)) === JSON.stringify(nextSubtables)
     ) {
       return;
     }
-    if (!items.length && !subtables?.length) {
+    if (!resolvedItems.length && !subtables?.length) {
       db.run("BEGIN IMMEDIATE");
       try {
         db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
@@ -1222,7 +1318,7 @@ export class PdvStore {
       [randomUUID(), tableNumber, new Date().toISOString()]
     );
     if (subtables !== undefined) {
-      db.run("UPDATE table_sessions SET subtables_json = ? WHERE table_number = ?", [JSON.stringify(normalizeSubtableNames(subtables)), tableNumber]);
+      db.run("UPDATE table_sessions SET subtables_json = ? WHERE table_number = ?", [JSON.stringify(nextSubtables), tableNumber]);
     }
     db.run("BEGIN IMMEDIATE");
     try {
@@ -1231,7 +1327,7 @@ export class PdvStore {
         `INSERT INTO table_items (id, table_number, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, paid_quantity, subtable_name, note, complements_json, sort_order)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
-      items.forEach((item, index) => {
+      resolvedItems.forEach((item, index) => {
         statement.run([
           item.id,
           tableNumber,
@@ -1466,6 +1562,7 @@ export class PdvStore {
       // Cada pagamento fica como um lancamento proprio, ligado pelo mesmo
       // table_session_id. Isso preserva nome, recibo e auditoria de cada pessoa.
       insertSale(db, sale);
+      for (const item of table.items) db.run("INSERT OR IGNORE INTO closed_table_items (item_id, table_session_id, sale_id) VALUES (?, ?, ?)", [item.id, table.sessionId || "", sale.id]);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
       db.run("COMMIT");
@@ -1542,11 +1639,28 @@ export class PdvStore {
     return sale;
   }
 
-  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Servidor", operationId?: string, observations = ""): Promise<PdvSale> {
+  async closeTablePartial(tableNumber: number, selectedItems: PdvCartItem[], payments: PdvPayment[], discount = 0, originDevice = "Servidor", operationId?: string, observations = "", closeScope?: PdvCloseScope): Promise<PdvSale> {
     tableNumber = this.normalizeTableNumber(tableNumber);
+    const requestJson = JSON.stringify({ tableNumber, selectedItems, payments: payments.map(({ id: _id, ...payment }) => payment), discount, observations, closeScope });
+    if (closeScope && (!operationId || !closeScope.sessionId || !["main", "subtable"].includes(closeScope.kind) || (closeScope.kind === "subtable" && !closeScope.subtableName?.trim()))) {
+      throw new Error("Fechamento sem identificação da conta. Atualize a mesa e tente novamente.");
+    }
     if (operationId) {
+      const completed = selectAll<{ requestJson: string; saleId: string }>(this.requireDb(), "SELECT request_json AS requestJson, sale_id AS saleId FROM scope_close_operations WHERE operation_id = ?", [operationId])[0];
+      if (completed) {
+        if (completed.requestJson !== requestJson) throw new Error("Esta operação já foi usada com outro pagamento.");
+        const previous = this.getSaleById(completed.saleId);
+        if (!previous) throw new Error("Pagamento registrado, mas venda indisponível. Consulte o Histórico.");
+        await this.persist();
+        return previous;
+      }
       const operation = selectAll<{ saleId: string }>(this.requireDb(), "SELECT sale_id AS saleId FROM partial_operations WHERE operation_id = ?", [operationId])[0];
-      if (operation) return this.getSaleById(operation.saleId) || this.getSales({}, 1)[0];
+      if (operation) {
+        const previous = this.getSaleById(operation.saleId);
+        if (!previous || previous.tableNumber !== tableNumber || closeScope) throw new Error("Operação já registrada. Consulte o Histórico.");
+        await this.persist();
+        return previous;
+      }
     }
     const table = this.getTables().find((item) => item.number === tableNumber);
     if (!table || !table.items.length) {
@@ -1555,7 +1669,17 @@ export class PdvStore {
     if (!selectedItems.length) {
       throw new Error("Selecione ao menos um item para o fechamento parcial.");
     }
+    if (closeScope && table.sessionId !== closeScope.sessionId) throw new Error("Esta conta já foi fechada ou pertence a outro atendimento. Atualize a mesa.");
     validateCartItems(selectedItems);
+    const inScope = (item: PdvCartItem) => closeScope?.kind === "main" ? !item.subtableName : (item.subtableName || "") === closeScope?.subtableName;
+    if (closeScope) {
+      const expected = table.items.filter((item) => inScope(item) && unpaidQuantity(item) > 0.009);
+      if (!expected.length || new Set(selectedItems.map((item) => item.id)).size !== expected.length || selectedItems.length !== expected.length || expected.some((item) => {
+        const selected = selectedItems.find((value) => value.id === item.id);
+        return !selected || Math.abs(selected.quantity - unpaidQuantity(item)) > 0.009;
+      })) throw new Error("A conta foi alterada em outro terminal. Atualize os itens antes de fechar.");
+    }
+
     const selectedById = new Map(selectedItems.map((item) => [item.id, item]));
     selectedItems.forEach((selected) => {
       const source = table.items.find((item) => item.id === selected.id);
@@ -1566,7 +1690,7 @@ export class PdvStore {
         throw new Error(`A quantidade selecionada de ${selected.productName} ultrapassa a mesa.`);
       }
     });
-    const nextItems = table.items.map((item) => {
+    const nextItems = closeScope ? table.items.filter((item) => !inScope(item)) : table.items.map((item) => {
       const selected = selectedById.get(item.id);
       if (!selected) {
         return item;
@@ -1578,16 +1702,24 @@ export class PdvStore {
       ...payment,
       description: payment.description?.trim() || observations.trim() || undefined
     }));
-    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, status: "Parcial", items: selectedItems, discount, payments: identifiedPayments, originDevice, operationId, observations });
+    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, status: closeScope ? "Finalizada" : "Parcial", items: selectedItems, discount, payments: identifiedPayments, originDevice, operationId, observations });
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
       insertSale(db, sale);
+      if (closeScope && operationId) {
+        db.run("INSERT INTO scope_close_operations (operation_id, request_json, sale_id) VALUES (?, ?, ?)", [operationId, requestJson, sale.id]);
+        for (const item of table.items.filter(inScope)) db.run("INSERT OR IGNORE INTO closed_table_items (item_id, table_session_id, sale_id) VALUES (?, ?, ?)", [item.id, table.sessionId || "", sale.id]);
+      }
       if (operationId) db.run("INSERT OR IGNORE INTO partial_operations (operation_id, sale_id) VALUES (?, ?)", [operationId, sale.id]);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       writeTableItems(db, tableNumber, nextItems);
-      // O parcial registra os itens pagos, mas deixa o restante da conta aberto.
-      db.run("UPDATE table_sessions SET status = 'Ocupada' WHERE table_number = ?", [tableNumber]);
+      const remainingSubtables = closeScope?.kind === "subtable" ? (table.subtables || []).filter((name) => name !== closeScope.subtableName) : table.subtables || [];
+      if (closeScope && !nextItems.length && !remainingSubtables.length) {
+        db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
+      } else {
+        db.run("UPDATE table_sessions SET status = 'Ocupada', subtables_json = ? WHERE table_number = ?", [JSON.stringify(remainingSubtables), tableNumber]);
+      }
       db.run("COMMIT");
     } catch (error) {
       db.run("ROLLBACK");
@@ -1815,7 +1947,7 @@ export class PdvStore {
         number,
         status: visualStatus,
         openedAt: items.length ? session?.openedAt || null : null,
-        people: session?.people || 1,
+        people: visualStatus === "Livre" ? 0 : session?.people || 0,
         note: items.length || session?.status === "Reservada" ? session?.note || "" : "",
         total: remainingTotal,
         items,
@@ -2038,6 +2170,16 @@ export class PdvStore {
         operation_id TEXT PRIMARY KEY,
         sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE
       );
+      CREATE TABLE IF NOT EXISTS closed_table_items (
+        item_id TEXT PRIMARY KEY,
+        table_session_id TEXT NOT NULL,
+        sale_id TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS scope_close_operations (
+        operation_id TEXT PRIMARY KEY,
+        request_json TEXT NOT NULL,
+        sale_id TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS table_transfer_operations (
         operation_id TEXT PRIMARY KEY,
         source_table_number INTEGER NOT NULL,
@@ -2238,7 +2380,8 @@ export class PdvStore {
       receiptFooter: map.get("receipt_footer") || DEFAULT_PDV_SETTINGS.receiptFooter,
       receiptAllowClientPrint: parseBooleanSetting(map.get("receipt_allow_client_print"), true),
       receiptGroupIdenticalItems: parseBooleanSetting(map.get("receipt_group_identical_items"), true),
-      receiptUseColor: parseBooleanSetting(map.get("receipt_use_color"), false)
+      receiptUseColor: parseBooleanSetting(map.get("receipt_use_color"), false),
+      cashControlMode: map.get("cash_control_mode") === "manual" ? "manual" : "automatic"
     };
   }
 

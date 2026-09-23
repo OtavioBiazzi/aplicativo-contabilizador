@@ -6,7 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import type { PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCashShift, PdvCloseScope, PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
@@ -24,17 +24,20 @@ interface LocalServerOptions {
   savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string, saleType?: PdvSale["type"]) => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
-  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[]) => Promise<void>;
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[]) => Promise<void>;
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string) => Promise<PdvCartItem[]>;
   appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
   cancelPdvTable: (tableNumber: number, originDevice?: string, subtableName?: string) => Promise<PdvSale | null>;
-  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string, observations?: string) => Promise<PdvSale>;
+  savePdvTablePartial: (tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string, observations?: string, closeScope?: PdvCloseScope) => Promise<PdvSale>;
   updatePdvSalePayments: (saleId: string, payments: PdvPayment[]) => Promise<PdvSale>;
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
   savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>;
+  openPdvCashShift: (openingAmount: number, originDevice?: string, responsible?: string, note?: string) => Promise<PdvCashShift>;
+  addPdvCashMovement: (type: "Suprimento" | "Sangria", amount: number, note?: string, originDevice?: string) => Promise<PdvCashShift>;
+  closePdvCashShift: (countedAmount: number, originDevice?: string, note?: string) => Promise<PdvCashShift>;
   savePdvCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
   savePdvReceivable: (draft: PdvReceivableDraft) => Promise<PdvReceivable>;
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, originDevice?: string, operationId?: string) => Promise<PdvReceivable>;
@@ -215,6 +218,19 @@ export class LocalServer {
       response.json(await this.options.getPdvSnapshot(normalizeEntryLimit(request.query.salesLimit)));
     });
 
+    app.post("/api/pdv/cash-shift/open", this.authorize("create"), async (request, response) => {
+      try { const shift = await this.options.openPdvCashShift(Number(request.body?.openingAmount || 0), String(request.header("x-device-name") || "Cliente remoto"), String(request.body?.responsible || ""), String(request.body?.note || "")); this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange(); response.status(201).json({ shift }); }
+      catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel abrir o caixa." }); }
+    });
+    app.post("/api/pdv/cash-shift/movements", this.authorize("create"), async (request, response) => {
+      try { const shift = await this.options.addPdvCashMovement(request.body?.type, Number(request.body?.amount || 0), String(request.body?.note || ""), String(request.header("x-device-name") || "Cliente remoto")); this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange(); response.status(201).json({ shift }); }
+      catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel movimentar o caixa." }); }
+    });
+    app.post("/api/pdv/cash-shift/close", this.authorize("create"), async (request, response) => {
+      try { const shift = await this.options.closePdvCashShift(Number(request.body?.countedAmount || 0), String(request.header("x-device-name") || "Cliente remoto"), String(request.body?.note || "")); this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange(); response.json({ shift }); }
+      catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel fechar o caixa." }); }
+    });
+
     app.post("/api/pdv/sales/direct", this.authorize("create"), async (request, response) => {
       try {
         const device = String(request.header("x-device-name") || "Cliente remoto");
@@ -329,7 +345,7 @@ export class LocalServer {
     app.put("/api/pdv/tables/:number/items", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
-        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : [], Array.isArray(request.body?.subtables) ? request.body.subtables : undefined);
+        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : [], Array.isArray(request.body?.subtables) ? request.body.subtables : undefined, Array.isArray(request.body?.baseItemIds) ? request.body.baseItemIds : undefined);
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
         response.json({ ok: true });
@@ -547,7 +563,8 @@ export class LocalServer {
           Number(request.body?.discount || 0),
           String(request.header("x-device-name") || "Cliente remoto"),
           String(request.header("x-idempotency-key") || "").trim() || undefined,
-          String(request.body?.observations || "")
+          String(request.body?.observations || ""),
+          request.body?.closeScope
         );
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
