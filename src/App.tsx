@@ -2360,6 +2360,27 @@ export function App() {
     }
   };
 
+  const chooseAnotherStartupRole = async () => {
+    if (startupRoleBusy) return;
+    setStartupRoleBusy(true);
+    setStartupRole(null);
+    setRememberStartupRole(false);
+    setEditingStartupConnection(false);
+    setRemoteMessage("");
+    setModulesMenuOpen(false);
+    setActiveTab("tables");
+    autoConnectionAttemptKey.current = null;
+    window.localStorage.removeItem(STARTUP_ROLE_STORAGE_KEY);
+    try {
+      if (remoteSessionRef.current) disconnectRemoteClient();
+      if (server?.running) setServer(await window.caixa.stopServer());
+    } catch (error) {
+      setRemoteMessage(startupConnectionMessage(error, "Nao foi possivel encerrar o modo atual."));
+    } finally {
+      setStartupRoleBusy(false);
+    }
+  };
+
   const saveStartupClientConnection = async () => {
     if (!settings || startupRoleBusy) return;
     const host = startupConnectionHost.trim();
@@ -2440,7 +2461,7 @@ export function App() {
           <div className="startup-role-actions">
             <button type="button" disabled={startupRoleBusy || !auto.host} onClick={() => void selectStartupRole("client")}><RefreshCw size={16} /> Tentar novamente</button>
             <button type="button" onClick={() => { setStartupConnectionHost(auto.host); setStartupConnectionPassword(auto.password); setStartupConnectionAutomatic(auto.mode === "client"); setRemoteMessage(""); setEditingStartupConnection((current) => !current); }}>Alterar conexao</button>
-            <button type="button" onClick={() => { window.localStorage.removeItem(STARTUP_ROLE_STORAGE_KEY); setStartupRole(null); setRemoteMessage(""); }}>Escolher outro modo</button>
+            <button type="button" disabled={startupRoleBusy} onClick={() => void chooseAnotherStartupRole()}>Escolher outro modo</button>
           </div>
           {editingStartupConnection && <form className="startup-connection-editor" onSubmit={(event) => { event.preventDefault(); void saveStartupClientConnection(); }}>
             <label><span>IP ou endereco do servidor</span><input autoFocus value={startupConnectionHost} onChange={(event) => setStartupConnectionHost(event.target.value)} placeholder="192.168.1.10:4317" autoComplete="off" /></label>
@@ -2942,6 +2963,7 @@ export function App() {
             onToast={showToast}
             onConnectRemote={connectRemoteClient}
             onDisconnectRemote={disconnectRemoteClient}
+            onChooseRole={chooseAnotherStartupRole}
             onRefreshRemote={() => refreshRemote()}
             onSubmitRemote={submitRemoteEntry}
             onEditRemote={editRemoteEntry}
@@ -6404,6 +6426,7 @@ function ServerPanel({
   onToast,
   onConnectRemote,
   onDisconnectRemote,
+  onChooseRole,
   onRefreshRemote,
   onSubmitRemote,
   onEditRemote,
@@ -6420,6 +6443,7 @@ function ServerPanel({
   onToast: (tone: ToastState["tone"], message: string) => void;
   onConnectRemote: (host: string, password: string, deviceName: string) => Promise<boolean>;
   onDisconnectRemote: () => void;
+  onChooseRole: () => Promise<void>;
   onRefreshRemote: () => Promise<void> | void;
   onSubmitRemote: (draft: EntryDraft) => Promise<void>;
   onEditRemote: (entry: LedgerEntry) => Promise<void>;
@@ -6520,6 +6544,11 @@ function ServerPanel({
           <strong>{remoteSession ? remoteSession.baseUrl : server.running ? server.url : "Aguardando abertura"}</strong>
           <span>{remoteSession ? `Este computador: ${remoteSession.deviceName}` : server.ips.join(" | ") || "Nenhum IP local encontrado"}</span>
         </div>
+      </div>
+
+      <div className="server-role-switch">
+        <button type="button" className="ghost-button" onClick={() => void onChooseRole()}><RefreshCw size={16} /> Trocar entre Servidor e Cliente</button>
+        <small>Encerra a conexao atual e mostra novamente a escolha do modo. Voce pode definir outro padrao.</small>
       </div>
 
       <div className="subtab-row">

@@ -13833,6 +13833,18 @@ body {
   gap: 10px;
 }
 
+.server-role-switch {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.server-role-switch small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .admin-workspace .server-url,
 .admin-workspace .server-panel :is(.flat-section, .connect-panel, .permission-box) {
   border-color: var(--admin-border);
