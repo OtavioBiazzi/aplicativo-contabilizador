@@ -39,11 +39,11 @@ contextBridge.exposeInMainWorld("caixa", {
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, operationId?: string) => ipcRenderer.invoke("pdv:receiveReceivable", id, payment, operationId),
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => ipcRenderer.invoke("pdv:updateReceivable", id, patch),
   cancelPdvReceivable: (id: string) => ipcRenderer.invoke("pdv:cancelReceivable", id),
-  deletePdvReceivable: (id: string) => ipcRenderer.invoke("pdv:deleteReceivable", id),
+  deletePdvReceivable: (id: string, permanent = false) => ipcRenderer.invoke("pdv:deleteReceivable", id, permanent),
   savePdvPayable: (draft: PdvPayableDraft) => ipcRenderer.invoke("pdv:savePayable", draft),
   payPdvPayable: (id: string, payment: PdvPayablePayment, operationId?: string) => ipcRenderer.invoke("pdv:payPayable", id, payment, operationId),
   cancelPdvPayable: (id: string) => ipcRenderer.invoke("pdv:cancelPayable", id),
-  deletePdvPayable: (id: string) => ipcRenderer.invoke("pdv:deletePayable", id),
+  deletePdvPayable: (id: string, permanent = false) => ipcRenderer.invoke("pdv:deletePayable", id, permanent),
   printPdvReceipt: (
     sale: PdvSale,
     customer?: PdvCustomer,

@@ -189,6 +189,8 @@ export interface AppSettings {
   fieldSize: "small" | "medium" | "large";
   density: DensityMode;
   simpleMode: boolean;
+  moduleWindowMode: "window" | "fullscreen";
+  headerHeight: "standard" | "compact";
   layout: LayoutMode;
   operationMode: OperationMode;
   profiles: Record<string, Partial<AppSettings>>;

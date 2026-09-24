@@ -101,6 +101,8 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     fieldSize: "medium",
     density: "normal",
     simpleMode: true,
+    moduleWindowMode: "window",
+    headerHeight: "standard",
     layout: "complete",
     operationMode: "pdv",
     activeProfile: "Perfil PC",

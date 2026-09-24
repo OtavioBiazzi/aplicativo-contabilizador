@@ -47,11 +47,11 @@ export interface CaixaApi {
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, operationId?: string) => Promise<PdvReceivable>;
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   cancelPdvReceivable: (id: string) => Promise<void>;
-  deletePdvReceivable: (id: string) => Promise<void>;
+  deletePdvReceivable: (id: string, permanent?: boolean) => Promise<void>;
   savePdvPayable: (draft: PdvPayableDraft) => Promise<PdvPayable>;
   payPdvPayable: (id: string, payment: PdvPayablePayment, operationId?: string) => Promise<PdvPayable>;
   cancelPdvPayable: (id: string) => Promise<void>;
-  deletePdvPayable: (id: string) => Promise<void>;
+  deletePdvPayable: (id: string, permanent?: boolean) => Promise<void>;
   printPdvReceipt: (
     sale: PdvSale,
     customer?: PdvCustomer,

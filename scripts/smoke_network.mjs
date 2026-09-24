@@ -49,6 +49,7 @@ const server = new LocalServer({
   removeEntry: async () => undefined,
   deleteEntry: async () => undefined,
   getPdvSnapshot: (salesLimit) => pdvStore.getSnapshot(salesLimit),
+  getPdvTable: (number) => pdvStore.getTable(number),
   savePdvDirectSale: (items, discount, payments, origin, operationId) => pdvStore.saveSale({ type: "Venda direta", items, discount, payments, originDevice: origin, operationId }),
   openPdvTable: (number, people, note) => pdvStore.openTable(number, people, note),
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
@@ -66,11 +67,11 @@ const server = new LocalServer({
   receivePdvReceivable: (id, payment, origin, operationId) => pdvStore.receiveReceivable(id, payment, origin, operationId),
   updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
   cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
-  deletePdvReceivable: (id) => pdvStore.deleteReceivable(id),
+  deletePdvReceivable: (id, permanent) => pdvStore.deleteReceivable(id, permanent),
   savePdvPayable: (draft) => pdvStore.savePayable(draft),
   payPdvPayable: (id, payment, origin, operationId) => pdvStore.payPayable(id, payment, origin, operationId),
   cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
-  deletePdvPayable: (id) => pdvStore.deletePayable(id),
+  deletePdvPayable: (id, permanent) => pdvStore.deletePayable(id, permanent),
   printPdvReceipt: async ({ sale }) => {
     remotePrintRequests += 1;
     return { ok: Boolean(sale?.id), message: "Impressao smoke recebida." };
@@ -312,6 +313,13 @@ const deleteReceivableResponse = await fetch(`http://127.0.0.1:43991/api/pdv/rec
 if (!deleteReceivableResponse.ok || (await pdvStore.getSnapshot()).receivables.find((entry) => entry.id === remoteReceivable.id)?.status !== "Excluida") {
   throw new Error("Conta a receber excluida nao permaneceu no historico com o status correto.");
 }
+const purgeReceivableResponse = await fetch(`http://127.0.0.1:43991/api/pdv/receivables/${remoteReceivable.id}?permanent=1`, { method: "DELETE", headers });
+if (!purgeReceivableResponse.ok || (await pdvStore.getSnapshot()).receivables.some((entry) => entry.id === remoteReceivable.id)) {
+  throw new Error(`Conta a receber excluida nao foi apagada definitivamente no servidor: ${await purgeReceivableResponse.text()}`);
+}
+if (!(await pdvStore.getSnapshot()).recentSales.some((sale) => sale.id === remoteReceivable.saleId)) {
+  throw new Error("Apagar a conta a receber removeu a venda vinculada.");
+}
 
 const payableDraftId = crypto.randomUUID();
 const payableDraft = {
@@ -370,6 +378,10 @@ const deletePayableResponse = await fetch(`http://127.0.0.1:43991/api/pdv/payabl
 if (!deletePayableResponse.ok || (await pdvStore.getSnapshot()).payables.find((entry) => entry.id === remotePayable.id)?.status !== "Excluida") {
   throw new Error("Conta a pagar excluida nao permaneceu no historico com o status correto.");
 }
+const purgePayableResponse = await fetch(`http://127.0.0.1:43991/api/pdv/payables/${remotePayable.id}?permanent=1`, { method: "DELETE", headers });
+if (!purgePayableResponse.ok || (await pdvStore.getSnapshot()).payables.some((entry) => entry.id === remotePayable.id)) {
+  throw new Error("Conta a pagar excluida nao foi apagada definitivamente no servidor.");
+}
 
 const open = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });
 if (!open.ok) throw new Error(`Cliente nao conseguiu abrir mesa no servidor: ${await open.text()}`);
@@ -380,6 +392,10 @@ const save = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/items", {
   body: JSON.stringify({ items: [remoteSubtableItem], subtables: ["Cliente remoto", "Submesa vazia"] })
 });
 if (!save.ok) throw new Error(`Cliente nao conseguiu salvar item no servidor: ${await save.text()}`);
+const savedResponse = await save.json();
+if (savedResponse.table?.number !== 7 || savedResponse.table.items[0]?.subtableName !== "Cliente remoto") {
+  throw new Error("Servidor nao retornou a mesa confirmada para atualizar o cliente sem snapshot completo.");
+}
 const savedTable = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 7);
 if (!savedTable?.subtables?.includes("Cliente remoto") || !savedTable.subtables.includes("Submesa vazia") || savedTable.items[0]?.subtableName !== "Cliente remoto") {
   throw new Error("Cliente nao preservou submesas ao salvar a mesa no servidor.");
@@ -391,6 +407,10 @@ const partial = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/partial", {
   body: JSON.stringify({ items: [{ ...remoteSubtableItem, quantity: 1, total: 12 }], payments: [{ id: crypto.randomUUID(), method: "Debito", amount: 12 }], observations: "Pessoa 1" })
 });
 if (!partial.ok) throw new Error(`Cliente nao conseguiu registrar parcial no servidor: ${await partial.text()}`);
+const partialResponse = await partial.json();
+if (partialResponse.table?.number !== 7 || partialResponse.table.items[0]?.paidQuantity !== 1) {
+  throw new Error("Fechamento parcial nao retornou a mesa atualizada para o cliente.");
+}
 const partialTable = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 7);
 if (partialTable?.items[0]?.paidQuantity !== 1 || partialTable.total !== 12) throw new Error("Servidor nao refletiu o saldo parcial da mesa para o cliente.");
 

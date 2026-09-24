@@ -606,6 +606,7 @@ async function bootstrap() {
       await exportLedgerIfEnabled();
     },
     getPdvSnapshot: (salesLimit) => pdvStore.getSnapshot(salesLimit),
+    getPdvTable: (number) => pdvStore.getTable(number),
     savePdvDirectSale: async (items, discount, payments, originDevice, operationId, saleType) => {
       const sale = await pdvStore.saveSale({ type: saleType === "Mesa" ? "Mesa" : saleType === "Onibus" ? "Onibus" : "Venda direta", items, discount, payments, originDevice, operationId });
       await exportLedgerIfEnabled();
@@ -629,11 +630,11 @@ async function bootstrap() {
     receivePdvReceivable: (id, payment, originDevice, operationId) => pdvStore.receiveReceivable(id, payment, originDevice, operationId),
     updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
     cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
-    deletePdvReceivable: (id) => pdvStore.deleteReceivable(id),
+    deletePdvReceivable: (id, permanent) => pdvStore.deleteReceivable(id, permanent),
     savePdvPayable: (draft) => pdvStore.savePayable(draft),
     payPdvPayable: (id, payment, originDevice, operationId) => pdvStore.payPayable(id, payment, originDevice, operationId),
     cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
-    deletePdvPayable: (id) => pdvStore.deletePayable(id),
+    deletePdvPayable: (id, permanent) => pdvStore.deletePayable(id, permanent),
     printPdvReceipt: async ({ sale, customer, receivable, customerName, customerDocument }) => {
       const snapshot = await pdvStore.getSnapshot();
       const hostWindow = mainWindow || BrowserWindow.getAllWindows()[0];
@@ -950,8 +951,8 @@ function registerIpc() {
     publishPdvChanged();
   });
 
-  ipcMain.handle("pdv:deleteReceivable", async (_event, id: string) => {
-    await pdvStore.deleteReceivable(id);
+  ipcMain.handle("pdv:deleteReceivable", async (_event, id: string, permanent = false) => {
+    await pdvStore.deleteReceivable(id, permanent);
     publishPdvChanged();
   });
 
@@ -972,8 +973,8 @@ function registerIpc() {
     publishPdvChanged();
   });
 
-  ipcMain.handle("pdv:deletePayable", async (_event, id: string) => {
-    await pdvStore.deletePayable(id);
+  ipcMain.handle("pdv:deletePayable", async (_event, id: string, permanent = false) => {
+    await pdvStore.deletePayable(id, permanent);
     publishPdvChanged();
   });
 

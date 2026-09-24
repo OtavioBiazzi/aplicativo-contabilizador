@@ -24,8 +24,10 @@ import {
   LayoutGrid,
   LayoutPanelTop,
   ListFilter,
+  Maximize2,
   MinusCircle,
   Minus,
+  Minimize2,
   MonitorUp,
   Palette,
   Pin,
@@ -299,7 +301,8 @@ const REMOTE_SESSION_STORAGE_KEY = "caixaRemoteSession";
 const DAILY_UPDATE_CHECK_KEY = "caixa.update.last-check-date.v1";
 const QUICK_ENTRY_MODE_STORAGE_PREFIX = "caixaQuickEntryMode";
 const HISTORY_FILTERS_STORAGE_KEY = "caixaHistoryFiltersV2";
-const REMOTE_ENTRY_LIMIT = 0;
+const REMOTE_ENTRY_LIMIT = 300;
+const REMOTE_OPERATIONAL_SALES_LIMIT = 300;
 const HISTORY_PAGE_SIZE = 160;
 const STARTUP_ROLE_STORAGE_KEY = "caixa.startup-role.v1";
 
@@ -1234,6 +1237,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("tables");
   const [baseOperationalTab, setBaseOperationalTab] = useState<"sale" | "tables">("tables");
   const [moduleWindowOffset, setModuleWindowOffset] = useState({ x: 0, y: 0 });
+  const [moduleWindowMaximized, setModuleWindowMaximized] = useState<boolean | null>(null);
   const moduleWindowDrag = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [payableCreateRequest, setPayableCreateRequest] = useState<{ supplier: string; nonce: number } | null>(null);
   const [pdvViewNonce, setPdvViewNonce] = useState(0);
@@ -1287,6 +1291,9 @@ export function App() {
   const pdvReloadTimer = useRef<number | null>(null);
   const remoteRefreshInFlight = useRef<Promise<void> | null>(null);
   const remoteRefreshQueued = useRef(false);
+  const remoteRefreshFullQueued = useRef(false);
+  const remoteFullSalesRef = useRef(false);
+  remoteFullSalesRef.current = (["history", "reports", "receivables", "clients"] as TabKey[]).includes(activeTab);
   const autoConnectionAttemptKey = useRef<string | null>(null);
   const dailyUpdateCheckStarted = useRef(false);
 
@@ -1581,6 +1588,7 @@ export function App() {
       document.documentElement.dataset.floatingTheme = resolvedFloatingTheme;
       document.documentElement.dataset.density = settings.density;
       document.documentElement.dataset.simpleMode = settings.simpleMode ? "true" : "false";
+      document.documentElement.dataset.headerHeight = settings.headerHeight || "standard";
       document.documentElement.dataset.fieldSize = settings.fieldSize;
       document.documentElement.dataset.floatingBorderless = settings.floating.borderless ? "true" : "false";
       document.documentElement.dataset.floatingCornerStyle = settings.floating.cornerStyle || "rounded";
@@ -1884,25 +1892,26 @@ export function App() {
   };
 
   const applyRemotePdvSnapshot = (pdv: PdvSnapshot) => {
-    // O endpoint retorna o estado completo. Substituir o cache tambem remove
-    // vendas excluidas e evita manter versoes antigas no Historico do cliente.
+    // O PDV recebe apenas as vendas recentes. Caixa e Relatorios pedem o
+    // historico completo ao abrir, sem transferi-lo em toda interacao da mesa.
     setRemotePdvSnapshot(pdv);
     setRemotePdvSales(pdv.recentSales);
     setRemotePdvCustomers(pdv.customers);
     setRemotePdvReceivables(pdv.receivables);
   };
 
-  const refreshRemote = async (session = remoteSessionRef.current) => {
+  const refreshRemote = async (session = remoteSessionRef.current, fullSales = remoteFullSalesRef.current) => {
     if (!session || !settings) {
       return;
     }
     if (remoteRefreshInFlight.current) {
       remoteRefreshQueued.current = true;
+      remoteRefreshFullQueued.current ||= fullSales;
       return remoteRefreshInFlight.current;
     }
     const request = Promise.all([
-      remoteRequest<RemoteEntriesResponse>(session, REMOTE_ENTRY_LIMIT ? `/api/entries?limit=${REMOTE_ENTRY_LIMIT}` : "/api/entries"),
-      remoteRequest<PdvSnapshot>(session, "/api/pdv/snapshot")
+      remoteRequest<RemoteEntriesResponse>(session, fullSales ? "/api/entries" : `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`),
+      remoteRequest<PdvSnapshot>(session, fullSales ? "/api/pdv/snapshot" : `/api/pdv/snapshot?salesLimit=${REMOTE_OPERATIONAL_SALES_LIMIT}`)
     ]).then(([data, pdv]) => {
       const current = remoteSessionRef.current;
       if (!current || current.baseUrl !== session.baseUrl || current.password !== session.password) {
@@ -1929,8 +1938,10 @@ export function App() {
     } finally {
       remoteRefreshInFlight.current = null;
       if (remoteRefreshQueued.current) {
+        const queuedFull = remoteRefreshFullQueued.current;
         remoteRefreshQueued.current = false;
-        void refreshRemote(remoteSessionRef.current).catch((error) => {
+        remoteRefreshFullQueued.current = false;
+        void refreshRemote(remoteSessionRef.current, queuedFull || remoteFullSalesRef.current).catch((error) => {
           setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel concluir a sincronizacao remota.");
         });
       }
@@ -2046,7 +2057,7 @@ export function App() {
         connectedAt: new Date().toISOString()
       };
       const data = await remoteRequest<RemoteEntriesResponse>(pendingSession, `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`);
-      const remotePdv = await remoteRequest<PdvSnapshot>(pendingSession, "/api/pdv/snapshot");
+      const remotePdv = await remoteRequest<PdvSnapshot>(pendingSession, `/api/pdv/snapshot?salesLimit=${REMOTE_OPERATIONAL_SALES_LIMIT}`);
       applyRemotePdvSnapshot(remotePdv);
       const connectedSession: RemoteClientSession = {
         ...pendingSession,
@@ -2103,6 +2114,7 @@ export function App() {
       remotePdvRefreshTimer.current = null;
     }
     remoteRefreshQueued.current = false;
+    remoteRefreshFullQueued.current = false;
     socket?.close();
     remoteSocket.current = null;
     remoteSessionRef.current = null;
@@ -2325,11 +2337,20 @@ export function App() {
     if (targetTab === "sale" || targetTab === "tables") {
       setBaseOperationalTab(targetTab);
       setModuleWindowOffset({ x: 0, y: 0 });
+      setModuleWindowMaximized(null);
     } else if (activeTab !== targetTab) {
       setModuleWindowOffset({ x: 0, y: 0 });
+      setModuleWindowMaximized(null);
     }
     setActiveTab(targetTab);
   };
+
+  useEffect(() => {
+    if (!remoteSession || !remoteFullSalesRef.current) return;
+    void refreshRemote(remoteSessionRef.current, true).catch((error) => {
+      setRemoteMessage(error instanceof Error ? error.message : "Nao foi possivel carregar o historico completo.");
+    });
+  }, [activeTab, remoteSession?.baseUrl]);
 
   const selectStartupRole = async (role: "server" | "client") => {
     if (!settings || !server || startupRoleBusy) return;
@@ -2544,6 +2565,7 @@ export function App() {
   const secondaryTabActive = availableModuleKeys.has(activeTab);
   const pdvMainTab = legacyMode ? null : baseOperationalTab;
   const moduleWindowOpen = !(["sale", "tables"] as TabKey[]).includes(activeTab);
+  const moduleWindowIsMaximized = moduleWindowMaximized ?? settings.moduleWindowMode === "fullscreen";
 
   return (
     <div className={`app-shell ${pdvMainTab ? "pdv-main-mode" : ""} professional-shell`}>
@@ -2739,15 +2761,21 @@ export function App() {
         {moduleWindowOpen && (
           <div className="module-window-backdrop">
             <section
-              className="module-window-shell"
-              style={{ transform: `translate(calc(-50% + ${moduleWindowOffset.x}px), calc(-50% + ${moduleWindowOffset.y}px))` }}
+              className={`module-window-shell ${moduleWindowIsMaximized ? "is-maximized" : ""}`}
+              style={moduleWindowIsMaximized ? undefined : { transform: `translate(calc(-50% + ${moduleWindowOffset.x}px), calc(-50% + ${moduleWindowOffset.y}px))` }}
               role="dialog"
               aria-modal="true"
               aria-label={moduleHeader.title}
             >
               <header
                 className="module-window-titlebar"
+                onDoubleClick={(event) => {
+                  if ((event.target as HTMLElement).closest("button")) return;
+                  setModuleWindowOffset({ x: 0, y: 0 });
+                  setModuleWindowMaximized(!moduleWindowIsMaximized);
+                }}
                 onPointerDown={(event) => {
+                  if (moduleWindowIsMaximized) return;
                   if ((event.target as HTMLElement).closest("button")) return;
                   event.currentTarget.setPointerCapture(event.pointerId);
                   moduleWindowDrag.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: moduleWindowOffset.x, originY: moduleWindowOffset.y };
@@ -2755,7 +2783,13 @@ export function App() {
                 onPointerMove={(event) => {
                   const drag = moduleWindowDrag.current;
                   if (!drag || drag.pointerId !== event.pointerId) return;
-                  setModuleWindowOffset({ x: drag.originX + event.clientX - drag.startX, y: drag.originY + event.clientY - drag.startY });
+                  const bounds = event.currentTarget.parentElement?.getBoundingClientRect();
+                  const maxX = Math.max(0, (window.innerWidth - (bounds?.width || 0)) / 2);
+                  const maxY = Math.max(0, (window.innerHeight - (bounds?.height || 0)) / 2);
+                  setModuleWindowOffset({
+                    x: Math.max(-maxX, Math.min(maxX, drag.originX + event.clientX - drag.startX)),
+                    y: Math.max(-maxY, Math.min(maxY, drag.originY + event.clientY - drag.startY))
+                  });
                 }}
                 onPointerUp={(event) => {
                   if (moduleWindowDrag.current?.pointerId === event.pointerId) moduleWindowDrag.current = null;
@@ -2763,7 +2797,10 @@ export function App() {
                 }}
               >
                 <div><span>{moduleHeader.eyebrow}</span><strong>{moduleHeader.title}</strong></div>
-                <button type="button" className="module-window-close" title="Fechar" aria-label="Fechar" onClick={() => { setActiveTab(baseOperationalTab); setSettingsWindowCategory(null); setModuleWindowOffset({ x: 0, y: 0 }); }}><X size={16} /></button>
+                <div className="module-window-controls">
+                  <button type="button" className="module-window-maximize" title={moduleWindowIsMaximized ? "Restaurar janela" : "Maximizar janela"} aria-label={moduleWindowIsMaximized ? "Restaurar janela" : "Maximizar janela"} onClick={() => { setModuleWindowOffset({ x: 0, y: 0 }); setModuleWindowMaximized(!moduleWindowIsMaximized); }}>{moduleWindowIsMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
+                  <button type="button" className="module-window-close" title="Fechar" aria-label="Fechar" onClick={() => { setActiveTab(baseOperationalTab); setSettingsWindowCategory(null); setModuleWindowOffset({ x: 0, y: 0 }); setModuleWindowMaximized(null); }}><X size={16} /></button>
+                </div>
               </header>
               <div className="module-window-body">
         {activeTab === "history" && (
@@ -2906,12 +2943,12 @@ export function App() {
                       await reloadPdv();
                     }
                   }}
-                  onDelete={async (id) => {
+                  onDelete={async (id, permanent = false) => {
                     if (remoteSession) {
-                      await remoteRequest(remoteSession, `/api/pdv/payables/${id}`, { method: "DELETE" });
+                      await remoteRequest(remoteSession, `/api/pdv/payables/${id}${permanent ? "?permanent=1" : ""}`, { method: "DELETE" });
                       await refreshRemote(remoteSession);
                     } else {
-                      await window.caixa.deletePdvPayable(id);
+                      await window.caixa.deletePdvPayable(id, permanent);
                       await reloadPdv();
                     }
                   }}
@@ -3058,7 +3095,7 @@ function PayablesPanel({
   onSave: (draft: PdvPayableDraft) => Promise<PdvPayable>;
   onPay: (id: string, payment: PdvPayablePayment) => Promise<PdvPayable>;
   onCancel: (id: string) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onDelete: (id: string, permanent?: boolean) => Promise<void>;
   createRequest?: { supplier: string; nonce: number } | null;
   onCreateRequestConsumed?: () => void;
   onToast: (tone: ToastState["tone"], message: string) => void;
@@ -3068,8 +3105,8 @@ function PayablesPanel({
   const monthEndDate = new Date(`${monthStart}T12:00:00`);
   monthEndDate.setMonth(monthEndDate.getMonth() + 1, 0);
   const monthEnd = getLocalDateKey(monthEndDate);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(monthEnd);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Historico" | "Pagas" | "Canceladas" | "Excluidas">("Em aberto");
   const [editing, setEditing] = useState<PdvPayable | "new" | null>(null);
@@ -3148,7 +3185,7 @@ function PayablesPanel({
       <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
         <button disabled={readOnly} onClick={() => setEditing("new")}><Plus /><span>Novo</span></button>
         <button disabled={!canChange} onClick={() => validSelection && setEditing(validSelection)}><Edit3 /><span>Alterar</span></button>
-        <button disabled={readOnly || !validSelection || validSelection.status === "Excluida"} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>Excluir</span></button>
+        <button disabled={readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
         <button className="primary-command" disabled={!canPay} onClick={() => validSelection && setPaying(validSelection)}><Wallet /><span>Pagar</span></button>
         <button disabled={!canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
         <button disabled={!validSelection} onClick={() => setRecordView(true)}><ReceiptText /><span>Registro</span></button>
@@ -3167,7 +3204,7 @@ function PayablesPanel({
         <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, fornecedor, categoria, documento ou tag" /></label>
         <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        <label><span>Situacao</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)}>{["Em aberto", "Vencidas", "Historico", "Pagas", "Canceladas", "Excluidas", "Todos"].map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label><span>Situacao</span><select value={status} onChange={(event) => { const next = event.target.value as typeof status; setStatus(next); if (next === "Excluidas") { setFrom(""); setTo(""); } }}>{["Em aberto", "Vencidas", "Historico", "Pagas", "Canceladas", "Excluidas", "Todos"].map((value) => <option key={value}>{value}</option>)}</select></label>
         <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Exibir tudo</button>
       </div>
 
@@ -3200,6 +3237,7 @@ function PayablesPanel({
                 <div><dt>Valor original</dt><dd>{formatCurrency(selected.amount)}</dd></div>
               </dl>
               {(selected.tags || []).length > 0 && <div className="financial-tag-list">{(selected.tags || []).map((tag) => <span key={tag}>{tag}</span>)}</div>}
+              {!readOnly && selected.status === "Excluida" && <div className="financial-danger-actions"><button onClick={() => setDeleteRequest(selected)}><Trash2 size={15} /> Apagar definitivamente</button></div>}
               {!readOnly && !["Paga", "Cancelada", "Excluida"].includes(selected.status) && (
                 <div className="financial-detail-actions payable-detail-actions">
                   <button className="pdv-primary-button" onClick={() => setPaying(selected)}>
@@ -3319,16 +3357,16 @@ function PayablesPanel({
       )}
       {deleteRequest && (
         <SettingsConfirmModal
-          title="Excluir conta a pagar?"
-          message={`${deleteRequest.description} saira da lista principal e ficara disponivel no filtro Excluidas.`}
-          confirmLabel="Excluir conta"
+          title={deleteRequest.status === "Excluida" ? "Apagar conta definitivamente?" : "Excluir conta a pagar?"}
+          message={deleteRequest.status === "Excluida" ? `${deleteRequest.description} e seus pagamentos serao removidos do sistema. Esta acao nao pode ser desfeita.` : `${deleteRequest.description} saira da lista principal e ficara disponivel no filtro Excluidas.`}
+          confirmLabel={deleteRequest.status === "Excluida" ? "Apagar definitivamente" : "Excluir conta"}
           danger
           onCancel={() => setDeleteRequest(null)}
           onConfirm={async () => {
-            await onDelete(deleteRequest.id);
+            await onDelete(deleteRequest.id, deleteRequest.status === "Excluida");
             setSelected((current) => current?.id === deleteRequest.id ? null : current);
             setDeleteRequest(null);
-            onToast("success", "Conta movida para o historico de excluidas.");
+            onToast("success", deleteRequest.status === "Excluida" ? "Conta apagada definitivamente." : "Conta movida para o historico de excluidas.");
           }}
         />
       )}
@@ -7543,6 +7581,18 @@ function SettingsPanel({
               <option value="compact">Compacto</option>
               <option value="grid">Grade</option>
               <option value="sidePanel">Painel lateral</option>
+            </select>
+          </label>
+          <label className="field"><span>Como abrir Caixa e menus gerenciais</span>
+            <select value={draft.moduleWindowMode || "window"} onChange={(event) => update("moduleWindowMode", event.target.value as AppSettings["moduleWindowMode"])}>
+              <option value="window">Janela arrastavel e redimensionavel</option>
+              <option value="fullscreen">Tela inteira</option>
+            </select>
+          </label>
+          <label className="field"><span>Altura do cabecalho</span>
+            <select value={draft.headerHeight || "standard"} onChange={(event) => update("headerHeight", event.target.value as AppSettings["headerHeight"])}>
+              <option value="standard">Padrao</option>
+              <option value="compact">Compacto para telas pequenas</option>
             </select>
           </label>
           <label className="field"><span>Tempo dos avisos</span>

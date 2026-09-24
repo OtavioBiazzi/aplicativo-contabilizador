@@ -237,6 +237,18 @@ export class PdvStore {
 
   getPayables(): PdvPayable[] {
     const today = new Date().toISOString().slice(0, 10);
+    const paymentsByAccount = new Map<string, PdvPayablePayment[]>();
+    selectAll<PdvPayablePayment>(
+      this.requireDb(),
+      `SELECT id, payable_id AS payableId, created_at AS createdAt, method, amount,
+       description, origin_device AS originDevice, operation_id AS operationId
+       FROM payable_payments ORDER BY created_at, rowid`
+    ).forEach((payment) => {
+      const payments = paymentsByAccount.get(payment.payableId) || [];
+      payments.push(payment);
+      paymentsByAccount.set(payment.payableId, payments);
+    });
+    const eventsByAccount = this.getFinancialEventsForType("payable");
     return selectAll<{
       id: string;
       description: string;
@@ -266,13 +278,7 @@ export class PdvStore {
        due_date AS dueDate, amount, status, note
        FROM payables ORDER BY due_date, created_at DESC`
     ).map((row) => {
-      const payments = selectAll<PdvPayablePayment>(
-        this.requireDb(),
-        `SELECT id, payable_id AS payableId, created_at AS createdAt, method, amount,
-         description, origin_device AS originDevice, operation_id AS operationId
-         FROM payable_payments WHERE payable_id = ? ORDER BY created_at, rowid`,
-        [row.id]
-      );
+      const payments = paymentsByAccount.get(row.id) || [];
       const paidAmount = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
       const balance = roundMoney(Math.max(0, row.amount - paidAmount));
       const status: PdvPayable["status"] = row.status === "Cancelada" || row.status === "Excluida"
@@ -284,7 +290,7 @@ export class PdvStore {
             : row.dueDate < today
               ? "Vencida"
               : "Em aberto";
-      const events = this.getFinancialEvents("payable", row.id);
+      const events = eventsByAccount.get(row.id) || [];
       const { tagsJson, ...payable } = row;
       return { ...payable, tags: parseStringList(tagsJson), payments, events, paidAmount, balance, status };
     });
@@ -450,9 +456,25 @@ export class PdvStore {
     await this.persist();
   }
 
-  async deletePayable(id: string): Promise<void> {
+  async deletePayable(id: string, permanent = false): Promise<void> {
     const payable = this.getPayables().find((item) => item.id === id);
     if (!payable) throw new Error("Conta a pagar nao encontrada.");
+    if (permanent) {
+      if (payable.status !== "Excluida") throw new Error("Somente contas ja excluidas podem ser apagadas definitivamente.");
+      const db = this.requireDb();
+      db.run("BEGIN TRANSACTION");
+      try {
+        db.run("DELETE FROM payable_payments WHERE payable_id = ?", [id]);
+        db.run("DELETE FROM financial_audit_events WHERE account_type = 'payable' AND account_id = ?", [id]);
+        db.run("DELETE FROM payables WHERE id = ?", [id]);
+        db.run("COMMIT");
+      } catch (error) {
+        db.run("ROLLBACK");
+        throw error;
+      }
+      await this.persist();
+      return;
+    }
     this.requireDb().run("UPDATE payables SET status = 'Excluida' WHERE id = ?", [id]);
     this.writeFinancialEvent(this.requireDb(), "payable", id, "Exclusao", "Conta movida para o historico de excluidas.", "Servidor");
     await this.persist();
@@ -460,6 +482,18 @@ export class PdvStore {
 
   getReceivables(): PdvReceivable[] {
     const today = new Date().toISOString().slice(0, 10);
+    const paymentsByAccount = new Map<string, PdvReceivablePayment[]>();
+    selectAll<PdvReceivablePayment>(
+      this.requireDb(),
+      `SELECT id, receivable_id AS receivableId, created_at AS createdAt, method, amount, received,
+       change, description, origin_device AS originDevice, operation_id AS operationId
+       FROM receivable_payments ORDER BY created_at, rowid`
+    ).forEach((payment) => {
+      const payments = paymentsByAccount.get(payment.receivableId) || [];
+      payments.push(payment);
+      paymentsByAccount.set(payment.receivableId, payments);
+    });
+    const eventsByAccount = this.getFinancialEventsForType("receivable");
     return selectAll<{
       id: string;
       saleId: string;
@@ -492,13 +526,7 @@ export class PdvStore {
        JOIN sales s ON s.id = r.sale_id
        ORDER BY r.created_at DESC`
     ).map((row) => {
-      const payments = selectAll<PdvReceivablePayment>(
-        this.requireDb(),
-        `SELECT id, receivable_id AS receivableId, created_at AS createdAt, method, amount, received,
-         change, description, origin_device AS originDevice, operation_id AS operationId
-         FROM receivable_payments WHERE receivable_id = ? ORDER BY created_at, rowid`,
-        [row.id]
-      );
+      const payments = paymentsByAccount.get(row.id) || [];
       const receivedAmount = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
       const balance = roundMoney(Math.max(0, row.originalAmount - receivedAmount));
       const status: PdvReceivable["status"] = row.status === "Cancelada" || row.status === "Excluida"
@@ -510,7 +538,7 @@ export class PdvStore {
             : row.dueDate && row.dueDate < today
               ? "Vencida"
               : "Em aberto";
-      const events = this.getFinancialEvents("receivable", row.id);
+      const events = eventsByAccount.get(row.id) || [];
       const { tagsJson, ...receivable } = row;
       return { ...receivable, tags: parseStringList(tagsJson), status, payments, events, receivedAmount, balance };
     });
@@ -639,9 +667,25 @@ export class PdvStore {
     await this.persist();
   }
 
-  async deleteReceivable(id: string): Promise<void> {
+  async deleteReceivable(id: string, permanent = false): Promise<void> {
     const receivable = this.getReceivables().find((item) => item.id === id);
     if (!receivable) throw new Error("Conta a receber nao encontrada.");
+    if (permanent) {
+      if (receivable.status !== "Excluida") throw new Error("Somente contas ja excluidas podem ser apagadas definitivamente.");
+      const db = this.requireDb();
+      db.run("BEGIN TRANSACTION");
+      try {
+        db.run("DELETE FROM receivable_payments WHERE receivable_id = ?", [id]);
+        db.run("DELETE FROM financial_audit_events WHERE account_type = 'receivable' AND account_id = ?", [id]);
+        db.run("DELETE FROM receivables WHERE id = ?", [id]);
+        db.run("COMMIT");
+      } catch (error) {
+        db.run("ROLLBACK");
+        throw error;
+      }
+      await this.persist();
+      return;
+    }
     this.requireDb().run("UPDATE receivables SET status = 'Excluida' WHERE id = ?", [id]);
     this.writeFinancialEvent(this.requireDb(), "receivable", id, "Exclusao", "Conta movida para o historico de excluidas.", "Servidor");
     await this.persist();
@@ -1993,31 +2037,40 @@ export class PdvStore {
 
   private hydrateSales(sales: Array<Omit<PdvSale, "items" | "payments">>): PdvSale[] {
     if (!sales.length) return [];
-    const saleIds = new Set(sales.map((sale) => sale.id));
+    const saleIds = sales.map((sale) => sale.id);
     const itemsBySale = new Map<string, PdvCartItem[]>();
     const paymentsBySale = new Map<string, PdvPayment[]>();
+    // Uma venda isolada e os snapshots limitados nao devem ler os itens de todo
+    // o historico. Blocos pequenos tambem respeitam o limite de parametros SQLite.
+    for (let offset = 0; offset < saleIds.length; offset += 400) {
+      const ids = saleIds.slice(offset, offset + 400);
+      const placeholders = ids.map(() => "?").join(",");
+      selectAll<PdvCartItem & { saleId: string }>(
+        this.requireDb(),
+        `SELECT id, sale_id AS saleId, product_id AS productId, product_name AS productName, category_name AS categoryName,
+          quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total,
+          subtable_name AS subtableName, note, complements_json AS complementsJson
+         FROM sale_items WHERE sale_id IN (${placeholders}) ORDER BY rowid`,
+        ids
+      ).forEach((row) => {
+        const items = itemsBySale.get(row.saleId) || [];
+        items.push(normalizeCartItem(row));
+        itemsBySale.set(row.saleId, items);
+      });
 
-    selectAll<PdvCartItem & { saleId: string }>(
-      this.requireDb(),
-      `SELECT id, sale_id AS saleId, product_id AS productId, product_name AS productName, category_name AS categoryName,
-        quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total,
-        subtable_name AS subtableName, note, complements_json AS complementsJson
-       FROM sale_items ORDER BY rowid`
-    ).forEach((row) => {
-      if (!saleIds.has(row.saleId)) return;
-      itemsBySale.set(row.saleId, [...(itemsBySale.get(row.saleId) || []), normalizeCartItem(row)]);
-    });
-
-    selectAll<PdvPayment & { saleId: string }>(
-      this.requireDb(),
-      `SELECT id, sale_id AS saleId, method, amount, received, change, description, customer_id AS customerId,
-       customer_name AS customerName, due_date AS dueDate
-       FROM sale_payments ORDER BY rowid`
-    ).forEach((row) => {
-      if (!saleIds.has(row.saleId)) return;
-      const { saleId, ...payment } = row;
-      paymentsBySale.set(saleId, [...(paymentsBySale.get(saleId) || []), payment]);
-    });
+      selectAll<PdvPayment & { saleId: string }>(
+        this.requireDb(),
+        `SELECT id, sale_id AS saleId, method, amount, received, change, description, customer_id AS customerId,
+         customer_name AS customerName, due_date AS dueDate
+         FROM sale_payments WHERE sale_id IN (${placeholders}) ORDER BY rowid`,
+        ids
+      ).forEach((row) => {
+        const { saleId, ...payment } = row;
+        const payments = paymentsBySale.get(saleId) || [];
+        payments.push(payment);
+        paymentsBySale.set(saleId, payments);
+      });
+    }
 
     return sales.map((sale) => ({
       ...sale,
@@ -2026,15 +2079,25 @@ export class PdvStore {
     }));
   }
 
-  private getFinancialEvents(accountType: PdvFinancialAuditEvent["accountType"], accountId: string): PdvFinancialAuditEvent[] {
-    return selectAll<PdvFinancialAuditEvent>(
+  private getFinancialEventsForType(accountType: PdvFinancialAuditEvent["accountType"]): Map<string, PdvFinancialAuditEvent[]> {
+    const eventsByAccount = new Map<string, PdvFinancialAuditEvent[]>();
+    selectAll<PdvFinancialAuditEvent>(
       this.requireDb(),
       `SELECT id, account_type AS accountType, account_id AS accountId, action, created_at AS createdAt,
        description, origin_device AS originDevice, amount
-       FROM financial_audit_events WHERE account_type = ? AND account_id = ?
+       FROM financial_audit_events WHERE account_type = ?
        ORDER BY created_at DESC, rowid DESC`,
-      [accountType, accountId]
-    ).map((event) => ({ ...event, amount: event.amount === null || event.amount === undefined ? undefined : Number(event.amount) }));
+      [accountType]
+    ).forEach((event) => {
+      const events = eventsByAccount.get(event.accountId) || [];
+      events.push({ ...event, amount: event.amount === null || event.amount === undefined ? undefined : Number(event.amount) });
+      eventsByAccount.set(event.accountId, events);
+    });
+    return eventsByAccount;
+  }
+
+  getTable(tableNumber: number): PdvOpenTable | undefined {
+    return this.getTables().find((table) => table.number === tableNumber);
   }
 
   private writeFinancialEvent(
