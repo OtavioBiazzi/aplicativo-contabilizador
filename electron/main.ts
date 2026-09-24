@@ -607,6 +607,7 @@ async function bootstrap() {
     },
     getPdvSnapshot: (salesLimit) => pdvStore.getSnapshot(salesLimit),
     getPdvTable: (number) => pdvStore.getTable(number),
+    getPdvVersion: () => pdvStore.getVersion(),
     savePdvDirectSale: async (items, discount, payments, originDevice, operationId, saleType) => {
       const sale = await pdvStore.saveSale({ type: saleType === "Mesa" ? "Mesa" : saleType === "Onibus" ? "Onibus" : "Venda direta", items, discount, payments, originDevice, operationId });
       await exportLedgerIfEnabled();
@@ -615,7 +616,7 @@ async function bootstrap() {
     },
     openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
-    savePdvTableItems: (tableNumber, items, subtables, baseItemIds) => pdvStore.saveTableItems(tableNumber, items, subtables, baseItemIds),
+    savePdvTableItems: (tableNumber, items, subtables, baseItemIds, expectedSessionId) => pdvStore.saveTableItems(tableNumber, items, subtables, baseItemIds, expectedSessionId),
     transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections, operationId) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId),
     appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
     updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),

@@ -125,6 +125,7 @@ export function buildPdvReceiptHtml(
   const paidTotal = sale.payments.reduce((sum, payment) => sum + payment.amount, 0);
   const totalChange = sale.payments.reduce((sum, payment) => sum + (payment.change || 0), 0);
   const pendingTotal = Math.max(0, sale.total - paidTotal);
+  const customerBalance = sale.receiptPurpose === "customer-balance";
   const payments = sale.payments.map((payment) => `
     <div class="row"><span>${escapeHtml(payment.method)}${payment.description ? ` - ${escapeHtml(payment.description)}` : ""}</span><b>${money(payment.amount)}</b></div>
     ${payment.received ? `<div class="subrow"><span>Recebido</span><b>${money(payment.received)}</b></div>` : ""}
@@ -133,7 +134,7 @@ export function buildPdvReceiptHtml(
   const receiptItems = settings.receiptGroupIdenticalItems === false ? sale.items : groupPdvReceiptItems(sale.items);
   const items = receiptItems.map((item, index) => `
     <div class="item">
-      <div class="row item-main"><span>${String(index + 1).padStart(2, "0")} ${formatQuantity(item.quantity)} ${escapeHtml(item.productName)}</span><b>${money(item.total)}</b></div>
+      <div class="row item-main"><span>${String(index + 1).padStart(2, "0")} ${customerBalance ? "" : `${formatQuantity(item.quantity)} `}${escapeHtml(item.productName)}</span><b>${money(item.total)}</b></div>
       ${item.complements?.length ? `<small>+ ${escapeHtml(item.complements.map((value) => value.name).join(", "))}</small>` : ""}
       ${item.note ? `<small>${escapeHtml(item.note)}</small>` : ""}
     </div>
@@ -147,7 +148,7 @@ export function buildPdvReceiptHtml(
   const displayCustomerName = customerName || customer?.name || "";
   const customerDocument = customerDocumentOverride || customer?.document || "";
   const orderNumber = sale.operationId || sale.id;
-  const receiptStatus = pendingTotal > 0.009 ? "CONTA EM ABERTO" : "COMPROVANTE DE PAGAMENTO";
+  const receiptStatus = customerBalance ? "RECIBO DE CONTAS A RECEBER" : pendingTotal > 0.009 ? "CONTA EM ABERTO" : "COMPROVANTE DE PAGAMENTO";
   const accountReceipts = receivable?.payments.map((payment) => `
     <div class="item">
       <div class="row"><span>${escapeHtml(payment.method)} - ${new Date(payment.createdAt).toLocaleDateString("pt-BR")}</span><b>${money(payment.amount)}</b></div>
@@ -194,19 +195,21 @@ export function buildPdvReceiptHtml(
     </div>
     <div class="status">${receiptStatus}</div>
     <div class="box">
-      <div class="box-title">${sale.tableNumber ? `MESA: ${String(sale.tableNumber).padStart(3, "0")}` : escapeHtml(sale.type || "VENDA")}</div>
+      <div class="box-title">${customerBalance ? "CONTAS A RECEBER DO CLIENTE" : sale.tableNumber ? `MESA: ${String(sale.tableNumber).padStart(3, "0")}` : escapeHtml(sale.type || "VENDA")}</div>
       <div class="section">
-        <div class="row"><span>PEDIDO: ${escapeHtml(String(orderNumber).slice(0, 12))}</span><b>${new Date(sale.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</b></div>
+        <div class="row"><span>${customerBalance ? "EMITIDO EM" : `PEDIDO: ${escapeHtml(String(orderNumber).slice(0, 12))}`}</span><b>${new Date(sale.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</b></div>
         ${displayCustomerName ? `<div>CLIENTE: ${escapeHtml(displayCustomerName)}</div>` : ""}
         ${customerDocument ? `<div>CPF/CNPJ: ${escapeHtml(customerDocument)}</div>` : ""}
       </div>
     </div>
-    <div class="columns"><span>QTD</span><span>DESCRICAO</span><span>TOTAL</span></div>
+    <div class="columns"><span>${customerBalance ? "Nº" : "QTD"}</span><span>DESCRICAO</span><span>${customerBalance ? "SALDO" : "TOTAL"}</span></div>
     ${items}
     <div class="divider dashed"></div>
+    ${customerBalance ? `<div class="row total"><span>TOTAL A RECEBER</span><b>${money(sale.total)}</b></div>` : `
     <div class="row"><span>Subtotal</span><b>${money(sale.subtotal)}</b></div>
     <div class="row"><span>${sale.discount < 0 ? "Acrescimo" : "Desconto"}</span><b>${money(Math.abs(sale.discount))}</b></div>
-    <div class="row total"><span>Total</span><b>${money(sale.total)}</b></div>
+    <div class="row total"><span>Total</span><b>${money(sale.total)}</b></div>`}
+    ${customerBalance ? "" : `
     <div class="divider"></div>
     <div class="row"><span>Total pago</span><b>${money(paidTotal)}</b></div>
     ${totalChange > 0 ? `<div class="row"><span>Troco</span><b>${money(totalChange)}</b></div>` : ""}
@@ -220,7 +223,7 @@ export function buildPdvReceiptHtml(
       <div class="row"><span>Total recebido</span><b>${money(receivable.receivedAmount)}</b></div>
       <div class="row"><span>Saldo a receber</span><b>${money(receivable.balance)}</b></div>
       ${receivable.dueDate ? `<div class="row"><span>Vencimento</span><b>${escapeHtml(receivable.dueDate.split("-").reverse().join("/"))}</b></div>` : ""}
-    ` : ""}
+    ` : ""}`}
     <div class="footer">${escapeHtml(settings.receiptFooter || "Obrigado pela preferencia.")}</div>
   </body></html>`;
 }

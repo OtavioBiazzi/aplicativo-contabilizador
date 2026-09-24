@@ -318,6 +318,8 @@ export interface PdvOpenTable {
 
 export interface PdvSale {
   id: string;
+  /** Usado apenas na visualizacao/impressao de um extrato, sem criar venda. */
+  receiptPurpose?: "customer-balance";
   createdAt: string;
   type: "Venda direta" | "Mesa" | "Onibus";
   tableNumber?: number;
@@ -335,6 +337,7 @@ export interface PdvSale {
 }
 
 export interface PdvSnapshot {
+  version?: PdvDataVersion;
   categories: PdvCategory[];
   products: PdvProduct[];
   tables: PdvOpenTable[];
@@ -397,6 +400,11 @@ export interface PdvSettings {
   receiptGroupIdenticalItems?: boolean;
   receiptUseColor?: boolean;
   cashControlMode?: "automatic" | "manual";
+}
+
+export interface PdvDataVersion {
+  instanceId: string;
+  revision: number;
 }
 
 export interface PdvProductImportResult {

@@ -7,6 +7,21 @@ import { PdvStore } from "../dist-electron/electron/pdvStore.js";
 import { LedgerStore } from "../dist-electron/electron/storage.js";
 import { pdvSaleToLedgerEntry } from "../dist-electron/src/shared/pdvLedger.js";
 import { groupPdvReceiptItems } from "../dist-electron/src/shared/pdvReceipt.js";
+import { buildCustomerBalanceReceipt, customerOutstandingAccounts } from "../dist-electron/src/shared/customerStatement.js";
+
+const statementSelected = { id: "conta-1", customerId: "cliente-1", customerName: "Maria", status: "Em aberto", balance: 20, originalAmount: 20, receivedAmount: 0, dueDate: "2026-09-01", createdAt: "2026-08-01T10:00:00Z", description: "Cafe" };
+const statementAccounts = [
+  statementSelected,
+  { ...statementSelected, id: "conta-2", balance: 15.5, originalAmount: 30, receivedAmount: 14.5, status: "Parcialmente recebida", dueDate: "2026-10-01", description: "Almoco" },
+  { ...statementSelected, id: "conta-3", balance: 9.25, dueDate: "2026-08-01", description: "Lanche" },
+  { ...statementSelected, id: "conta-paga", balance: 0, status: "Recebida" },
+  { ...statementSelected, id: "outra-pessoa", customerId: "cliente-2", balance: 100 },
+  { ...statementSelected, id: "cancelada", status: "Cancelada", balance: 100 }
+];
+const statement = buildCustomerBalanceReceipt(statementAccounts, statementSelected);
+if (customerOutstandingAccounts(statementAccounts, statementSelected).length !== 3 || statement.items.length !== 3 || statement.total !== 44.75 || statement.receiptPurpose !== "customer-balance") {
+  throw new Error("Recibo consolidado deve somar apenas o saldo pendente de todas as contas do mesmo cliente.");
+}
 
 const root = process.cwd();
 const tmp = path.join(root, ".tmp-pdv-smoke");

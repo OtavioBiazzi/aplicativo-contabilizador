@@ -50,10 +50,11 @@ const server = new LocalServer({
   deleteEntry: async () => undefined,
   getPdvSnapshot: (salesLimit) => pdvStore.getSnapshot(salesLimit),
   getPdvTable: (number) => pdvStore.getTable(number),
+  getPdvVersion: () => pdvStore.getVersion(),
   savePdvDirectSale: (items, discount, payments, origin, operationId) => pdvStore.saveSale({ type: "Venda direta", items, discount, payments, originDevice: origin, operationId }),
   openPdvTable: (number, people, note) => pdvStore.openTable(number, people, note),
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
-  savePdvTableItems: (number, items, subtables) => pdvStore.saveTableItems(number, items, subtables),
+  savePdvTableItems: (number, items, subtables, baseItemIds, expectedSessionId) => pdvStore.saveTableItems(number, items, subtables, baseItemIds, expectedSessionId),
   transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections, operationId) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId),
   appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
   closePdvTable: (number, payments, discount, origin, operationId) => pdvStore.closeTable(number, payments, discount, origin, operationId),
@@ -739,6 +740,25 @@ const winningId = concurrentScopes[0].ok ? "network-scope-1" : "network-scope-2"
 if (!(await closeRemoteScope(winningId)).ok) throw new Error("Reenvio remoto nao recuperou o fechamento.");
 const afterScope = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 25);
 if (afterScope.subtables.includes("Ronaldo") || afterScope.items.length !== 1 || afterScope.items[0].subtableName !== "Ana") throw new Error("Submesa remota nao foi removida atomicamente.");
+
+// Um autosave atrasado nunca pode reabrir uma mesa ja cancelada.
+const fastItem = { ...item, id: crypto.randomUUID(), quantity: 1, total: 12 };
+const fastOpen = await fetch("http://127.0.0.1:43991/api/pdv/tables/31/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });
+const fastOpened = await fastOpen.json();
+const fastSessionId = fastOpened.table?.sessionId;
+if (!fastOpen.ok || !fastSessionId) throw new Error("A abertura remota nao retornou a sessao da mesa.");
+const fastSave = await fetch("http://127.0.0.1:43991/api/pdv/tables/31/items", { method: "PUT", headers, body: JSON.stringify({ items: [fastItem], baseItemIds: [], sessionId: fastSessionId }) });
+if (!fastSave.ok || (await fastSave.json()).table?.items[0]?.id !== fastItem.id) throw new Error("O primeiro produto rapido nao foi confirmado.");
+const fastCancel = await fetch("http://127.0.0.1:43991/api/pdv/tables/31/cancel", { method: "POST", headers, body: JSON.stringify({}) });
+const fastCancelled = await fastCancel.json();
+if (!fastCancel.ok || fastCancelled.table?.status !== "Livre" || fastCancelled.version?.revision <= fastOpened.version?.revision) throw new Error("Cancelamento remoto nao confirmou a mesa livre em uma versao mais nova.");
+const staleSave = await fetch("http://127.0.0.1:43991/api/pdv/tables/31/items", { method: "PUT", headers, body: JSON.stringify({ items: [fastItem], baseItemIds: [], sessionId: fastSessionId }) });
+if (staleSave.status !== 400 || pdvStore.getTable(31)?.status !== "Livre") throw new Error("Autosave atrasado reabriu mesa cancelada.");
+const fastReopen = await fetch("http://127.0.0.1:43991/api/pdv/tables/31/open", { method: "POST", headers, body: JSON.stringify({ people: 1 }) });
+const fastReopened = await fastReopen.json();
+if (!fastReopen.ok || fastReopened.table?.sessionId === fastSessionId) throw new Error("A nova abertura reutilizou a sessao cancelada.");
+const staleAfterReopen = await fetch("http://127.0.0.1:43991/api/pdv/tables/31/items", { method: "PUT", headers, body: JSON.stringify({ items: [{ ...fastItem, id: crypto.randomUUID() }], baseItemIds: [], sessionId: fastSessionId }) });
+if (staleAfterReopen.status !== 400 || pdvStore.getTable(31)?.items.length) throw new Error("Autosave de sessao antiga contaminou atendimento novo.");
 
 await new Promise((resolve) => {
   reconnectSocket.once("close", resolve);

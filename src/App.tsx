@@ -56,7 +56,7 @@ import {
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
 import { PaymentAmountModal, PdvApp } from "./PdvApp";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
-import type { PdvCashShift, PdvCustomer, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
+import type { PdvCashShift, PdvCustomer, PdvDataVersion, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
 import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
 import { downloadFinancialCsv } from "./shared/financialExport";
 import {
@@ -332,6 +332,8 @@ interface StoredHistoryFilters {
 
 interface RemoteSocketMessage {
   type?: string;
+  table?: PdvOpenTable;
+  version?: PdvDataVersion;
   jobId?: string;
   sale?: PdvSale;
   customer?: PdvCustomer;
@@ -1290,6 +1292,7 @@ export function App() {
   const pdvReloadQueued = useRef(false);
   const pdvReloadTimer = useRef<number | null>(null);
   const remoteRefreshInFlight = useRef<Promise<void> | null>(null);
+  const remotePdvVersionFloor = useRef<PdvDataVersion | null>(null);
   const remoteRefreshQueued = useRef(false);
   const remoteRefreshFullQueued = useRef(false);
   const remoteFullSalesRef = useRef(false);
@@ -1800,11 +1803,14 @@ export function App() {
     };
     remoteSocket.current.onmessage = (event) => {
       let isPdvChange = false;
+      let tableChange: RemoteSocketMessage | null = null;
       let receiptJob: RemoteSocketMessage | null = null;
       try {
         const message = JSON.parse(String(event.data || "{}")) as RemoteSocketMessage;
         if (message.type === "pdv-changed") {
           isPdvChange = true;
+        } else if (message.type === "pdv-table-changed" && message.table) {
+          tableChange = message;
         } else if (message.type === "receipt-print-request") {
           receiptJob = message;
         }
@@ -1813,6 +1819,10 @@ export function App() {
       }
       const current = remoteSessionRef.current;
       if (current) {
+        if (tableChange?.table) {
+          confirmRemotePdvTable(tableChange.table, tableChange.version);
+          return;
+        }
         if (receiptJob?.jobId && receiptJob.sale) {
           const socket = remoteSocket.current;
           const job = receiptJob;
@@ -1892,12 +1902,49 @@ export function App() {
   };
 
   const applyRemotePdvSnapshot = (pdv: PdvSnapshot) => {
+    const currentVersion = remotePdvVersionFloor.current;
+    if (pdv.version && currentVersion?.instanceId === pdv.version.instanceId && pdv.version.revision < currentVersion.revision) return;
+    if (pdv.version) remotePdvVersionFloor.current = pdv.version;
     // O PDV recebe apenas as vendas recentes. Caixa e Relatorios pedem o
     // historico completo ao abrir, sem transferi-lo em toda interacao da mesa.
     setRemotePdvSnapshot(pdv);
     setRemotePdvSales(pdv.recentSales);
     setRemotePdvCustomers(pdv.customers);
     setRemotePdvReceivables(pdv.receivables);
+  };
+
+  const confirmRemotePdvTable = (table: PdvOpenTable, version?: PdvDataVersion) => {
+    const currentVersion = remotePdvVersionFloor.current;
+    if (version && currentVersion?.instanceId === version.instanceId && version.revision < currentVersion.revision) return;
+    if (version) remotePdvVersionFloor.current = version;
+    setRemotePdvSnapshot((current) => current ? {
+      ...current,
+      version: version || current.version,
+      tables: current.tables.map((item) => item.number === table.number ? table : item)
+    } : current);
+  };
+
+  const confirmRemoteReceivable = (receivable: PdvReceivable, version?: PdvDataVersion) => {
+    const currentVersion = remotePdvVersionFloor.current;
+    if (version && currentVersion?.instanceId === version.instanceId && version.revision < currentVersion.revision) return;
+    if (version) remotePdvVersionFloor.current = version;
+    setRemotePdvSnapshot((current) => current ? {
+      ...current,
+      version: version || current.version,
+      receivables: [...current.receivables.filter((item) => item.id !== receivable.id), receivable]
+    } : current);
+    setRemotePdvReceivables((current) => [...current.filter((item) => item.id !== receivable.id), receivable]);
+  };
+
+  const confirmRemotePayable = (payable: PdvPayable, version?: PdvDataVersion) => {
+    const currentVersion = remotePdvVersionFloor.current;
+    if (version && currentVersion?.instanceId === version.instanceId && version.revision < currentVersion.revision) return;
+    if (version) remotePdvVersionFloor.current = version;
+    setRemotePdvSnapshot((current) => current ? {
+      ...current,
+      version: version || current.version,
+      payables: [...current.payables.filter((item) => item.id !== payable.id), payable]
+    } : current);
   };
 
   const refreshRemote = async (session = remoteSessionRef.current, fullSales = remoteFullSalesRef.current) => {
@@ -1907,7 +1954,11 @@ export function App() {
     if (remoteRefreshInFlight.current) {
       remoteRefreshQueued.current = true;
       remoteRefreshFullQueued.current ||= fullSales;
-      return remoteRefreshInFlight.current;
+      const running = remoteRefreshInFlight.current;
+      await running;
+      const followup = remoteRefreshInFlight.current;
+      if (followup && followup !== running) await followup;
+      return;
     }
     const request = Promise.all([
       remoteRequest<RemoteEntriesResponse>(session, fullSales ? "/api/entries" : `/api/entries?limit=${REMOTE_ENTRY_LIMIT}`),
@@ -2122,6 +2173,7 @@ export function App() {
     setRemotePdvCustomers([]);
     setRemotePdvReceivables([]);
     setRemotePdvSnapshot(null);
+    remotePdvVersionFloor.current = null;
     setRemoteSession(null);
     remoteReconnectAttempt.current = 0;
     setRemoteMessage("");
@@ -2721,6 +2773,8 @@ export function App() {
               toastDuration={settings.notificationDurationMs}
               onDirectCartChange={setPdvDirectCartActive}
               snapshotOverride={remoteSession ? remotePdvSnapshot : pdvSnapshot}
+              onRemoteTableConfirmed={confirmRemotePdvTable}
+              onRemoteReceivableConfirmed={confirmRemoteReceivable}
               receiptPrintTargets={remoteSession
                 ? (remoteSession.permissions.printReceipts ? [{ id: "server", label: "Computador servidor" }] : [])
                 : server.devices.filter((device) => device.permissions.printReceipts).map((device) => ({ id: device.id, label: device.name }))}
@@ -2914,22 +2968,28 @@ export function App() {
                   payables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.payables || []}
                   readOnly={Boolean(remoteSession && !remoteSession.permissions.manageTables)}
                   onSave={async (draft) => {
-                    const payable = remoteSession
-                      ? await remoteRequest<{ payable: PdvPayable }>(remoteSession, "/api/pdv/payables", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.payable)
-                      : await window.caixa.savePdvPayable(draft);
+                    let payable: PdvPayable;
+                    if (remoteSession) {
+                      const result = await remoteRequest<{ payable: PdvPayable; version?: PdvDataVersion }>(remoteSession, "/api/pdv/payables", { method: "POST", body: JSON.stringify(draft) });
+                      payable = result.payable;
+                      confirmRemotePayable(payable, result.version);
+                    } else payable = await window.caixa.savePdvPayable(draft);
                     if (remoteSession) await refreshRemote(remoteSession);
                     else await reloadPdv();
                     return payable;
                   }}
                   onPay={async (id, payment) => {
                     const operationId = crypto.randomUUID();
-                    const payable = remoteSession
-                      ? await remoteRequest<{ payable: PdvPayable }>(remoteSession, `/api/pdv/payables/${id}/payments`, {
+                    let payable: PdvPayable;
+                    if (remoteSession) {
+                      const result = await remoteRequest<{ payable: PdvPayable; version?: PdvDataVersion }>(remoteSession, `/api/pdv/payables/${id}/payments`, {
                           method: "POST",
                           headers: { "x-idempotency-key": operationId },
                           body: JSON.stringify({ payment })
-                        }).then((result) => result.payable)
-                      : await window.caixa.payPdvPayable(id, payment, operationId);
+                        });
+                      payable = result.payable;
+                      confirmRemotePayable(payable, result.version);
+                    } else payable = await window.caixa.payPdvPayable(id, payment, operationId);
                     if (remoteSession) await refreshRemote(remoteSession);
                     else await reloadPdv();
                     return payable;
@@ -3156,6 +3216,7 @@ function PayablesPanel({
   const sevenDays = getLocalDateKey(new Date(new Date(`${today}T12:00:00`).getTime() + 7 * 86400000));
   const active = visible.filter((payable) => !["Cancelada", "Excluida"].includes(payable.status));
   const openBalance = roundMoney(active.reduce((sum, payable) => sum + payable.balance, 0));
+  const hiddenOpenCount = payables.filter((payable) => payable.balance > 0.009 && !["Cancelada", "Excluida"].includes(payable.status) && !visible.some((item) => item.id === payable.id)).length;
   const overdue = active.filter((payable) => payable.status === "Vencida");
   const paidInPeriod = roundMoney(active.reduce((sum, payable) => sum + payable.paidAmount, 0));
   const dueToday = active.filter((payable) => payable.dueDate === today && !["Paga", "Cancelada", "Excluida"].includes(payable.status));
@@ -3207,6 +3268,7 @@ function PayablesPanel({
         <label><span>Situacao</span><select value={status} onChange={(event) => { const next = event.target.value as typeof status; setStatus(next); if (next === "Excluidas") { setFrom(""); setTo(""); } }}>{["Em aberto", "Vencidas", "Historico", "Pagas", "Canceladas", "Excluidas", "Todos"].map((value) => <option key={value}>{value}</option>)}</select></label>
         <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Exibir tudo</button>
       </div>
+      {hiddenOpenCount > 0 && <div className="finance-filter-notice">{hiddenOpenCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}>Exibir todas</button></div>}
 
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
         <FinancialGrid id="payables" rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
@@ -3308,6 +3370,10 @@ function PayablesPanel({
               } else {
                 next = await onSave({ ...draft, installmentCount: draft.installmentCount || 1 });
               }
+              setFrom("");
+              setTo("");
+              setStatus("Todos");
+              setQuery("");
               syncSelection(next);
               setEditing(null);
               setNewSupplier("");

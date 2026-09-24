@@ -6,7 +6,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 import { WebSocket, WebSocketServer } from "ws";
 import { DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, ENTRY_TYPES, PAYMENT_METHODS } from "../src/shared/defaults.js";
 import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, QuickTabSettings, RemoteClientPolicy, ServerDevice, ServerPermissions, ServerState } from "../src/shared/types.js";
-import type { PdvCashShift, PdvCloseScope, PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
+import type { PdvCashShift, PdvCloseScope, PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvDataVersion, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
 interface LocalServerOptions {
@@ -22,10 +22,11 @@ interface LocalServerOptions {
   deleteEntry: (id: string) => Promise<void>;
   getPdvSnapshot: (salesLimit?: number) => Promise<PdvSnapshot>;
   getPdvTable: (number: number) => PdvOpenTable | undefined;
+  getPdvVersion: () => PdvDataVersion;
   savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string, saleType?: PdvSale["type"]) => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
-  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[]) => Promise<void>;
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[], expectedSessionId?: string) => Promise<void>;
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string) => Promise<PdvCartItem[]>;
   appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
@@ -323,9 +324,10 @@ export class LocalServer {
       try {
         const tableNumber = Number(request.params.number);
         await this.options.openPdvTable(tableNumber, Number(request.body?.people || 1), String(request.body?.note || ""));
-        this.broadcast({ type: "pdv-changed" });
-        this.options.onRemotePdvChange();
-        response.json({ ok: true });
+        const table = this.options.getPdvTable(tableNumber);
+        const version = this.options.getPdvVersion();
+        response.json({ ok: true, table, version });
+        setImmediate(() => { this.broadcast({ type: "pdv-table-changed", table, version }); this.options.onRemotePdvChange(); });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel abrir a mesa." });
       }
@@ -335,7 +337,7 @@ export class LocalServer {
       try {
         const tableNumber = Number(request.params.number);
         await this.options.setPdvTableStatus(tableNumber, request.body?.status);
-        this.broadcast({ type: "pdv-changed" });
+        this.broadcast({ type: "pdv-table-changed", table: this.options.getPdvTable(tableNumber), version: this.options.getPdvVersion() });
         this.options.onRemotePdvChange();
         response.json({ ok: true });
       } catch (error) {
@@ -346,10 +348,11 @@ export class LocalServer {
     app.put("/api/pdv/tables/:number/items", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
-        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : [], Array.isArray(request.body?.subtables) ? request.body.subtables : undefined, Array.isArray(request.body?.baseItemIds) ? request.body.baseItemIds : undefined);
+        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : [], Array.isArray(request.body?.subtables) ? request.body.subtables : undefined, Array.isArray(request.body?.baseItemIds) ? request.body.baseItemIds : undefined, String(request.body?.sessionId || "") || undefined);
         const table = this.options.getPdvTable(tableNumber);
-        response.json({ ok: true, table });
-        setImmediate(() => { this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange(); });
+        const version = this.options.getPdvVersion();
+        response.json({ ok: true, table, version });
+        setImmediate(() => { this.broadcast({ type: "pdv-table-changed", table, version }); this.options.onRemotePdvChange(); });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar itens da mesa." });
       }
@@ -376,7 +379,7 @@ export class LocalServer {
         const device = String(request.header("x-device-name") || "Cliente remoto");
         const operationId = String(request.header("x-idempotency-key") || "").trim() || undefined;
         const sale = await this.options.closePdvTable(tableNumber, Array.isArray(request.body?.payments) ? request.body.payments : [], Number(request.body?.discount || 0), device, operationId);
-        response.json({ sale });
+        response.json({ sale, table: this.options.getPdvTable(tableNumber), version: this.options.getPdvVersion() });
         setImmediate(() => { this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange(); });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel fechar a mesa." });
@@ -432,7 +435,7 @@ export class LocalServer {
         const receivable = await this.options.savePdvReceivable(request.body || {});
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
-        response.status(201).json({ receivable });
+        response.status(201).json({ receivable, version: this.options.getPdvVersion() });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar a conta a receber." });
       }
@@ -449,7 +452,7 @@ export class LocalServer {
         );
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
-        response.status(201).json({ receivable });
+        response.status(201).json({ receivable, version: this.options.getPdvVersion() });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel registrar o recebimento." });
       }
@@ -460,7 +463,7 @@ export class LocalServer {
         const receivable = await this.options.updatePdvReceivable(request.params.id, request.body || {});
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
-        response.json({ receivable });
+        response.json({ receivable, version: this.options.getPdvVersion() });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel atualizar a conta." });
       }
@@ -493,7 +496,7 @@ export class LocalServer {
         const payable = await this.options.savePdvPayable(request.body || {});
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
-        response.status(201).json({ payable });
+        response.status(201).json({ payable, version: this.options.getPdvVersion() });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar a conta a pagar." });
       }
@@ -510,7 +513,7 @@ export class LocalServer {
         );
         this.broadcast({ type: "pdv-changed" });
         this.options.onRemotePdvChange();
-        response.status(201).json({ payable });
+        response.status(201).json({ payable, version: this.options.getPdvVersion() });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel registrar o pagamento." });
       }
@@ -540,14 +543,14 @@ export class LocalServer {
 
     app.post("/api/pdv/tables/:number/cancel", this.authorize("manageTables"), async (request, response) => {
       try {
+        const tableNumber = Number(request.params.number);
         const sale = await this.options.cancelPdvTable(
-          Number(request.params.number),
+          tableNumber,
           String(request.header("x-device-name") || "Cliente remoto"),
           String(request.body?.subtableName || "").trim() || undefined
         );
-        this.broadcast({ type: "pdv-changed" });
-        this.options.onRemotePdvChange();
-        response.json({ ok: true, sale });
+        response.json({ ok: true, sale, table: this.options.getPdvTable(tableNumber), version: this.options.getPdvVersion() });
+        setImmediate(() => { this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange(); });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel cancelar a mesa." });
       }
@@ -567,7 +570,7 @@ export class LocalServer {
           request.body?.closeScope
         );
         const table = this.options.getPdvTable(tableNumber);
-        response.json({ sale, table });
+        response.json({ sale, table, version: this.options.getPdvVersion() });
         setImmediate(() => { this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange(); });
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar fechamento parcial." });

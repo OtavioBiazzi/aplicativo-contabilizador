@@ -11,6 +11,7 @@ import type {
   PdvCategoryDraft,
   PdvCustomer,
   PdvCustomerDraft,
+  PdvDataVersion,
   PdvExportFilters,
   PdvFinancialAuditEvent,
   PdvOpenTable,
@@ -108,6 +109,8 @@ export class PdvStore {
   private db: Database | null = null;
   private dbFilePath = "";
   private persistQueue: Promise<void> = Promise.resolve();
+  private readonly instanceId = randomUUID();
+  private revision = 0;
 
   constructor(private readonly dataDirectory: string) {}
 
@@ -185,6 +188,7 @@ export class PdvStore {
 
   async getSnapshot(salesLimit?: number): Promise<PdvSnapshot> {
     return {
+      version: this.getVersion(),
       categories: this.getCategories(),
       products: this.getProducts(),
       tables: this.getTables(),
@@ -821,6 +825,10 @@ export class PdvStore {
     return next;
   }
 
+  getVersion(): PdvDataVersion {
+    return { instanceId: this.instanceId, revision: this.revision };
+  }
+
   getCurrentCashShift(): PdvCashShift | undefined {
     const raw = selectAll<{ value: string }>(this.requireDb(), "SELECT value FROM pdv_settings WHERE key = 'cash_shift_current'")[0]?.value;
     if (!raw) return undefined;
@@ -1286,6 +1294,12 @@ export class PdvStore {
       throw new Error("Status de mesa invalido.");
     }
     const db = this.requireDb();
+    if (status === "Livre") {
+      if (this.getTableItems(tableNumber).length) throw new Error("Cancele ou feche os itens antes de liberar a mesa.");
+      db.run("DELETE FROM table_sessions WHERE table_number = ?", [tableNumber]);
+      await this.persist();
+      return;
+    }
     const current = selectAll<{ status: PdvTableStatus }>(
       db,
       "SELECT status FROM table_sessions WHERE table_number = ? LIMIT 1",
@@ -1303,7 +1317,7 @@ export class PdvStore {
     await this.persist();
   }
 
-  async saveTableItems(tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[]): Promise<void> {
+  async saveTableItems(tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[], expectedSessionId?: string): Promise<void> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     validateCartItems(items);
     const db = this.requireDb();
@@ -1312,11 +1326,14 @@ export class PdvStore {
         throw new Error("Esta conta já foi fechada em outro terminal. Atualize a mesa antes de continuar.");
       }
     }
-    const currentSession = selectAll<{ status: PdvTableStatus; subtablesJson: string }>(
+    const currentSession = selectAll<{ id: string; status: PdvTableStatus; subtablesJson: string }>(
       db,
-      "SELECT status, subtables_json AS subtablesJson FROM table_sessions WHERE table_number = ? LIMIT 1",
+      "SELECT id, status, subtables_json AS subtablesJson FROM table_sessions WHERE table_number = ? LIMIT 1",
       [tableNumber]
     )[0];
+    if (expectedSessionId && currentSession?.id !== expectedSessionId) {
+      throw new Error("Esta mesa foi fechada ou reaberta em outro terminal. Atualize a mesa antes de continuar.");
+    }
     const currentItems = this.getTableItems(tableNumber);
     const baseline = Array.isArray(baseItemIds) ? new Set(baseItemIds.map(String)) : null;
     // Cada terminal informa os itens que conhecia ao abrir/atualizar a mesa.
@@ -1664,6 +1681,8 @@ export class PdvStore {
     db.run("BEGIN IMMEDIATE");
     try {
       insertSale(db, sale);
+      const cancelledItems = table.items.filter((item) => cancelMainOnly ? !item.subtableName : normalizedSubtable ? (item.subtableName || "") === normalizedSubtable : true);
+      for (const item of cancelledItems) db.run("INSERT OR IGNORE INTO closed_table_items (item_id, table_session_id, sale_id) VALUES (?, ?, ?)", [item.id, table.sessionId || "", sale.id]);
       db.run("DELETE FROM table_items WHERE table_number = ?", [tableNumber]);
       if (cancelMainOnly || normalizedSubtable) {
         if (remainingItems.length) writeTableItems(db, tableNumber, remainingItems);
@@ -1973,7 +1992,9 @@ export class PdvStore {
        FROM table_items ORDER BY table_number, sort_order, rowid`
     ).forEach((row) => {
       const item = normalizeCartItem(row);
-      itemsByTable.set(row.tableNumber, [...(itemsByTable.get(row.tableNumber) || []), item]);
+      const items = itemsByTable.get(row.tableNumber) || [];
+      items.push(item);
+      itemsByTable.set(row.tableNumber, items);
     });
     return Array.from({ length: tableCount }, (_, index) => {
       const number = index + 1;
@@ -2449,6 +2470,7 @@ export class PdvStore {
   }
 
   private async persist() {
+    this.revision += 1;
     const write = this.persistQueue.catch(() => undefined).then(async () => {
       const db = this.requireDb();
       const tempPath = `${this.dbFilePath}.${process.pid}.${Date.now()}.tmp`;

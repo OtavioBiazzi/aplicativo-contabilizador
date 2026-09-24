@@ -7973,6 +7973,35 @@ input[type="date"] {
   -webkit-text-fill-color: var(--muted) !important;
 }
 
+/* Keep the account receipt preview and its actions inside the available window. */
+#root .history-receipt-modal.receipt-viewer-modal {
+  width: min(940px, 90vw);
+  height: min(700px, calc(100% - 40px));
+  max-height: calc(100% - 40px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#root .history-receipt-modal.receipt-viewer-modal > .receipt-viewer-body {
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+}
+
+#root .history-receipt-modal.receipt-viewer-modal > .modal-head {
+  top: 0;
+  margin: 0;
+}
+
+#root .history-receipt-modal.receipt-viewer-modal > .receipt-modal-actions {
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
 @media (max-width: 620px) {
   .pdv-inline-customer-create,
   .pdv-receivable-list > article,
