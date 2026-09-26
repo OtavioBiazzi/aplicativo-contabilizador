@@ -1,3 +1,5 @@
+import { IndependentUpdater } from "./components/IndependentUpdater";
+import { historyDescription } from "./shared/historyDescription";
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -54,11 +56,12 @@ import {
   X
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
-import { PaymentAmountModal, PdvApp } from "./PdvApp";
+import { PaymentAmountModal, PaymentModal, PdvApp } from "./PdvApp";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
-import type { PdvCashShift, PdvCustomer, PdvDataVersion, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
+import type { PdvCashShift, PdvCustomer, PdvCustomerDraft, PdvDataVersion, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
 import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
 import { downloadFinancialCsv } from "./shared/financialExport";
+import { inFinancialPeriod, supplierBalanceKey, type FinancialDateField } from "./shared/financialDates";
 import {
   buildReportDataset,
   createReportRecords,
@@ -2232,9 +2235,15 @@ export function App() {
     await addEntry(draft);
   };
 
-  const editRemoteEntry = async (entry: LedgerEntry) => {
+  const editRemoteEntry = async (entry: LedgerEntry, patch?: Partial<LedgerEntry>) => {
     if (!remoteSession?.permissions.edit) {
       return;
+    }
+    if (patch) {
+      const payload = { ...patch };
+      if (!remoteSession.permissions.viewEntryValues) delete payload.finalValue;
+      await remoteRequest(remoteSession, `/api/entries/${entry.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+      await refreshRemote(remoteSession); showToast("success", "Lancamento remoto editado."); return;
     }
     const description = window.prompt("Nova descricao", entry.description || "");
     if (description === null) {
@@ -2536,6 +2545,7 @@ export function App() {
             <button type="button" onClick={() => { setStartupConnectionHost(auto.host); setStartupConnectionPassword(auto.password); setStartupConnectionAutomatic(auto.mode === "client"); setRemoteMessage(""); setEditingStartupConnection((current) => !current); }}>Alterar conexao</button>
             <button type="button" disabled={startupRoleBusy} onClick={() => void chooseAnotherStartupRole()}>Escolher outro modo</button>
           </div>
+          <IndependentUpdater />
           {editingStartupConnection && <form className="startup-connection-editor" onSubmit={(event) => { event.preventDefault(); void saveStartupClientConnection(); }}>
             <label><span>IP ou endereco do servidor</span><input autoFocus value={startupConnectionHost} onChange={(event) => setStartupConnectionHost(event.target.value)} placeholder="192.168.1.10:4317" autoComplete="off" /></label>
             <label><span>Senha do servidor</span><input type="password" value={startupConnectionPassword} onChange={(event) => setStartupConnectionPassword(event.target.value)} autoComplete="off" /></label>
@@ -2785,7 +2795,7 @@ export function App() {
                 if (tab === "history" && tableNumber) setHistoryFocus({ tableNumber, nonce: Date.now() });
                 requestNavigation(tab);
               }}
-              onOperationalTabChange={(tab) => requestNavigation(tab)}
+              onOperationalTabChange={(tab) => { setBaseOperationalTab(tab); setActiveTab(tab); }}
             />
           </div>
         )}
@@ -2893,6 +2903,16 @@ export function App() {
               method: "POST",
               body: JSON.stringify(payload)
             }) : undefined}
+            onSaveCustomer={async (draft) => {
+              if (remoteSession) return (await remoteRequest<{ customer: PdvCustomer }>(remoteSession, "/api/pdv/customers", { method: "POST", body: JSON.stringify(draft) })).customer;
+              return window.caixa.savePdvCustomer(draft);
+            }}
+            onSavePayments={async (sale, payments) => {
+              if (remoteSession) await remoteRequest(remoteSession, `/api/pdv/sales/${sale.id}/payments`, { method: "PATCH", body: JSON.stringify({ payments }) });
+              else await window.caixa.updatePdvSalePayments(sale.id, payments);
+              await reload(); if (remoteSession) await refreshRemote(remoteSession);
+            }}
+            canEdit={!remoteSession || remoteSession.permissions.edit}
             onEditRemote={remoteSession ? editRemoteEntry : undefined}
             onCancelRemote={remoteSession ? cancelRemoteEntry : undefined}
             onDeleteRemote={remoteSession ? deleteRemoteEntry : undefined}
@@ -2977,6 +2997,14 @@ export function App() {
                     if (remoteSession) await refreshRemote(remoteSession);
                     else await reloadPdv();
                     return payable;
+                  }}
+                  onPaySupplier={async (supplier, payment, operationId, accountIds) => {
+                    if (remoteSession) {
+                      const result = await remoteRequest<{ payables: PdvPayable[]; version?: PdvDataVersion }>(remoteSession, "/api/pdv/supplier-payments", { method: "POST", headers: { "x-idempotency-key": operationId }, body: JSON.stringify({ supplier, payment, accountIds }) });
+                      result.payables.forEach((account) => confirmRemotePayable(account, result.version));
+                      await refreshRemote(remoteSession); return result.payables;
+                    }
+                    const accounts = await window.caixa.paySupplierPayables(supplier, payment, operationId, accountIds); await reloadPdv(); return accounts;
                   }}
                   onPay={async (id, payment) => {
                     const operationId = crypto.randomUUID();
@@ -3144,6 +3172,7 @@ function PayablesPanel({
   readOnly,
   onSave,
   onPay,
+  onPaySupplier,
   onCancel,
   onDelete,
   createRequest,
@@ -3153,6 +3182,7 @@ function PayablesPanel({
   payables: PdvPayable[];
   readOnly: boolean;
   onSave: (draft: PdvPayableDraft) => Promise<PdvPayable>;
+  onPaySupplier: (supplier: string, payment: PdvPayablePayment, operationId: string, accountIds?: string[]) => Promise<PdvPayable[]>;
   onPay: (id: string, payment: PdvPayablePayment) => Promise<PdvPayable>;
   onCancel: (id: string) => Promise<void>;
   onDelete: (id: string, permanent?: boolean) => Promise<void>;
@@ -3167,6 +3197,7 @@ function PayablesPanel({
   const monthEnd = getLocalDateKey(monthEndDate);
   const [from, setFrom] = useState(monthStart);
   const [to, setTo] = useState(monthEnd);
+  const [dateField, setDateField] = useState<FinancialDateField>("emission");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Historico" | "Pagas" | "Canceladas" | "Excluidas">("Em aberto");
   const [editing, setEditing] = useState<PdvPayable | "new" | null>(null);
@@ -3175,6 +3206,23 @@ function PayablesPanel({
   const [cancelRequest, setCancelRequest] = useState<PdvPayable | null>(null);
   const [deleteRequest, setDeleteRequest] = useState<PdvPayable | null>(null);
   const [busy, setBusy] = useState(false);
+  const [supplierView, setSupplierView] = useState(false);
+  const [supplierSelection, setSupplierSelection] = useState("");
+  const [supplierPaying, setSupplierPaying] = useState<PdvPayable | null>(null);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [payingAccountIds, setPayingAccountIds] = useState<string[] | undefined>();
+  const supplierOperationId = useRef(crypto.randomUUID());
+  const supplierRows = useMemo(() => {
+    const groups = new Map<string, { id: string; name: string; count: number; balance: number; representative: PdvPayable }>();
+    for (const account of payables) {
+      const key = supplierBalanceKey(account.supplier);
+      if (!key || account.balance <= 0.009 || ["Cancelada", "Excluida"].includes(account.status)) continue;
+      const row = groups.get(key) || { id: key, name: account.supplier, count: 0, balance: 0, representative: account };
+      row.count++; row.balance = roundMoney(row.balance + account.balance); groups.set(key, row);
+    }
+    return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }, [payables]);
+  const selectedSupplierRow = supplierRows.find((row) => row.id === supplierSelection);
   const [recordView, setRecordView] = useState(false);
   const [newSupplier, setNewSupplier] = useState("");
 
@@ -3186,7 +3234,7 @@ function PayablesPanel({
   }, [createRequest?.nonce]);
 
   const visible = payables.filter((payable) => {
-    const inPeriod = (!from || payable.dueDate >= from) && (!to || payable.dueDate <= to);
+    const inPeriod = inFinancialPeriod(payable, from, to, dateField);
     const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
     const queryMatch = !normalizedQuery || [
       payable.description,
@@ -3209,7 +3257,7 @@ function PayablesPanel({
   });
   useEffect(() => {
     setSelected((current) => current ? visible.find((item) => item.id === current.id) || null : null);
-  }, [payables, from, to, query, status]);
+  }, [payables, from, to, query, status, dateField]);
   const validSelection = selected && visible.some((item) => item.id === selected.id) ? selected : null;
   const canChange = !readOnly && !!validSelection && !["Cancelada", "Excluida"].includes(validSelection.status);
   const canPay = canChange && (validSelection?.balance || 0) > 0.009;
@@ -3243,23 +3291,39 @@ function PayablesPanel({
         <div className="financial-head-actions"><button className="pdv-ghost-button" onClick={() => downloadFinancialCsv(`contas-a-pagar-${today}.csv`, ["Descricao", "Fornecedor", "Categoria", "Centro de custo", "Documento", "Emissao", "Vencimento", "Valor", "Pago", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"], visible.map((item) => [item.description, item.supplier, item.category, item.costCenter, item.documentNumber, item.issueDate, item.dueDate, item.amount, item.paidAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note]))}><Download size={16} /> Exportar</button>{!readOnly && <button className="pdv-primary-button" onClick={() => setEditing("new")}><Plus size={17} /> Nova conta</button>}</div>
       </div>
 
-      <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
+      {!supplierView && <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
         <button disabled={readOnly} onClick={() => setEditing("new")}><Plus /><span>Novo</span></button>
         <button disabled={!canChange} onClick={() => validSelection && setEditing(validSelection)}><Edit3 /><span>Alterar</span></button>
         <button disabled={readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
+        <button disabled={readOnly || !visible.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
+          const accounts = visible.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
+          if (!accounts.length) return;
+          if (!supplierBalanceKey(accounts[0].supplier) || accounts.some((account) => supplierBalanceKey(account.supplier) !== supplierBalanceKey(accounts[0].supplier))) { onToast("error", "Selecione contas pendentes do mesmo fornecedor."); return; }
+          supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(accounts.map((account) => account.id)); setSupplierPaying({ ...accounts[0], description: accounts[0].supplier, balance: roundMoney(accounts.reduce((sum, account) => sum + account.balance, 0)) });
+        }}><Wallet /><span>Pagar selecionadas ({selectedAccountIds.filter((id) => visible.some((account) => account.id === id)).length})</span></button>
         <button className="primary-command" disabled={!canPay} onClick={() => validSelection && setPaying(validSelection)}><Wallet /><span>Pagar</span></button>
         <button disabled={!canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
         <button disabled={!validSelection} onClick={() => setRecordView(true)}><ReceiptText /><span>Registro</span></button>
         <span className="finance-command-divider" />
         <button className={status === "Em aberto" ? "active" : ""} onClick={() => { setStatus("Em aberto"); setRecordView(false); }}><CalendarDays /><span>Contas a pagar</span></button>
         <button className={status === "Pagas" ? "active" : ""} onClick={() => { setStatus("Pagas"); setRecordView(false); }}><Check /><span>Contas pagas</span></button>
-      </div>
+      </div>}
       <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
-        <button role="tab" aria-selected={!recordView} onClick={() => setRecordView(false)}>Pesquisa</button>
-        <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => setRecordView(true)}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
+        <button role="tab" aria-selected={!recordView && !supplierView} onClick={() => { setSupplierView(false); setRecordView(false); }}>Pesquisa</button>
+        <button role="tab" aria-selected={supplierView} onClick={() => { setSupplierView(true); setRecordView(false); }}>Por fornecedor</button>
+        <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setSupplierView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
         <span>Duplo clique em uma linha para consultar o registro</span>
       </div>
-      <div className="finance-period-shortcuts"><span>Vencimento</span><button onClick={() => { setFrom(today); setTo(today); setStatus("Em aberto"); }}>Hoje</button><button onClick={() => { setFrom(today); setTo(sevenDays); setStatus("Em aberto"); }}>Próximos 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencidas"); }}>Vencidas</button></div>
+      {supplierView ? <>
+        <div className="financial-filters"><label className="financial-search"><span>Buscar fornecedor</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome do fornecedor" /></label><button disabled={readOnly || !selectedSupplierRow} onClick={() => { if (selectedSupplierRow) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...selectedSupplierRow.representative, description: selectedSupplierRow.name, balance: selectedSupplierRow.balance }); } }}>Pagar ao fornecedor</button></div>
+        <p className="settings-note">Saldo de todas as contas pendentes. O pagamento abate os vencimentos mais antigos. Contas sem fornecedor permanecem na Pesquisa.</p>
+        <FinancialGrid id="supplier-balances" rows={supplierRows.filter((row) => row.name.toLocaleLowerCase("pt-BR").includes(query.toLocaleLowerCase("pt-BR")))} selectedId={supplierSelection} onSelect={(row) => setSupplierSelection(row.id)} onOpen={(row) => { if (!readOnly) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...row.representative, description: row.name, balance: row.balance }); } }} columns={[
+          { key: "name", label: "Fornecedor", required: true, value: (row) => row.name },
+          { key: "count", label: "Contas pendentes", numeric: true, value: (row) => row.count },
+          { key: "balance", label: "Total a pagar", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{formatCurrency(row.balance)}</strong> }
+        ]} totals={<><span>Saldo pendente de todos os fornecedores</span><strong>{formatCurrency(supplierRows.reduce((sum, row) => sum + row.balance, 0))}</strong></>} />
+      </> : <>
+      <div className="finance-period-shortcuts"><label>Período por <select aria-label="Referencia do periodo" value={dateField} onChange={(event) => setDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label><button onClick={() => { setFrom(today); setTo(today); setStatus("Em aberto"); }}>Hoje</button><button onClick={() => { setDateField("due"); setFrom(today); setTo(sevenDays); setStatus("Em aberto"); }}>Vencem em 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencidas"); }}>Vencidas</button><span>Sem vencimento: usa a emissão</span></div>
 
       <div className="financial-filters">
         <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, fornecedor, categoria, documento ou tag" /></label>
@@ -3272,6 +3336,7 @@ function PayablesPanel({
 
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
         <FinancialGrid id="payables" rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
+          { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${item.description}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
           { key: "issue", label: "Emissão", value: (item) => item.issueDate, render: (item) => item.issueDate ? new Date(`${item.issueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
           { key: "document", label: "Documento", value: (item) => item.documentNumber || "—" },
           { key: "description", label: "Descrição / fornecedor", required: true, value: (item) => item.description, render: (item) => <div className="finance-cell-title"><strong>{item.description}</strong><small>{item.supplier || "Fornecedor não informado"}</small></div> },
@@ -3328,6 +3393,13 @@ function PayablesPanel({
         </aside>
       </div>
 
+      </>}
+      {supplierPaying && <PayablePaymentModal payable={supplierPaying} busy={busy} onCancel={() => { if (!busy) setSupplierPaying(null); }} onConfirm={async (payment) => {
+        if (busy) return; setBusy(true);
+        try { await onPaySupplier(supplierPaying.supplier, payment, supplierOperationId.current, payingAccountIds); setSupplierPaying(null); setSelectedAccountIds([]); onToast("success", "Pagamento distribuído nas contas do fornecedor."); }
+        catch (cause) { onToast("error", cause instanceof Error ? cause.message : "Nao foi possivel pagar."); }
+        finally { setBusy(false); }
+      }} />}
       {editing && (
         <PayableEditorModal
           payable={editing === "new" ? null : editing}
@@ -4613,6 +4685,9 @@ function HistoryPanel({
   onChange,
   onToast,
   onEditRemote,
+  onSavePayments,
+  onSaveCustomer,
+  canEdit = true,
   onCancelRemote,
   onDeleteRemote,
   onRestoreRemote,
@@ -4628,7 +4703,10 @@ function HistoryPanel({
   focusDate?: HistoryFocusDate | null;
   onChange: () => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
-  onEditRemote?: (entry: LedgerEntry) => Promise<void>;
+  onEditRemote?: (entry: LedgerEntry, patch?: Partial<LedgerEntry>) => Promise<void>;
+  onSaveCustomer?: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
+  onSavePayments?: (sale: PdvSale, payments: PdvPayment[]) => Promise<void>;
+  canEdit?: boolean;
   onCancelRemote?: (entry: LedgerEntry) => Promise<void>;
   onDeleteRemote?: (entry: LedgerEntry, permanent?: boolean) => Promise<void>;
   onRestoreRemote?: (entry: LedgerEntry) => Promise<void>;
@@ -4652,6 +4730,8 @@ function HistoryPanel({
   const [originFilter, setOriginFilter] = useState(savedFilters.originFilter);
   const [movementFilter, setMovementFilter] = useState(savedFilters.movementFilter);
   const [tableNumberFilter, setTableNumberFilter] = useState("");
+  const [editingPayments, setEditingPayments] = useState<PdvSale | null>(null);
+  const [paymentsBusy, setPaymentsBusy] = useState(false);
   const [editing, setEditing] = useState<LedgerEntry | null>(null);
   const [details, setDetails] = useState<PdvSale | null>(null);
   const [receiptSale, setReceiptSale] = useState<PdvSale | null>(null);
@@ -4725,7 +4805,7 @@ function HistoryPanel({
         || (movementFilter === "Com cliente" && Boolean(entry.sourceSaleId && customerSaleIds.has(entry.sourceSaleId)))
         || (movementFilter === "Servidor" && normalizedOrigin === "Servidor")
         || (movementFilter === "Clientes remotos" && normalizedOrigin !== "Servidor")
-        || (movementFilter === "Fechamentos parciais" && entry.customType === "Mesa parcial")
+        || (movementFilter === "Fechamentos parciais" && (entry.customType === "Mesa parcial" || sale?.status === "Parcial"))
         || (movementFilter === "Vendas diretas" && entry.type === "Venda" && !entry.tableNumber);
       const sameTable = !tableNumberFilter || Number(entry.tableNumber || 0) === Number(tableNumberFilter.replace(/^0+/, "") || 0);
       if (!sameType || !sameStatus || !sameDate || !sameOrigin || !samePayment || !sameValue || !movementMatches || !sameTable) {
@@ -4735,7 +4815,7 @@ function HistoryPanel({
         return true;
       }
       const haystack = [
-        entry.description,
+        historyDescription(entry, sale, pdvReceivables, pdvCustomers),
         entry.tableNumber ? `Mesa ${entry.tableNumber}` : "",
         entry.busNumber ? `Onibus ${entry.busNumber}` : "",
         entry.observations,
@@ -4747,7 +4827,7 @@ function HistoryPanel({
       const normalizedHaystack = normalizeHistorySearch(haystack);
       return searchTerms.every((term) => normalizedHaystack.includes(term));
     });
-  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, movementFilter, tableNumberFilter, pdvSaleById, customerSaleIds]);
+  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, movementFilter, tableNumberFilter, pdvSaleById, customerSaleIds, pdvReceivables, pdvCustomers]);
   const visibleRows = filtered.slice(0, visibleCount);
   const filteredSummary = useMemo(() => filtered.reduce((summary, entry) => {
     if (entry.status === "active") {
@@ -4893,16 +4973,13 @@ function HistoryPanel({
           <tbody>
             {visibleRows.map((entry) => {
               const { time } = formatDateTime(entry.createdAt);
-              const description = entry.description.trim();
-              const defaultTablePattern = entry.tableNumber ? new RegExp(`^mesa\\s*0*${entry.tableNumber}$`, "i") : null;
-              const customTableName = entry.tableNumber && description && !defaultTablePattern?.test(description) ? description : "";
-              const isSubtableRecord = entry.customType?.startsWith("Submesa") || (entry.customType === "Mesa parcial" && Boolean(customTableName));
+              const description = historyDescription(entry, entry.sourceSaleId ? pdvSaleById.get(entry.sourceSaleId) : undefined, pdvReceivables, pdvCustomers);
               return (
                 <tr key={entry.id} className={entry.status !== "active" ? "muted-row" : ""}>
                   <td>{formatDateTime(entry.createdAt).date}</td>
                   <td>{time}</td>
                   <td>{entry.customType || entry.type}</td>
-                  <td>{entry.tableNumber ? isSubtableRecord ? description : "-" : description || "-"}</td>
+                  <td>{description || "-"}</td>
                   <td>{entry.tableNumber ? entry.tableNumber : "-"}</td>
                   <td>{entry.busNumber || "-"}</td>
                   <td>{paymentLabelForEntry(entry)}</td>
@@ -4910,10 +4987,11 @@ function HistoryPanel({
                   <td><span className={`status-dot ${entry.status}`}>{statusLabel(entry.status)}</span></td>
                   <td>
                     <div className="row-actions">
-                      <button title="Editar" onClick={() => onEditRemote ? void onEditRemote(entry) : setEditing(entry)}><Edit3 size={15} /></button>
+                      <button title="Editar" disabled={!canEdit} onClick={() => setEditing(entry)}><Edit3 size={15} /></button>
+                      {entry.sourceSaleId && onSavePayments && <button title="Editar pagamentos" aria-label="Editar pagamentos" disabled={!canEdit || entry.status !== "active" || pdvReceivables.some((account) => account.saleId === entry.sourceSaleId)} onClick={() => { const sale = pdvSaleById.get(entry.sourceSaleId!); if (sale) setEditingPayments(sale); }}><Wallet size={15} /></button>}
                       {entry.sourceSaleId && <button className="history-sale-details-button" title="Ver produtos e pagamentos" aria-label="Ver produtos e pagamentos" onClick={() => openSaleDetails(entry)}><Eye size={15} /></button>}
                       <button className="history-receipt-button" title="Gerar recibo ou cupom" aria-label="Gerar recibo ou cupom" onClick={() => openReceipt(entry)}><ReceiptText size={15} /></button>
-                      <button title="Duplicar" onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
+                      <button title={entry.sourceSaleId ? "Vendas do PDV nao podem ser duplicadas como lancamentos" : onEditRemote ? "Duplicacao indisponivel no cliente" : "Duplicar"} disabled={Boolean(entry.sourceSaleId || onEditRemote)} onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
                       {entry.status === "deleted" || entry.status === "cancelled" ? (
                          <button title="Restaurar" onClick={() => run(() => onRestoreRemote ? onRestoreRemote(entry) : window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
                       ) : (
@@ -4947,12 +5025,20 @@ function HistoryPanel({
         )}
       </div>
 
+      {editingPayments && onSavePayments && <PaymentModal total={editingPayments.total} busy={paymentsBusy} customers={pdvCustomers} onSaveCustomer={onSaveCustomer || ((draft) => window.caixa.savePdvCustomer(draft))} initialPayments={editingPayments.payments} title="Editar pagamentos" confirmLabel="Salvar pagamentos" skipConfirmation onCancel={() => { if (!paymentsBusy) setEditingPayments(null); }} onConfirm={async (payments) => {
+        setPaymentsBusy(true);
+        try { await onSavePayments(editingPayments, payments); setEditingPayments(null); onToast("success", "Pagamentos atualizados."); }
+        catch (cause) { onToast("error", cause instanceof Error ? cause.message : "Nao foi possivel editar pagamentos."); }
+        finally { setPaymentsBusy(false); }
+      }} />}
       {editing && (
         <EditEntryModal
           entry={editing}
+          preserveSplit={Boolean(editing.sourceSaleId && (pdvSaleById.get(editing.sourceSaleId)?.payments.length || 0) > 1)}
           onClose={() => setEditing(null)}
           onSave={async (patch) => {
-            await run(() => window.caixa.updateEntry(editing.id, patch), "Lancamento atualizado.");
+            if (onEditRemote) await onEditRemote(editing, patch);
+            else { await window.caixa.updateEntry(editing.id, patch); await onChange(); onToast("success", "Lancamento atualizado."); }
             setEditing(null);
           }}
         />
@@ -5120,9 +5206,10 @@ function HistoryReceiptModal({
   onClose: () => void;
   onToast: (tone: ToastState["tone"], message: string) => void;
 }) {
-  const linkedCustomer = receivable ? customers.find((item) => item.id === receivable.customerId) : undefined;
+  const paymentCustomer = sale.payments.find((payment) => payment.customerId || payment.customerName);
+  const linkedCustomer = customers.find((item) => item.id === (receivable?.customerId || paymentCustomer?.customerId));
   const [customerId, setCustomerId] = useState(linkedCustomer?.id || "");
-  const [customerName, setCustomerName] = useState("");
+  const [customerName, setCustomerName] = useState(linkedCustomer ? "" : paymentCustomer?.customerName || "");
   const [customerDocument, setCustomerDocument] = useState("");
   const [busy, setBusy] = useState(false);
   const [previewHtml, setPreviewHtml] = useState("");
@@ -5431,10 +5518,12 @@ function ImportPreviewModal({
 
 function EditEntryModal({
   entry,
+  preserveSplit = false,
   onClose,
   onSave
 }: {
   entry: LedgerEntry;
+  preserveSplit?: boolean;
   onClose: () => void;
   onSave: (patch: Partial<LedgerEntry>) => Promise<void>;
 }) {
@@ -5445,13 +5534,14 @@ function EditEntryModal({
   const [busNumber, setBusNumber] = useState(entry.busNumber);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(entry.paymentMethod);
   const [observations, setObservations] = useState(entry.observations);
+  const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const submit = async () => {
     if (saving) return;
-    setSaving(true);
+    setSaving(true); setError("");
     try {
-      await onSave({ type, description, finalValue: parseMoney(finalValue), tableNumber, busNumber, paymentMethod, observations });
-    } finally {
+      await onSave({ type, description, ...(parseMoney(finalValue) !== entry.finalValue ? { finalValue: parseMoney(finalValue) } : {}), tableNumber, busNumber, ...(paymentMethod !== entry.paymentMethod ? { paymentMethod } : {}), observations });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Nao foi possivel salvar."); } finally {
       setSaving(false);
     }
   };
@@ -5492,7 +5582,7 @@ function EditEntryModal({
           </label>
           <label className="field">
             <span>Valor final</span>
-            <input value={finalValue} onChange={(event) => setFinalValue(event.target.value)} />
+            <input disabled={preserveSplit} value={finalValue} onChange={(event) => setFinalValue(event.target.value)} />
           </label>
           <label className="field description-field">
             <span>Descricao</span>
@@ -5508,7 +5598,7 @@ function EditEntryModal({
           </label>
           <label className="field">
             <span>Pagamento</span>
-            <select value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}>
+            <select disabled={preserveSplit} value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod)}>
               {PAYMENT_METHODS.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
@@ -5517,6 +5607,8 @@ function EditEntryModal({
             <input value={observations} onChange={(event) => setObservations(event.target.value)} />
           </label>
         </div>
+        {preserveSplit && <p className="settings-note">Esta venda possui vários pagamentos. Use o botão Editar pagamentos na linha do histórico para alterar todos os meios utilizados.</p>}
+        {error && <p className="settings-note" role="alert">{error}</p>}
         <div className="submit-row">
           <button
             className="primary-button"

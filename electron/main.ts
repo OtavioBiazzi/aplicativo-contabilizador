@@ -628,11 +628,13 @@ async function bootstrap() {
     closePdvCashShift: (countedAmount, originDevice, note) => pdvStore.closeCashShift(countedAmount, originDevice, note),
     savePdvCustomer: (draft) => pdvStore.saveCustomer(draft),
     savePdvReceivable: (draft) => pdvStore.saveReceivable(draft),
+    receiveCustomerReceivables: (id, payment, originDevice, operationId, accountIds) => pdvStore.receiveCustomerReceivables(id, payment, originDevice, operationId, accountIds),
     receivePdvReceivable: (id, payment, originDevice, operationId) => pdvStore.receiveReceivable(id, payment, originDevice, operationId),
     updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
     cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
     deletePdvReceivable: (id, permanent) => pdvStore.deleteReceivable(id, permanent),
     savePdvPayable: (draft) => pdvStore.savePayable(draft),
+    paySupplierPayables: (supplier, payment, originDevice, operationId, accountIds) => pdvStore.paySupplierPayables(supplier, payment, originDevice, operationId, accountIds),
     payPdvPayable: (id, payment, originDevice, operationId) => pdvStore.payPayable(id, payment, originDevice, operationId),
     cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
     deletePdvPayable: (id, permanent) => pdvStore.deletePayable(id, permanent),
@@ -929,6 +931,12 @@ function registerIpc() {
     return customer;
   });
 
+  ipcMain.handle("pdv:receiveCustomerReceivables", async (_event, id: string, payment: PdvReceivablePayment, operationId: string, accountIds?: string[]): Promise<PdvReceivable[]> => {
+    const accounts = await pdvStore.receiveCustomerReceivables(id, payment, "Servidor", operationId, accountIds);
+    publishPdvChanged();
+    return accounts;
+  });
+
   ipcMain.handle("pdv:receiveReceivable", async (_event, id: string, payment: PdvReceivablePayment, operationId?: string): Promise<PdvReceivable> => {
     const receivable = await pdvStore.receiveReceivable(id, payment, "Servidor", operationId || randomUUID());
     publishPdvChanged();
@@ -961,6 +969,11 @@ function registerIpc() {
     const payable = await pdvStore.savePayable(draft);
     publishPdvChanged();
     return payable;
+  });
+
+  ipcMain.handle("pdv:paySupplierPayables", async (_event, supplier: string, payment: PdvPayablePayment, operationId: string, accountIds?: string[]): Promise<PdvPayable[]> => {
+    const accounts = await pdvStore.paySupplierPayables(supplier, payment, "Servidor", operationId, accountIds);
+    publishPdvChanged(); return accounts;
   });
 
   ipcMain.handle("pdv:payPayable", async (_event, id: string, payment: PdvPayablePayment, operationId?: string): Promise<PdvPayable> => {

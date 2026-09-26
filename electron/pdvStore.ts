@@ -1,3 +1,4 @@
+import { supplierBalanceKey } from "../src/shared/financialDates.js";
 ﻿import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
@@ -451,6 +452,40 @@ export class PdvStore {
     return this.getPayables().find((item) => item.id === payableId)!;
   }
 
+  async paySupplierPayables(supplier: string, payment: PdvPayablePayment, originDevice = "Servidor", operationId: string, accountIds?: string[]): Promise<PdvPayable[]> {
+    const db = this.requireDb(); const key = supplierBalanceKey(supplier);
+    const signature = JSON.stringify(["supplier", key, payment.method, payment.amount, payment.description || "", accountIds ? [...new Set(accountIds)].sort() : null]);
+    const existing = selectAll<{ request_json: string; account_ids_json: string }>(db, "SELECT request_json, account_ids_json FROM financial_group_operations WHERE operation_id = ?", [operationId])[0];
+    if (existing) {
+      if (existing.request_json !== signature) throw new Error("Este pagamento ja foi utilizado com outros dados.");
+      const ids: string[] = JSON.parse(existing.account_ids_json);
+      return this.getPayables().filter((account) => ids.includes(account.id));
+    }
+    const allAccounts = this.getPayables();
+    if (accountIds && (!accountIds.length || accountIds.some((id) => !allAccounts.some((account) => account.id === id && supplierBalanceKey(account.supplier) === key && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status))))) throw new Error("As contas selecionadas foram alteradas ou pertencem a outro fornecedor. Atualize a selecao.");
+    const accounts = allAccounts.filter((account) => (!accountIds || accountIds.includes(account.id)) && supplierBalanceKey(account.supplier) === key && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status))
+      .sort((a, b) => (a.dueDate || a.issueDate).localeCompare(b.dueDate || b.issueDate) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const cents = Math.round(Number(payment.amount) * 100);
+    const total = accounts.reduce((sum, account) => sum + Math.round(account.balance * 100), 0);
+    if (!key || !operationId || !Number.isFinite(cents) || cents <= 0 || cents > total) throw new Error("O pagamento deve ser maior que zero e nao pode ultrapassar o saldo atual do fornecedor.");
+    if (!["Dinheiro", "Debito", "Credito", "Pix", "Outros"].includes(payment.method)) throw new Error("Forma de pagamento invalida.");
+    let remaining = cents; const affected: string[] = [];
+    db.run("BEGIN IMMEDIATE");
+    try {
+      for (const account of accounts) {
+        if (!remaining) break;
+        const amountCents = Math.min(remaining, Math.round(account.balance * 100)); remaining -= amountCents;
+        db.run(`INSERT INTO payable_payments (id, payable_id, created_at, method, amount, description, origin_device, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [randomUUID(), account.id, new Date().toISOString(), payment.method, amountCents / 100, String(payment.description || "Pagamento do saldo do fornecedor").trim(), originDevice, `${operationId}:${account.id}`]);
+        db.run("UPDATE payables SET status = ? WHERE id = ?", [Math.round(account.balance * 100) === amountCents ? "Paga" : "Parcialmente paga", account.id]);
+        this.writeFinancialEvent(db, "payable", account.id, "Pagamento", "Pagamento distribuido pelo saldo do fornecedor.", originDevice, amountCents / 100); affected.push(account.id);
+      }
+      db.run("INSERT INTO financial_group_operations (operation_id, request_json, account_ids_json) VALUES (?, ?, ?)", [operationId, signature, JSON.stringify(affected)]);
+      db.run("COMMIT");
+    } catch (error) { db.run("ROLLBACK"); throw error; }
+    await this.persist(); return this.getPayables().filter((account) => affected.includes(account.id));
+  }
+
   async cancelPayable(id: string): Promise<void> {
     const payable = this.getPayables().find((item) => item.id === id);
     if (!payable) throw new Error("Conta a pagar nao encontrada.");
@@ -660,6 +695,47 @@ export class PdvStore {
     }
     await this.persist();
     return this.getReceivables().find((item) => item.id === receivableId)!;
+  }
+
+  async receiveCustomerReceivables(customerId: string, payment: PdvReceivablePayment, originDevice = "Servidor", operationId: string, accountIds?: string[]): Promise<PdvReceivable[]> {
+    const db = this.requireDb();
+    const signature = JSON.stringify([customerId, payment.method, payment.amount, payment.received ?? null, payment.description || "", accountIds ? [...new Set(accountIds)].sort() : null]);
+    const existing = selectAll<{ request_json: string; account_ids_json: string }>(db, "SELECT request_json, account_ids_json FROM financial_group_operations WHERE operation_id = ?", [operationId])[0];
+    if (existing) {
+      if (existing.request_json !== signature) throw new Error("Este recebimento ja foi utilizado com outros dados.");
+      const ids: string[] = JSON.parse(existing.account_ids_json);
+      return this.getReceivables().filter((account) => ids.includes(account.id));
+    }
+    const allAccounts = this.getReceivables();
+    if (accountIds && (!accountIds.length || accountIds.some((id) => !allAccounts.some((account) => account.id === id && account.customerId === customerId && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status))))) throw new Error("As contas selecionadas foram alteradas ou pertencem a outro cliente. Atualize a selecao.");
+    const accounts = allAccounts.filter((account) => (!accountIds || accountIds.includes(account.id)) && account.customerId === customerId && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status))
+      .sort((a, b) => (a.dueDate || a.createdAt.slice(0, 10)).localeCompare(b.dueDate || b.createdAt.slice(0, 10)) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const cents = Math.round(Number(payment.amount) * 100);
+    const total = accounts.reduce((sum, account) => sum + Math.round(account.balance * 100), 0);
+    if (!customerId || !operationId || !Number.isFinite(cents) || cents <= 0 || cents > total) throw new Error("O recebimento deve ser maior que zero e nao pode ultrapassar o saldo atual do cliente.");
+    if (!["Dinheiro", "Debito", "Credito", "Pix", "Outros"].includes(payment.method)) throw new Error("Forma de recebimento invalida.");
+    const receivedCents = payment.method === "Dinheiro" ? Math.round(Number(payment.received ?? payment.amount) * 100) : cents;
+    if (!Number.isFinite(receivedCents) || receivedCents < cents) throw new Error("O dinheiro entregue nao cobre o recebimento.");
+    let remaining = cents;
+    const affected: string[] = [];
+    db.run("BEGIN IMMEDIATE");
+    try {
+      for (const account of accounts) {
+        if (!remaining) break;
+        const amountCents = Math.min(remaining, Math.round(account.balance * 100));
+        remaining -= amountCents;
+        const changeCents = remaining === 0 ? receivedCents - cents : 0;
+        db.run(`INSERT INTO receivable_payments (id, receivable_id, created_at, method, amount, received, change, description, origin_device, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [randomUUID(), account.id, new Date().toISOString(), payment.method, amountCents / 100, payment.method === "Dinheiro" ? (amountCents + changeCents) / 100 : null, changeCents / 100, String(payment.description || "Recebimento do saldo do cliente").trim(), originDevice, `${operationId}:${account.id}`]);
+        db.run("UPDATE receivables SET status = ? WHERE id = ?", [Math.round(account.balance * 100) === amountCents ? "Recebida" : "Parcialmente recebida", account.id]);
+        this.writeFinancialEvent(db, "receivable", account.id, "Pagamento", "Recebimento distribuido pelo saldo do cliente.", originDevice, amountCents / 100);
+        affected.push(account.id);
+      }
+      db.run("INSERT INTO financial_group_operations (operation_id, request_json, account_ids_json) VALUES (?, ?, ?)", [operationId, signature, JSON.stringify(affected)]);
+      db.run("COMMIT");
+    } catch (error) { db.run("ROLLBACK"); throw error; }
+    await this.persist();
+    return this.getReceivables().filter((account) => affected.includes(account.id));
   }
 
   async cancelReceivable(id: string): Promise<void> {
@@ -1833,10 +1909,14 @@ export class PdvStore {
     if (!Number.isFinite(nextTotal) || nextTotal < 0) {
       throw new Error("Total final invalido.");
     }
-    const nextPayments = patch.paymentMethod
-      ? normalizePaymentsForTotal([{ id: randomUUID(), method: normalizePdvPaymentMethod(patch.paymentMethod), amount: nextTotal, received: nextTotal }], nextTotal)
-      : patch.finalValue !== undefined
-        ? normalizePaymentsForTotal(currentSale.payments, nextTotal)
+    const paymentMethodChanged = patch.paymentMethod && normalizePdvPaymentMethod(patch.paymentMethod) !== currentSale.payments[0]?.method;
+    if (currentSale.payments.length > 1 && (paymentMethodChanged || nextTotal !== currentSale.total)) {
+      throw new Error("Venda com varios pagamentos: edite cada pagamento pelo botao Pagamentos no Historico.");
+    }
+    const nextPayments = paymentMethodChanged
+      ? normalizePaymentsForTotal([{ ...currentSale.payments[0], id: currentSale.payments[0]?.id || randomUUID(), method: normalizePdvPaymentMethod(patch.paymentMethod), amount: nextTotal, received: nextTotal }], nextTotal)
+      : patch.finalValue !== undefined && nextTotal !== currentSale.total
+        ? normalizePaymentsForTotal(currentSale.payments.map((payment) => ({ ...payment, amount: nextTotal, received: payment.method === "Dinheiro" ? Math.max(payment.received ?? nextTotal, nextTotal) : undefined })), nextTotal)
         : null;
     let status = patch.status;
     if (status === "cancelled") status = "Cancelada";
@@ -2294,6 +2374,7 @@ export class PdvStore {
         status TEXT NOT NULL DEFAULT 'Em aberto',
         note TEXT NOT NULL DEFAULT ''
       );
+      CREATE TABLE IF NOT EXISTS financial_group_operations (operation_id TEXT PRIMARY KEY, request_json TEXT NOT NULL, account_ids_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS receivable_payments (
         id TEXT PRIMARY KEY,
         receivable_id TEXT NOT NULL REFERENCES receivables(id) ON DELETE CASCADE,

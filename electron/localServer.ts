@@ -42,11 +42,13 @@ interface LocalServerOptions {
   closePdvCashShift: (countedAmount: number, originDevice?: string, note?: string) => Promise<PdvCashShift>;
   savePdvCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
   savePdvReceivable: (draft: PdvReceivableDraft) => Promise<PdvReceivable>;
+  receiveCustomerReceivables: (id: string, payment: PdvReceivablePayment, originDevice: string, operationId: string, accountIds?: string[]) => Promise<PdvReceivable[]>;
   receivePdvReceivable: (id: string, payment: PdvReceivablePayment, originDevice?: string, operationId?: string) => Promise<PdvReceivable>;
   updatePdvReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
   cancelPdvReceivable: (id: string) => Promise<void>;
   deletePdvReceivable: (id: string, permanent?: boolean) => Promise<void>;
   savePdvPayable: (draft: PdvPayableDraft) => Promise<PdvPayable>;
+  paySupplierPayables: (supplier: string, payment: PdvPayablePayment, originDevice: string, operationId: string, accountIds?: string[]) => Promise<PdvPayable[]>;
   payPdvPayable: (id: string, payment: PdvPayablePayment, originDevice?: string, operationId?: string) => Promise<PdvPayable>;
   cancelPdvPayable: (id: string) => Promise<void>;
   deletePdvPayable: (id: string, permanent?: boolean) => Promise<void>;
@@ -441,6 +443,17 @@ export class LocalServer {
       }
     });
 
+    app.post("/api/pdv/customers/:id/receipts", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const operationId = String(request.header("x-idempotency-key") || "").trim();
+        if (request.body?.accountIds !== undefined && !Array.isArray(request.body.accountIds)) throw new Error("Selecao de contas invalida.");
+        const receivables = await this.options.receiveCustomerReceivables(request.params.id, request.body?.payment || {}, String(request.header("x-device-name") || "Cliente remoto"), operationId, Array.isArray(request.body?.accountIds) ? request.body.accountIds.map(String) : undefined);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.status(201).json({ receivables, version: this.options.getPdvVersion() });
+      } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel receber o saldo do cliente." }); }
+    });
+
     app.post("/api/pdv/receivables/:id/payments", this.authorize("manageTables"), async (request, response) => {
       try {
         const operationId = String(request.header("x-idempotency-key") || "").trim() || undefined;
@@ -500,6 +513,16 @@ export class LocalServer {
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar a conta a pagar." });
       }
+    });
+
+    app.post("/api/pdv/supplier-payments", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const operationId = String(request.header("x-idempotency-key") || "").trim();
+        if (request.body?.accountIds !== undefined && !Array.isArray(request.body.accountIds)) throw new Error("Selecao de contas invalida.");
+        const payables = await this.options.paySupplierPayables(String(request.body?.supplier || ""), request.body?.payment || {}, String(request.header("x-device-name") || "Cliente remoto"), operationId, Array.isArray(request.body?.accountIds) ? request.body.accountIds.map(String) : undefined);
+        this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange();
+        response.status(201).json({ payables, version: this.options.getPdvVersion() });
+      } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel pagar o saldo do fornecedor." }); }
     });
 
     app.post("/api/pdv/payables/:id/payments", this.authorize("manageTables"), async (request, response) => {

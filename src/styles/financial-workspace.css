@@ -25,6 +25,8 @@
 .finance-view-tabs > span { margin-left: auto; padding: 0 8px; font-size: .7rem; color: var(--muted); }
 .finance-period-shortcuts { display: flex; align-items: center; gap: 6px; padding: 12px 0 7px; flex-wrap: wrap; }
 .finance-period-shortcuts > span { color: var(--muted); font-size: .73rem; margin-right: 6px; }
+.finance-period-shortcuts > label { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: .73rem; }
+.finance-period-shortcuts select { padding: 5px 8px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); font: inherit; }
 .finance-period-shortcuts button { padding: 5px 11px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 4px; font-size: .73rem; }
 .finance-filter-notice { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: .78rem; }
 .finance-filter-notice button { padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
@@ -589,3 +591,6 @@ html body #root > .app-shell.professional-shell { grid-template-rows: 22px 76px 
 .professional-product-export label { display: inline-flex; align-items: center; gap: 5px; font-size: .78rem; }
 .professional-product-export input { accent-color: var(--accent); }
 .professional-product-export button { margin-left: auto; }
+
+.startup-independent-updater { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.startup-connection-card { max-height: 90vh; overflow-y: auto; }

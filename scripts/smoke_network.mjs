@@ -65,11 +65,13 @@ const server = new LocalServer({
   savePdvProduct: (draft) => pdvStore.saveProduct(draft),
   savePdvCustomer: (draft) => pdvStore.saveCustomer(draft),
   savePdvReceivable: (draft) => pdvStore.saveReceivable(draft),
+  receiveCustomerReceivables: (id, payment, origin, operationId, accountIds) => pdvStore.receiveCustomerReceivables(id, payment, origin, operationId, accountIds),
   receivePdvReceivable: (id, payment, origin, operationId) => pdvStore.receiveReceivable(id, payment, origin, operationId),
   updatePdvReceivable: (id, patch) => pdvStore.updateReceivable(id, patch),
   cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
   deletePdvReceivable: (id, permanent) => pdvStore.deleteReceivable(id, permanent),
   savePdvPayable: (draft) => pdvStore.savePayable(draft),
+  paySupplierPayables: (supplier, payment, origin, operationId, accountIds) => pdvStore.paySupplierPayables(supplier, payment, origin, operationId, accountIds),
   payPdvPayable: (id, payment, origin, operationId) => pdvStore.payPayable(id, payment, origin, operationId),
   cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
   deletePdvPayable: (id, permanent) => pdvStore.deletePayable(id, permanent),
@@ -759,6 +761,28 @@ const fastReopened = await fastReopen.json();
 if (!fastReopen.ok || fastReopened.table?.sessionId === fastSessionId) throw new Error("A nova abertura reutilizou a sessao cancelada.");
 const staleAfterReopen = await fetch("http://127.0.0.1:43991/api/pdv/tables/31/items", { method: "PUT", headers, body: JSON.stringify({ items: [{ ...fastItem, id: crypto.randomUUID() }], baseItemIds: [], sessionId: fastSessionId }) });
 if (staleAfterReopen.status !== 400 || pdvStore.getTable(31)?.items.length) throw new Error("Autosave de sessao antiga contaminou atendimento novo.");
+
+
+// Consolidated/selected financial commands must work through the client API too.
+const groupCustomer = await pdvStore.saveCustomer({ name: "Cliente saldo remoto", active: true });
+const groupAccounts = await Promise.all([20,30,15].map((amount,i)=>pdvStore.saveReceivable({customerId:groupCustomer.id,description:`Conta ${i}`,amount,dueDate:`2030-09-0${i+1}`})));
+const groupPayment = {id:crypto.randomUUID(),method:"Pix",amount:38};
+const groupPayload = {payment:groupPayment,accountIds:groupAccounts.slice(0,2).map(account=>account.id)};
+const collectGroup = () => fetch(`http://127.0.0.1:43991/api/pdv/customers/${groupCustomer.id}/receipts`,{method:"POST",headers:{...headers,"x-idempotency-key":"remote-customer-group"},body:JSON.stringify(groupPayload)});
+const collectedResponse = await collectGroup();
+if (!collectedResponse.ok) throw new Error(await collectedResponse.text());
+const collected = await collectedResponse.json();
+if (collected.receivables.length!==2 || collected.receivables.reduce((sum,account)=>sum+account.balance,0)!==12 || !collected.version) throw new Error("Recebimento remoto nao distribuiu o saldo selecionado.");
+if (!(await collectGroup()).ok || pdvStore.getReceivables().find(account=>account.id===groupAccounts[2].id).balance!==15) throw new Error("Reenvio alterou contas fora da selecao.");
+const groupPayables = await Promise.all([20,30,15].map((amount,i)=>pdvStore.savePayable({supplier:"Fornecedor saldo remoto",description:`Conta ${i}`,amount,dueDate:`2030-09-0${i+1}`})));
+const payGroup = () => fetch("http://127.0.0.1:43991/api/pdv/supplier-payments",{method:"POST",headers:{...headers,"x-idempotency-key":"remote-supplier-group"},body:JSON.stringify({supplier:"Fornecedor saldo remoto",payment:groupPayment,accountIds:groupPayables.slice(0,2).map(account=>account.id)})});
+const paidResponse = await payGroup();
+if (!paidResponse.ok) throw new Error(await paidResponse.text());
+const paid = await paidResponse.json();
+if (paid.payables.length!==2 || paid.payables.reduce((sum,account)=>sum+account.balance,0)!==12 || !paid.version) throw new Error("Pagamento remoto nao distribuiu o saldo selecionado.");
+if (!(await payGroup()).ok || pdvStore.getPayables().find(account=>account.id===groupPayables[2].id).balance!==15) throw new Error("Reenvio alterou contas a pagar fora da selecao.");
+const malformedSelection = await fetch("http://127.0.0.1:43991/api/pdv/supplier-payments",{method:"POST",headers:{...headers,"x-idempotency-key":"malformed-group"},body:JSON.stringify({supplier:"Fornecedor saldo remoto",payment:{...groupPayment,amount:1},accountIds:"invalid"})});
+if (malformedSelection.status!==400) throw new Error("Selecao invalida foi tratada como pagamento de todas as contas.");
 
 await new Promise((resolve) => {
   reconnectSocket.once("close", resolve);
