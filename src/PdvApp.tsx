@@ -2856,14 +2856,13 @@ function PdvSaleScreen(props: {
             </span>
           </div>
           <div className="pdv-cart-add-quantity" aria-label="Quantidade do proximo produto">
-            <span>Qtd.</span>
             <button type="button" aria-label="Diminuir quantidade" onClick={() => props.setQuantity(Math.max(1, props.quantity - 1))}><Minus size={15} /></button>
-            <input type="number" min={1} value={props.quantity} onChange={(event) => props.setQuantity(Number(event.target.value || 1))} />
+            <input type="number" aria-label="Quantidade do proximo produto" min={1} value={props.quantity} onChange={(event) => props.setQuantity(Number(event.target.value || 1))} />
             <button type="button" aria-label="Aumentar quantidade" onClick={() => props.setQuantity(props.quantity + 1)}><Plus size={15} /></button>
           </div>
-          <button className="pdv-cart-product-search" type="button" title="Consultar todos os produtos" onClick={() => setProductLookupOpen(true)}>
+          <button className="pdv-cart-product-search" type="button" aria-label="Consultar todos os produtos" title="Consultar todos os produtos" onClick={() => setProductLookupOpen(true)}>
             <Search size={18} />
-            Produtos
+            Pd
           </button>
           <div className="pdv-cart-density" aria-label="Tamanho dos itens do carrinho">
             <button type="button" title="Diminuir itens do carrinho" aria-label="Diminuir itens do carrinho" disabled={cartDensity === "ultra"} onClick={() => setCartDensity((current) => current === "comfortable" ? "normal" : current === "normal" ? "compact" : "ultra")}>-</button>

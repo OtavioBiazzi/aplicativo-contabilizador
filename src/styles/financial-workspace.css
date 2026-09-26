@@ -484,6 +484,15 @@ html body #root > .app-shell.professional-shell { grid-template-rows: 22px 76px 
 .pdv-cart-add-quantity > span { padding-inline: 3px; color: var(--muted); font-size: .7rem; font-weight: 800; }
 .pdv-cart-add-quantity button, .pdv-cart-add-quantity input { width: 29px; height: 29px; min-height: 29px; padding: 0; display: grid; place-items: center; text-align: center; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }
 .pdv-cart-add-quantity input { width: 42px; }
+.pdv-cart-head { gap: 4px; min-width: 0; max-width: 100%; }
+.pdv-cart-head .pdv-cart-title { min-width: 0; flex: 1; }
+.pdv-cart-head .pdv-cart-title h2 { font-size: .9rem; }
+.pdv-cart-head .pdv-cart-product-search { min-width: 50px; padding-inline: 6px; gap: 4px; white-space: nowrap; flex-shrink: 0; }
+.pdv-cart-head .pdv-cart-product-search svg { width: 16px; }
+.pdv-cart-head .pdv-cart-add-quantity button { width: 24px; }
+.pdv-cart-head .pdv-cart-add-quantity input { width: 34px; }
+.pdv-cart-head .pdv-cart-density button { width: 24px; }
+.pdv-cart-head :is(.pdv-cart-add-quantity, .pdv-cart-density) { flex-shrink: 0; }
 .pdv-product-filter-requirement { display: inline-flex; align-items: center; gap: 5px; min-height: 34px; padding: 3px 4px 3px 7px; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; }
 .pdv-product-filter-requirement input { width: 48px; height: 26px; padding: 3px; text-align: center; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 3px; }
 .pdv-product-filter-requirement b { color: var(--muted); }
