@@ -1,6 +1,7 @@
 import type { PdvPayment, PdvPaymentMethod, PdvSale } from "./pdvTypes.js";
 import type { LedgerEntry, PaymentMethod } from "./types.js";
 import { formatCurrency } from "./calculations.js";
+import { saleHistoryDescription } from "./saleDescription.js";
 
 function pdvPaymentToLegacyMethod(method: PdvPaymentMethod): PaymentMethod {
   if (method === "Nao definido" || method === "Outros" || method === "Conta a receber") {
@@ -23,10 +24,9 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
   const cancelledSubtable = sale.status === "Cancelada"
     ? sale.observations?.match(/(?:^|\s)Submesa cancelada:\s*(.+?)(?:\.|$)/i)?.[1]?.trim() || ""
     : "";
-  const closedSubtable = sale.status === "Parcial"
+  const closedSubtable = sale.status !== "Cancelada"
     ? sale.observations?.match(/(?:^|\s)Submesa:\s*(.+?)(?:\.|$)/i)?.[1]?.trim() || ""
     : "";
-  const subtableName = cancelledSubtable || closedSubtable;
   const originDevice = !sale.originDevice || sale.originDevice === "Este computador" || sale.originDevice === "PDV local"
     ? "Servidor"
     : sale.originDevice;
@@ -43,7 +43,7 @@ export function pdvSaleToLedgerEntry(sale: PdvSale): LedgerEntry {
     roundingStep: 0.01,
     roundingDirection: "nearest",
     difference: -(sale.discount || 0),
-    description: subtableName || sale.description || (sale.tableNumber ? `Mesa ${sale.tableNumber}` : "Venda direta"),
+    description: saleHistoryDescription(sale),
     tableNumber: sale.tableNumber ? String(sale.tableNumber) : "",
     busNumber: "",
     paymentMethod,

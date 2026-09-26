@@ -1,5 +1,5 @@
 import { IndependentUpdater } from "./components/IndependentUpdater";
-import { historyDescription } from "./shared/historyDescription";
+import { createHistoryDescriptionLookup } from "./shared/historyDescription";
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -4740,6 +4740,7 @@ function HistoryPanel({
   const deferredQuery = useDeferredValue(query);
   const originOptions = useMemo(() => ["Todos", ...new Set(entries.map((entry) => displayOriginDevice(entry.originDevice)).filter(Boolean))], [entries]);
   const pdvSaleById = useMemo(() => new Map(pdvSales.map((sale) => [sale.id, sale])), [pdvSales]);
+  const describeHistory = useMemo(() => createHistoryDescriptionLookup(pdvReceivables, pdvCustomers), [pdvReceivables, pdvCustomers]);
   const customerSaleIds = useMemo(() => new Set([
     ...pdvReceivables.map((item) => item.saleId).filter(Boolean),
     ...pdvSales.filter((sale) => sale.payments.some((payment) => Boolean(payment.customerId || payment.customerName))).map((sale) => sale.id)
@@ -4805,7 +4806,7 @@ function HistoryPanel({
         || (movementFilter === "Com cliente" && Boolean(entry.sourceSaleId && customerSaleIds.has(entry.sourceSaleId)))
         || (movementFilter === "Servidor" && normalizedOrigin === "Servidor")
         || (movementFilter === "Clientes remotos" && normalizedOrigin !== "Servidor")
-        || (movementFilter === "Fechamentos parciais" && (entry.customType === "Mesa parcial" || sale?.status === "Parcial"))
+        || (movementFilter === "Fechamentos parciais" && (entry.customType === "Mesa parcial" || entry.customType === "Submesa fechada" || sale?.status === "Parcial"))
         || (movementFilter === "Vendas diretas" && entry.type === "Venda" && !entry.tableNumber);
       const sameTable = !tableNumberFilter || Number(entry.tableNumber || 0) === Number(tableNumberFilter.replace(/^0+/, "") || 0);
       if (!sameType || !sameStatus || !sameDate || !sameOrigin || !samePayment || !sameValue || !movementMatches || !sameTable) {
@@ -4815,7 +4816,7 @@ function HistoryPanel({
         return true;
       }
       const haystack = [
-        historyDescription(entry, sale, pdvReceivables, pdvCustomers),
+        describeHistory(entry, sale),
         entry.tableNumber ? `Mesa ${entry.tableNumber}` : "",
         entry.busNumber ? `Onibus ${entry.busNumber}` : "",
         entry.observations,
@@ -4827,7 +4828,7 @@ function HistoryPanel({
       const normalizedHaystack = normalizeHistorySearch(haystack);
       return searchTerms.every((term) => normalizedHaystack.includes(term));
     });
-  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, movementFilter, tableNumberFilter, pdvSaleById, customerSaleIds, pdvReceivables, pdvCustomers]);
+  }, [entries, deferredQuery, type, statusFilter, dateFrom, dateTo, minimumValue, maximumValue, originFilter, paymentFilter, movementFilter, tableNumberFilter, pdvSaleById, customerSaleIds, describeHistory]);
   const visibleRows = filtered.slice(0, visibleCount);
   const filteredSummary = useMemo(() => filtered.reduce((summary, entry) => {
     if (entry.status === "active") {
@@ -4973,7 +4974,7 @@ function HistoryPanel({
           <tbody>
             {visibleRows.map((entry) => {
               const { time } = formatDateTime(entry.createdAt);
-              const description = historyDescription(entry, entry.sourceSaleId ? pdvSaleById.get(entry.sourceSaleId) : undefined, pdvReceivables, pdvCustomers);
+              const description = describeHistory(entry, entry.sourceSaleId ? pdvSaleById.get(entry.sourceSaleId) : undefined);
               return (
                 <tr key={entry.id} className={entry.status !== "active" ? "muted-row" : ""}>
                   <td>{formatDateTime(entry.createdAt).date}</td>

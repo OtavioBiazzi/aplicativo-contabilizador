@@ -6,6 +6,7 @@ import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DiagnosticLogger } from "./diagnostics.js";
+import { DeferredTask } from "./deferredTask.js";
 import { LedgerExporter } from "./exporter.js";
 import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
@@ -46,6 +47,13 @@ let floatingRememberBounds = true;
 let restoringFloatingBounds = false;
 let gracefulQuitStarted = false;
 let gracefulQuitFinished = false;
+const automaticLedgerExport = new DeferredTask(async () => {
+  try {
+    await logExportStatus("sincronizacao automatica em segundo plano", await exportLedgerIfEnabled());
+  } catch (error) {
+    await logger?.error("Falha na exportacao automatica", error instanceof Error ? error.message : String(error));
+  }
+});
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";
@@ -655,19 +663,19 @@ async function bootstrap() {
     removePdvPreset: () => pdvStore.removeImportedProducts("Cose Dell Abadia"),
     closePdvTable: async (tableNumber, payments, discount, originDevice, operationId) => {
       const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice, operationId);
-      await exportLedgerIfEnabled();
+      automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
     },
     cancelPdvTable: async (tableNumber, originDevice, subtableName) => {
       const sale = await pdvStore.cancelTable(tableNumber, originDevice, subtableName);
-      await exportLedgerIfEnabled();
+      automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
     },
     savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId, observations, closeScope) => {
       const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId, observations, closeScope);
-      await exportLedgerIfEnabled();
+      automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
     },
@@ -747,7 +755,7 @@ async function logExportStatus(action: string, status: ExportStatus) {
 async function getIntegratedLedgerEntries() {
   return [
     ...(await store.getEntries()),
-    ...pdvSalesToLedgerEntries(pdvStore.getSales({}))
+    ...pdvSalesToLedgerEntries(pdvStore.getSalesForLedger())
   ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 }
 
@@ -883,7 +891,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
     const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Servidor", operationId || randomUUID());
-    await exportLedgerIfEnabled();
+    automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -896,7 +904,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:cancelTable", async (_event, tableNumber: number, subtableName?: string): Promise<PdvSale | null> => {
     const sale = await pdvStore.cancelTable(tableNumber, "Servidor", subtableName);
-    await exportLedgerIfEnabled();
+    automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -904,7 +912,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string, closeScope?: PdvCloseScope): Promise<PdvSale> => {
     const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Servidor", operationId || randomUUID(), observations, closeScope);
-    await exportLedgerIfEnabled();
+    automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -1684,6 +1692,7 @@ app.on("before-quit", (event) => {
   gracefulQuitStarted = true;
   void (async () => {
     try {
+      await automaticLedgerExport.flush();
       const settings = await store.getSettings();
       const today = getLocalDateKey();
       if (settings.automaticClosingReportEnabled) {

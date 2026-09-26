@@ -593,4 +593,5 @@ html body #root > .app-shell.professional-shell { grid-template-rows: 22px 76px 
 .professional-product-export button { margin-left: auto; }
 
 .startup-independent-updater { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.startup-independent-updater .startup-role-actions { justify-content: center; flex-wrap: wrap; }
 .startup-connection-card { max-height: 90vh; overflow-y: auto; }

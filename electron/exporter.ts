@@ -15,6 +15,7 @@ interface ExportState {
 const EXPORT_STATE_FILE = "export-state.json";
 
 export class LedgerExporter {
+  private exportQueue: Promise<unknown> = Promise.resolve();
   private readonly statePath: string;
 
   constructor(private readonly dataDirectory: string) {
@@ -32,6 +33,12 @@ export class LedgerExporter {
   }
 
   async export(entries: LedgerEntry[], settings: AppSettings, options: { rewriteHistorical?: boolean } = {}): Promise<ExportStatus> {
+    const request = this.exportQueue.catch(() => undefined).then(() => this.exportNow(entries, settings, options));
+    this.exportQueue = request;
+    return request;
+  }
+
+  private async exportNow(entries: LedgerEntry[], settings: AppSettings, options: { rewriteHistorical?: boolean } = {}): Promise<ExportStatus> {
     try {
       await fs.mkdir(settings.outputDirectory, { recursive: true });
       const exportTargets = this.buildTargets(entries, settings);

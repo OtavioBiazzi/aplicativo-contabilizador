@@ -824,6 +824,8 @@ export function PdvApp({
       : { sale: await window.caixa.cancelPdvTable(tableNumber, subtableName), table: undefined, version: undefined };
     if (result.table) {
       noteConfirmedTable(result.table, result.version);
+      const confirmedTable = result.table;
+      setSnapshot((current) => current ? { ...current, tables: current.tables.map((table) => table.number === tableNumber ? confirmedTable : table) } : current);
       if (activeTable?.number === tableNumber) applyFreshTable(result.table);
     }
     clearQueuedRemoteTable(tableNumber);
@@ -833,6 +835,7 @@ export function PdvApp({
       resetTableMutationTracking();
     }
     setTableSaveState("saved");
+    if (!result.table) void load().catch(() => setToast("Cancelamento confirmado. Aguardando atualização das mesas."));
     return result.sale;
   };
   const saveDirectPdvSale = (items: PdvCartItem[], directDiscount: number, payments: PdvPayment[], saleType: PdvSale["type"] = directSaleMode, operationId: PdvOperationId = crypto.randomUUID()) => remotePdvActive && remoteSession
@@ -1035,7 +1038,7 @@ export function PdvApp({
         items: tableCart,
         subtables: subtableNames,
         mutationRevision: tableMutationRevision.current
-      });
+      }, false);
     }
     setTableSaveState("saving");
   };
@@ -1386,7 +1389,6 @@ export function PdvApp({
           message: "Os itens em aberto serao cancelados e a mesa voltara a ficar livre.",
           action: async () => {
             await cancelPdvTable(table.number);
-            await load();
           }
         });
         return;
@@ -1419,7 +1421,6 @@ export function PdvApp({
         message: "A mesa sera liberada. Os itens pendentes ficarao registrados como cancelados no Historico, sem entrar no faturamento ou no Excel.",
         action: async () => {
           await cancelPdvTable(table.number);
-          await load();
         }
       });
     }
@@ -1618,8 +1619,6 @@ export function PdvApp({
       message: "Os itens dessa submesa serao cancelados. A mesa principal sera mantida.",
       action: async () => {
         await cancelPdvTable(activeTable.number, name);
-        const refreshed = await load();
-        applyFreshOpenTable(refreshed, activeTable.number);
         setCurrentSubtable((current) => current === name ? "" : current);
         setToast(`Submesa ${name} cancelada e registrada no Historico.`);
       }
@@ -2190,7 +2189,7 @@ export function PdvApp({
             const original = sale?.payments.find((item) => item.id === payment.id);
             if (sale && original) setCorrectingPartialPayment({ sale, payment: original });
           }}
-          showDescription={Boolean(checkoutTarget.kind !== "direct" && checkoutTarget.kind !== "table")}
+          showDescription={checkoutTarget.kind !== "direct"}
           onCancel={() => {
             if ((checkoutTarget.kind === "table" || checkoutTarget.kind === "table-scope") && advancedSplitReturn) {
               setCheckoutTarget(null);

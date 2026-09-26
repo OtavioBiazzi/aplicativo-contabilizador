@@ -1,4 +1,5 @@
 import { supplierBalanceKey } from "../src/shared/financialDates.js";
+import { joinSaleLabels } from "../src/shared/saleDescription.js";
 ﻿import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
@@ -891,6 +892,16 @@ export class PdvStore {
     return this.hydrateSales(sales).filter((sale) => matchesSaleFilters(sale, filters));
   }
 
+  /** Ledger rows need payment details, but never the products of every old sale. */
+  getSalesForLedger(): PdvSale[] {
+    const sales = selectAll<Omit<PdvSale, "items" | "payments">>(this.requireDb(),
+      `SELECT id, created_at AS createdAt, type, table_number AS tableNumber, table_session_id AS tableSessionId,
+        COALESCE(status, 'Finalizada') AS status, subtotal, discount, total, description, observations,
+        origin_device AS originDevice, operation_id AS operationId
+       FROM sales WHERE COALESCE(financial_only, 0) = 0 ORDER BY created_at DESC`);
+    return this.hydrateSales(sales, false);
+  }
+
   async saveSettings(patch: Partial<PdvSettings>): Promise<PdvSettings> {
     const next = { ...this.getSettings(), ...patch };
     const db = this.requireDb();
@@ -965,7 +976,11 @@ export class PdvStore {
   }
 
   private withCashExpected(shift: PdvCashShift): PdvCashShift {
-    const salesCash = this.getSales().filter((sale) => sale.status !== "Cancelada" && sale.createdAt >= shift.openedAt && (!shift.closedAt || sale.createdAt <= shift.closedAt)).flatMap((sale) => sale.payments).filter((payment) => payment.method === "Dinheiro").reduce((sum, payment) => sum + payment.amount, 0);
+    const salesCash = selectAll<{ total: number }>(this.requireDb(),
+      `SELECT COALESCE(SUM(p.amount), 0) AS total FROM sale_payments p JOIN sales s ON s.id = p.sale_id
+       WHERE p.method = 'Dinheiro' AND COALESCE(s.status, 'Finalizada') != 'Cancelada'
+         AND COALESCE(s.financial_only, 0) = 0 AND s.created_at >= ?${shift.closedAt ? " AND s.created_at <= ?" : ""}`,
+      shift.closedAt ? [shift.openedAt, shift.closedAt] : [shift.openedAt])[0]?.total || 0;
     const periodFilter = `created_at >= ?${shift.closedAt ? " AND created_at <= ?" : ""}`;
     const periodParams = shift.closedAt ? [shift.openedAt, shift.closedAt] : [shift.openedAt];
     const receivedCash = selectAll<{ total: number }>(this.requireDb(), `SELECT COALESCE(SUM(amount), 0) AS total FROM receivable_payments WHERE method = 'Dinheiro' AND ${periodFilter}`, periodParams)[0]?.total || 0;
@@ -1693,7 +1708,7 @@ export class PdvStore {
       throw new Error("Mesa sem itens para fechar.");
     }
     const db = this.requireDb();
-    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, items: pendingItems, discount, payments, originDevice, operationId });
+    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, items: pendingItems, discount, payments, originDevice, operationId, description: table.note });
     db.run("BEGIN IMMEDIATE");
     try {
       // Cada pagamento fica como um lancamento proprio, ligado pelo mesmo
@@ -1841,7 +1856,8 @@ export class PdvStore {
       ...payment,
       description: payment.description?.trim() || observations.trim() || undefined
     }));
-    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, status: closeScope ? "Finalizada" : "Parcial", items: selectedItems, discount, payments: identifiedPayments, originDevice, operationId, observations });
+    const sale = createSale({ type: "Mesa", tableNumber, tableSessionId: table.sessionId, status: closeScope ? "Finalizada" : "Parcial", items: selectedItems, discount, payments: identifiedPayments, originDevice, operationId, observations,
+      description: joinSaleLabels([table.note, closeScope?.kind === "subtable" ? closeScope.subtableName : undefined]) });
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
@@ -1870,7 +1886,7 @@ export class PdvStore {
 
   async cancelSale(id: string): Promise<void> {
     const db = this.requireDb();
-    const sale = this.getSales().find((item) => item.id === id);
+    const sale = this.getSaleById(id);
     if (!sale) {
       throw new Error("Venda nao encontrada.");
     }
@@ -1901,7 +1917,7 @@ export class PdvStore {
     if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
       throw new Error("Venda nao encontrada.");
     }
-    const currentSale = this.getSales().find((sale) => sale.id === id);
+    const currentSale = this.getSaleById(id);
     if (!currentSale) {
       throw new Error("Venda nao encontrada.");
     }
@@ -1968,7 +1984,7 @@ export class PdvStore {
 
   async deleteSale(id: string): Promise<void> {
     const db = this.requireDb();
-    const sale = this.getSales().find((item) => item.id === id);
+    const sale = this.getSaleById(id);
     if (!sale) {
       throw new Error("Venda nao encontrada.");
     }
@@ -1987,7 +2003,7 @@ export class PdvStore {
   }
 
   async updateSalePayments(id: string, payments: PdvPayment[]): Promise<PdvSale> {
-    const sale = this.getSales().find((item) => item.id === id);
+    const sale = this.getSaleById(id);
     if (!sale) {
       throw new Error("Venda nao encontrada.");
     }
@@ -2010,7 +2026,7 @@ export class PdvStore {
       throw error;
     }
     await this.persist();
-    return this.getSales().find((item) => item.id === id) || sale;
+    return this.getSaleById(id) || sale;
   }
 
   private getCategories(): PdvCategory[] {
@@ -2136,7 +2152,7 @@ export class PdvStore {
     return sale ? this.hydrateSales([sale])[0] : undefined;
   }
 
-  private hydrateSales(sales: Array<Omit<PdvSale, "items" | "payments">>): PdvSale[] {
+  private hydrateSales(sales: Array<Omit<PdvSale, "items" | "payments">>, includeItems = true): PdvSale[] {
     if (!sales.length) return [];
     const saleIds = sales.map((sale) => sale.id);
     const itemsBySale = new Map<string, PdvCartItem[]>();
@@ -2146,7 +2162,7 @@ export class PdvStore {
     for (let offset = 0; offset < saleIds.length; offset += 400) {
       const ids = saleIds.slice(offset, offset + 400);
       const placeholders = ids.map(() => "?").join(",");
-      selectAll<PdvCartItem & { saleId: string }>(
+      if (includeItems) selectAll<PdvCartItem & { saleId: string }>(
         this.requireDb(),
         `SELECT id, sale_id AS saleId, product_id AS productId, product_name AS productName, category_name AS categoryName,
           quantity, measure_label AS measureLabel, unit_price AS unitPrice, base_unit_price AS baseUnitPrice, discount, total,
