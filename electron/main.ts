@@ -624,12 +624,13 @@ async function bootstrap() {
     },
     openPdvTable: (tableNumber, people, note) => pdvStore.openTable(tableNumber, people, note),
     setPdvTableStatus: (tableNumber, status) => pdvStore.setTableStatus(tableNumber, status),
-    savePdvTableItems: (tableNumber, items, subtables, baseItemIds, expectedSessionId) => pdvStore.saveTableItems(tableNumber, items, subtables, baseItemIds, expectedSessionId),
+    savePdvTableItems: (tableNumber, items, subtables, baseItemIds, expectedSessionId, renamedSubtable) => pdvStore.saveTableItems(tableNumber, items, subtables, baseItemIds, expectedSessionId, renamedSubtable),
     transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections, operationId) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId),
     appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
     updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
     savePdvCategory: (draft) => pdvStore.saveCategory(draft),
     savePdvProduct: (draft) => pdvStore.saveProduct(draft),
+    removePdvProduct: (id) => pdvStore.removeProduct(id),
     savePdvSettings: (patch) => pdvStore.saveSettings(patch),
     openPdvCashShift: (openingAmount, originDevice, responsible, note) => pdvStore.openCashShift(openingAmount, originDevice, responsible, note),
     addPdvCashMovement: (type, amount, note, originDevice) => pdvStore.addCashMovement(type, amount, note, originDevice),
@@ -878,8 +879,8 @@ function registerIpc() {
     publishPdvChanged();
   });
 
-  ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[]) => {
-    await pdvStore.saveTableItems(tableNumber, items, subtables, baseItemIds);
+  ipcMain.handle("pdv:saveTableItems", async (_event, tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[], renamedSubtable?: { from: string; to: string }) => {
+    await pdvStore.saveTableItems(tableNumber, items, subtables, baseItemIds, undefined, renamedSubtable);
     publishPdvChanged();
   });
 

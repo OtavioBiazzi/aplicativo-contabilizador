@@ -1,6 +1,7 @@
 import { getLocalDateKey, roundMoney } from "./calculations.js";
 import type { PdvCartItem, PdvPayment, PdvSale } from "./pdvTypes.js";
 import type { LedgerEntry } from "./types.js";
+import { matchesTableNumberFilter } from "./tableNumberFilter.js";
 
 export type ReportRecordStatus = "active" | "cancelled" | "deleted";
 
@@ -112,7 +113,7 @@ export function createReportRecords(entries: LedgerEntry[], pdvSales: PdvSale[])
 
 export function filterReportRecords(records: ReportRecord[], filters: ReportFilters): ReportRecord[] {
   const query = String(filters.query || "").trim().toLocaleLowerCase("pt-BR");
-  const table = String(filters.table || "").replace(/^0+/, "");
+  const table = String(filters.table || "");
   return records.filter((record) => {
     const dateKey = getLocalDateKey(record.createdAt);
     if (filters.from && dateKey < filters.from) return false;
@@ -120,7 +121,7 @@ export function filterReportRecords(records: ReportRecord[], filters: ReportFilt
     if (filters.type && filters.type !== "Todos" && record.type !== filters.type) return false;
     if (filters.status && filters.status !== "Todos" && record.status !== filters.status) return false;
     if (filters.payment && filters.payment !== "Todos" && !record.payments.some((payment) => payment.method === filters.payment)) return false;
-    if (table && record.tableNumber.replace(/^0+/, "") !== table) return false;
+    if (!matchesTableNumberFilter(record.tableNumber, table)) return false;
     if (filters.origin && filters.origin !== "Todos" && record.originDevice !== filters.origin) return false;
     if (filters.product && filters.product !== "Todos" && !record.items.some((item) => item.productName === filters.product)) return false;
     if (filters.category && filters.category !== "Todos" && !record.items.some((item) => item.categoryName === filters.category)) return false;

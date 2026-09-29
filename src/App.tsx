@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
 import { PaymentAmountModal, PaymentModal, PdvApp } from "./PdvApp";
+import { matchesTableNumberFilter } from "./shared/tableNumberFilter";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
 import type { PdvCashShift, PdvCustomer, PdvCustomerDraft, PdvDataVersion, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
 import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
@@ -1614,6 +1615,10 @@ export function App() {
     if (!toast) {
       return;
     }
+    if (settings?.notificationsEnabled === false && toast.tone !== "error") {
+      setToast(null);
+      return;
+    }
     const notificationDuration = Math.max(1200, settings?.notificationDurationMs || 3200);
     const timeout = window.setTimeout(() => setToast(null), notificationDuration);
     return () => window.clearTimeout(timeout);
@@ -2781,6 +2786,7 @@ export function App() {
               roundingStep={settings.defaultRoundingStep}
               roundingDirection={settings.defaultRoundingDirection}
               toastDuration={settings.notificationDurationMs}
+              notificationsEnabled={settings.notificationsEnabled !== false}
               onDirectCartChange={setPdvDirectCartActive}
               snapshotOverride={remoteSession ? remotePdvSnapshot : pdvSnapshot}
               onRemoteTableConfirmed={confirmRemotePdvTable}
@@ -2969,6 +2975,7 @@ export function App() {
                       snapshot: remotePdvSnapshot
                     } : null}
                     toastDuration={settings.notificationDurationMs}
+                    notificationsEnabled={settings.notificationsEnabled !== false}
                     receiptPrintTargets={remoteSession
                       ? (remoteSession.permissions.printReceipts ? [{ id: "server", label: "Computador servidor" }] : [])
                       : server.devices.filter((device) => device.permissions.printReceipts).map((device) => ({ id: device.id, label: device.name }))}
@@ -4808,7 +4815,7 @@ function HistoryPanel({
         || (movementFilter === "Clientes remotos" && normalizedOrigin !== "Servidor")
         || (movementFilter === "Fechamentos parciais" && (entry.customType === "Mesa parcial" || entry.customType === "Submesa fechada" || sale?.status === "Parcial"))
         || (movementFilter === "Vendas diretas" && entry.type === "Venda" && !entry.tableNumber);
-      const sameTable = !tableNumberFilter || Number(entry.tableNumber || 0) === Number(tableNumberFilter.replace(/^0+/, "") || 0);
+      const sameTable = matchesTableNumberFilter(entry.tableNumber, tableNumberFilter);
       if (!sameType || !sameStatus || !sameDate || !sameOrigin || !samePayment || !sameValue || !movementMatches || !sameTable) {
         return false;
       }
@@ -4922,7 +4929,7 @@ function HistoryPanel({
         </label>
         <label className="field">
           <span>Mesa exata</span>
-          <input inputMode="numeric" value={tableNumberFilter} onChange={(event) => setTableNumberFilter(event.target.value.replace(/\D/g, ""))} placeholder="001" />
+          <input inputMode="text" value={tableNumberFilter} onChange={(event) => setTableNumberFilter(event.target.value.replace(/[^\d,;\s]/g, ""))} placeholder="001, 004, 021" />
         </label>
         <label className="field">
           <span>Valor minimo</span>
@@ -8052,7 +8059,7 @@ function SettingsPanel({
         </section>
 
         <section className={categoryClass("pdv", "settings-group wide pdv-settings-panel")}>
-          <PdvApp embedded initialTab="products" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} />
+          <PdvApp embedded initialTab="products" hideTopbar remoteSession={remoteSession} toastDuration={settings.notificationDurationMs} notificationsEnabled={settings.notificationsEnabled !== false} />
         </section>
 
         <section className={categoryClass("privacy", "settings-group wide privacy-settings")}>
@@ -8421,6 +8428,7 @@ function SettingsPanel({
             hideTopbar
             remoteSession={remoteSession}
             toastDuration={settings.notificationDurationMs}
+            notificationsEnabled={settings.notificationsEnabled !== false}
             advancedSection={activePdvAdvancedSection || "tables"}
             hideAdvancedNavigation
             advancedSettingsActionsRef={pdvSettingsActionsRef}

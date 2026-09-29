@@ -26,7 +26,7 @@ interface LocalServerOptions {
   savePdvDirectSale: (items: PdvCartItem[], discount: number, payments: PdvPayment[], originDevice?: string, operationId?: string, saleType?: PdvSale["type"]) => Promise<PdvSale>;
   openPdvTable: (tableNumber: number, people?: number, note?: string) => Promise<void>;
   setPdvTableStatus: (tableNumber: number, status: PdvTableStatus) => Promise<void>;
-  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[], expectedSessionId?: string) => Promise<void>;
+  savePdvTableItems: (tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[], expectedSessionId?: string, renamedSubtable?: { from: string; to: string }) => Promise<void>;
   transferPdvTableItems: (sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string) => Promise<PdvCartItem[]>;
   appendPdvTableItems: (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => Promise<void>;
   closePdvTable: (tableNumber: number, payments: PdvPayment[], discount?: number, originDevice?: string, operationId?: string) => Promise<PdvSale>;
@@ -36,6 +36,7 @@ interface LocalServerOptions {
   updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>;
   savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>;
   savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>;
+  removePdvProduct: (id: string) => Promise<"deleted" | "archived">;
   savePdvSettings: (patch: Partial<PdvSettings>) => Promise<PdvSettings>;
   openPdvCashShift: (openingAmount: number, originDevice?: string, responsible?: string, note?: string) => Promise<PdvCashShift>;
   addPdvCashMovement: (type: "Suprimento" | "Sangria", amount: number, note?: string, originDevice?: string) => Promise<PdvCashShift>;
@@ -289,6 +290,18 @@ export class LocalServer {
       }
     });
 
+    app.delete("/api/pdv/products/:id", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
+      try {
+        const id = String(request.params.id);
+        const mode = await this.options.removePdvProduct(id);
+        this.broadcast({ type: "pdv-changed" });
+        this.options.onRemotePdvChange();
+        response.json({ id, mode });
+      } catch (error) {
+        response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel remover produto." });
+      }
+    });
+
     app.patch("/api/pdv/settings", this.authorize("allowClientCustomization"), async (request, response) => {
       try {
         const settings = await this.options.savePdvSettings(request.body || {});
@@ -350,7 +363,7 @@ export class LocalServer {
     app.put("/api/pdv/tables/:number/items", this.authorize("manageTables"), async (request, response) => {
       try {
         const tableNumber = Number(request.params.number);
-        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : [], Array.isArray(request.body?.subtables) ? request.body.subtables : undefined, Array.isArray(request.body?.baseItemIds) ? request.body.baseItemIds : undefined, String(request.body?.sessionId || "") || undefined);
+        await this.options.savePdvTableItems(tableNumber, Array.isArray(request.body?.items) ? request.body.items : [], Array.isArray(request.body?.subtables) ? request.body.subtables : undefined, Array.isArray(request.body?.baseItemIds) ? request.body.baseItemIds : undefined, String(request.body?.sessionId || "") || undefined, request.body?.renamedSubtable && typeof request.body.renamedSubtable.from === "string" && typeof request.body.renamedSubtable.to === "string" ? request.body.renamedSubtable : undefined);
         const table = this.options.getPdvTable(tableNumber);
         const version = this.options.getPdvVersion();
         response.json({ ok: true, table, version });
@@ -714,10 +727,13 @@ export class LocalServer {
     };
   }
 
-  private forbidClientPdvConfiguration(_request: Request, response: Response, next: NextFunction) {
-    response.status(403).json({ error: "Produtos e configuracoes do PDV sao definidos somente no computador servidor." });
-    void next;
-  }
+  private forbidClientPdvConfiguration = (_request: Request, response: Response, next: NextFunction) => {
+    if (this.permissions.allowClientCustomization) {
+      next();
+      return;
+    }
+    response.status(403).json({ error: "Edicao do catalogo pelo cliente nao permitida no servidor." });
+  };
 
   private handleSocket(socket: WebSocket, request: http.IncomingMessage) {
     const url = new URL(request.url || "", `http://${request.headers.host}`);

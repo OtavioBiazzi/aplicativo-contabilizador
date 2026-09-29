@@ -36,12 +36,13 @@ import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptP
 import { downloadFinancialCsv } from "./shared/financialExport";
 import { buildCustomerBalanceReceipt, customerOutstandingAccounts } from "./shared/customerStatement";
 import { inFinancialPeriod, type FinancialDateField } from "./shared/financialDates";
+import { matchesTableNumberFilter } from "./shared/tableNumberFilter";
 
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 type CartDisplayItem = PdvCartItem & { compressedMemberIds: string[]; compressedLineCount: number };
 export type PdvAdvancedSection = "tables" | "appearance" | "operation" | "printing" | "data";
-type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; appVersion: string; connectedAt?: string; roundingStep?: number; roundingDirection?: RoundDirection; allowPrint?: boolean; allowEdit?: boolean; snapshot?: PdvSnapshot | null; permissions?: { allowClientCustomization: boolean; manageTables?: boolean } };
-type PendingRemoteTable = { tableNumber: number; sessionId?: string; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; baseItemIds?: string[]; updatedAt: string; attempts?: number; lastError?: string };
+type PdvRemoteSession = { baseUrl: string; password: string; deviceName: string; appVersion: string; connectedAt?: string; roundingStep?: number; roundingDirection?: RoundDirection; allowPrint?: boolean; allowEdit?: boolean; snapshot?: PdvSnapshot | null; permissions?: { allowClientCustomization: boolean; manageTables?: boolean; manageProducts?: boolean } };
+type PendingRemoteTable = { tableNumber: number; sessionId?: string; people: number; note: string; items: PdvCartItem[]; subtables?: string[]; baseItemIds?: string[]; renamedSubtable?: { from: string; to: string }; updatedAt: string; attempts?: number; lastError?: string };
 type PdvClientVisualSettings = Pick<PdvSettings, "gridColumns" | "categoryColumns" | "tableColumns" | "productCardHeight" | "productFontSize" | "categoryCardHeight" | "tableCardHeight"> & {
   vibrantMode?: boolean;
   hideTableStatusDescriptions?: boolean;
@@ -195,7 +196,7 @@ function tableSearchDetails(table: PdvOpenTable, rawQuery: string): { matches: b
   }
 
   const tableNumberQuery = query.replace(/^mesa\s*/, "").trim();
-  const matchesNumber = /^\d+$/.test(tableNumberQuery) && Number(tableNumberQuery) === table.number;
+  const matchesNumber = /^\d+(?:[,;\s]+\d+)*$/.test(tableNumberQuery) && matchesTableNumberFilter(table.number, tableNumberQuery);
   const subtableNames = [...new Set([
     ...(table.subtables || []),
     ...table.items.map((item) => item.subtableName || "").filter(Boolean)
@@ -513,6 +514,7 @@ export function PdvApp({
   roundingStep = 0.01,
   roundingDirection = "nearest",
   toastDuration = 3200,
+  notificationsEnabled = true,
   initialHistoryView = "sales",
   hideHistoryNavigation = false,
   advancedSection,
@@ -537,6 +539,7 @@ export function PdvApp({
   roundingStep?: number;
   roundingDirection?: RoundDirection;
   toastDuration?: number;
+  notificationsEnabled?: boolean;
   initialHistoryView?: HistoryView;
   hideHistoryNavigation?: boolean;
   advancedSection?: PdvAdvancedSection;
@@ -580,7 +583,12 @@ export function PdvApp({
   const [pendingProduct, setPendingProduct] = useState<PendingProduct | null>(null);
   const [pendingMeasureProduct, setPendingMeasureProduct] = useState<PendingMeasureProduct | null>(null);
   const [tableMenu, setTableMenu] = useState<{ x: number; y: number; table: PdvOpenTable } | null>(null);
-  const [toast, setToast] = useState("");
+  const [toast, setToastValue] = useState("");
+  const [toastIsError, setToastIsError] = useState(false);
+  const setToast = (message: string, isError = false) => {
+    setToastIsError(isError);
+    setToastValue(message);
+  };
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [checkoutTarget, setCheckoutTarget] = useState<CheckoutTarget | null>(null);
@@ -620,6 +628,7 @@ export function PdvApp({
   const lastPersistedTableItemIds = useRef<string[]>([]);
   const isRemoteClient = Boolean(remoteSession);
   const canConfigureServer = !isRemoteClient || Boolean(remoteSession?.permissions?.allowClientCustomization);
+  const canConfigureProducts = !isRemoteClient || Boolean(remoteSession?.permissions?.allowClientCustomization && remoteSession?.permissions?.manageProducts);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
   // O cliente usa o mesmo catalogo e as mesmas mesas do servidor em todas as abas do PDV.
   // A venda direta continua sendo finalizada localmente, mas nunca pode ficar sem produtos por ler um catalogo local vazio.
@@ -664,23 +673,23 @@ export function PdvApp({
   const setPdvTableStatus = (tableNumber: number, status: PdvTableStatus) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${tableNumber}/status`, { method: "PATCH", body: JSON.stringify({ status }) }).then(() => undefined)
     : window.caixa.setPdvTableStatus(tableNumber, status);
-  const savePdvTableItems = async (tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds: string[] = lastPersistedTableItemIds.current): Promise<PdvOpenTable | null> => {
+  const savePdvTableItems = async (tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds: string[] = lastPersistedTableItemIds.current, renamedSubtable?: { from: string; to: string }): Promise<PdvOpenTable | null> => {
     if (!remoteTablesActive || !remoteSession) {
-      await window.caixa.savePdvTableItems(tableNumber, items, subtables, baseItemIds);
+      await window.caixa.savePdvTableItems(tableNumber, items, subtables, baseItemIds, renamedSubtable);
       return null;
     }
     try {
       const sessionId = activeTable?.number === tableNumber ? activeTable.sessionId : undefined;
       const result = await remotePdvRequest<{ ok: boolean; table?: PdvOpenTable; version?: PdvDataVersion }>(remoteSession, `/api/pdv/tables/${tableNumber}/items`, {
         method: "PUT",
-        body: JSON.stringify({ items, subtables, baseItemIds, sessionId })
+        body: JSON.stringify({ items, subtables, baseItemIds, sessionId, renamedSubtable })
       });
       clearQueuedRemoteTable(tableNumber);
       return noteConfirmedTable(result.table, result.version) ? result.table || null : null;
     } catch (error) {
       const current = snapshot?.tables.find((table) => table.number === tableNumber);
       if (shouldQueueRemoteSave(error)) {
-        queueRemoteTable(tableNumber, current?.people || 1, current?.note || "", items, subtables, baseItemIds);
+        queueRemoteTable(tableNumber, current?.people || 1, current?.note || "", items, subtables, baseItemIds, renamedSubtable);
       }
       throw error;
     }
@@ -702,14 +711,14 @@ export function PdvApp({
   const appendPdvTableItems = (targetTableNumber: number, items: PdvCartItem[], targetSubtable?: string) => remotePdvActive && remoteSession
     ? remotePdvRequest<{ ok: boolean }>(remoteSession, `/api/pdv/tables/${targetTableNumber}/append`, { method: "POST", body: JSON.stringify({ items, targetSubtable }) }).then(() => undefined)
     : window.caixa.appendPdvTableItems(targetTableNumber, items, targetSubtable);
-  const queueRemoteTable = (tableNumber: number, people: number, note: string, items: PdvCartItem[], subtables?: string[], baseItemIds: string[] = lastPersistedTableItemIds.current) => {
+  const queueRemoteTable = (tableNumber: number, people: number, note: string, items: PdvCartItem[], subtables?: string[], baseItemIds: string[] = lastPersistedTableItemIds.current, renamedSubtable?: { from: string; to: string }) => {
     if (!remoteSession) {
       return;
     }
     const currentQueue = readPendingRemoteTables(remoteSession.baseUrl);
     const previous = currentQueue.find((item) => item.tableNumber === tableNumber);
     const queued = currentQueue.filter((item) => item.tableNumber !== tableNumber);
-    queued.push({ tableNumber, sessionId: activeTable?.number === tableNumber ? activeTable.sessionId : previous?.sessionId, people: Math.max(1, Math.floor(people || 1)), note: note || "", items, subtables, baseItemIds: previous?.baseItemIds || baseItemIds, updatedAt: new Date().toISOString(), attempts: previous?.attempts || 0, lastError: previous?.lastError });
+    queued.push({ tableNumber, sessionId: activeTable?.number === tableNumber ? activeTable.sessionId : previous?.sessionId, people: Math.max(1, Math.floor(people || 1)), note: note || "", items, subtables, baseItemIds: previous?.baseItemIds || baseItemIds, renamedSubtable: renamedSubtable || previous?.renamedSubtable, updatedAt: new Date().toISOString(), attempts: previous?.attempts || 0, lastError: previous?.lastError });
     writePendingRemoteTables(remoteSession.baseUrl, queued);
   };
   const clearQueuedRemoteTable = (tableNumber: number) => {
@@ -793,7 +802,7 @@ export function PdvApp({
           continue;
         }
         try {
-          const result = await remotePdvRequest<{ ok: boolean; table?: PdvOpenTable; version?: PdvDataVersion }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items: table.items, subtables: table.subtables, baseItemIds: table.baseItemIds, sessionId: table.sessionId }) });
+          const result = await remotePdvRequest<{ ok: boolean; table?: PdvOpenTable; version?: PdvDataVersion }>(remoteSession, `/api/pdv/tables/${table.tableNumber}/items`, { method: "PUT", body: JSON.stringify({ items: table.items, subtables: table.subtables, baseItemIds: table.baseItemIds, sessionId: table.sessionId, renamedSubtable: table.renamedSubtable }) });
           noteConfirmedTable(result.table, result.version);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Falha ao sincronizar";
@@ -862,16 +871,24 @@ export function PdvApp({
     : window.caixa.updatePdvSalePayments(saleId, payments);
   const clientConfigurationBlocked = () => Promise.reject(new Error("Produtos e regras do PDV sao definidos somente no servidor."));
   const updatePdvProducts = (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => isRemoteClient
-    ? clientConfigurationBlocked()
+    ? canConfigureProducts && remoteSession
+      ? remotePdvRequest<{ ok: boolean }>(remoteSession, "/api/pdv/products", { method: "PATCH", body: JSON.stringify({ ids, patch }) }).then(() => undefined)
+      : clientConfigurationBlocked()
     : window.caixa.updatePdvProducts(ids, patch);
   const savePdvCategory = (draft: PdvCategoryDraft) => isRemoteClient
-    ? clientConfigurationBlocked() as Promise<PdvCategory>
+    ? canConfigureProducts && remoteSession
+      ? remotePdvRequest<{ category: PdvCategory }>(remoteSession, "/api/pdv/categories", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.category)
+      : clientConfigurationBlocked() as Promise<PdvCategory>
     : window.caixa.savePdvCategory(draft);
   const savePdvProduct = (draft: PdvProductDraft) => isRemoteClient
-    ? clientConfigurationBlocked() as Promise<PdvProduct>
+    ? canConfigureProducts && remoteSession
+      ? remotePdvRequest<{ product: PdvProduct }>(remoteSession, "/api/pdv/products", { method: "POST", body: JSON.stringify(draft) }).then((result) => result.product)
+      : clientConfigurationBlocked() as Promise<PdvProduct>
     : window.caixa.savePdvProduct(draft);
   const removePdvProduct = (id: string) => isRemoteClient
-    ? clientConfigurationBlocked() as ReturnType<typeof window.caixa.removePdvProduct>
+    ? canConfigureProducts && remoteSession
+      ? remotePdvRequest<Awaited<ReturnType<typeof window.caixa.removePdvProduct>>>(remoteSession, `/api/pdv/products/${encodeURIComponent(id)}`, { method: "DELETE" })
+      : clientConfigurationBlocked() as ReturnType<typeof window.caixa.removePdvProduct>
     : window.caixa.removePdvProduct(id);
   const savePdvSettings = (patch: Partial<PdvSettings>) => isRemoteClient && remoteSession
     ? canConfigureServer
@@ -955,12 +972,12 @@ export function PdvApp({
     }
   };
 
-  const queueTableSave = async (payload: { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables: string[]; mutationRevision: number }, refresh = true) => {
+  const queueTableSave = async (payload: { tableNumber: number; people: number; note: string; items: PdvCartItem[]; subtables: string[]; mutationRevision: number; renamedSubtable?: { from: string; to: string } }, refresh = true) => {
     const revision = ++tableSaveRevision.current;
     setTableSaveState("saving");
     const save = async () => {
       await ensureTableMeta(payload.tableNumber, payload.people, payload.note);
-      const confirmedTable = await savePdvTableItems(payload.tableNumber, payload.items, payload.subtables);
+      const confirmedTable = await savePdvTableItems(payload.tableNumber, payload.items, payload.subtables, lastPersistedTableItemIds.current, payload.renamedSubtable);
       if (revision !== tableSaveRevision.current) return;
       if (refresh && confirmedTable && snapshotOverride !== undefined) {
         setSnapshot((current) => current ? { ...current, tables: current.tables.map((table) => table.number === confirmedTable.number ? confirmedTable : table) } : current);
@@ -1009,7 +1026,7 @@ export function PdvApp({
       setCurrentSubtable("");
       setSelectedTableItemIds([]);
       setPartialSelectedItemIds([]);
-      setToast(`A Mesa ${String(fresh.number).padStart(3, "0")} foi fechada em outro computador.`);
+      setToast(`A Mesa ${String(fresh.number).padStart(3, "0")} foi fechada em outro computador.`, true);
       return;
     }
     setActiveTable((current) => samePdvValue(current, fresh) ? current : fresh);
@@ -1069,7 +1086,7 @@ export function PdvApp({
       setTableSaveState("saved");
     } catch (error) {
       setTableSaveState("error");
-      setToast(error instanceof Error ? error.message : "Nao foi possivel abrir o destino da transferencia.");
+      setToast(error instanceof Error ? error.message : "Nao foi possivel abrir o destino da transferencia.", true);
     } finally {
       tableTransferInProgress.current = false;
     }
@@ -1125,9 +1142,23 @@ export function PdvApp({
     }
   }, [snapshot, activeTable?.number, tableCart, tableSaveState]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (tab === initialTab) {
       return;
+    }
+    if (tab === "tables" && activeTable && tableMutationRevision.current !== persistedTableMutationRevision.current) {
+      if (tableAutosaveTimer.current !== null) {
+        window.clearTimeout(tableAutosaveTimer.current);
+        tableAutosaveTimer.current = null;
+      }
+      void queueTableSave({
+        tableNumber: activeTable.number,
+        people: tablePeople,
+        note: tableNote,
+        items: tableCart,
+        subtables: subtableNames,
+        mutationRevision: tableMutationRevision.current
+      }).catch((error) => setToast(error instanceof Error ? error.message : "Nao foi possivel salvar a mesa antes de mudar de tela.", true));
     }
     setTab(initialTab);
   }, [initialTab]);
@@ -1161,7 +1192,7 @@ export function PdvApp({
             queueRemoteTable(activeTable.number, tablePeople, tableNote, tableCart, subtableNames);
           }
           setTableSaveState("error");
-          setToast(error instanceof Error ? error.message : "Nao foi possivel salvar a mesa no servidor.");
+          setToast(error instanceof Error ? error.message : "Nao foi possivel salvar a mesa no servidor.", true);
         }
       })();
     }, 180);
@@ -1212,7 +1243,7 @@ export function PdvApp({
   )) || [] : [];
 
   const addProduct = (product: PdvProduct, direct = false, bypassReopen = false) => {
-    const latestTableStatus = activeTable
+    const latestTableStatus = tab === "tables" && activeTable
       ? snapshot?.tables.find((table) => table.number === activeTable.number)?.status || activeTable.status
       : undefined;
     const closingCurrentAccount = !currentSubtable
@@ -1233,14 +1264,15 @@ export function PdvApp({
   };
 
   const addResolvedProduct = (product: PdvProduct, resolvedQuantity: { quantity: number; measureLabel?: string; unitPrice?: number; finalTotal?: number }, direct = false) => {
+    const inTable = tab === "tables" && Boolean(activeTable);
     const availableComplements = snapshot ? complementsForProduct(product, snapshot.products) : [];
     if (snapshot?.settings.complementsEnabled && !direct && (product.hasComplements || product.complementProductIds.length > 0) && availableComplements.length > 0) {
       setPendingProduct({ product, ...resolvedQuantity });
       return;
     }
-    const item = createCartItem(product, resolvedQuantity.quantity, [], resolvedQuantity.unitPrice, activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "", resolvedQuantity.measureLabel, resolvedQuantity.finalTotal);
+    const item = createCartItem(product, resolvedQuantity.quantity, [], resolvedQuantity.unitPrice, inTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "", resolvedQuantity.measureLabel, resolvedQuantity.finalTotal);
     const items = expandIndividualUnits(item, Boolean(snapshot?.settings.individualUnitItems));
-    if (activeTable) {
+    if (inTable) {
       updateLocalTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems && !tableCartCompressed.current));
       setQuantity(1);
       return;
@@ -1260,7 +1292,7 @@ export function PdvApp({
 
   const finishDirectSale = () => {
     if (!cart.length) {
-      setToast("Adicione ao menos um produto.");
+      setToast("Adicione ao menos um produto.", true);
       return;
     }
     setCheckoutTarget({ kind: "direct", total: saleFinal, operationId: crypto.randomUUID() });
@@ -1275,16 +1307,16 @@ export function PdvApp({
       action: latest.settings.receiptPrinterName ? "print" : "open",
       printerName: latest.settings.receiptPrinterName
     });
-    if (!result.ok && !/cancel/i.test(result.message)) setToast(result.message);
+    if (!result.ok && !/cancel/i.test(result.message)) setToast(result.message, true);
   };
 
   const finishSaleSideEffects = (sale: PdvSale, fallbackMessage: string) => {
     if (snapshot && !snapshot.settings.receiptOpenAfterSale) {
       if (snapshot.settings.receiptAutoPrint) {
-        void maybePrintSale(sale, snapshot).catch(() => setToast("Venda concluida. Nao foi possivel imprimir; reimprima pelo Historico."));
+        void maybePrintSale(sale, snapshot).catch(() => setToast("Venda concluida. Nao foi possivel imprimir; reimprima pelo Historico.", true));
       }
       // O App principal ja recebe a notificacao do servidor e atualiza o PDV.
-      if (snapshotOverride === undefined) void load().catch(() => setToast(fallbackMessage));
+      if (snapshotOverride === undefined) void load().catch(() => setToast(fallbackMessage, true));
       return;
     }
     void load().then(async (latest) => {
@@ -1292,7 +1324,7 @@ export function PdvApp({
         setCompletedReceipt({ sale, receivable: latest.receivables.find((item) => item.saleId === sale.id) });
       }
       await maybePrintSale(sale, latest);
-    }).catch(() => setToast(fallbackMessage));
+    }).catch(() => setToast(fallbackMessage, true));
   };
 
   const confirmDirectSale = async (payments: PdvPayment[], items = cart, saleType: PdvSale["type"] = directSaleMode, operationId: PdvOperationId = crypto.randomUUID()) => {
@@ -1306,7 +1338,7 @@ export function PdvApp({
       setToast(saleType === "Onibus" ? "Venda de onibus finalizada." : saleType === "Mesa" ? "Mesa avulsa finalizada." : "Venda finalizada.");
       finishSaleSideEffects(sale, "Venda finalizada. Os dados serao atualizados na proxima sincronizacao.");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Nao foi possivel finalizar a venda.");
+      setToast(error instanceof Error ? error.message : "Nao foi possivel finalizar a venda.", true);
       throw error;
     } finally {
       setBusy(false);
@@ -1355,7 +1387,7 @@ export function PdvApp({
       lastPersistedTableItemIds.current = table.items.map((item) => item.id);
     } catch (error) {
       setTableSaveState("error");
-      setToast(error instanceof Error ? error.message : "Nao foi possivel abrir a mesa no servidor.");
+      setToast(error instanceof Error ? error.message : "Nao foi possivel abrir a mesa no servidor.", true);
     }
   };
 
@@ -1428,7 +1460,8 @@ export function PdvApp({
 
   const addConfiguredProduct = (product: PdvProduct, unitPrice: number, complements: PdvCartItem["complements"]) => {
     const resolvedQuantity = pendingProduct?.product.id === product.id ? pendingProduct : { quantity, measureLabel: undefined };
-    const subtableName = activeTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "";
+    const inTable = tab === "tables" && Boolean(activeTable);
+    const subtableName = inTable && snapshot?.settings.subtablesEnabled ? currentSubtable : "";
     const grouped = snapshot?.settings.groupComplementsWithProduct ?? true;
     const mainItem = createCartItem(product, resolvedQuantity.quantity, grouped ? complements || [] : [], unitPrice ?? pendingProduct?.unitPrice, subtableName, resolvedQuantity.measureLabel, pendingProduct?.finalTotal);
     const separateComplements = !grouped
@@ -1439,7 +1472,7 @@ export function PdvApp({
         } satisfies PdvCartItem))
       : [];
     const items = [mainItem, ...separateComplements].flatMap((item) => expandIndividualUnits(item, Boolean(snapshot?.settings.individualUnitItems)));
-    if (activeTable) {
+    if (inTable) {
       updateLocalTableCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems && !tableCartCompressed.current));
     } else {
       setCart((current) => mergeIncomingItems(current, items, snapshot?.settings.stackIdenticalItems && !directCartCompressed.current));
@@ -1544,7 +1577,7 @@ export function PdvApp({
     const scope: TableCloseScope = hasIndependentSubtables ? { kind: "main" } : { kind: "all" };
     const scopedItems = itemsForCloseScope(tableCart, scope);
     if (!scopedItems.length) {
-      setToast(hasIndependentSubtables ? "A mesa principal nao tem itens para fechar." : "Mesa sem itens para fechar.");
+      setToast(hasIndependentSubtables ? "A mesa principal nao tem itens para fechar." : "Mesa sem itens para fechar.", true);
       return;
     }
     await persistTableBeforeAction();
@@ -1579,7 +1612,7 @@ export function PdvApp({
     }
     const selected = items?.length ? items : tableCart.filter((item) => partialSelectedItemIds.includes(item.id));
     if (!selected.length) {
-      setToast("Selecione itens da mesa para fechar parcial.");
+      setToast("Selecione itens da mesa para fechar parcial.", true);
       return;
     }
     await persistTableBeforeAction();
@@ -1595,7 +1628,7 @@ export function PdvApp({
       const scope: TableCloseScope = { kind: "subtable", subtableName: name };
       const selected = itemsForCloseScope(tableCart, scope);
       if (!selected.length) {
-        setToast("Essa submesa nao tem itens para fechar.");
+        setToast("Essa submesa nao tem itens para fechar.", true);
         return;
       }
       await persistTableBeforeAction();
@@ -1647,7 +1680,7 @@ export function PdvApp({
 
   const moveSelectedItemsToSubtable = async (name: string) => {
     if (!activeTable || !selectedTableItemIds.length) {
-      setToast("Selecione itens para mover.");
+      setToast("Selecione itens para mover.", true);
       return;
     }
     const selected = new Set(selectedTableItemIds);
@@ -1667,12 +1700,17 @@ export function PdvApp({
     const rename = async () => {
       const renamedItems = tableCart.map((item) => (item.subtableName || "") === oldName ? { ...item, subtableName: nextName } : item);
       const renamedSubtables = [...new Set(subtableNames.map((item) => item === oldName ? nextName : item))];
+      if (tableAutosaveTimer.current !== null) {
+        window.clearTimeout(tableAutosaveTimer.current);
+        tableAutosaveTimer.current = null;
+      }
+      markTableMutation();
+      const mutationRevision = tableMutationRevision.current;
       setTableCart(renamedItems);
       setSubtableNames(renamedSubtables);
       setCurrentSubtable(nextName);
-      await savePdvTableItems(activeTable.number, renamedItems, renamedSubtables);
+      await queueTableSave({ tableNumber: activeTable.number, people: tablePeople, note: tableNote, items: renamedItems, subtables: renamedSubtables, mutationRevision, renamedSubtable: { from: oldName, to: nextName } });
       setToast(`Submesa ${oldName} renomeada para ${nextName}.`);
-      await load();
     };
     if (tableCart.some((item) => (item.subtableName || "") === nextName)) {
       setConfirmRequest({ title: `Juntar submesas em ${nextName}?`, message: "Ja existe uma submesa com esse nome. Os itens serao reunidos nela.", action: rename });
@@ -1778,7 +1816,7 @@ export function PdvApp({
         catch {
           setActiveTable(null);
           setTableCart([]);
-          setToast("Pagamento confirmado. Aguardando atualização das mesas; não repita o pagamento.");
+          setToast("Pagamento confirmado. Aguardando atualização das mesas; não repita o pagamento.", true);
           return;
         }
         const updatedTable = refreshed.tables.find((table) => table.number === target.table.number);
@@ -1796,7 +1834,7 @@ export function PdvApp({
         if (refreshed.settings.receiptOpenAfterSale) {
           setCompletedReceipt({ sale, receivable: refreshed.receivables.find((item) => item.saleId === sale.id) });
         }
-        void maybePrintSale(sale, refreshed).catch(() => setToast("Conta fechada. Não foi possível imprimir; reimprima pelo Histórico."));
+        void maybePrintSale(sale, refreshed).catch(() => setToast("Conta fechada. Não foi possível imprimir; reimprima pelo Histórico.", true));
         if (remainingItems.length || remainingSubtables.length) {
           applyFreshOpenTable(refreshed, target.table.number);
         } else {
@@ -2157,13 +2195,13 @@ export function PdvApp({
           />
         )}
 
-        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} removePdvProduct={removePdvProduct} />}
+        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={!canConfigureProducts} canImport={!isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} removePdvProduct={removePdvProduct} />}
         {tab === "history" && <HistoryScreen snapshot={snapshot} initialView={initialHistoryView} hideNavigation={hideHistoryNavigation} readOnly={isRemoteClient && remoteSession?.permissions?.manageTables === false} onChanged={load} saveCustomer={savePdvCustomer} saveReceivable={savePdvReceivable} receiveReceivable={receivePdvReceivable} receiveCustomerReceivables={receiveCustomerReceivables} updateReceivable={updatePdvReceivable} cancelReceivable={cancelPdvReceivable} deleteReceivable={deletePdvReceivable} allowPrint={!isRemoteClient || (snapshot.settings.receiptAllowClientPrint !== false && remoteSession?.allowPrint !== false)} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} onNavigateMain={onNavigateMain} onCreatePayableForCustomer={onCreatePayableForCustomer} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
         {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={!canConfigureServer} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} externalActionsRef={advancedSettingsActionsRef} onDirtyChange={onAdvancedSettingsDirtyChange} forcedSection={advancedSection} hideNavigation={hideAdvancedNavigation} />}
       </main>
 
-      {toast && (
+      {toast && (notificationsEnabled || toastIsError) && (
         <button className="pdv-toast" onClick={() => setToast("")}>
           <Check size={18} /> {toast}
         </button>
@@ -2189,7 +2227,7 @@ export function PdvApp({
             const original = sale?.payments.find((item) => item.id === payment.id);
             if (sale && original) setCorrectingPartialPayment({ sale, payment: original });
           }}
-          showDescription={checkoutTarget.kind !== "direct"}
+          showDescription={checkoutTarget.kind !== "direct" && (checkoutTarget.kind !== "table" && checkoutTarget.kind !== "table-scope" || snapshot.settings.fullPaymentIdentificationEnabled !== false)}
           onCancel={() => {
             if ((checkoutTarget.kind === "table" || checkoutTarget.kind === "table-scope") && advancedSplitReturn) {
               setCheckoutTarget(null);
@@ -2340,7 +2378,7 @@ export function PdvApp({
           onConfirm={() => {
             const request = confirmRequest;
             setConfirmRequest(null);
-            void request.action().catch((error) => setToast(error instanceof Error ? error.message : "Nao foi possivel concluir a acao."));
+            void request.action().catch((error) => setToast(error instanceof Error ? error.message : "Nao foi possivel concluir a acao.", true));
           }}
         />
       )}
@@ -6320,7 +6358,7 @@ function FileImportButton({ onPreview, onImport, onImported, busy }: { onPreview
   );
 }
 
-function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCose, onRemoveCose, onPreviewImportFile, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct, removePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onRemoveCose: () => Promise<number>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>; removePdvProduct: (id: string) => ReturnType<typeof window.caixa.removePdvProduct> }) {
+function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImportCose, onPreviewCose, onRemoveCose, onPreviewImportFile, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct, removePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; canImport?: boolean; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onRemoveCose: () => Promise<number>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>; removePdvProduct: (id: string) => ReturnType<typeof window.caixa.removePdvProduct> }) {
   const [section, setSection] = useState<"products" | "categories" | "complements" | "imports">("products");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [targetCategoryId, setTargetCategoryId] = useState(snapshot.categories[0]?.id || "");
@@ -6492,13 +6530,13 @@ function ProductsScreen({ snapshot, readOnly = false, onImportCose, onPreviewCos
           <div>
             <strong>Importar arquivo Excel ou CSV</strong>
             <span>Adicione e atualize produtos sem usar a planilha como banco principal.</span>
-            {!readOnly && <FileImportButton busy={busy} onPreview={onPreviewImportFile} onImport={onImportFile} onImported={onProductsUpdated} />}
+            {canImport && !readOnly && <FileImportButton busy={busy} onPreview={onPreviewImportFile} onImport={onImportFile} onImported={onProductsUpdated} />}
           </div>
           <div>
             <strong>Preset Cose Dell Abadia</strong>
             <span>{snapshot.products.filter((product) => product.importSource === "Cose Dell Abadia").length} produto(s) identificados nesta importacao.</span>
-            {!readOnly && <CoseImportButton busy={busy} onPreview={onPreviewCose} onImport={onImportCose} onImported={onProductsUpdated} />}
-            {!readOnly && <button className="pdv-danger-button" disabled={busy || !snapshot.products.some((product) => product.importSource === "Cose Dell Abadia")} onClick={() => setRemoveCoseConfirm(true)}>Remover somente esta importacao</button>}
+            {canImport && !readOnly && <CoseImportButton busy={busy} onPreview={onPreviewCose} onImport={onImportCose} onImported={onProductsUpdated} />}
+            {canImport && !readOnly && <button className="pdv-danger-button" disabled={busy || !snapshot.products.some((product) => product.importSource === "Cose Dell Abadia")} onClick={() => setRemoveCoseConfirm(true)}>Remover somente esta importacao</button>}
           </div>
         </div>
       )}
@@ -7824,7 +7862,7 @@ function HistoryScreen({
         <label><span>Tipo</span><select value={filters.type} onChange={(event) => setFilters({ ...filters, type: event.target.value })}><option>Todos</option><option>Venda direta</option><option>Onibus</option><option>Mesa</option></select></label>
         <label><span>Pagamento</span><select value={filters.payment} onChange={(event) => setFilters({ ...filters, payment: event.target.value })}><option>Todos</option>{PAYMENT_METHODS.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label><span>Status</span><select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}><option>Todos</option><option>Finalizada</option><option>Parcial</option><option>Cancelada</option></select></label>
-        <label><span>Mesa</span><input value={filters.table} onChange={(event) => setFilters({ ...filters, table: event.target.value })} placeholder="001" /></label>
+        <label><span>Mesa</span><input value={filters.table} onChange={(event) => setFilters({ ...filters, table: event.target.value })} placeholder="001, 004, 021" /></label>
         <label><span>Origem</span><select value={filters.origin} onChange={(event) => setFilters({ ...filters, origin: event.target.value })}><option>Todos</option>{[...new Set(snapshot.recentSales.map((sale) => displayPdvOrigin(sale.originDevice)))].map((origin) => <option key={origin}>{origin}</option>)}</select></label>
       </div>
       <FinancialGrid id="history" rows={sales} selectedId={highlighted?.id} onSelect={(sale) => setHighlightedId(sale.id)} onOpen={setSelectedSale} columns={[
@@ -7973,7 +8011,7 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
         <label><span>Tipo</span><select value={filters.type || "Todos"} onChange={(event) => setFilters({ ...filters, type: event.target.value as PdvExportFilters["type"] })}><option>Todos</option><option>Venda direta</option><option>Onibus</option><option>Mesa</option></select></label>
         <label><span>Pagamento</span><select value={filters.payment || "Todos"} onChange={(event) => setFilters({ ...filters, payment: event.target.value as PdvExportFilters["payment"] })}><option>Todos</option>{PAYMENT_METHODS.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label><span>Status</span><select value={filters.status || "Todos"} onChange={(event) => setFilters({ ...filters, status: event.target.value as PdvExportFilters["status"] })}><option>Todos</option><option>Finalizada</option><option>Parcial</option><option>Cancelada</option></select></label>
-        <label><span>Mesa</span><input value={filters.table || ""} onChange={(event) => setFilters({ ...filters, table: event.target.value })} placeholder="001" /></label>
+        <label><span>Mesa</span><input value={filters.table || ""} onChange={(event) => setFilters({ ...filters, table: event.target.value })} placeholder="001, 004, 021" /></label>
       </div>
       <div className="pdv-report-grid">
         <Metric title="Total vendido" value={money(total)} />
@@ -8350,6 +8388,10 @@ function AdvancedScreen({ snapshot, readOnly = false, clientVisualSettings = {},
             Solicitar descricao nos pagamentos parciais
           </label>
           <label className="pdv-switch-line">
+            <input type="checkbox" checked={draft.fullPaymentIdentificationEnabled !== false} onChange={(event) => changeDraft({ fullPaymentIdentificationEnabled: event.target.checked })} />
+            Mostrar identificacao da pessoa no fechamento total
+          </label>
+          <label className="pdv-switch-line">
             <input type="checkbox" checked={Boolean(draft.skipPaymentConfirmation)} onChange={(event) => changeDraft({ skipPaymentConfirmation: event.target.checked })} />
             Finalizar pagamento sem pedir confirmacao
           </label>
@@ -8634,7 +8676,7 @@ function filterSales(
   const query = normalizeTableSearch(filters.query || "");
   const queryTerms = query.split(",").map((term) => term.trim()).filter(Boolean);
   const valueRange = parseSaleValueQuery(query);
-  const table = (filters.table || "").replace(/^0+/, "");
+  const table = filters.table || "";
   return sales.filter((sale) => {
     const dateKey = localDateInputValue(new Date(sale.createdAt));
     if (filters.from && dateKey < filters.from) {
@@ -8652,7 +8694,7 @@ function filterSales(
     if (filters.payment && filters.payment !== "Todos" && !sale.payments.some((payment) => payment.method === filters.payment)) {
       return false;
     }
-    if (table && String(sale.tableNumber || "") !== table) {
+    if (!matchesTableNumberFilter(sale.tableNumber, table)) {
       return false;
     }
     if (filters.origin && filters.origin !== "Todos" && displayPdvOrigin(sale.originDevice) !== filters.origin) {

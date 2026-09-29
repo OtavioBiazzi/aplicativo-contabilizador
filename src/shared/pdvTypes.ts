@@ -371,6 +371,7 @@ export interface PdvSettings {
   productLookupQuantitiesEnabled?: boolean;
   stackIdenticalItems?: boolean;
   partialPaymentDescriptionEnabled?: boolean;
+  fullPaymentIdentificationEnabled?: boolean;
   skipPaymentConfirmation?: boolean;
   individualUnitItems?: boolean;
   groupComplementsWithProduct?: boolean;

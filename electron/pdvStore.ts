@@ -1,5 +1,6 @@
 import { supplierBalanceKey } from "../src/shared/financialDates.js";
 import { joinSaleLabels } from "../src/shared/saleDescription.js";
+import { matchesTableNumberFilter } from "../src/shared/tableNumberFilter.js";
 ﻿import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
@@ -57,6 +58,7 @@ const DEFAULT_PDV_SETTINGS: PdvSettings = {
   productLookupQuantitiesEnabled: false,
   stackIdenticalItems: false,
   partialPaymentDescriptionEnabled: false,
+  fullPaymentIdentificationEnabled: true,
   skipPaymentConfirmation: false,
   individualUnitItems: false,
   groupComplementsWithProduct: true,
@@ -1408,7 +1410,7 @@ export class PdvStore {
     await this.persist();
   }
 
-  async saveTableItems(tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[], expectedSessionId?: string): Promise<void> {
+  async saveTableItems(tableNumber: number, items: PdvCartItem[], subtables?: string[], baseItemIds?: string[], expectedSessionId?: string, renamedSubtable?: { from: string; to: string }): Promise<void> {
     tableNumber = this.normalizeTableNumber(tableNumber);
     validateCartItems(items);
     const db = this.requireDb();
@@ -1431,12 +1433,17 @@ export class PdvStore {
     // Itens incluidos por outro terminal depois dessa base sao preservados;
     // alteracoes e remocoes dos itens conhecidos continuam sendo aplicadas.
     const concurrentItems = baseline ? currentItems.filter((item) => !baseline.has(item.id) && !items.some((candidate) => candidate.id === item.id)) : [];
-    const resolvedItems = baseline ? [...items, ...concurrentItems] : items;
+    const resolvedItems = (baseline ? [...items, ...concurrentItems] : items).map((item) => renamedSubtable && item.subtableName === renamedSubtable.from ? { ...item, subtableName: renamedSubtable.to } : item);
     const currentSubtables = parseSubtableNames(currentSession?.subtablesJson);
+    const renamedOldNames = new Set(currentItems.flatMap((current) => {
+      const updated = items.find((item) => item.id === current.id);
+      return updated && current.subtableName && current.subtableName !== updated.subtableName ? [current.subtableName] : [];
+    }));
+    if (renamedSubtable?.from && renamedSubtable.to) renamedOldNames.add(renamedSubtable.from);
     const nextSubtables = subtables === undefined
       ? currentSubtables
       : baseline
-        ? normalizeSubtableNames([...subtables, ...currentSubtables])
+        ? normalizeSubtableNames([...subtables, ...currentSubtables.filter((name) => !renamedOldNames.has(name))])
         : normalizeSubtableNames(subtables);
     if (
       (items.length > 0 || !currentSession || currentSession.status === "Reservada") &&
@@ -2533,6 +2540,7 @@ export class PdvStore {
       productLookupQuantitiesEnabled: parseBooleanSetting(map.get("product_lookup_quantities_enabled"), DEFAULT_PDV_SETTINGS.productLookupQuantitiesEnabled || false),
       stackIdenticalItems: parseBooleanSetting(map.get("stack_identical_items"), DEFAULT_PDV_SETTINGS.stackIdenticalItems || false),
       partialPaymentDescriptionEnabled: parseBooleanSetting(map.get("partial_payment_description_enabled"), DEFAULT_PDV_SETTINGS.partialPaymentDescriptionEnabled || false),
+      fullPaymentIdentificationEnabled: parseBooleanSetting(map.get("full_payment_identification_enabled"), DEFAULT_PDV_SETTINGS.fullPaymentIdentificationEnabled ?? true),
       skipPaymentConfirmation: parseBooleanSetting(map.get("skip_payment_confirmation"), DEFAULT_PDV_SETTINGS.skipPaymentConfirmation || false),
       individualUnitItems: parseBooleanSetting(map.get("individual_unit_items"), DEFAULT_PDV_SETTINGS.individualUnitItems || false),
       groupComplementsWithProduct: parseBooleanSetting(map.get("group_complements_with_product"), DEFAULT_PDV_SETTINGS.groupComplementsWithProduct ?? true),
@@ -3077,7 +3085,7 @@ function matchesSaleFilters(sale: PdvSale, filters: PdvExportFilters): boolean {
   const dateKey = Number.isNaN(date.getTime())
     ? sale.createdAt.slice(0, 10)
     : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  const table = (filters.table || "").replace(/^0+/, "");
+  const table = filters.table || "";
   if (filters.from && dateKey < filters.from) {
     return false;
   }
@@ -3093,7 +3101,7 @@ function matchesSaleFilters(sale: PdvSale, filters: PdvExportFilters): boolean {
   if (filters.status && filters.status !== "Todos" && sale.status !== filters.status) {
     return false;
   }
-  if (table && String(sale.tableNumber || "") !== table) {
+  if (!matchesTableNumberFilter(sale.tableNumber, table)) {
     return false;
   }
   return true;

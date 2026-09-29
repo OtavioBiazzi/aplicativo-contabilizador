@@ -324,6 +324,22 @@
   gap: 6px;
 }
 
+#root .pdv-table-product-filter-selected .pdv-product-filter-requirement {
+  background: #e7f2fa;
+  border-color: #9dc3db;
+  color: #12334b;
+}
+
+#root .pdv-table-product-filter-selected .pdv-product-filter-requirement :is(b, em) {
+  color: #12334b;
+}
+
+#root .pdv-table-product-filter-selected .pdv-product-filter-requirement input {
+  background: #fff;
+  color: #12334b;
+  border-color: #9dc3db;
+}
+
 #root .pdv-table-product-filter-selected button {
   display: inline-flex;
   align-items: center;
@@ -354,6 +370,7 @@
 
 #root .pdv-table-product-filter-list {
   display: grid;
+  align-content: start;
   gap: 3px;
   max-height: min(48vh, 410px);
   overflow-y: auto;
@@ -378,6 +395,7 @@
 #root .pdv-table-product-filter-list > button:nth-child(odd) { background: #edf6fb; }
 #root .pdv-table-product-filter-list > button:hover,
 #root .pdv-table-product-filter-list > button.selected { background: #ef773e; color: #fff; }
+#root .pdv-table-product-filter-list > button.selected :is(strong, small, b) { color: #fff !important; -webkit-text-fill-color: #fff !important; }
 #root .pdv-table-product-filter-list > button > span:nth-child(2) { display: grid; gap: 1px; min-width: 0; }
 #root .pdv-table-product-filter-list > button :is(strong, small, b) { color: inherit !important; -webkit-text-fill-color: currentColor !important; }
 

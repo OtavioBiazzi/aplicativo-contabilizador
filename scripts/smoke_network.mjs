@@ -54,7 +54,7 @@ const server = new LocalServer({
   savePdvDirectSale: (items, discount, payments, origin, operationId) => pdvStore.saveSale({ type: "Venda direta", items, discount, payments, originDevice: origin, operationId }),
   openPdvTable: (number, people, note) => pdvStore.openTable(number, people, note),
   setPdvTableStatus: (number, status) => pdvStore.setTableStatus(number, status),
-  savePdvTableItems: (number, items, subtables, baseItemIds, expectedSessionId) => pdvStore.saveTableItems(number, items, subtables, baseItemIds, expectedSessionId),
+  savePdvTableItems: (number, items, subtables, baseItemIds, expectedSessionId, renamedSubtable) => pdvStore.saveTableItems(number, items, subtables, baseItemIds, expectedSessionId, renamedSubtable),
   transferPdvTableItems: (sourceTableNumber, targetTableNumber, selections, operationId) => pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId),
   appendPdvTableItems: (targetTableNumber, items, targetSubtable) => pdvStore.appendTableItems(targetTableNumber, items, targetSubtable),
   closePdvTable: (number, payments, discount, origin, operationId) => pdvStore.closeTable(number, payments, discount, origin, operationId),
@@ -63,6 +63,7 @@ const server = new LocalServer({
   updatePdvProducts: (ids, patch) => pdvStore.updateProducts(ids, patch),
   savePdvCategory: (draft) => pdvStore.saveCategory(draft),
   savePdvProduct: (draft) => pdvStore.saveProduct(draft),
+  removePdvProduct: (id) => pdvStore.removeProduct(id),
   savePdvCustomer: (draft) => pdvStore.saveCustomer(draft),
   savePdvReceivable: (draft) => pdvStore.saveReceivable(draft),
   receiveCustomerReceivables: (id, payment, origin, operationId, accountIds) => pdvStore.receiveCustomerReceivables(id, payment, origin, operationId, accountIds),
@@ -187,10 +188,25 @@ const item = {
 };
 
 const productUpdate = await fetch("http://127.0.0.1:43991/api/pdv/products", { method: "PATCH", headers, body: JSON.stringify({ ids: [product.id], patch: { favorite: true } }) });
-if (productUpdate.status !== 403) throw new Error(`Cliente conseguiu alterar produto controlado pelo servidor: ${await productUpdate.text()}`);
-if ((await pdvStore.getSnapshot()).products.find((entry) => entry.id === product.id)?.favorite) {
-  throw new Error("Produto foi alterado apesar da protecao de configuracao remota.");
+if (!productUpdate.ok || !(await pdvStore.getSnapshot()).products.find((entry) => entry.id === product.id)?.favorite) {
+  throw new Error(`Cliente autorizado nao conseguiu alterar produto: ${await productUpdate.text()}`);
 }
+const remoteCategoryResponse = await fetch("http://127.0.0.1:43991/api/pdv/categories", { method: "POST", headers, body: JSON.stringify({ name: "Categoria cliente", active: true, favorite: false, sortOrder: 20 }) });
+if (!remoteCategoryResponse.ok) throw new Error(`Cliente autorizado nao conseguiu criar categoria: ${await remoteCategoryResponse.text()}`);
+const remoteCategory = (await remoteCategoryResponse.json()).category;
+const remoteProductResponse = await fetch("http://127.0.0.1:43991/api/pdv/products", { method: "POST", headers, body: JSON.stringify({ name: "Produto cliente temporario", categoryId: remoteCategory.id, price: 3, costPrice: 0, unit: "UNID", unitMode: "unidade", active: true, showOnPdv: true, favorite: false, canBeComplement: false, hasComplements: false, complementProductIds: [], sortOrder: 20, trackStock: false, stockQuantity: 0, minimumStock: 0 }) });
+if (!remoteProductResponse.ok) throw new Error(`Cliente autorizado nao conseguiu criar produto: ${await remoteProductResponse.text()}`);
+const remoteProduct = (await remoteProductResponse.json()).product;
+const remoteRemoval = await fetch(`http://127.0.0.1:43991/api/pdv/products/${remoteProduct.id}`, { method: "DELETE", headers });
+if (!remoteRemoval.ok || (await remoteRemoval.json()).mode !== "deleted") throw new Error("Cliente autorizado nao conseguiu remover produto temporario.");
+settings.server.permissions.allowClientCustomization = false;
+server.setPermissions(settings.server.permissions);
+const blockedProductUpdate = await fetch("http://127.0.0.1:43991/api/pdv/products", { method: "PATCH", headers, body: JSON.stringify({ ids: [product.id], patch: { favorite: false } }) });
+if (blockedProductUpdate.status !== 403 || !(await pdvStore.getSnapshot()).products.find((entry) => entry.id === product.id)?.favorite) {
+  throw new Error("Produto foi alterado sem permissao de configuracao remota.");
+}
+settings.server.permissions.allowClientCustomization = true;
+server.setPermissions(settings.server.permissions);
 
 const direct = await fetch("http://127.0.0.1:43991/api/pdv/sales/direct", {
   method: "POST",
@@ -402,6 +418,28 @@ if (savedResponse.table?.number !== 7 || savedResponse.table.items[0]?.subtableN
 const savedTable = (await pdvStore.getSnapshot()).tables.find((table) => table.number === 7);
 if (!savedTable?.subtables?.includes("Cliente remoto") || !savedTable.subtables.includes("Submesa vazia") || savedTable.items[0]?.subtableName !== "Cliente remoto") {
   throw new Error("Cliente nao preservou submesas ao salvar a mesa no servidor.");
+}
+await pdvStore.openTable(30, 1);
+const firstRenameItem = { ...item, id: crypto.randomUUID(), subtableName: "Antiga" };
+const concurrentRenameItem = { ...item, id: crypto.randomUUID(), subtableName: "Antiga" };
+await pdvStore.saveTableItems(30, [firstRenameItem], ["Antiga", "Vazia antiga"]);
+const renameBase = pdvStore.getTable(30);
+await pdvStore.saveTableItems(30, [firstRenameItem, concurrentRenameItem], ["Antiga", "Vazia antiga"]);
+const renamed = await fetch("http://127.0.0.1:43991/api/pdv/tables/30/items", {
+  method: "PUT", headers,
+  body: JSON.stringify({ items: [{ ...firstRenameItem, subtableName: "Nova" }], subtables: ["Nova", "Vazia antiga"], baseItemIds: [firstRenameItem.id], sessionId: renameBase.sessionId, renamedSubtable: { from: "Antiga", to: "Nova" } })
+});
+if (!renamed.ok) throw new Error(`Renomear submesa remota falhou: ${await renamed.text()}`);
+const renamedTable = pdvStore.getTable(30);
+if (renamedTable.subtables.includes("Antiga") || !renamedTable.subtables.includes("Nova") || renamedTable.items.length !== 2 || renamedTable.items.some((row) => row.subtableName !== "Nova")) {
+  throw new Error("Renomeacao recriou submesa antiga ou perdeu item concorrente.");
+}
+const renamedEmpty = await fetch("http://127.0.0.1:43991/api/pdv/tables/30/items", {
+  method: "PUT", headers,
+  body: JSON.stringify({ items: renamedTable.items, subtables: ["Nova", "Vazia nova"], baseItemIds: renamedTable.items.map((row) => row.id), sessionId: renamedTable.sessionId, renamedSubtable: { from: "Vazia antiga", to: "Vazia nova" } })
+});
+if (!renamedEmpty.ok || pdvStore.getTable(30).subtables.includes("Vazia antiga") || !pdvStore.getTable(30).subtables.includes("Vazia nova")) {
+  throw new Error("Renomeacao de submesa vazia manteve o nome anterior.");
 }
 const partialOperation = crypto.randomUUID();
 const partial = await fetch("http://127.0.0.1:43991/api/pdv/tables/7/partial", {
