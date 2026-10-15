@@ -3286,6 +3286,11 @@ function PayablesPanel({
     setSelected(next);
     setPaying((current) => current?.id === next.id ? next : current);
   };
+  const exportVisibleAccounts = () => downloadFinancialCsv(
+    `contas-a-pagar-${today}.csv`,
+    ["Descricao", "Fornecedor", "Categoria", "Centro de custo", "Documento", "Emissao", "Vencimento", "Valor", "Pago", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"],
+    visible.map((item) => [item.description, item.supplier, item.category, item.costCenter, item.documentNumber, item.issueDate, item.dueDate, item.amount, item.paidAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note])
+  );
 
   return (
     <section className="payables-panel pdv-panel financial-module-shell pdv-payable-professional">
@@ -3295,7 +3300,6 @@ function PayablesPanel({
           <h1>Contas a pagar</h1>
           <p>Vencimentos, fornecedores e pagamentos do negocio.</p>
         </div>
-        <div className="financial-head-actions"><button className="pdv-ghost-button" onClick={() => downloadFinancialCsv(`contas-a-pagar-${today}.csv`, ["Descricao", "Fornecedor", "Categoria", "Centro de custo", "Documento", "Emissao", "Vencimento", "Valor", "Pago", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"], visible.map((item) => [item.description, item.supplier, item.category, item.costCenter, item.documentNumber, item.issueDate, item.dueDate, item.amount, item.paidAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note]))}><Download size={16} /> Exportar</button>{!readOnly && <button className="pdv-primary-button" onClick={() => setEditing("new")}><Plus size={17} /> Nova conta</button>}</div>
       </div>
 
       {!supplierView && <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
@@ -3311,15 +3315,14 @@ function PayablesPanel({
         <button className="primary-command" disabled={!canPay} onClick={() => validSelection && setPaying(validSelection)}><Wallet /><span>Pagar</span></button>
         <button disabled={!canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
         <button disabled={!validSelection} onClick={() => setRecordView(true)}><ReceiptText /><span>Registro</span></button>
-        <span className="finance-command-divider" />
-        <button className={status === "Em aberto" ? "active" : ""} onClick={() => { setStatus("Em aberto"); setRecordView(false); }}><CalendarDays /><span>Contas a pagar</span></button>
-        <button className={status === "Pagas" ? "active" : ""} onClick={() => { setStatus("Pagas"); setRecordView(false); }}><Check /><span>Contas pagas</span></button>
       </div>}
-      <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
-        <button role="tab" aria-selected={!recordView && !supplierView} onClick={() => { setSupplierView(false); setRecordView(false); }}>Pesquisa</button>
-        <button role="tab" aria-selected={supplierView} onClick={() => { setSupplierView(true); setRecordView(false); }}>Por fornecedor</button>
-        <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setSupplierView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
-        <span>Duplo clique em uma linha para consultar o registro</span>
+      <div className="finance-view-row">
+        <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
+          <button role="tab" aria-selected={!recordView && !supplierView} onClick={() => { setSupplierView(false); setRecordView(false); }}>Pesquisa</button>
+          <button role="tab" aria-selected={supplierView} onClick={() => { setSupplierView(true); setRecordView(false); }}>Por fornecedor</button>
+          <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setSupplierView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
+        </div>
+        <button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button>
       </div>
       {supplierView ? <>
         <div className="financial-filters"><label className="financial-search"><span>Buscar fornecedor</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome do fornecedor" /></label><button disabled={readOnly || !selectedSupplierRow} onClick={() => { if (selectedSupplierRow) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...selectedSupplierRow.representative, description: selectedSupplierRow.name, balance: selectedSupplierRow.balance }); } }}>Pagar ao fornecedor</button></div>
@@ -3330,10 +3333,10 @@ function PayablesPanel({
           { key: "balance", label: "Total a pagar", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{formatCurrency(row.balance)}</strong> }
         ]} totals={<><span>Saldo pendente de todos os fornecedores</span><strong>{formatCurrency(supplierRows.reduce((sum, row) => sum + row.balance, 0))}</strong></>} />
       </> : <>
-      <div className="finance-period-shortcuts"><label>Período por <select aria-label="Referencia do periodo" value={dateField} onChange={(event) => setDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label><button onClick={() => { setFrom(today); setTo(today); setStatus("Em aberto"); }}>Hoje</button><button onClick={() => { setDateField("due"); setFrom(today); setTo(sevenDays); setStatus("Em aberto"); }}>Vencem em 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencidas"); }}>Vencidas</button><span>Sem vencimento: usa a emissão</span></div>
+      <div className="finance-period-shortcuts"><label>Data: <select aria-label="Data usada no filtro" title="Se a conta não tiver vencimento, será usada a data de emissão" value={dateField} onChange={(event) => setDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label><button onClick={() => { setFrom(today); setTo(today); setStatus("Em aberto"); }}>Hoje</button><button onClick={() => { setDateField("due"); setFrom(today); setTo(sevenDays); setStatus("Em aberto"); }}>Próximos 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencidas"); }}>Vencidas</button></div>
 
       <div className="financial-filters">
-        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descricao, fornecedor, categoria, documento ou tag" /></label>
+        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descrição, fornecedor, documento ou tag" /></label>
         <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
         <label><span>Situacao</span><select value={status} onChange={(event) => { const next = event.target.value as typeof status; setStatus(next); if (next === "Excluidas") { setFrom(""); setTo(""); } }}>{["Em aberto", "Vencidas", "Historico", "Pagas", "Canceladas", "Excluidas", "Todos"].map((value) => <option key={value}>{value}</option>)}</select></label>

@@ -7078,12 +7078,16 @@ function ReceivablesScreen({
     }
     setCustomerReceiptTarget(receivable);
   };
+  const exportVisibleAccounts = () => downloadFinancialCsv(
+    `contas-a-receber-${today}.csv`,
+    ["Cliente", "Descricao", "Mesa", "Submesa", "Categoria", "Centro de custo", "Documento", "Vencimento", "Original", "Recebido", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"],
+    receivables.map((item) => [item.customerName, item.description, item.tableNumber || "", item.subtableName || "", item.category, item.costCenter, item.documentNumber, item.dueDate, item.originalAmount, item.receivedAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note])
+  );
 
   return (
     <section className="pdv-panel financial-module-shell pdv-receivable-professional">
       <div className="pdv-section-head financial-module-head">
         <div><span className="pdv-eyebrow">Financeiro</span><h1>Contas a receber</h1><p>Cobrancas, vencimentos e recebimentos vinculados aos clientes.</p></div>
-        <div className="financial-head-actions"><button className="pdv-ghost-button" onClick={() => downloadFinancialCsv(`contas-a-receber-${today}.csv`, ["Cliente", "Descricao", "Mesa", "Submesa", "Categoria", "Centro de custo", "Documento", "Vencimento", "Original", "Recebido", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"], receivables.map((item) => [item.customerName, item.description, item.tableNumber || "", item.subtableName || "", item.category, item.costCenter, item.documentNumber, item.dueDate, item.originalAmount, item.receivedAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note]))}><Download size={16} /> Exportar</button>{!readOnly && <button className="pdv-primary-button" onClick={() => setCreating(true)}><Plus size={16} /> Nova conta</button>}</div>
       </div>
       {!hideNavigation && <HistoryViewTabs value={view} onChange={onViewChange} showSales={showSales} />}
       {!customerView && <div className="finance-command-bar" aria-label="Comandos de contas a receber">
@@ -7100,15 +7104,14 @@ function ReceivablesScreen({
         <button disabled={!canChange || (validSelection?.receivedAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
         <button disabled={!validSelection || !snapshot.recentSales.some((sale) => sale.id === validSelection.saleId)} onClick={() => validSelection && openReceipt(validSelection)}><ReceiptText /><span>Recibo</span></button>
         <button disabled={!validSelection || !customerOutstandingAccounts(snapshot.receivables, validSelection).length} onClick={() => validSelection && openCustomerReceipt(validSelection)}><ReceiptText /><span>Recibo do cliente</span></button>
-        <span className="finance-command-divider" />
-        <button className={status === "Pendentes" ? "active" : ""} onClick={() => { setStatus("Pendentes"); setRecordView(false); }}><Clock3 /><span>Contas a receber</span></button>
-        <button className={status === "Recebida" ? "active" : ""} onClick={() => { setStatus("Recebida"); setRecordView(false); }}><Check /><span>Contas recebidas</span></button>
       </div>}
-      <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
-        <button role="tab" aria-selected={!recordView && !customerView} onClick={() => { setCustomerView(false); setRecordView(false); }}>Pesquisa</button>
-        <button role="tab" aria-selected={customerView} onClick={() => { setCustomerView(true); setRecordView(false); }}>Por cliente</button>
-        <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setCustomerView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
-        <span>Duplo clique em uma linha para consultar o registro</span>
+      <div className="finance-view-row">
+        <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
+          <button role="tab" aria-selected={!recordView && !customerView} onClick={() => { setCustomerView(false); setRecordView(false); }}>Pesquisa</button>
+          <button role="tab" aria-selected={customerView} onClick={() => { setCustomerView(true); setRecordView(false); }}>Por cliente</button>
+          <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setCustomerView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
+        </div>
+        <button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button>
       </div>
       {customerView ? <>
         <div className="financial-filters"><label className="financial-search"><span>Buscar cliente</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome do cliente" /></label><button disabled={readOnly || !selectedCustomerRow} onClick={() => { if (selectedCustomerRow) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...selectedCustomerRow.representative, balance: selectedCustomerRow.balance }); } }}>Receber do cliente</button><button disabled={!selectedCustomerRow} onClick={() => selectedCustomerRow && openCustomerReceipt(selectedCustomerRow.representative)}>Recibo do cliente</button></div>
@@ -7119,9 +7122,9 @@ function ReceivablesScreen({
           { key: "balance", label: "Total a receber", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{money(row.balance)}</strong> }
         ]} />
       </> : <>
-      <div className="finance-period-shortcuts"><label>Período por <select aria-label="Referencia do periodo" value={dateField} onChange={(event) => setDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label><button onClick={() => { setFrom(today); setTo(today); setStatus("Pendentes"); }}>Hoje</button><button onClick={() => { setDateField("due"); setFrom(today); setTo(sevenDays); setStatus("Pendentes"); }}>Vencem em 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencida"); }}>Vencidas</button><span>Sem vencimento: usa a emissão</span></div>
+      <div className="finance-period-shortcuts"><label>Data: <select aria-label="Data usada no filtro" title="Se a conta não tiver vencimento, será usada a data de emissão" value={dateField} onChange={(event) => setDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label><button onClick={() => { setFrom(today); setTo(today); setStatus("Pendentes"); }}>Hoje</button><button onClick={() => { setDateField("due"); setFrom(today); setTo(sevenDays); setStatus("Pendentes"); }}>Próximos 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencida"); }}>Vencidas</button></div>
       <div className="financial-filters">
-        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cliente, documento, categoria, mesa ou produto" /></label>
+        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cliente, documento, mesa ou produto" /></label>
         <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
         <label><span>Situacao</span><select value={status} onChange={(event) => { const next = event.target.value; setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }}><option>Pendentes</option><option>Historico</option><option>Todos</option><option>Em aberto</option><option>Parcialmente recebida</option><option>Vencida</option><option>Recebida</option><option>Cancelada</option><option>Excluida</option></select></label>
