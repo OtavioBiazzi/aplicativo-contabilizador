@@ -1,4 +1,6 @@
 import { IndependentUpdater } from "./components/IndependentUpdater";
+import { HelpCenter, type HelpDestination } from "./components/HelpCenter";
+import { OpenTablesSummary } from "./components/OpenTablesSummary";
 import { createHistoryDescriptionLookup } from "./shared/historyDescription";
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -6,6 +8,7 @@ import {
   ArrowDown,
   ArrowUp,
   BarChart3,
+  BookOpen,
   Boxes,
   CalendarDays,
   Clock,
@@ -102,7 +105,7 @@ import type {
   UpdateInfo
 } from "./shared/types";
 
-type TabKey = "sale" | "tables" | "history" | "dashboard" | "clients" | "receivables" | "payables" | "reports" | "server" | "settings";
+type TabKey = "sale" | "tables" | "history" | "dashboard" | "clients" | "receivables" | "payables" | "reports" | "server" | "settings" | "help";
 type SettingsCategory =
   | "appearance"
   | "operation"
@@ -231,7 +234,8 @@ const TAB_ITEMS: Array<{ key: TabKey; label: string; icon: typeof Send }> = [
   { key: "payables", label: "Contas a pagar", icon: Wallet },
   { key: "reports", label: "Relatorios", icon: BarChart3 },
   { key: "server", label: "Rede", icon: Server },
-  { key: "settings", label: "Ajustes", icon: Settings }
+  { key: "settings", label: "Ajustes", icon: Settings },
+  { key: "help", label: "Ajuda e tutoriais", icon: BookOpen }
 ];
 
 const DEFAULT_HEADER_PINNED_MODULES: TabKey[] = ["sale", "tables", "history"];
@@ -1256,6 +1260,7 @@ export function App() {
   const [importingPreview, setImportingPreview] = useState(false);
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey());
   const [totalMenuOpen, setTotalMenuOpen] = useState(false);
+  const [openTablesSummary, setOpenTablesSummary] = useState(false);
   const totalMenuRef = useRef<HTMLDivElement | null>(null);
   const [modulesMenuOpen, setModulesMenuOpen] = useState(false);
   const modulesMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2411,6 +2416,25 @@ export function App() {
     setActiveTab(targetTab);
   };
 
+  const navigateFromHelp = (destination: HelpDestination) => {
+    const categories: Partial<Record<HelpDestination, SettingsCategory>> = {
+      appearance: "appearance", privacy: "privacy", printing: "printing", updates: "updates", files: "files", operations: "pdvOperation"
+    };
+    const category = categories[destination];
+    if (category) {
+      setSettingsWindowCategory(category);
+      setSettingsFocus({ category, nonce: Date.now() });
+      requestNavigation("settings");
+    } else if (destination === "products-report" || destination === "reports") {
+      setSettingsWindowCategory(null);
+      setReportWindowTab(destination === "products-report" ? "products" : "overview");
+      requestNavigation("reports");
+    } else {
+      setSettingsWindowCategory(null);
+      requestNavigation(destination as TabKey);
+    }
+  };
+
   useEffect(() => {
     if (!remoteSession || !remoteFullSalesRef.current) return;
     void refreshRemote(remoteSessionRef.current, true).catch((error) => {
@@ -2580,6 +2604,7 @@ export function App() {
     : summary;
   const quickEntryStorageScope = quickEntryStorageScopeForSession(remoteSession);
   const canUseTotalMenu = canViewRemoteTotals;
+  const helpServerIp = server.ips.find((ip) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) || server.ips[0] || "localhost";
 
   if (IS_FLOATING_WINDOW) {
     return (
@@ -2600,8 +2625,8 @@ export function App() {
   }
 
   const header = headerForTab(activeTab, displaySummary.count);
-  const selectedSettingsModule = MODULE_GROUPS.flatMap((group) => group.items)
-    .find((item) => item.key === "settings" && item.settingsCategory === settingsWindowCategory);
+  const selectedSettingsModule = activeTab === "settings" ? MODULE_GROUPS.flatMap((group) => group.items)
+    .find((item) => item.key === "settings" && item.settingsCategory === settingsWindowCategory) : undefined;
   const selectedReportModule = activeTab === "reports" ? MODULE_GROUPS.flatMap((group) => group.items)
     .find((item) => item.key === "reports" && item.reportTab === reportWindowTab)
     : undefined;
@@ -2628,7 +2653,7 @@ export function App() {
       ))
     }))
     .filter((group) => group.items.length > 0);
-  const availableModuleKeys = new Set(availableModuleGroups.flatMap((group) => group.items.map((item) => item.key)));
+  const availableModuleKeys = new Set<TabKey>(["help", ...availableModuleGroups.flatMap((group) => group.items.map((item) => item.key))]);
   const secondaryTabActive = availableModuleKeys.has(activeTab);
   const pdvMainTab = legacyMode ? null : baseOperationalTab;
   const moduleWindowOpen = !(["sale", "tables"] as TabKey[]).includes(activeTab);
@@ -2671,6 +2696,7 @@ export function App() {
               <button type="button" onClick={toggleHeaderPrivacy}><Eye size={16} />{settings.privacy.hideHeaderTotal ? "Mostrar total no topo" : "Ativar privacidade"}</button>
               <button type="button" onClick={openTodayReport}><BarChart3 size={16} />Relatorio deste dia</button>
               <button type="button" onClick={() => { setHistoryFocus({ date: currentDateKey, nonce: Date.now() }); requestNavigation("history"); setTotalMenuOpen(false); }}><History size={16} />Historico de hoje</button>
+              <button type="button" onClick={() => { setOpenTablesSummary(true); setTotalMenuOpen(false); }}><Utensils size={16} />Mesas em aberto</button>
               <button type="button" onClick={() => { setSettingsWindowCategory("privacy"); setSettingsFocus({ category: "privacy", nonce: Date.now() }); requestNavigation("settings"); setTotalMenuOpen(false); }}><Settings size={16} />Ajustes de privacidade</button>
             </div>
           )}
@@ -2722,7 +2748,7 @@ export function App() {
           <section ref={managerialMenuRef} className="managerial-menu" role="dialog" aria-modal="true" aria-labelledby="managerial-menu-title">
             <div className="managerial-menu-head">
               <div><span>Administracao</span><h2 id="managerial-menu-title">Menu Gerencial</h2><p>Cadastros, financeiro, relatorios e configuracoes em um so lugar.</p></div>
-              <button type="button" aria-label="Fechar Menu Gerencial" onClick={() => setModulesMenuOpen(false)}><X size={22} /></button>
+              <div className="managerial-menu-head-actions"><button type="button" className="managerial-help-button" onClick={() => { setSettingsWindowCategory(null); requestNavigation("help"); setModulesMenuOpen(false); }}><BookOpen size={18} />Ajuda e tutoriais</button><button type="button" aria-label="Fechar Menu Gerencial" onClick={() => setModulesMenuOpen(false)}><X size={22} /></button></div>
             </div>
             <div className="managerial-menu-grid">
               {availableModuleGroups.map((group) => (
@@ -2896,6 +2922,7 @@ export function App() {
             entries={historyEntries}
             settings={settings}
             focusDate={historyFocus}
+            onFocusConsumed={() => setHistoryFocus(null)}
             onChange={async () => {
               await reload();
             }}
@@ -3083,6 +3110,8 @@ export function App() {
           }} />
         )}
 
+        {activeTab === "help" && <HelpCenter role={remoteSession ? "client" : "server"} address={remoteSession?.baseUrl || (server.running ? `http://${helpServerIp}:${server.port}` : "")} password={remoteSession?.password || settings.server.password} onNavigate={navigateFromHelp} />}
+
         {activeTab === "server" && (
           <ServerPanel
             settings={settings}
@@ -3124,6 +3153,8 @@ export function App() {
           </div>
         )}
       </main>
+
+      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} onOpenTables={() => { setOpenTablesSummary(false); requestNavigation("tables"); }} />}
 
       {importPreview && (
         <ImportPreviewModal
@@ -3340,9 +3371,9 @@ function PayablesPanel({
         <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
         <label><span>Situacao</span><select value={status} onChange={(event) => { const next = event.target.value as typeof status; setStatus(next); if (next === "Excluidas") { setFrom(""); setTo(""); } }}>{["Em aberto", "Vencidas", "Historico", "Pagas", "Canceladas", "Excluidas", "Todos"].map((value) => <option key={value}>{value}</option>)}</select></label>
-        <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Exibir tudo</button>
+        <button title="Ampliar o período sem mudar a situação selecionada" onClick={() => { setFrom(""); setTo(""); setQuery(""); }}><RotateCcw size={15} /> Todo o período</button>
       </div>
-      {hiddenOpenCount > 0 && <div className="finance-filter-notice">{hiddenOpenCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}>Exibir todas</button></div>}
+      {hiddenOpenCount > 0 && <div className="finance-filter-notice">{hiddenOpenCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Em aberto"); setQuery(""); }}>Ver todas em aberto</button></div>}
 
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
         <FinancialGrid id="payables" rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
@@ -4692,6 +4723,7 @@ function HistoryPanel({
   entries,
   settings,
   focusDate,
+  onFocusConsumed,
   onChange,
   onToast,
   onEditRemote,
@@ -4711,6 +4743,7 @@ function HistoryPanel({
   entries: LedgerEntry[];
   settings: AppSettings;
   focusDate?: HistoryFocusDate | null;
+  onFocusConsumed?: () => void;
   onChange: () => Promise<void>;
   onToast: (tone: ToastState["tone"], message: string) => void;
   onEditRemote?: (entry: LedgerEntry, patch?: Partial<LedgerEntry>) => Promise<void>;
@@ -4771,8 +4804,13 @@ function HistoryPanel({
     setPaymentFilter("Todos");
     setType("Todos");
     setMovementFilter("Todos");
+    setOriginFilter("Todos");
+    setMinimumValue("");
+    setMaximumValue("");
     setQuery("");
     setVisibleCount(HISTORY_PAGE_SIZE);
+    // O atalho da mesa ou do dia só se aplica a esta abertura do Histórico.
+    onFocusConsumed?.();
   }, [focusDate?.nonce]);
 
   useEffect(() => {
@@ -8602,7 +8640,8 @@ function titleForTab(tab: TabKey): string {
     payables: "Contas a pagar",
     reports: "Relatorios",
     server: "Rede",
-    settings: "Ajuste"
+    settings: "Ajuste",
+    help: "Ajuda e tutoriais"
   };
   return map[tab];
 }
@@ -8662,6 +8701,12 @@ function headerForTab(tab: TabKey, todayCount: number): { eyebrow: string; title
       title: titleForTab(tab),
       status: "Acesso com senha e permissoes",
       detail: "Sincronizacao"
+    },
+    help: {
+      eyebrow: "Guia do aplicativo",
+      title: titleForTab(tab),
+      status: "Respostas, passos e acessos rápidos",
+      detail: "Ajuda"
     },
     settings: {
       eyebrow: "Preferencias do app",

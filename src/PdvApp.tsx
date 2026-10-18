@@ -6947,6 +6947,7 @@ function ReceivablesScreen({
   onViewChange,
   onChanged,
   onSaveReceivable,
+  onSaveCustomer,
   onReceive,
   onReceiveCustomer,
   onUpdateReceivable,
@@ -6964,6 +6965,7 @@ function ReceivablesScreen({
   onViewChange: (value: HistoryView) => void;
   onChanged: () => void;
   onSaveReceivable: (draft: PdvReceivableDraft) => Promise<PdvReceivable>;
+  onSaveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
   onReceiveCustomer: (id: string, payment: PdvReceivablePayment, operationId: string, accountIds?: string[]) => Promise<PdvReceivable[]>;
   onReceive: (id: string, payment: PdvReceivablePayment, operationId?: string) => Promise<PdvReceivable>;
   onUpdateReceivable: (id: string, patch: PdvReceivablePatch) => Promise<PdvReceivable>;
@@ -7005,6 +7007,7 @@ function ReceivablesScreen({
   const [to, setTo] = useState(monthEnd);
   const [selected, setSelected] = useState<PdvReceivable | null>(null);
   const [creating, setCreating] = useState(false);
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [editing, setEditing] = useState<PdvReceivable | null>(null);
   const [receiving, setReceiving] = useState<PdvReceivable | null>(null);
   const [cancelRequest, setCancelRequest] = useState<PdvReceivable | null>(null);
@@ -7111,7 +7114,10 @@ function ReceivablesScreen({
           <button role="tab" aria-selected={customerView} onClick={() => { setCustomerView(true); setRecordView(false); }}>Por cliente</button>
           <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setCustomerView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
         </div>
-        <button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button>
+        <div className="finance-view-actions">
+          {!readOnly && <button className="finance-customer-button" onClick={() => setCreatingCustomer(true)}><Plus size={14} /> Novo cliente</button>}
+          <button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button>
+        </div>
       </div>
       {customerView ? <>
         <div className="financial-filters"><label className="financial-search"><span>Buscar cliente</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome do cliente" /></label><button disabled={readOnly || !selectedCustomerRow} onClick={() => { if (selectedCustomerRow) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...selectedCustomerRow.representative, balance: selectedCustomerRow.balance }); } }}>Receber do cliente</button><button disabled={!selectedCustomerRow} onClick={() => selectedCustomerRow && openCustomerReceipt(selectedCustomerRow.representative)}>Recibo do cliente</button></div>
@@ -7128,9 +7134,9 @@ function ReceivablesScreen({
         <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
         <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
         <label><span>Situacao</span><select value={status} onChange={(event) => { const next = event.target.value; setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }}><option>Pendentes</option><option>Historico</option><option>Todos</option><option>Em aberto</option><option>Parcialmente recebida</option><option>Vencida</option><option>Recebida</option><option>Cancelada</option><option>Excluida</option></select></label>
-        <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}><RotateCcw size={15} /> Exibir tudo</button>
+        <button title="Ampliar o período sem mudar a situação selecionada" onClick={() => { setFrom(""); setTo(""); setQuery(""); }}><RotateCcw size={15} /> Todo o período</button>
       </div>
-      {hiddenPendingCount > 0 && <div className="finance-filter-notice">{hiddenPendingCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); }}>Exibir todas</button></div>}
+      {hiddenPendingCount > 0 && <div className="finance-filter-notice">{hiddenPendingCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); }}>Ver todas em aberto</button></div>}
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
         <FinancialGrid id="receivables" rows={receivables} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
           { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${item.description || item.id}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
@@ -7172,7 +7178,8 @@ function ReceivablesScreen({
         setCustomerReceiving(null); setSelectedAccountIds([]); await onChanged(); setNotice("Recebimento distribuído nas contas do cliente.");
       }} />}
       {receiving && <ReceivableCollectionModal receivable={receiving} onCancel={() => setReceiving(null)} onConfirm={(payment) => registerPayment(receiving, payment)} />}
-      {creating && <ReceivableDraftModal customers={snapshot.customers} onCancel={() => setCreating(false)} onSave={async (draft) => { const next = await onSaveReceivable(draft); setFrom(""); setTo(""); setStatus("Todos"); setQuery(""); setSelected(next); setCreating(false); await onChanged(); setNotice("Conta a receber cadastrada."); }} />}
+      {creating && <ReceivableDraftModal customers={snapshot.customers} onSaveCustomer={async (draft) => { const customer = await onSaveCustomer(draft); await onChanged(); return customer; }} onCancel={() => setCreating(false)} onSave={async (draft) => { const next = await onSaveReceivable(draft); setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); setSelected(next); setCreating(false); await onChanged(); setNotice("Conta a receber cadastrada."); }} />}
+      {creatingCustomer && <CustomerEditorModal onCancel={() => setCreatingCustomer(false)} onSave={async (draft) => { await onSaveCustomer(draft); setCreatingCustomer(false); await onChanged(); }} />}
       {editing && <ReceivableEditorModal receivable={editing} sale={snapshot.recentSales.find((item) => item.id === editing.saleId)} onCancel={() => setEditing(null)} onDelete={() => { setDeleteRequest(editing); setEditing(null); }} onSave={async (patch) => { const next = await onUpdateReceivable(editing.id, patch); setSelected(next); setEditing(null); await onChanged(); setNotice("Conta a receber atualizada."); }} />}
       {cancelRequest && <PdvConfirmModal title="Cancelar conta a receber?" message={`A conta de ${cancelRequest.customerName} sera marcada como cancelada. A venda permanecera no Historico.`} onCancel={() => setCancelRequest(null)} onConfirm={() => void onCancelReceivable(cancelRequest.id).then(async () => { setSelected((current) => current?.id === cancelRequest.id ? null : current); setCancelRequest(null); await onChanged(); })} />}
       {deleteRequest && <PdvConfirmModal title={deleteRequest.status === "Excluida" ? "Apagar conta definitivamente?" : "Excluir conta a receber?"} message={deleteRequest.status === "Excluida" ? `A conta de ${deleteRequest.customerName} e seus recebimentos serao removidos do sistema. Esta acao nao pode ser desfeita.` : `A conta de ${deleteRequest.customerName} saira das listas operacionais e permanecera somente no historico como excluida.`} confirmLabel={deleteRequest.status === "Excluida" ? "Apagar definitivamente" : "Excluir conta"} danger onCancel={() => setDeleteRequest(null)} onConfirm={() => void onDeleteReceivable(deleteRequest.id, deleteRequest.status === "Excluida").then(async () => { setSelected((current) => current?.id === deleteRequest.id ? null : current); setDeleteRequest(null); await onChanged(); setNotice(deleteRequest.status === "Excluida" ? "Conta apagada definitivamente." : "Conta movida para o historico de excluidas."); }).catch((error) => { setDeleteRequest(null); setNotice(error instanceof Error ? error.message : "Nao foi possivel apagar a conta."); })} />}
@@ -7183,11 +7190,14 @@ function ReceivablesScreen({
   );
 }
 
-function ReceivableDraftModal({ customers, onCancel, onSave }: { customers: PdvCustomer[]; onCancel: () => void; onSave: (draft: PdvReceivableDraft) => Promise<void> }) {
+function ReceivableDraftModal({ customers, onSaveCustomer, onCancel, onSave }: { customers: PdvCustomer[]; onSaveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>; onCancel: () => void; onSave: (draft: PdvReceivableDraft) => Promise<void> }) {
   const [draft, setDraft] = useState<PdvReceivableDraft>({ id: crypto.randomUUID(), customerId: "", description: "", dueDate: localDateInputValue(), amount: 0, tags: [] });
   const [amountText, setAmountText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [createdCustomers, setCreatedCustomers] = useState<PdvCustomer[]>([]);
+  const availableCustomers = [...customers, ...createdCustomers.filter((customer) => !customers.some((item) => item.id === customer.id))].filter((item) => item.active);
   const amount = roundMoney(Number(amountText.replace(",", ".")) || 0);
   const valid = Boolean(draft.customerId && draft.description.trim() && amount > 0);
   const confirm = async () => {
@@ -7202,13 +7212,13 @@ function ReceivableDraftModal({ customers, onCancel, onSave }: { customers: PdvC
       setBusy(false);
     }
   };
-  useModalConfirmShortcut(() => void confirm(), onCancel, valid && !busy);
+  useModalConfirmShortcut(() => void confirm(), onCancel, valid && !busy && !creatingCustomer);
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop" role="dialog" aria-modal="true">
       <section className="pdv-payment-modal pdv-admin-modal pdv-financial-editor-modal">
         <div className="pdv-section-head"><div><span className="pdv-eyebrow">Contas a receber</span><h1>Nova conta</h1><p>Cadastre uma cobranca sem precisar criar uma venda no PDV.</p></div><button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button></div>
         <div className="pdv-editor-grid pdv-financial-editor-grid">
-          <label className="pdv-wide-field"><span>Cliente *</span><select autoFocus value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}><option value="">Selecione um cliente</option>{customers.filter((item) => item.active).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.document ? ` · ${customer.document}` : ""}</option>)}</select></label>
+          <div className="pdv-wide-field financial-customer-picker"><label><span>Cliente *</span><select autoFocus value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}><option value="">Selecione um cliente</option>{availableCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.document ? ` · ${customer.document}` : ""}</option>)}</select></label><button type="button" className="pdv-ghost-button" onClick={() => setCreatingCustomer(true)}><Plus size={15} /> Novo cliente</button></div>
           <label className="pdv-wide-field"><span>Descricao *</span><input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Ex.: Encomenda, mensalidade ou venda a prazo" /></label>
           <label><span>Valor *</span><input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} placeholder="0,00" /></label>
           <label><span>Vencimento</span><input type="date" value={draft.dueDate || ""} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value })} /></label>
@@ -7221,6 +7231,7 @@ function ReceivableDraftModal({ customers, onCancel, onSave }: { customers: PdvC
         </div>
         {error && <div className="pdv-inline-warning">{error}</div>}
         <div className="pdv-action-row"><button className="pdv-ghost-button" onClick={onCancel} disabled={busy}>Cancelar</button><button className="pdv-primary-button" disabled={!valid || busy} onClick={() => void confirm()}>{busy ? "Salvando..." : "Salvar conta"}</button></div>
+        {creatingCustomer && <CustomerEditorModal onCancel={() => setCreatingCustomer(false)} onSave={async (customerDraft) => { const customer = await onSaveCustomer(customerDraft); setCreatedCustomers((current) => [...current, customer]); setDraft((current) => ({ ...current, customerId: customer.id })); setCreatingCustomer(false); }} />}
       </section>
     </div>
   );
@@ -7294,6 +7305,7 @@ function CustomersScreen({
   const [editing, setEditing] = useState<PdvCustomer | "new" | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<PdvCustomer | null>(null);
   const [detailCustomer, setDetailCustomer] = useState<PdvCustomer | null>(null);
+  const [detailSection, setDetailSection] = useState<"summary" | "pending">("summary");
   const [notice, setNotice] = useState("");
   const normalized = query.trim().toLocaleLowerCase("pt-BR");
   const balanceFor = (id: string) => roundMoney(snapshot.receivables.filter((item) => item.customerId === id && !["Cancelada", "Excluida"].includes(item.status)).reduce((sum, item) => sum + item.balance, 0));
@@ -7351,7 +7363,8 @@ function CustomersScreen({
               <div><dt>Saldo pendente</dt><dd>{money(balanceFor(selectedCustomer.id))}</dd></div>
             </dl>
             <div className="financial-detail-actions customer-detail-actions">
-              <button className="pdv-primary-button" onClick={() => setDetailCustomer(selectedCustomer)}>Abrir ficha completa</button>
+              <button className="pdv-primary-button" onClick={() => { setDetailSection("pending"); setDetailCustomer(selectedCustomer); }}>Contas pendentes ({snapshot.receivables.filter((item) => item.customerId === selectedCustomer.id && item.balance > 0.009 && !["Cancelada", "Excluida", "Recebida"].includes(item.status)).length})</button>
+              <button className="pdv-ghost-button" onClick={() => { setDetailSection("summary"); setDetailCustomer(selectedCustomer); }}>Abrir ficha completa</button>
               {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditing(selectedCustomer)}><Pencil size={15} /> Editar</button>}
               {!readOnly && onCreatePayableForCustomer && <button className="pdv-ghost-button" onClick={() => onCreatePayableForCustomer(selectedCustomer)}><Wallet size={15} /> Conta a pagar</button>}
             </div>
@@ -7376,7 +7389,9 @@ function CustomersScreen({
       )}
       {detailCustomer && (
         <CustomerDetailModal
+          key={detailCustomer.id}
           customer={detailCustomer}
+          initialSection={detailSection}
           snapshot={snapshot}
           readOnly={readOnly}
           allowPrint={allowPrint}
@@ -7401,6 +7416,7 @@ function CustomersScreen({
 
 function CustomerDetailModal({
   customer,
+  initialSection = "summary",
   snapshot,
   readOnly,
   allowPrint,
@@ -7418,6 +7434,7 @@ function CustomerDetailModal({
   onNotice
 }: {
   customer: PdvCustomer;
+  initialSection?: "summary" | "pending";
   snapshot: PdvSnapshot;
   readOnly: boolean;
   allowPrint: boolean;
@@ -7434,14 +7451,14 @@ function CustomerDetailModal({
   onCreatePayable?: () => void;
   onNotice: (message: string) => void;
 }) {
-  const [section, setSection] = useState<"summary" | "pending" | "history">("summary");
+  const [section, setSection] = useState<"summary" | "pending" | "history">(initialSection);
   const [receiving, setReceiving] = useState<PdvReceivable | null>(null);
   const [editingReceivable, setEditingReceivable] = useState<PdvReceivable | null>(null);
   const [deletingReceivable, setDeletingReceivable] = useState<PdvReceivable | null>(null);
   const [receiptTarget, setReceiptTarget] = useState<{ sale: PdvSale; receivable: PdvReceivable } | null>(null);
   const [selectedSale, setSelectedSale] = useState<PdvSale | null>(null);
   const customerReceivables = snapshot.receivables.filter((item) => item.customerId === customer.id);
-  const pending = customerReceivables.filter((item) => !["Recebida", "Cancelada", "Excluida"].includes(item.status));
+  const pending = customerReceivables.filter((item) => item.balance > 0.009 && !["Recebida", "Cancelada", "Excluida"].includes(item.status));
   const linkedSales = customerReceivables
     .map((receivable) => snapshot.recentSales.find((sale) => sale.id === receivable.saleId))
     .filter((sale): sale is PdvSale => Boolean(sale));
@@ -7523,7 +7540,7 @@ function CustomerDetailModal({
                 return (
                   <article key={receivable.id} className={`status-${receivable.status.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-")}`}>
                     <div className="pdv-customer-account-head">
-                      <div><strong>{receivable.tableNumber ? `Mesa ${String(receivable.tableNumber).padStart(3, "0")}` : "Venda"}</strong><span>{new Date(receivable.createdAt).toLocaleString("pt-BR")} | {receivable.status}</span></div>
+                      <div><strong>{receivable.description || (receivable.tableNumber ? `Mesa ${String(receivable.tableNumber).padStart(3, "0")}` : "Conta a receber")}</strong><span>{receivable.tableNumber ? `Mesa ${String(receivable.tableNumber).padStart(3, "0")} | ` : ""}{new Date(receivable.createdAt).toLocaleString("pt-BR")} | {receivable.status}</span></div>
                       <b>{money(receivable.balance)}</b>
                     </div>
                     <div className="pdv-customer-account-values"><span>Original {money(receivable.originalAmount)}</span><span>Recebido {money(receivable.receivedAmount)}</span><span>{receivable.dueDate ? `Vence ${receivable.dueDate.split("-").reverse().join("/")}` : "Sem vencimento"}</span></div>
@@ -7696,15 +7713,22 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
 }
 
 function CustomerEditorModal({ customer, onCancel, onSave }: { customer?: PdvCustomer; onCancel: () => void; onSave: (draft: PdvCustomerDraft) => void | Promise<void> }) {
-  const [draft, setDraft] = useState<PdvCustomerDraft>(customer || { name: "", active: true });
-  const confirm = () => {
-    if (draft.name.trim()) void onSave(draft);
+  const [draft, setDraft] = useState<PdvCustomerDraft>(() => customer || { id: crypto.randomUUID(), name: "", active: true });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const confirm = async () => {
+    if (!draft.name.trim() || busy) return;
+    setBusy(true);
+    setError("");
+    try { await onSave(draft); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível salvar o cliente."); }
+    finally { setBusy(false); }
   };
-  useModalConfirmShortcut(confirm, onCancel, Boolean(draft.name.trim()));
+  useModalConfirmShortcut(() => void confirm(), () => { if (!busy) onCancel(); }, Boolean(draft.name.trim()) && !busy);
   return (
     <div className="pdv-modal-backdrop">
       <section className="pdv-payment-modal pdv-editor-modal pdv-admin-modal pdv-customer-editor-modal">
-        <div className="pdv-section-head"><div><span className="pdv-eyebrow">Cliente</span><h1>{customer ? "Editar cliente" : "Novo cliente"}</h1></div><button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button></div>
+        <div className="pdv-section-head"><div><span className="pdv-eyebrow">Cliente</span><h1>{customer ? "Editar cliente" : "Novo cliente"}</h1></div><button className="pdv-icon-button" disabled={busy} onClick={onCancel}><X size={18} /></button></div>
         <div className="pdv-customer-editor-scroll">
           <div className="pdv-editor-section">
             <div className="pdv-editor-section-title"><strong>Identificacao</strong><small>Nome e documento usados na conta e no recibo.</small></div>
@@ -7724,7 +7748,8 @@ function CustomerEditorModal({ customer, onCancel, onSave }: { customer?: PdvCus
           </div>
           <label className="pdv-switch-line pdv-customer-active-line"><input type="checkbox" checked={draft.active !== false} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Cliente ativo e disponivel para novas contas</label>
         </div>
-        <div className="pdv-action-row"><button className="pdv-danger-button" onClick={onCancel}>Cancelar</button><button className="pdv-primary-button" disabled={!draft.name.trim()} onClick={confirm}>Salvar cliente</button></div>
+        {error && <div className="pdv-inline-warning" role="alert">{error}</div>}
+        <div className="pdv-action-row"><button className="pdv-danger-button" disabled={busy} onClick={onCancel}>Cancelar</button><button className="pdv-primary-button" disabled={!draft.name.trim() || busy} onClick={() => void confirm()}>{busy ? "Salvando..." : "Salvar cliente"}</button></div>
       </section>
     </div>
   );
@@ -7835,7 +7860,7 @@ function HistoryScreen({
   };
 
   if (view === "receivables") {
-    return <ReceivablesScreen snapshot={snapshot} view={view} onViewChange={setView} onChanged={onChanged} onSaveReceivable={saveReceivable} onReceive={receiveReceivable} onReceiveCustomer={receiveCustomerReceivables} onUpdateReceivable={updateReceivable} onCancelReceivable={cancelReceivable} onDeleteReceivable={deleteReceivable} showSales={showSales} hideNavigation={hideNavigation} allowPrint={allowPrint} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} readOnly={readOnly} />;
+    return <ReceivablesScreen snapshot={snapshot} view={view} onViewChange={setView} onChanged={onChanged} onSaveReceivable={saveReceivable} onSaveCustomer={saveCustomer} onReceive={receiveReceivable} onReceiveCustomer={receiveCustomerReceivables} onUpdateReceivable={updateReceivable} onCancelReceivable={cancelReceivable} onDeleteReceivable={deleteReceivable} showSales={showSales} hideNavigation={hideNavigation} allowPrint={allowPrint} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} readOnly={readOnly} />;
   }
   if (view === "customers") {
     return <CustomersScreen snapshot={snapshot} view={view} onViewChange={setView} onSave={saveCustomer} onChanged={onChanged} showSales={showSales} hideNavigation={hideNavigation} readOnly={readOnly} onReceive={receiveReceivable} onUpdateReceivable={updateReceivable} onCancelReceivable={cancelReceivable} onDeleteReceivable={deleteReceivable} allowPrint={allowPrint} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} onNavigateMain={onNavigateMain} onCreatePayableForCustomer={onCreatePayableForCustomer} />;
