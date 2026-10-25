@@ -262,7 +262,7 @@ export class LocalServer {
       }
     });
 
-    app.patch("/api/pdv/products", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
+    app.patch("/api/pdv/products", this.authorize("manageProducts"), async (request, response) => {
       try {
         const ids = Array.isArray(request.body?.ids) ? request.body.ids.map(String) : [];
         await this.options.updatePdvProducts(ids, request.body?.patch || {});
@@ -274,7 +274,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/categories", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
+    app.post("/api/pdv/categories", this.authorize("manageProducts"), async (request, response) => {
       try {
         const category = await this.options.savePdvCategory(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -285,7 +285,7 @@ export class LocalServer {
       }
     });
 
-    app.post("/api/pdv/products", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
+    app.post("/api/pdv/products", this.authorize("manageProducts"), async (request, response) => {
       try {
         const product = await this.options.savePdvProduct(request.body || {});
         this.broadcast({ type: "pdv-changed" });
@@ -296,7 +296,7 @@ export class LocalServer {
       }
     });
 
-    app.delete("/api/pdv/products/:id", this.authorize("manageProducts"), this.forbidClientPdvConfiguration, async (request, response) => {
+    app.delete("/api/pdv/products/:id", this.authorize("manageProducts"), async (request, response) => {
       try {
         const id = String(request.params.id);
         const mode = await this.options.removePdvProduct(id);

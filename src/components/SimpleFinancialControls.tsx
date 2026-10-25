@@ -7,9 +7,9 @@ import type { FinancialPaymentMethod, PdvPayment, PdvSupplier } from "../shared/
 export const FINANCIAL_PAYMENT_METHODS: FinancialPaymentMethod[] = ["Pix", "Dinheiro", "Debito", "Credito", "Outros"];
 export const paymentMethodLabel = (method: string) => ({ Debito: "Cartão de débito", Credito: "Cartão de crédito" }[method] || method);
 
-export function SimpleFinancialFilters({ query, onQuery, placeholder, from, to, onPeriod, dateField, onDateField, status, onStatus, statuses }: {
+export function SimpleFinancialFilters({ query, onQuery, placeholder, from, to, onPeriod, dateField, onDateField, status, onStatus, statuses, grouped = false, pendingNotice }: {
   query: string; onQuery: (value: string) => void; placeholder: string; from: string; to: string; onPeriod: (from: string, to: string) => void;
-  dateField: FinancialDateField; onDateField: (value: FinancialDateField) => void; status: string; onStatus: (value: string) => void; statuses: string[];
+  dateField: FinancialDateField; onDateField: (value: FinancialDateField) => void; status: string; onStatus: (value: string) => void; statuses: string[]; grouped?: boolean; pendingNotice?: { count: number; onShowAll: () => void };
 }) {
   const today = getLocalDateKey();
   const start = `${today.slice(0, 7)}-01`;
@@ -19,9 +19,9 @@ export function SimpleFinancialFilters({ query, onQuery, placeholder, from, to, 
   const period = custom ? "custom" : !from && !to ? "all" : from === start && to === end ? "month" : from === today && to === today ? "today" : "custom";
   return <div className="simple-financial-filters">
     <div className="simple-financial-filter-row">
-      <label className="simple-financial-search"><span>Buscar</span><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder={placeholder} /></label>
-      <label><span>Situação</span><select value={status} onChange={(event) => onStatus(event.target.value)}>{statuses.map((value) => <option key={value} value={value}>{{ Historico: "Histórico", Excluida: "Excluída", Excluidas: "Excluídas" }[value] || value}</option>)}</select></label>
-      <label><span>Período{dateField === "due" ? " (vencimento)" : ""}</span><select aria-label="Período das contas" value={period} onChange={(event) => {
+      <label className="simple-financial-search"><div className="financial-search-heading"><span>Buscar</span>{!grouped && pendingNotice && pendingNotice.count > 0 && <button type="button" aria-label="Ver todas em aberto" onClick={pendingNotice.onShowAll}>Ver todas em aberto ({pendingNotice.count})</button>}</div><input aria-label="Buscar" value={query} onChange={(event) => onQuery(event.target.value)} placeholder={placeholder} /></label>
+      <label><span>Situação</span><select disabled={grouped} value={grouped ? "group-pending" : status} onChange={(event) => onStatus(event.target.value)}>{grouped && <option value="group-pending">Em aberto</option>}{statuses.map((value) => <option key={value} value={value}>{{ Historico: "Histórico", Excluida: "Excluída", Excluidas: "Excluídas" }[value] || value}</option>)}</select></label>
+      <label><span>Período{dateField === "due" ? " (vencimento)" : ""}</span><select aria-label="Período das contas" disabled={grouped} value={grouped ? "all" : period} onChange={(event) => {
         const value = event.target.value; setCustom(value === "custom");
         if (value === "all") onPeriod("", "");
         if (value === "month") onPeriod(start, end);
@@ -29,9 +29,9 @@ export function SimpleFinancialFilters({ query, onQuery, placeholder, from, to, 
       }}><option value="month">Este mês</option><option value="today">Hoje</option><option value="all">Todo o período</option><option value="custom">Escolher datas…</option></select></label>
     </div>
     {(custom || period === "custom") && <div className="simple-financial-date-row">
-      <label><span>De</span><input type="date" value={from} onChange={(event) => onPeriod(event.target.value, to)} /></label>
-      <label><span>Até</span><input type="date" value={to} onChange={(event) => onPeriod(from, event.target.value)} /></label>
-      <label><span>Usar a data de</span><select value={dateField} onChange={(event) => onDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label>
+      <label><span>De</span><input type="date" disabled={grouped} value={from} onChange={(event) => onPeriod(event.target.value, to)} /></label>
+      <label><span>Até</span><input type="date" disabled={grouped} value={to} onChange={(event) => onPeriod(from, event.target.value)} /></label>
+      <label><span>Usar a data de</span><select disabled={grouped} value={dateField} onChange={(event) => onDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label>
     </div>}
   </div>;
 }

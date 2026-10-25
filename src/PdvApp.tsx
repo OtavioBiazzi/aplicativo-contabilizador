@@ -629,7 +629,7 @@ export function PdvApp({
   const lastPersistedTableItemIds = useRef<string[]>([]);
   const isRemoteClient = Boolean(remoteSession);
   const canConfigureServer = !isRemoteClient || Boolean(remoteSession?.permissions?.allowClientCustomization);
-  const canConfigureProducts = !isRemoteClient || Boolean(remoteSession?.permissions?.allowClientCustomization && remoteSession?.permissions?.manageProducts);
+  const canConfigureProducts = !isRemoteClient || Boolean(remoteSession?.permissions?.manageProducts);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
   // O cliente usa o mesmo catalogo e as mesmas mesas do servidor em todas as abas do PDV.
   // A venda direta continua sendo finalizada localmente, mas nunca pode ficar sem produtos por ler um catalogo local vazio.
@@ -870,7 +870,7 @@ export function PdvApp({
   const updatePdvSalePayments = (saleId: string, payments: PdvPayment[]) => remoteTablesActive && remoteSession
     ? remotePdvRequest<{ sale: PdvSale }>(remoteSession, `/api/pdv/sales/${saleId}/payments`, { method: "PATCH", body: JSON.stringify({ payments }) }).then((result) => result.sale)
     : window.caixa.updatePdvSalePayments(saleId, payments);
-  const clientConfigurationBlocked = () => Promise.reject(new Error("Produtos e regras do PDV sao definidos somente no servidor."));
+  const clientConfigurationBlocked = () => Promise.reject(new Error("O servidor não liberou a permissão necessária para esta ação."));
   const updatePdvProducts = (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => isRemoteClient
     ? canConfigureProducts && remoteSession
       ? remotePdvRequest<{ ok: boolean }>(remoteSession, "/api/pdv/products", { method: "PATCH", body: JSON.stringify({ ids, patch }) }).then(() => undefined)
@@ -7002,7 +7002,8 @@ function ReceivablesScreen({
     }
     return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   }, [snapshot.receivables]);
-  const selectedCustomerRow = customerRows.find((row) => row.id === customerSelection);
+  const visibleCustomerRows = customerRows.filter((row) => row.name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().includes(query.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase()));
+  const selectedCustomerRow = visibleCustomerRows.find((row) => row.id === customerSelection);
   const [recordView, setRecordView] = useState(false);
   const [from, setFrom] = useState(monthStart);
   const [to, setTo] = useState(monthEnd);
@@ -7093,23 +7094,23 @@ function ReceivablesScreen({
         <div><span className="pdv-eyebrow">Financeiro</span><h1>Contas a receber</h1><p>Cobrancas, vencimentos e recebimentos vinculados aos clientes.</p></div>
       </div>
       {!hideNavigation && <HistoryViewTabs value={view} onChange={onViewChange} showSales={showSales} />}
-      {!customerView && <div className="finance-command-bar" aria-label="Comandos de contas a receber">
+      <div className="finance-command-bar" aria-label="Comandos de contas a receber">
         <button disabled={readOnly} onClick={() => setCreating(true)}><Plus /><span>Novo</span></button>
-        <button disabled={!canChange} onClick={() => validSelection && setEditing(validSelection)}><Pencil /><span>Alterar</span></button>
-        {selectedAccountIds.some((id) => receivables.some((account) => account.id === id)) && <button disabled={readOnly || !receivables.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
+        <button disabled={customerView || !canChange} onClick={() => validSelection && setEditing(validSelection)}><Pencil /><span>Alterar</span></button>
+        {!customerView && selectedAccountIds.some((id) => receivables.some((account) => account.id === id)) && <button disabled={readOnly || !receivables.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
           const accounts = receivables.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
           if (!accounts.length) return;
           if (!accounts[0].customerId || accounts.some((account) => account.customerId !== accounts[0].customerId)) { setNotice("Selecione contas pendentes do mesmo cliente."); return; }
           customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(accounts.map((account) => account.id)); setCustomerReceiving({ ...accounts[0], balance: roundMoney(accounts.reduce((sum, account) => sum + account.balance, 0)) });
         }}><Wallet /><span>Receber selecionadas ({selectedAccountIds.filter((id) => receivables.some((account) => account.id === id)).length})</span></button>}
-        <button className="primary-command" disabled={!canReceive} onClick={() => validSelection && setReceiving(validSelection)}><Wallet /><span>Receber</span></button>
+        <button className="primary-command" disabled={customerView ? readOnly || !selectedCustomerRow : !canReceive} onClick={() => { if (customerView && selectedCustomerRow) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...selectedCustomerRow.representative, balance: selectedCustomerRow.balance }); } else if (!customerView && validSelection) { setReceiving(validSelection); } }}><Wallet /><span>Receber</span></button>
         <details className="finance-more-actions"><summary>Mais ações</summary><div>
-        <button disabled={readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
-        <button disabled={!canChange || (validSelection?.receivedAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
-        <button disabled={!validSelection || !snapshot.recentSales.some((sale) => sale.id === validSelection.saleId)} onClick={() => validSelection && openReceipt(validSelection)}><ReceiptText /><span>Recibo</span></button>
-        <button disabled={!validSelection || !customerOutstandingAccounts(snapshot.receivables, validSelection).length} onClick={() => validSelection && openCustomerReceipt(validSelection)}><ReceiptText /><span>Recibo do cliente</span></button>
+        <button disabled={customerView || readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
+        <button disabled={customerView || !canChange || (validSelection?.receivedAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
+        <button disabled={customerView || !validSelection || !snapshot.recentSales.some((sale) => sale.id === validSelection.saleId)} onClick={() => validSelection && openReceipt(validSelection)}><ReceiptText /><span>Recibo</span></button>
+        <button disabled={customerView ? !selectedCustomerRow : !validSelection || !customerOutstandingAccounts(snapshot.receivables, validSelection).length} onClick={() => { const account = customerView ? selectedCustomerRow?.representative : validSelection; if (account) openCustomerReceipt(account); }}><ReceiptText /><span>Recibo do cliente</span></button>
         </div></details>
-      </div>}
+      </div>
       <div className="finance-view-row">
         <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
           <button role="tab" aria-selected={!recordView && !customerView} onClick={() => { setCustomerView(false); setRecordView(false); }}>Pesquisa</button>
@@ -7121,17 +7122,14 @@ function ReceivablesScreen({
           <button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button>
         </div>
       </div>
+      <SimpleFinancialFilters grouped={customerView} pendingNotice={{ count: hiddenPendingCount, onShowAll: () => { setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); } }} query={query} onQuery={setQuery} placeholder={customerView ? "Nome do cliente" : "Cliente, descrição ou produto"} from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }} statuses={["Pendentes", "Recebida", "Vencida", "Cancelada", "Excluida", "Historico", "Em aberto", "Parcialmente recebida", "Todos"]} />
       {customerView ? <>
-        <div className="financial-filters"><label className="financial-search"><span>Buscar cliente</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome do cliente" /></label><button disabled={readOnly || !selectedCustomerRow} onClick={() => { if (selectedCustomerRow) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...selectedCustomerRow.representative, balance: selectedCustomerRow.balance }); } }}>Receber do cliente</button><button disabled={!selectedCustomerRow} onClick={() => selectedCustomerRow && openCustomerReceipt(selectedCustomerRow.representative)}>Recibo do cliente</button></div>
-        <p className="settings-note">Saldo de todas as contas pendentes, independentemente do período. O recebimento abate primeiro os vencimentos mais antigos.</p>
-        <FinancialGrid id="customer-balances" totals={<><span>Saldo pendente de todos os clientes</span><strong>{money(customerRows.reduce((sum, row) => sum + row.balance, 0))}</strong></>} rows={customerRows.filter((row) => row.name.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().includes(query.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase()))} selectedId={customerSelection} onSelect={(row) => setCustomerSelection(row.id)} onOpen={(row) => { if (!readOnly) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...row.representative, balance: row.balance }); } }} columns={[
+        <FinancialGrid id="customer-balances" totals={<><span>Falta receber<strong>{money(visibleCustomerRows.reduce((sum, row) => sum + row.balance, 0))}</strong></span></>} rows={visibleCustomerRows} selectedId={customerSelection} onSelect={(row) => setCustomerSelection(row.id)} onOpen={(row) => { if (!readOnly) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...row.representative, balance: row.balance }); } }} columns={[
           { key: "name", label: "Cliente", required: true, value: (row) => row.name },
           { key: "count", label: "Contas pendentes", numeric: true, value: (row) => row.count },
           { key: "balance", label: "Total a receber", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{money(row.balance)}</strong> }
         ]} />
       </> : <>
-      <SimpleFinancialFilters query={query} onQuery={setQuery} placeholder="Cliente, descrição ou produto" from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }} statuses={["Pendentes", "Recebida", "Vencida", "Cancelada", "Excluida", "Historico", "Em aberto", "Parcialmente recebida", "Todos"]} />
-      {hiddenPendingCount > 0 && <div className="finance-filter-notice">{hiddenPendingCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); }}>Ver todas em aberto</button></div>}
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
         <FinancialGrid id="receivables" defaultHidden={["created", "document", "method", "received"]} rows={receivables} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
           { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${item.description || item.id}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
@@ -7140,11 +7138,12 @@ function ReceivablesScreen({
           { key: "customer", label: "Cliente / descrição", required: true, value: (item) => item.customerName, render: (item) => <div className="finance-cell-title"><strong>{item.customerName}</strong><small>{item.description || (item.tableNumber ? `Mesa ${item.tableNumber}${item.subtableName ? ` · ${item.subtableName}` : ""}` : "Conta avulsa")}</small></div> },
           { key: "due", label: "Vencimento", value: (item) => item.dueDate || "", render: (item) => item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "Sem data" },
           { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || "—" },
+          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <FinancialStatus value={item.status} /> },
           { key: "amount", label: "Valor", numeric: true, value: (item) => item.originalAmount, render: (item) => money(item.originalAmount) },
           { key: "received", label: "Recebido", numeric: true, value: (item) => item.receivedAmount, render: (item) => money(item.receivedAmount) },
           { key: "balance", label: "Saldo", numeric: true, required: true, value: (item) => item.balance, render: (item) => <strong>{money(item.balance)}</strong> },
-          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <FinancialStatus value={item.status} /> }
-        ]} totals={<><span>Totais do filtro <small>Sem canceladas e excluídas</small></span><span>A receber <strong>{money(outstanding)}</strong></span><span>Recebido <strong>{money(received)}</strong></span></>} />
+        ]} totals={<><span>Recebido <strong>{money(received)}</strong></span><span className="finance-outstanding-total">Falta receber <strong>{money(outstanding)}</strong></span></>} />
+
         <aside className="financial-account-detail">
           {selected ? <>
             <button className="finance-back" onClick={() => setRecordView(false)}>← Voltar à pesquisa</button>

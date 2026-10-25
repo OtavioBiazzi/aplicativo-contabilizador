@@ -3301,7 +3301,8 @@ function PayablesPanel({
     }
     return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
   }, [payables]);
-  const selectedSupplierRow = supplierRows.find((row) => row.id === supplierSelection);
+  const visibleSupplierRows = supplierRows.filter((row) => row.name.toLocaleLowerCase("pt-BR").includes(query.toLocaleLowerCase("pt-BR")));
+  const selectedSupplierRow = visibleSupplierRows.find((row) => row.id === supplierSelection);
   const [recordView, setRecordView] = useState(false);
   const [newSupplier, setNewSupplier] = useState("");
 
@@ -3364,21 +3365,21 @@ function PayablesPanel({
         </div>
       </div>
 
-      {!supplierView && <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
+      <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
         <button disabled={readOnly} onClick={() => setEditing("new")}><Plus /><span>Novo</span></button>
-        <button disabled={!canChange} onClick={() => validSelection && setEditing(validSelection)}><Edit3 /><span>Alterar</span></button>
-        {selectedAccountIds.some((id) => visible.some((account) => account.id === id)) && <button disabled={readOnly || !visible.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
+        <button disabled={supplierView || !canChange} onClick={() => validSelection && setEditing(validSelection)}><Edit3 /><span>Alterar</span></button>
+        {!supplierView && selectedAccountIds.some((id) => visible.some((account) => account.id === id)) && <button disabled={readOnly || !visible.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
           const accounts = visible.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
           if (!accounts.length) return;
           if (!supplierBalanceKey(accounts[0].supplier) || accounts.some((account) => supplierBalanceKey(account.supplier) !== supplierBalanceKey(accounts[0].supplier))) { onToast("error", "Selecione contas pendentes do mesmo fornecedor."); return; }
           supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(accounts.map((account) => account.id)); setSupplierPaying({ ...accounts[0], description: accounts[0].supplier, balance: roundMoney(accounts.reduce((sum, account) => sum + account.balance, 0)) });
         }}><Wallet /><span>Pagar selecionadas ({selectedAccountIds.filter((id) => visible.some((account) => account.id === id)).length})</span></button>}
-        <button className="primary-command" disabled={!canPay} onClick={() => validSelection && setPaying(validSelection)}><Wallet /><span>Pagar</span></button>
+        <button className="primary-command" disabled={supplierView ? readOnly || !selectedSupplierRow : !canPay} onClick={() => { if (supplierView && selectedSupplierRow) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...selectedSupplierRow.representative, description: selectedSupplierRow.name, balance: selectedSupplierRow.balance }); } else if (!supplierView && validSelection) { setPaying(validSelection); } }}><Wallet /><span>Pagar</span></button>
         <details className="finance-more-actions"><summary>Mais ações</summary><div>
-          <button disabled={readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
-          <button disabled={!canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
+          <button disabled={supplierView || readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
+          <button disabled={supplierView || !canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
         </div></details>
-      </div>}
+      </div>
       <div className="finance-view-row">
         <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
           <button role="tab" aria-selected={!recordView && !supplierView} onClick={() => { setSupplierView(false); setRecordView(false); }}>Pesquisa</button>
@@ -3387,17 +3388,14 @@ function PayablesPanel({
         </div>
         <div className="finance-view-actions"><button className="finance-customer-button" onClick={() => setManagingSuppliers(true)}><Users size={14} /> Fornecedores</button><button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button></div>
       </div>
+      <SimpleFinancialFilters grouped={supplierView} pendingNotice={{ count: hiddenOpenCount, onShowAll: () => { setFrom(""); setTo(""); setStatus("Em aberto"); setQuery(""); } }} query={query} onQuery={setQuery} placeholder={supplierView ? "Nome do fornecedor" : "Descrição ou fornecedor"} from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next as typeof status); if (next === "Excluidas") { setFrom(""); setTo(""); } }} statuses={["Em aberto", "Vencidas", "Pagas", "Canceladas", "Excluidas", "Historico", "Todos"]} />
       {supplierView ? <>
-        <div className="financial-filters"><label className="financial-search"><span>Buscar fornecedor</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome do fornecedor" /></label><button disabled={readOnly || !selectedSupplierRow} onClick={() => { if (selectedSupplierRow) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...selectedSupplierRow.representative, description: selectedSupplierRow.name, balance: selectedSupplierRow.balance }); } }}>Pagar ao fornecedor</button></div>
-        <p className="settings-note">Saldo de todas as contas pendentes. O pagamento abate os vencimentos mais antigos. Contas sem fornecedor permanecem na Pesquisa.</p>
-        <FinancialGrid id="supplier-balances" rows={supplierRows.filter((row) => row.name.toLocaleLowerCase("pt-BR").includes(query.toLocaleLowerCase("pt-BR")))} selectedId={supplierSelection} onSelect={(row) => setSupplierSelection(row.id)} onOpen={(row) => { if (!readOnly) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...row.representative, description: row.name, balance: row.balance }); } }} columns={[
+        <FinancialGrid id="supplier-balances" rows={visibleSupplierRows} selectedId={supplierSelection} onSelect={(row) => setSupplierSelection(row.id)} onOpen={(row) => { if (!readOnly) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...row.representative, description: row.name, balance: row.balance }); } }} columns={[
           { key: "name", label: "Fornecedor", required: true, value: (row) => row.name },
           { key: "count", label: "Contas pendentes", numeric: true, value: (row) => row.count },
           { key: "balance", label: "Total a pagar", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{formatCurrency(row.balance)}</strong> }
-        ]} totals={<><span>Saldo pendente de todos os fornecedores</span><strong>{formatCurrency(supplierRows.reduce((sum, row) => sum + row.balance, 0))}</strong></>} />
+        ]} totals={<><span>Falta pagar<strong>{formatCurrency(visibleSupplierRows.reduce((sum, row) => sum + row.balance, 0))}</strong></span></>} />
       </> : <>
-      <SimpleFinancialFilters query={query} onQuery={setQuery} placeholder="Descrição ou fornecedor" from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next as typeof status); if (next === "Excluidas") { setFrom(""); setTo(""); } }} statuses={["Em aberto", "Vencidas", "Pagas", "Canceladas", "Excluidas", "Historico", "Todos"]} />
-      {hiddenOpenCount > 0 && <div className="finance-filter-notice">{hiddenOpenCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Em aberto"); setQuery(""); }}>Ver todas em aberto</button></div>}
 
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
         <FinancialGrid id="payables" defaultHidden={["issue", "document", "category", "method", "paid"]} rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
@@ -3408,11 +3406,12 @@ function PayablesPanel({
           { key: "category", label: "Categoria", value: (item) => item.category || "—" },
           { key: "due", label: "Vencimento", value: (item) => item.dueDate, render: (item) => item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
           { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || item.preferredPaymentMethod || "Não definida" },
+          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <FinancialStatus value={item.status} /> },
           { key: "amount", label: "Valor", numeric: true, value: (item) => item.amount, render: (item) => formatCurrency(item.amount) },
           { key: "paid", label: "Pago", numeric: true, value: (item) => item.paidAmount, render: (item) => formatCurrency(item.paidAmount) },
           { key: "balance", label: "Falta pagar", numeric: true, required: true, value: (item) => item.balance, render: (item) => <strong className="finance-balance-value">{formatCurrency(item.balance)}</strong> },
-          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <FinancialStatus value={item.status} /> }
-        ]} totals={<><span>Totais do filtro <small>Sem canceladas e excluídas</small></span><span className="finance-outstanding-total">Falta pagar <strong>{formatCurrency(openBalance)}</strong></span><span>Já pago <strong>{formatCurrency(paidInPeriod)}</strong></span></>} />
+        ]} totals={<><span>Já pago <strong>{formatCurrency(paidInPeriod)}</strong></span><span className="finance-outstanding-total">Falta pagar <strong>{formatCurrency(openBalance)}</strong></span></>} />
+
         <aside className="financial-account-detail">
           {selected ? (
             <>
@@ -6793,6 +6792,7 @@ function ServerPanel({
             <strong>Permissoes dos dispositivos</strong>
             <span>Controla o que a pagina remota pode fazer</span>
           </div>
+          <div className="permission-access-preset"><button type="button" onClick={() => setPermissions(fullClientPermissions())}>Liberar acesso completo</button><small>Produtos, clientes, financeiro, histórico e ajustes operacionais. A conexão e a aparência continuam próprias de cada computador.</small></div>
           <div className="permission-box permission-grid">
             {(["view", "create", "manageTables", "manageProducts", "edit", "delete", "viewEntryValues", "viewTotals", "printReceipts", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
@@ -7091,6 +7091,7 @@ function SettingsPanel({
 
   const isRemoteLockedCategory = (target: SettingsCategory) => remoteClientActive
     && remoteLockedCategories.has(target)
+    && !(target === "pdv" && remoteClientPermissions?.manageProducts)
     && !(remoteCustomizationAllowed && remoteServerEditableCategories.has(target));
 
   const notifyRemoteLock = () => {
@@ -8116,6 +8117,7 @@ function SettingsPanel({
           )}
           <label className="field"><span>Porta padrao</span><input type="number" value={draft.server.port} onChange={(event) => update("server", { ...draft.server, port: Number(event.target.value || 4317) })} /></label>
           <label className="field"><span>Senha salva</span><input type="password" value={draft.server.password} onChange={(event) => update("server", { ...draft.server, password: event.target.value })} placeholder="Opcional, pode definir ao abrir" /></label>
+          <div className="permission-access-preset"><button type="button" onClick={() => update("server", { ...draft.server, permissions: fullClientPermissions() })}>Liberar acesso completo</button><small>Depois, desmarque abaixo o que quiser restringir. A conexão e a aparência continuam próprias de cada computador.</small></div>
           <div className="permission-box permission-grid">
             {(["view", "create", "manageTables", "manageProducts", "edit", "delete", "viewEntryValues", "viewTotals", "printReceipts", "allowClientCustomization"] as const).map((key) => (
               <label className="switch-line" key={key}>
@@ -8613,18 +8615,22 @@ function shortcutLabel(key: string): string {
   return labels[key] || key;
 }
 
+function fullClientPermissions(): ServerPermissions {
+  return { view: true, create: true, manageTables: true, manageProducts: true, edit: true, delete: true, viewEntryValues: true, viewTotals: true, printReceipts: true, allowClientCustomization: true };
+}
+
 function permissionLabel(key: keyof ServerPermissions): string {
   return {
-    view: "Somente visualizar",
+    view: "Visualizar dados",
     create: "Registrar vendas",
-    manageTables: "Gerenciar mesas e fechamentos",
-    manageProducts: "Gerenciar produtos e ajustes do PDV",
+    manageTables: "Gerenciar mesas, clientes e contas a pagar/receber",
+    manageProducts: "Criar, editar e excluir produtos e categorias",
     edit: "Editar lancamentos",
     delete: "Apagar lancamentos",
     viewEntryValues: "Ver valores das vendas",
     viewTotals: "Ver totais vendidos",
     printReceipts: "Imprimir recibos neste cliente",
-    allowClientCustomization: "Cliente pode editar configuracoes do servidor"
+    allowClientCustomization: "Editar ajustes operacionais e de impressão do servidor"
   }[key];
 }
 

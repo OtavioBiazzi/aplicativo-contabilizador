@@ -30,3 +30,14 @@ Solicitação de 25/10/2026: seguir a organização simples da referência, mant
 - `qa_simple_finance.py` aprovou cadastro de fornecedor dentro da conta, preservação dos campos, forma prevista no pagamento, pagamento parcial, recebimento agrupado com troco e filtros. Os totais foram conferidos dentro da janela de 1024 × 600.
 - `qa_simple_finance_client.py` aprovou criação/exclusão de fornecedor no servidor pelo cliente autorizado e conta criada remotamente com Pix previsto.
 - `qa_help_finance.py` continuou aprovando pendências por cliente, cadastro de cliente durante uma cobrança, resumo das mesas, ajuda e reabertura do Histórico após consulta de uma mesa.
+
+
+### Cabeçalho estável, valores à direita e acesso do cliente
+
+- Pesquisa, Por fornecedor/cliente e Registro compartilham a mesma barra de ações, abas e filtro. A visão agrupada usa o botão principal Pagar/Receber; não desaparece mais a barra ao trocar de aba.
+- A consulta agrupada continua somando todas as pendências do fornecedor/cliente, independentemente do período. Situação e período ficam fixos em Em aberto/Todo o período nessa visão; a busca continua disponível.
+- Valores ficam nas últimas colunas, à direita, e os resumos terminam com Falta pagar/Falta receber. Retirados os textos “Totais do filtro”, a nota sobre canceladas/excluídas, a instrução para selecionar linhas e o seletor “Linhas”. A paginação continua disponível quando há mais de 25 registros.
+- O atalho para pendências fora do período fica junto à busca, sem criar uma faixa adicional que empurre o conteúdo. Ele limpa o período mantendo somente as contas em aberto.
+- A permissão Gerenciar produtos controla criação, edição e exclusão de produtos/categorias pelo cliente sem exigir também a permissão dos ajustes operacionais. A restrição é conferida na interface e no servidor.
+- Rede → Permissões oferece “Liberar acesso completo”. O servidor precisa salvar essa escolha; permissões existentes não são ampliadas automaticamente. Mesas, clientes e contas a pagar/receber continuam vinculados à permissão financeira; conexão e aparência continuam locais em cada computador.
+- Verificação: compilação e testes de rede, financeiro simples e campos opcionais aprovados. No Electron, conferidos cabeçalhos em 1280 × 720 e 1024 × 600 (incluindo datas personalizadas), paginação, pagamentos agrupados, criação/edição de produto e criação de despesa pelo cliente, revogação de permissões em tempo real e o preset de acesso completo. O atalho de pendências também preservou a situação ao limpar datas.

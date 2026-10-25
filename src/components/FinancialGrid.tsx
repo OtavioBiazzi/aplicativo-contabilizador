@@ -25,7 +25,7 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
   });
   const [sort, setSort] = useState({ key: "", descending: false });
   const [page, setPage] = useState(0);
-  const [size, setSize] = useState(25);
+  const size = 25;
   const [options, setOptions] = useState(false);
   const ordered = useMemo(() => {
     const column = columns.find((item) => item.key === sort.key);
@@ -46,7 +46,7 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
   const shown = ordered.slice(currentPage * size, (currentPage + 1) * size);
   const visibleColumns = columns.filter((column) => column.required || !preferences.hidden.includes(column.key));
   return <div className={`finance-grid ${preferences.compact ? "is-compact" : ""} ${defaultHidden.length ? "is-simple" : ""}`}>
-    <div className="finance-grid-caption"><span>{rows.length} registro(s) encontrados <small>• Selecione uma linha para usar os comandos</small></span>
+    <div className="finance-grid-caption"><span>{rows.length} registro(s)</span>
       <div className="finance-grid-options"><button type="button" aria-expanded={options} onClick={() => setOptions(!options)}><Columns3 size={15} /> Visualização <ChevronDown size={13} /></button>
         {options && <div className="finance-column-menu" onKeyDown={(event) => { if (event.key === "Escape") setOptions(false); }}>
           <strong>Personalizar esta tabela</strong>
@@ -66,7 +66,7 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
         }
       }}>{visibleColumns.map((column) => <td key={column.key} className={column.numeric ? "number" : ""}>{column.render ? column.render(row) : column.value(row)}</td>)}</tr>)}</tbody>
     </table>{!rows.length && <div className="finance-grid-empty"><strong>Nenhum registro encontrado</strong><span>Altere a pesquisa ou os filtros para consultar outras contas.</span></div>}</div>
-    <div className="finance-grid-footer"><div className="finance-grid-totals">{totals}</div><div className="finance-pagination"><label>Linhas <select aria-label="Linhas por página" value={size} onChange={(event) => setSize(Number(event.target.value))}>{[25, 50, 100].map((count) => <option key={count}>{count}</option>)}</select></label><button aria-label="Página anterior" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage + 1} / {pages}</span><button aria-label="Próxima página" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></div></div>
+    <div className="finance-grid-footer">{pages > 1 && <nav className="finance-pagination" aria-label="Páginas das contas"><button aria-label="Página anterior" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage + 1} / {pages}</span><button aria-label="Próxima página" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></nav>}<div className="finance-grid-totals">{totals}</div></div>
   </div>;
 }
 

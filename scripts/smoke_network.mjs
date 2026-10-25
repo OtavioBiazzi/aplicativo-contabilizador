@@ -224,10 +224,15 @@ const remoteRemoval = await fetch(`http://127.0.0.1:43991/api/pdv/products/${rem
 if (!remoteRemoval.ok || (await remoteRemoval.json()).mode !== "deleted") throw new Error("Cliente autorizado nao conseguiu remover produto temporario.");
 settings.server.permissions.allowClientCustomization = false;
 server.setPermissions(settings.server.permissions);
+const independentProductUpdate = await fetch("http://127.0.0.1:43991/api/pdv/products", { method: "PATCH", headers, body: JSON.stringify({ ids: [product.id], patch: { favorite: true } }) });
+if (!independentProductUpdate.ok) throw new Error("Permissao de produtos deve funcionar sem liberar os ajustes do servidor.");
+settings.server.permissions.manageProducts = false;
+server.setPermissions(settings.server.permissions);
 const blockedProductUpdate = await fetch("http://127.0.0.1:43991/api/pdv/products", { method: "PATCH", headers, body: JSON.stringify({ ids: [product.id], patch: { favorite: false } }) });
 if (blockedProductUpdate.status !== 403 || !(await pdvStore.getSnapshot()).products.find((entry) => entry.id === product.id)?.favorite) {
-  throw new Error("Produto foi alterado sem permissao de configuracao remota.");
+  throw new Error("Produto foi alterado sem permissao de produtos.");
 }
+settings.server.permissions.manageProducts = true;
 settings.server.permissions.allowClientCustomization = true;
 server.setPermissions(settings.server.permissions);
 
