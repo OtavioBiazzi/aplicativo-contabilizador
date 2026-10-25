@@ -43,14 +43,14 @@ with sync_playwright() as p:
     suppliers.get_by_role('button',name='Fechar',exact=True).click()
     panel.get_by_role('button',name='Novo',exact=True).click()
     editor=page.locator('.simple-payable-editor')
-    editor.get_by_label('Descrição *',exact=True).fill('QA Conta criada no cliente')
+    editor.get_by_label('Descrição',exact=True).fill('QA Conta criada no cliente')
     editor.get_by_label('Valor *',exact=True).fill('12')
-    expect(editor.get_by_role('combobox',name='Forma de pagamento',exact=True)).to_have_value('Pix')
+    expect(editor.get_by_role('combobox',name='Forma de pagamento',exact=True)).to_have_value('')
     editor.get_by_role('combobox',name='Fornecedor',exact=True).select_option(label='QA Fornecedor antigo')
     editor.get_by_role('button',name='Salvar conta',exact=True).click()
     editor.wait_for(state='detached')
     account=server.evaluate("async()=> (await window.caixa.getPdvSnapshot()).payables.find(a=>a.description==='QA Conta criada no cliente')")
-    assert account['preferredPaymentMethod']=='Pix' and account['supplier']=='QA Fornecedor antigo',account
+    assert account['preferredPaymentMethod']=='' and account['supplier']=='QA Fornecedor antigo',account
     page.screenshot(path=str(out/'payables-client.png'))
     assert not errors,errors
     print('PASS client supplier creation/deletion, stored payment preference and remote payable creation')

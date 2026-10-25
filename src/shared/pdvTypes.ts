@@ -254,6 +254,12 @@ export interface PdvSupplier {
   name: string;
 }
 
+export interface PdvFinancialLookup {
+  id: string;
+  kind: "category" | "costCenter";
+  name: string;
+}
+
 export type FinancialPaymentMethod = Exclude<PdvPaymentMethod, "Conta a receber" | "Nao definido">;
 
 export interface PdvPayable {
@@ -264,7 +270,7 @@ export interface PdvPayable {
   costCenter: string;
   documentNumber: string;
   paymentAccount: string;
-  preferredPaymentMethod?: FinancialPaymentMethod;
+  preferredPaymentMethod?: FinancialPaymentMethod | "";
   tags: string[];
   createdAt: string;
   updatedAt: string;
@@ -291,7 +297,7 @@ export interface PdvPayableDraft {
   costCenter?: string;
   documentNumber?: string;
   paymentAccount?: string;
-  preferredPaymentMethod?: FinancialPaymentMethod;
+  preferredPaymentMethod?: FinancialPaymentMethod | "";
   tags?: string[];
   issueDate?: string;
   seriesId?: string;
@@ -355,6 +361,7 @@ export interface PdvSnapshot {
   receivables: PdvReceivable[];
   payables: PdvPayable[];
   suppliers: PdvSupplier[];
+  financialLookups: PdvFinancialLookup[];
   currentCashShift?: PdvCashShift;
   recentCashShifts: PdvCashShift[];
   settings: PdvSettings;

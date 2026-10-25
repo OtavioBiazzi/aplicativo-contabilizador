@@ -15,7 +15,7 @@ import type {
 } from "./shared/types";
 import type { PdvCashShift, PdvCloseScope, PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportPreview, PdvProductImportResult, PdvProductRemovalResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "./shared/pdvTypes";
 
-import type { PdvSupplier } from "./shared/pdvTypes";
+import type { PdvSupplier, PdvFinancialLookup } from "./shared/pdvTypes";
 
 export interface CaixaApi {
   getSnapshot: () => Promise<AppSnapshot>;
@@ -54,6 +54,8 @@ export interface CaixaApi {
   savePdvPayable: (draft: PdvPayableDraft) => Promise<PdvPayable>;
   savePdvSupplier: (draft: PdvSupplier) => Promise<PdvSupplier>;
   deletePdvSupplier: (id: string) => Promise<void>;
+  savePdvFinancialLookup: (draft: PdvFinancialLookup) => Promise<PdvFinancialLookup>;
+  deletePdvFinancialLookup: (id: string) => Promise<void>;
   paySupplierPayables: (supplier: string, payment: PdvPayablePayment, operationId: string, accountIds?: string[]) => Promise<PdvPayable[]>;
   payPdvPayable: (id: string, payment: PdvPayablePayment, operationId?: string) => Promise<PdvPayable>;
   cancelPdvPayable: (id: string) => Promise<void>;

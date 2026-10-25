@@ -15,6 +15,16 @@ Solicitação de 25/10/2026: seguir a organização simples da referência, mant
 
 ## Verificação concluída
 
+### Refinamento solicitado após abrir a prévia
+
+- Descrição passa para a última linha principal e fica opcional. Apenas o valor é obrigatório; vencimento é exigido somente para calcular parcelas ou recorrências.
+- Novas contas ficam sem forma prevista selecionada. Uma forma já escolhida em conta antiga é preservada, e pode ser removida pelo usuário. Ao pagar de fato é necessário escolher o meio usado.
+- Documento, categoria e centro de custo ficam à vista. Categoria e centro de custo usam listas com cadastro e exclusão pelo botão “+”, compartilhadas com o cliente autorizado.
+- Os cadastros são independentes das classificações históricas: remover um nome não altera contas antigas nem recria o cadastro ao reiniciar.
+- Total, já pago e “Falta pagar” ganham uma faixa visível no cadastro/registro. A descrição em branco tem identificação de exibição pelo fornecedor, documento ou categoria.
+- Prévia separada com dados de teste para conferir esta organização sem interromper o aplicativo aberto.
+- Verificação do refinamento: compilação aprovada; testes de migração v4 → v5, campos opcionais, saldo parcial e cadastros aprovados. Testes no Electron como servidor e cliente confirmaram os cadastros de categoria/centro, conta sem descrição/vencimento/forma prevista e pagamento parcial. Janela conferida em 1024 × 600. Versão local de prévia: 0.4.11-preview.1.
+
 - `smoke_simple_finance` aprovou a migração v3 → v4, backup, forma prevista, dados antigos, exclusão do fornecedor sem afetar suas contas e reinício sem recriar o cadastro removido.
 - Passaram os testes existentes de rede/permissões, regressões financeiras, PDV, fechamento parcial, caixa, concorrência e identificação no histórico.
 - `qa_simple_finance.py` aprovou cadastro de fornecedor dentro da conta, preservação dos campos, forma prevista no pagamento, pagamento parcial, recebimento agrupado com troco e filtros. Os totais foram conferidos dentro da janela de 1024 × 600.

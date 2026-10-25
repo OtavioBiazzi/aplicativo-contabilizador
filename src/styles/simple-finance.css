@@ -15,6 +15,7 @@
 .simple-extra-options[open] > summary { border-bottom: 1px solid var(--line); color: var(--text); }
 .simple-extra-options > label { margin: 10px; }
 #root .simple-payable-editor { width: min(640px, 88vw); max-height: 86vh; min-height: 0; height: auto; display: flex; flex-direction: column; border-radius: 1px; }
+#root .module-window-body .simple-payable-editor { max-height: calc(100% - 16px); }
 #root .simple-payable-editor .modal-head { min-height: 40px; padding: 8px 12px; flex-shrink: 0; }
 #root .simple-payable-editor .modal-head strong { font-size: 1rem; }
 #root .simple-payable-editor .payable-editor-body { padding: 10px 12px; flex: 1 1 auto; }
@@ -31,6 +32,20 @@
 #root .pdv-financial-editor-modal,
 #root .pdv-financial-editor-modal :is(input, select, textarea, button) { border-radius: 1px !important; }
 .simple-series-notice { font-size: .75rem; color: var(--muted); padding: 0 3px; }
+.payable-balance-summary { display: grid; grid-template-columns: 1fr 1fr 1.4fr; align-items: end; gap: 12px; padding: 10px 12px; margin-bottom: 12px; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--accent); }
+.payable-balance-summary > span { display: grid; gap: 5px; font-size: .73rem; color: var(--muted); }
+.payable-balance-summary strong { font-size: .95rem; color: var(--text); }
+.payable-balance-summary .remaining { text-align: right; }
+.payable-balance-summary .remaining strong { color: var(--accent); font-size: 1.45rem; line-height: 1.1; }
+#root .simple-payable-editor .payable-balance-summary { position: sticky; top: 0; z-index: 2; }
+.payable-document-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+#root .simple-payable-editor .lookup-manage-button { width: 28px; min-width: 28px; min-height: 32px; height: 32px; padding: 0; }
+.payable-required-note { margin-right: auto; color: var(--muted); font-size: .73rem; }
+#root .pdv-payable-professional .finance-balance-value { color: var(--accent) !important; font-size: .96rem; }
+#root .pdv-payable-professional .finance-outstanding-total strong { color: var(--accent) !important; font-size: 1.22rem; }
+.financial-outstanding { display: grid; gap: 5px; padding: 11px 12px; margin: 0 0 14px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--panel-2); }
+.financial-outstanding span { font-size: .78rem; color: var(--muted); }
+.financial-outstanding strong { font-size: 1.6rem; line-height: 1.15; color: var(--accent); }
 #root .pdv-financial-editor-modal:has(.financial-customer-picker) { width: min(640px, 88vw); max-height: 86vh; height: auto; border-radius: 1px; }
 #root .pdv-financial-editor-modal .pdv-section-head { min-height: 40px; padding: 10px 12px; }
 #root .pdv-financial-editor-modal .pdv-section-head :is(p, .pdv-eyebrow) { display: none; }

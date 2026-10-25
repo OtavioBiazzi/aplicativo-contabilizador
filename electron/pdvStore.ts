@@ -34,6 +34,7 @@ import type {
   PdvSale,
   PdvSnapshot,
   PdvSupplier,
+  PdvFinancialLookup,
   PdvTableStatus,
   PdvTransferSelection
 } from "../src/shared/pdvTypes.js";
@@ -136,8 +137,8 @@ export class PdvStore {
         throw new Error("Banco PDV ainda nao existe.");
       }
       this.db = new this.sql.Database(await fs.readFile(this.dbFilePath));
-      if (this.databaseUserVersion() < 4) {
-        await this.backupSqliteDaily("antes-migracao-v4");
+      if (this.databaseUserVersion() < 5) {
+        await this.backupSqliteDaily("antes-migracao-v5");
       }
     } catch (error) {
       if (existingDatabase) {
@@ -161,7 +162,7 @@ export class PdvStore {
       }
       throw error;
     }
-    this.requireDb().run("PRAGMA user_version = 4");
+    this.requireDb().run("PRAGMA user_version = 5");
     await this.persist();
   }
 
@@ -187,7 +188,7 @@ export class PdvStore {
     this.db = restored;
     previous.close();
     this.migrate();
-    this.requireDb().run("PRAGMA user_version = 4");
+    this.requireDb().run("PRAGMA user_version = 5");
     await this.persist();
     await this.backupSqliteDaily("pos-restauracao");
   }
@@ -203,6 +204,7 @@ export class PdvStore {
       receivables: this.getReceivables(),
       payables: this.getPayables(),
       suppliers: this.getSuppliers(),
+      financialLookups: this.getFinancialLookups(),
       currentCashShift: this.getCurrentCashShift(),
       recentCashShifts: this.getCashShiftHistory(),
       settings: this.getSettings(),
@@ -244,6 +246,27 @@ export class PdvStore {
     );
     await this.persist();
     return this.getCustomers().find((customer) => customer.id === id)!;
+  }
+
+  getFinancialLookups(): PdvFinancialLookup[] {
+    return selectAll<PdvFinancialLookup>(this.requireDb(), "SELECT id, kind, name FROM financial_lookups ORDER BY name COLLATE NOCASE");
+  }
+
+  async saveFinancialLookup(draft: PdvFinancialLookup): Promise<PdvFinancialLookup> {
+    if (!["category", "costCenter"].includes(draft.kind)) throw new Error("Tipo de cadastro invalido.");
+    const name = String(draft.name || "").trim();
+    if (!name) throw new Error("Informe um nome.");
+    const existing = selectAll<PdvFinancialLookup>(this.requireDb(), "SELECT id, kind, name FROM financial_lookups WHERE kind = ? AND name_key = ?", [draft.kind, supplierBalanceKey(name)])[0];
+    if (existing) return existing;
+    const id = String(draft.id || randomUUID());
+    this.requireDb().run("INSERT INTO financial_lookups (id, kind, name, name_key) VALUES (?, ?, ?, ?)", [id, draft.kind, name, supplierBalanceKey(name)]);
+    await this.persist();
+    return { id, kind: draft.kind, name };
+  }
+
+  async deleteFinancialLookup(id: string): Promise<void> {
+    this.requireDb().run("DELETE FROM financial_lookups WHERE id = ?", [String(id)]);
+    await this.persist();
   }
 
   getSuppliers(): PdvSupplier[] {
@@ -320,7 +343,7 @@ export class PdvStore {
           ? "Paga"
           : paidAmount > 0.009
             ? "Parcialmente paga"
-            : row.dueDate < today
+            : row.dueDate && row.dueDate < today
               ? "Vencida"
               : "Em aberto";
       const events = eventsByAccount.get(row.id) || [];
@@ -333,13 +356,12 @@ export class PdvStore {
     const description = String(draft.description || "").trim();
     const dueDate = String(draft.dueDate || "").trim();
     const amount = roundMoney(Number(draft.amount));
-    if (!description) throw new Error("Informe a descricao da conta.");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw new Error("Informe um vencimento valido.");
+    if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) throw new Error("Informe um vencimento valido.");
     if (!Number.isFinite(amount) || amount <= 0) throw new Error("Informe um valor maior que zero.");
     const id = draft.id || randomUUID();
     const existing = this.getPayables().find((item) => item.id === id);
-    const preferredPaymentMethod = draft.preferredPaymentMethod || existing?.preferredPaymentMethod || "Pix";
-    if (!["Dinheiro", "Pix", "Debito", "Credito", "Outros"].includes(preferredPaymentMethod)) throw new Error("Forma de pagamento invalida.");
+    const preferredPaymentMethod = draft.preferredPaymentMethod === undefined ? existing?.preferredPaymentMethod || "" : draft.preferredPaymentMethod;
+    if (!["", "Dinheiro", "Pix", "Debito", "Credito", "Outros"].includes(preferredPaymentMethod)) throw new Error("Forma de pagamento invalida.");
     if (existing?.status === "Cancelada" || existing?.status === "Excluida") throw new Error("Uma conta cancelada ou excluida nao pode ser editada.");
     const payments = (draft.payments === undefined ? existing?.payments || [] : draft.payments).map((payment) => ({
       id: String(payment.id || randomUUID()),
@@ -411,6 +433,10 @@ export class PdvStore {
       const supplier = String(draft.supplier || "").trim();
       if (supplier && (!existing || supplier !== existing.supplier)) {
         db.run("INSERT OR IGNORE INTO suppliers (id, name, name_key) VALUES (?, ?, ?)", [randomUUID(), supplier, supplierBalanceKey(supplier)]);
+      }
+      for (const [kind, field] of [["category", "category"], ["costCenter", "costCenter"]] as const) {
+        const name = String(draft[field] || "").trim();
+        if (name && (!existing || name !== existing[field])) db.run("INSERT OR IGNORE INTO financial_lookups (id, kind, name, name_key) VALUES (?, ?, ?, ?)", [randomUUID(), kind, name, supplierBalanceKey(name)]);
       }
       if (draft.payments !== undefined) {
         db.run("DELETE FROM payable_payments WHERE payable_id = ?", [id]);
@@ -2443,6 +2469,7 @@ export class PdvStore {
         operation_id TEXT UNIQUE
       );
       CREATE TABLE IF NOT EXISTS suppliers (id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE);
+      CREATE TABLE IF NOT EXISTS financial_lookups (id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, name_key TEXT NOT NULL, UNIQUE(kind, name_key));
       CREATE TABLE IF NOT EXISTS payables (
         id TEXT PRIMARY KEY,
         description TEXT NOT NULL,
@@ -2518,7 +2545,7 @@ export class PdvStore {
     addColumnIfMissing(db, "receivables", "updated_at", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "payables", "cost_center", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "payables", "payment_account", "TEXT NOT NULL DEFAULT ''");
-    addColumnIfMissing(db, "payables", "preferred_payment_method", "TEXT NOT NULL DEFAULT 'Pix'");
+    addColumnIfMissing(db, "payables", "preferred_payment_method", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "payables", "tags_json", "TEXT NOT NULL DEFAULT '[]'");
     addColumnIfMissing(db, "payables", "updated_at", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "payables", "issue_date", "TEXT NOT NULL DEFAULT ''");
@@ -2532,6 +2559,15 @@ export class PdvStore {
         db.run("INSERT OR IGNORE INTO suppliers (id, name, name_key) VALUES (?, ?, ?)", [randomUUID(), name, supplierBalanceKey(name)]);
       }
       db.run("INSERT INTO pdv_settings (key, value) VALUES ('supplier_registry_initialized', 'true')");
+    }
+    if (!selectAll(db, "SELECT key FROM pdv_settings WHERE key = 'financial_lookups_initialized'").length) {
+      for (const [kind, column] of [["category", "category"], ["costCenter", "cost_center"]] as const) {
+        for (const row of selectAll<{ name: string }>(db, `SELECT DISTINCT ${column} AS name FROM payables WHERE trim(${column}) <> ''`)) {
+          const name = row.name.trim();
+          db.run("INSERT OR IGNORE INTO financial_lookups (id, kind, name, name_key) VALUES (?, ?, ?, ?)", [randomUUID(), kind, name, supplierBalanceKey(name)]);
+        }
+      }
+      db.run("INSERT INTO pdv_settings (key, value) VALUES ('financial_lookups_initialized', 'true')");
     }
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_operation_id ON sales(operation_id) WHERE operation_id IS NOT NULL");
     db.run("CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at DESC)");

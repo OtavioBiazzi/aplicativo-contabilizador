@@ -74,6 +74,8 @@ const server = new LocalServer({
   savePdvPayable: (draft) => pdvStore.savePayable(draft),
   savePdvSupplier: (draft) => pdvStore.saveSupplier(draft),
   deletePdvSupplier: (id) => pdvStore.deleteSupplier(id),
+  savePdvFinancialLookup: (draft) => pdvStore.saveFinancialLookup(draft),
+  deletePdvFinancialLookup: (id) => pdvStore.deleteFinancialLookup(id),
   paySupplierPayables: (supplier, payment, origin, operationId, accountIds) => pdvStore.paySupplierPayables(supplier, payment, origin, operationId, accountIds),
   payPdvPayable: (id, payment, origin, operationId) => pdvStore.payPayable(id, payment, origin, operationId),
   cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
@@ -122,6 +124,15 @@ if (!printClient || serverStateChanges < 1) {
   throw new Error("Servidor nao identificou o cliente imediatamente ao conectar.");
 }
 const headers = { "content-type": "application/json", "x-caixa-password": "smoke-password", "x-device-name": "Cliente smoke", "x-caixa-version": appVersion };
+const lookupResponse = await fetch('http://127.0.0.1:43991/api/pdv/financial-lookups',{method:'POST',headers,body:JSON.stringify({id:crypto.randomUUID(),kind:'category',name:'Categoria financeira remota'})});
+if (!lookupResponse.ok) throw new Error('Cliente não cadastrou categoria financeira.');
+const remoteLookup = (await lookupResponse.json()).lookup;
+server.setPermissions({...settings.server.permissions,manageTables:false});
+const deniedLookup = await fetch(`http://127.0.0.1:43991/api/pdv/financial-lookups/${remoteLookup.id}`,{method:'DELETE',headers});
+if(deniedLookup.status!==403)throw new Error('Cliente alterou categoria sem permissão.');
+server.setPermissions(settings.server.permissions);
+const deletedLookup = await fetch(`http://127.0.0.1:43991/api/pdv/financial-lookups/${remoteLookup.id}`,{method:'DELETE',headers});
+if(!deletedLookup.ok || pdvStore.getFinancialLookups().some(item=>item.id===remoteLookup.id))throw new Error('Cliente não excluiu categoria financeira.');
 const supplierResponse = await fetch('http://127.0.0.1:43991/api/pdv/suppliers',{method:'POST',headers,body:JSON.stringify({id:crypto.randomUUID(),name:'Fornecedor remoto smoke'})});
 if (!supplierResponse.ok) throw new Error('Cliente não cadastrou fornecedor.');
 const remoteSupplier = (await supplierResponse.json()).supplier;

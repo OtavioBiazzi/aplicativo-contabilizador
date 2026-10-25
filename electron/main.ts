@@ -1,6 +1,6 @@
 ﻿import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
-import type { PdvSupplier } from "../src/shared/pdvTypes.js";
+import type { PdvSupplier, PdvFinancialLookup } from "../src/shared/pdvTypes.js";
 import { nativeImage } from "electron";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -646,6 +646,8 @@ async function bootstrap() {
     savePdvPayable: (draft) => pdvStore.savePayable(draft),
     savePdvSupplier: (draft) => pdvStore.saveSupplier(draft),
     deletePdvSupplier: (id) => pdvStore.deleteSupplier(id),
+    savePdvFinancialLookup: (draft) => pdvStore.saveFinancialLookup(draft),
+    deletePdvFinancialLookup: (id) => pdvStore.deleteFinancialLookup(id),
     paySupplierPayables: (supplier, payment, originDevice, operationId, accountIds) => pdvStore.paySupplierPayables(supplier, payment, originDevice, operationId, accountIds),
     payPdvPayable: (id, payment, originDevice, operationId) => pdvStore.payPayable(id, payment, originDevice, operationId),
     cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
@@ -977,6 +979,12 @@ function registerIpc() {
     publishPdvChanged();
   });
 
+  ipcMain.handle("pdv:saveFinancialLookup", async (_event, draft: PdvFinancialLookup) => {
+    const lookup = await pdvStore.saveFinancialLookup(draft); publishPdvChanged(); return lookup;
+  });
+  ipcMain.handle("pdv:deleteFinancialLookup", async (_event, id: string) => {
+    await pdvStore.deleteFinancialLookup(id); publishPdvChanged();
+  });
   ipcMain.handle("pdv:saveSupplier", async (_event, draft: PdvSupplier) => {
     const supplier = await pdvStore.saveSupplier(draft);
     publishPdvChanged(); return supplier;

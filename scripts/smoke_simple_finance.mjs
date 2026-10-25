@@ -19,11 +19,11 @@ await store.persist();
 
 store = new PdvStore(dir); await store.initialize();
 let account = store.getPayables().find(item=>item.id===first.id);
-assert.equal(account.preferredPaymentMethod,'Pix');
+assert.equal(account.preferredPaymentMethod,'');
 assert.equal(account.balance,40);
 assert.equal(account.payments.length,1);
 assert.equal(account.paymentAccount,'Dado anterior preservado');
-assert((await readdir(path.join(dir,'pdv-backups'))).some(name=>name.includes('antes-migracao-v4')));
+assert((await readdir(path.join(dir,'pdv-backups'))).some(name=>name.includes('antes-migracao-v5')));
 const migrated = store.getSuppliers().find(item=>item.name==='Fornecedor Antigo');
 assert(migrated);
 await store.deleteSupplier(migrated.id);
@@ -40,7 +40,7 @@ const supplier = await store.saveSupplier({id:crypto.randomUUID(),name:'  Distri
 const duplicate = await store.saveSupplier({id:crypto.randomUUID(),name:'distribuidora nova'});
 assert.equal(supplier.id,duplicate.id);
 const next = await store.savePayable({description:'Compra nova',supplier:supplier.name,amount:25,dueDate});
-assert.equal(next.preferredPaymentMethod,'Pix');
+assert.equal(next.preferredPaymentMethod,'');
 await store.deleteSupplier(supplier.id);
 assert(store.getPayables().some(item=>item.id===next.id && item.supplier===supplier.name));
 await assert.rejects(store.savePayable({...next,preferredPaymentMethod:'Invalida'}),/Forma de pagamento/);
