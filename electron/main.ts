@@ -1,5 +1,6 @@
 ﻿import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
+import type { PdvSupplier } from "../src/shared/pdvTypes.js";
 import { nativeImage } from "electron";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -643,6 +644,8 @@ async function bootstrap() {
     cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
     deletePdvReceivable: (id, permanent) => pdvStore.deleteReceivable(id, permanent),
     savePdvPayable: (draft) => pdvStore.savePayable(draft),
+    savePdvSupplier: (draft) => pdvStore.saveSupplier(draft),
+    deletePdvSupplier: (id) => pdvStore.deleteSupplier(id),
     paySupplierPayables: (supplier, payment, originDevice, operationId, accountIds) => pdvStore.paySupplierPayables(supplier, payment, originDevice, operationId, accountIds),
     payPdvPayable: (id, payment, originDevice, operationId) => pdvStore.payPayable(id, payment, originDevice, operationId),
     cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
@@ -974,6 +977,13 @@ function registerIpc() {
     publishPdvChanged();
   });
 
+  ipcMain.handle("pdv:saveSupplier", async (_event, draft: PdvSupplier) => {
+    const supplier = await pdvStore.saveSupplier(draft);
+    publishPdvChanged(); return supplier;
+  });
+  ipcMain.handle("pdv:deleteSupplier", async (_event, id: string) => {
+    await pdvStore.deleteSupplier(id); publishPdvChanged();
+  });
   ipcMain.handle("pdv:savePayable", async (_event, draft: PdvPayableDraft): Promise<PdvPayable> => {
     const payable = await pdvStore.savePayable(draft);
     publishPdvChanged();

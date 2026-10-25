@@ -11,15 +11,17 @@ export type FinancialColumn<T> = {
 };
 
 /** Shared, keyboard accessible ledger. Preferences belong to this terminal only. */
-export function FinancialGrid<T extends { id: string }>({ id, rows, columns, selectedId, onSelect, onOpen, totals }: {
+export function FinancialGrid<T extends { id: string }>({ id, rows, columns, selectedId, onSelect, onOpen, totals, defaultHidden = [] }: {
   id: string; rows: T[]; columns: FinancialColumn<T>[]; selectedId?: string;
   onSelect: (row: T) => void; onOpen: (row: T) => void; totals: ReactNode;
+  defaultHidden?: string[];
 }) {
-  const [preferences, setPreferences] = useState<{ hidden: string[]; compact: boolean }>(() => {
+  const [preferences, setPreferences] = useState<{ hidden: string[]; compact: boolean; simpleDefaultsApplied: boolean }>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(`caixa.financeiro.${id}`) || "{}");
-      return { hidden: Array.isArray(saved.hidden) ? saved.hidden : [], compact: saved.compact !== false };
-    } catch { return { hidden: [], compact: true }; }
+      const hidden = Array.isArray(saved.hidden) ? saved.hidden : [];
+      return { hidden: saved.simpleDefaultsApplied || hidden.length ? hidden : defaultHidden, compact: saved.compact !== false, simpleDefaultsApplied: Boolean(saved.simpleDefaultsApplied || defaultHidden.length) };
+    } catch { return { hidden: defaultHidden, compact: true, simpleDefaultsApplied: defaultHidden.length > 0 }; }
   });
   const [sort, setSort] = useState({ key: "", descending: false });
   const [page, setPage] = useState(0);
@@ -43,7 +45,7 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
   const currentPage = Math.min(page, pages - 1);
   const shown = ordered.slice(currentPage * size, (currentPage + 1) * size);
   const visibleColumns = columns.filter((column) => column.required || !preferences.hidden.includes(column.key));
-  return <div className={`finance-grid ${preferences.compact ? "is-compact" : ""}`}>
+  return <div className={`finance-grid ${preferences.compact ? "is-compact" : ""} ${defaultHidden.length ? "is-simple" : ""}`}>
     <div className="finance-grid-caption"><span>{rows.length} registro(s) encontrados <small>• Selecione uma linha para usar os comandos</small></span>
       <div className="finance-grid-options"><button type="button" aria-expanded={options} onClick={() => setOptions(!options)}><Columns3 size={15} /> Visualização <ChevronDown size={13} /></button>
         {options && <div className="finance-column-menu" onKeyDown={(event) => { if (event.key === "Escape") setOptions(false); }}>

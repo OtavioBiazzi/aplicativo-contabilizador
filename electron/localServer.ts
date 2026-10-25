@@ -9,6 +9,8 @@ import type { AppSettings, EntryDraft, EntryType, LedgerEntry, PaymentMethod, Qu
 import type { PdvCashShift, PdvCloseScope, PdvCartItem, PdvCategory, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvDataVersion, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProduct, PdvProductDraft, PdvProductImportResult, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvSnapshot, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 import { calculateCash, calculateSplit, filterEntriesByLocalDate, roundMoney, summarizeEntries } from "../src/shared/calculations.js";
 
+import type { PdvSupplier } from "../src/shared/pdvTypes.js";
+
 interface LocalServerOptions {
   appVersion: string;
   permissions: ServerPermissions;
@@ -49,6 +51,8 @@ interface LocalServerOptions {
   cancelPdvReceivable: (id: string) => Promise<void>;
   deletePdvReceivable: (id: string, permanent?: boolean) => Promise<void>;
   savePdvPayable: (draft: PdvPayableDraft) => Promise<PdvPayable>;
+  savePdvSupplier: (draft: PdvSupplier) => Promise<PdvSupplier>;
+  deletePdvSupplier: (id: string) => Promise<void>;
   paySupplierPayables: (supplier: string, payment: PdvPayablePayment, originDevice: string, operationId: string, accountIds?: string[]) => Promise<PdvPayable[]>;
   payPdvPayable: (id: string, payment: PdvPayablePayment, originDevice?: string, operationId?: string) => Promise<PdvPayable>;
   cancelPdvPayable: (id: string) => Promise<void>;
@@ -515,6 +519,21 @@ export class LocalServer {
       } catch (error) {
         response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel excluir a conta." });
       }
+    });
+
+    app.post("/api/pdv/suppliers", this.authorize("manageTables"), async (request, response) => {
+      try {
+        const supplier = await this.options.savePdvSupplier(request.body || {});
+        this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange();
+        response.status(201).json({ supplier, version: this.options.getPdvVersion() });
+      } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel salvar o fornecedor." }); }
+    });
+    app.delete("/api/pdv/suppliers/:id", this.authorize("manageTables"), async (request, response) => {
+      try {
+        await this.options.deletePdvSupplier(request.params.id);
+        this.broadcast({ type: "pdv-changed" }); this.options.onRemotePdvChange();
+        response.json({ ok: true, version: this.options.getPdvVersion() });
+      } catch (error) { response.status(400).json({ error: error instanceof Error ? error.message : "Nao foi possivel excluir o fornecedor." }); }
     });
 
     app.post("/api/pdv/payables", this.authorize("manageTables"), async (request, response) => {

@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings, EntryDraft, LedgerEntry, ServerState } from "../src/shared/types.js";
 import type { PdvCloseScope, PdvCartItem, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProductDraft, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
 
+import type { PdvSupplier } from "../src/shared/pdvTypes.js";
+
 contextBridge.exposeInMainWorld("caixa", {
   getSnapshot: () => ipcRenderer.invoke("app:getSnapshot"),
   getPdvSnapshot: (salesLimit?: number) => ipcRenderer.invoke("pdv:getSnapshot", salesLimit),
@@ -42,6 +44,8 @@ contextBridge.exposeInMainWorld("caixa", {
   cancelPdvReceivable: (id: string) => ipcRenderer.invoke("pdv:cancelReceivable", id),
   deletePdvReceivable: (id: string, permanent = false) => ipcRenderer.invoke("pdv:deleteReceivable", id, permanent),
   savePdvPayable: (draft: PdvPayableDraft) => ipcRenderer.invoke("pdv:savePayable", draft),
+  savePdvSupplier: (draft: PdvSupplier) => ipcRenderer.invoke("pdv:saveSupplier", draft),
+  deletePdvSupplier: (id: string) => ipcRenderer.invoke("pdv:deleteSupplier", id),
   paySupplierPayables: (supplier: string, payment: PdvPayablePayment, operationId: string, accountIds?: string[]) => ipcRenderer.invoke("pdv:paySupplierPayables", supplier, payment, operationId, accountIds),
   payPdvPayable: (id: string, payment: PdvPayablePayment, operationId?: string) => ipcRenderer.invoke("pdv:payPayable", id, payment, operationId),
   cancelPdvPayable: (id: string) => ipcRenderer.invoke("pdv:cancelPayable", id),

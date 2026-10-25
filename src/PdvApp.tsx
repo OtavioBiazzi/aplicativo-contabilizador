@@ -1,4 +1,5 @@
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
+import { SimpleFinancialFilters, SimpleCollectionModal } from "./components/SimpleFinancialControls";
 ﻿import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { useLayoutEffect } from "react";
@@ -7039,7 +7040,6 @@ function ReceivablesScreen({
       ...(sale?.items.map((value) => value.productName) || [])
     ].join(" ").toLocaleLowerCase("pt-BR").includes(normalized);
   });
-  const sevenDays = localDateInputValue(new Date(new Date(`${today}T12:00:00`).getTime() + 7 * 86400000));
   const active = receivables.filter((item) => !["Cancelada", "Excluida"].includes(item.status));
   const outstanding = roundMoney(active.reduce((sum, item) => sum + item.balance, 0));
   const received = roundMoney(active.reduce((sum, item) => sum + item.receivedAmount, 0));
@@ -7096,17 +7096,19 @@ function ReceivablesScreen({
       {!customerView && <div className="finance-command-bar" aria-label="Comandos de contas a receber">
         <button disabled={readOnly} onClick={() => setCreating(true)}><Plus /><span>Novo</span></button>
         <button disabled={!canChange} onClick={() => validSelection && setEditing(validSelection)}><Pencil /><span>Alterar</span></button>
-        <button disabled={readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
-        <button disabled={readOnly || !receivables.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
+        {selectedAccountIds.some((id) => receivables.some((account) => account.id === id)) && <button disabled={readOnly || !receivables.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
           const accounts = receivables.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
           if (!accounts.length) return;
           if (!accounts[0].customerId || accounts.some((account) => account.customerId !== accounts[0].customerId)) { setNotice("Selecione contas pendentes do mesmo cliente."); return; }
           customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(accounts.map((account) => account.id)); setCustomerReceiving({ ...accounts[0], balance: roundMoney(accounts.reduce((sum, account) => sum + account.balance, 0)) });
-        }}><Wallet /><span>Receber selecionadas ({selectedAccountIds.filter((id) => receivables.some((account) => account.id === id)).length})</span></button>
+        }}><Wallet /><span>Receber selecionadas ({selectedAccountIds.filter((id) => receivables.some((account) => account.id === id)).length})</span></button>}
         <button className="primary-command" disabled={!canReceive} onClick={() => validSelection && setReceiving(validSelection)}><Wallet /><span>Receber</span></button>
+        <details className="finance-more-actions"><summary>Mais ações</summary><div>
+        <button disabled={readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
         <button disabled={!canChange || (validSelection?.receivedAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
         <button disabled={!validSelection || !snapshot.recentSales.some((sale) => sale.id === validSelection.saleId)} onClick={() => validSelection && openReceipt(validSelection)}><ReceiptText /><span>Recibo</span></button>
         <button disabled={!validSelection || !customerOutstandingAccounts(snapshot.receivables, validSelection).length} onClick={() => validSelection && openCustomerReceipt(validSelection)}><ReceiptText /><span>Recibo do cliente</span></button>
+        </div></details>
       </div>}
       <div className="finance-view-row">
         <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
@@ -7128,17 +7130,10 @@ function ReceivablesScreen({
           { key: "balance", label: "Total a receber", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{money(row.balance)}</strong> }
         ]} />
       </> : <>
-      <div className="finance-period-shortcuts"><label>Data: <select aria-label="Data usada no filtro" title="Se a conta não tiver vencimento, será usada a data de emissão" value={dateField} onChange={(event) => setDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label><button onClick={() => { setFrom(today); setTo(today); setStatus("Pendentes"); }}>Hoje</button><button onClick={() => { setDateField("due"); setFrom(today); setTo(sevenDays); setStatus("Pendentes"); }}>Próximos 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencida"); }}>Vencidas</button></div>
-      <div className="financial-filters">
-        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cliente, documento, mesa ou produto" /></label>
-        <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
-        <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        <label><span>Situacao</span><select value={status} onChange={(event) => { const next = event.target.value; setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }}><option>Pendentes</option><option>Historico</option><option>Todos</option><option>Em aberto</option><option>Parcialmente recebida</option><option>Vencida</option><option>Recebida</option><option>Cancelada</option><option>Excluida</option></select></label>
-        <button title="Ampliar o período sem mudar a situação selecionada" onClick={() => { setFrom(""); setTo(""); setQuery(""); }}><RotateCcw size={15} /> Todo o período</button>
-      </div>
+      <SimpleFinancialFilters query={query} onQuery={setQuery} placeholder="Cliente, descrição ou produto" from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }} statuses={["Pendentes", "Recebida", "Vencida", "Cancelada", "Excluida", "Historico", "Em aberto", "Parcialmente recebida", "Todos"]} />
       {hiddenPendingCount > 0 && <div className="finance-filter-notice">{hiddenPendingCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); }}>Ver todas em aberto</button></div>}
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
-        <FinancialGrid id="receivables" rows={receivables} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
+        <FinancialGrid id="receivables" defaultHidden={["created", "document", "method", "received"]} rows={receivables} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
           { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${item.description || item.id}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
           { key: "created", label: "Emissão", value: (item) => item.createdAt, render: (item) => new Date(item.createdAt).toLocaleDateString("pt-BR") },
           { key: "document", label: "Documento", value: (item) => item.documentNumber || "—" },
@@ -7156,7 +7151,7 @@ function ReceivablesScreen({
             <div className="financial-detail-title"><span className="pdv-eyebrow">Detalhes da conta</span><h3>{selected.customerName}</h3><p>{selected.description || selected.note || "Sem descricao adicional."}</p></div>
             <dl>
               <div><dt>Valor original</dt><dd>{money(selected.originalAmount)}</dd></div><div><dt>Recebido</dt><dd>{money(selected.receivedAmount)}</dd></div><div><dt>Saldo</dt><dd>{money(selected.balance)}</dd></div>
-              <div><dt>Categoria</dt><dd>{selected.category || "Nao informada"}</dd></div><div><dt>Centro de custo</dt><dd>{selected.costCenter || "Nao informado"}</dd></div><div><dt>Documento</dt><dd>{selected.documentNumber || "Nao informado"}</dd></div><div><dt>Conta prevista</dt><dd>{selected.paymentAccount || "Nao informada"}</dd></div>
+              {selected.category && <div><dt>Categoria</dt><dd>{selected.category}</dd></div>}{selected.costCenter && <div><dt>Centro de custo</dt><dd>{selected.costCenter}</dd></div>}{selected.documentNumber && <div><dt>Documento</dt><dd>{selected.documentNumber}</dd></div>}
             </dl>
             {(selected.tags || []).length > 0 && <div className="financial-tag-list">{(selected.tags || []).map((tag) => <span key={tag}>{tag}</span>)}</div>}
             <div className="financial-detail-actions">
@@ -7222,12 +7217,13 @@ function ReceivableDraftModal({ customers, onSaveCustomer, onCancel, onSave }: {
           <label className="pdv-wide-field"><span>Descricao *</span><input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Ex.: Encomenda, mensalidade ou venda a prazo" /></label>
           <label><span>Valor *</span><input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} placeholder="0,00" /></label>
           <label><span>Vencimento</span><input type="date" value={draft.dueDate || ""} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value })} /></label>
+          <label className="pdv-wide-field"><span>Observação</span><textarea rows={2} value={draft.note || ""} onChange={(event) => setDraft({ ...draft, note: event.target.value })} placeholder="Opcional" /></label>
+          <details className="simple-extra-options pdv-wide-field"><summary>Mais opções</summary><div className="pdv-editor-grid">
           <label><span>Categoria</span><input value={draft.category || ""} onChange={(event) => setDraft({ ...draft, category: event.target.value })} placeholder="Ex.: Vendas, encomendas" /></label>
           <label><span>Centro de custo</span><input value={draft.costCenter || ""} onChange={(event) => setDraft({ ...draft, costCenter: event.target.value })} placeholder="Ex.: Loja principal" /></label>
           <label><span>Documento</span><input value={draft.documentNumber || ""} onChange={(event) => setDraft({ ...draft, documentNumber: event.target.value })} placeholder="Pedido ou referencia" /></label>
-          <label><span>Conta prevista</span><input value={draft.paymentAccount || ""} onChange={(event) => setDraft({ ...draft, paymentAccount: event.target.value })} placeholder="Ex.: Caixa ou Banco" /></label>
           <label className="pdv-wide-field"><span>Tags</span><input value={(draft.tags || []).join(", ")} onChange={(event) => setDraft({ ...draft, tags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} placeholder="Ex.: mensalista, prioridade" /></label>
-          <label className="pdv-wide-field"><span>Observacao</span><textarea rows={3} value={draft.note || ""} onChange={(event) => setDraft({ ...draft, note: event.target.value })} /></label>
+          </div></details>
         </div>
         {error && <div className="pdv-inline-warning">{error}</div>}
         <div className="pdv-action-row"><button className="pdv-ghost-button" onClick={onCancel} disabled={busy}>Cancelar</button><button className="pdv-primary-button" disabled={!valid || busy} onClick={() => void confirm()}>{busy ? "Salvando..." : "Salvar conta"}</button></div>
@@ -7238,29 +7234,7 @@ function ReceivableDraftModal({ customers, onSaveCustomer, onCancel, onSave }: {
 }
 
 function ReceivableCollectionModal({ receivable, onCancel, onConfirm }: { receivable: PdvReceivable; onCancel: () => void; onConfirm: (payment: PdvPayment) => void | Promise<void> }) {
-  const methods: Array<Exclude<PdvPaymentMethod, "Conta a receber" | "Nao definido">> = ["Dinheiro", "Debito", "Credito", "Pix", "Outros"];
-  const [method, setMethod] = useState<typeof methods[number] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const confirm = async (payment: PdvPayment) => {
-    if (busy) return;
-    setBusy(true); setError("");
-    try { await onConfirm(payment); } catch (cause) { setError(cause instanceof Error ? cause.message : "Nao foi possivel registrar o recebimento."); }
-    finally { setBusy(false); setMethod(null); }
-  };
-  return (
-    <div className="pdv-modal-backdrop pdv-nested-backdrop">
-      <section className="pdv-payment-modal pdv-collection-modal pdv-admin-modal">
-        <div className="pdv-section-head"><div><span className="pdv-eyebrow">Recebimento</span><h1>{receivable.customerName}</h1><p>Saldo atual: {money(receivable.balance)}</p></div><button className="pdv-icon-button" onClick={onCancel} disabled={busy}><X size={18} /></button></div>
-        <div className="pdv-payment-methods">
-          {methods.map((value) => <button key={value} disabled={busy} onClick={() => setMethod(value)}>{value}</button>)}
-        </div>
-        <div className="pdv-action-row"><button className="pdv-ghost-button" onClick={onCancel} disabled={busy}>Voltar</button></div>
-        {busy && <p>Registrando recebimento...</p>}{error && <p className="pdv-inline-warning">{error}</p>}
-        {method && !busy && <PaymentAmountModal method={method} remaining={receivable.balance} onCancel={() => setMethod(null)} onConfirm={(payment) => void confirm(payment)} />}
-      </section>
-    </div>
-  );
+  return <SimpleCollectionModal mode="receivable" title={receivable.customerName} balance={receivable.balance} onCancel={onCancel} onConfirm={onConfirm} />;
 }
 
 function CustomersScreen({
@@ -7595,7 +7569,7 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
   const [category, setCategory] = useState(receivable.category || "");
   const [costCenter, setCostCenter] = useState(receivable.costCenter || "");
   const [documentNumber, setDocumentNumber] = useState(receivable.documentNumber || "");
-  const [paymentAccount, setPaymentAccount] = useState(receivable.paymentAccount || "");
+  const [paymentAccount] = useState(receivable.paymentAccount || "");
   const [tagsText, setTagsText] = useState((receivable.tags || []).join(", "));
   const [manualAmountText, setManualAmountText] = useState(String(receivable.originalAmount).replace(".", ","));
   const [items, setItems] = useState<PdvCartItem[]>(() => sale?.items.map((item) => ({ ...item })) || []);
@@ -7633,18 +7607,19 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
       <section className="pdv-payment-modal pdv-admin-modal pdv-receivable-full-editor">
-        <div className="pdv-section-head"><div><span className="pdv-eyebrow">Conta a receber</span><h1>Editar pendencia completa</h1><p>{receivable.customerName} | Conta {money(accountTotal)} | Recebido {money(receivedTotal)} | Saldo {money(Math.max(0, remaining))}</p></div><button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button></div>
+        <div className="pdv-section-head"><div><h1>Editar conta a receber</h1><p>{receivable.customerName} · Saldo {money(Math.max(0, remaining))}</p></div><button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button></div>
         <div className="pdv-receivable-editor-scroll">
           <div className="pdv-editor-grid pdv-receivable-editor-fields">
             <label><span>Data de vencimento</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
             {manualAccount && <label><span>Valor da conta</span><input inputMode="decimal" value={manualAmountText} onChange={(event) => setManualAmountText(event.target.value)} /></label>}
             <label><span>Descricao</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: Venda a prazo, encomenda..." /></label>
+            <label className="pdv-wide-field"><span>Observação</span><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></label>
+            <details className="simple-extra-options pdv-wide-field"><summary>Mais opções</summary><div className="pdv-editor-grid">
             <label><span>Categoria</span><input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Ex.: Vendas, encomendas" /></label>
             <label><span>Centro de custo</span><input value={costCenter} onChange={(event) => setCostCenter(event.target.value)} placeholder="Ex.: Loja principal" /></label>
             <label><span>Documento</span><input value={documentNumber} onChange={(event) => setDocumentNumber(event.target.value)} placeholder="Pedido, contrato ou referencia" /></label>
-            <label><span>Conta prevista</span><input value={paymentAccount} onChange={(event) => setPaymentAccount(event.target.value)} placeholder="Ex.: Caixa principal, Banco" /></label>
             <label className="pdv-wide-field"><span>Tags</span><input value={tagsText} onChange={(event) => setTagsText(event.target.value)} placeholder="Ex.: prioridade, encomenda, mensalista" /></label>
-            <label className="pdv-wide-field"><span>Observacao da pendencia</span><textarea rows={2} value={note} onChange={(event) => setNote(event.target.value)} /></label>
+            </div></details>
           </div>
           {!manualAccount && <section className="pdv-receivable-editor-section">
             <div className="pdv-subsection-title"><div><strong>Produtos e valores</strong><span>Altere a quantidade ou o valor final lancado. O saldo sera recalculado.</span></div><b>{money(itemTotal)}</b></div>
@@ -7676,8 +7651,8 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
               ))}
             </div>
           </section>}
-          <section className="pdv-receivable-editor-section">
-            <div className="pdv-subsection-title"><div><strong>Recebimentos registrados</strong><span>Edite forma, valor, dinheiro recebido ou remova um lançamento incorreto.</span></div><button className="pdv-ghost-button" type="button" disabled={remaining <= 0.009} onClick={() => setAddingPayment(true)}><Plus size={15} /> Adicionar</button></div>
+          <details className="simple-extra-options"><summary>Recebimentos registrados ({payments.length})</summary><section className="pdv-receivable-editor-section">
+            <div className="pdv-subsection-title"><strong>Recebimentos</strong><button className="pdv-ghost-button" type="button" disabled={remaining <= 0.009} onClick={() => setAddingPayment(true)}><Plus size={15} /> Adicionar</button></div>
             <div className="pdv-receivable-payment-editor-list">
               {payments.map((payment) => (
                 <article key={payment.id}>
@@ -7690,7 +7665,7 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
               ))}
               {!payments.length && <div className="pdv-empty pdv-compact-empty">Nenhum recebimento registrado. A pendencia continua em aberto.</div>}
             </div>
-          </section>
+          </section></details>
           {!valid && <div className="pdv-inline-warning">Revise os valores: o total precisa ser positivo e nao pode ficar abaixo do valor ja recebido.</div>}
         </div>
         <div className="pdv-action-row pdv-receivable-editor-actions"><button className="pdv-danger-button pdv-delete-receivable" type="button" onClick={onDelete}><Trash2 size={16} /> Excluir pendencia</button><span /><button className="pdv-ghost-button" onClick={onCancel}>Voltar</button><button className="pdv-primary-button" disabled={!valid} onClick={confirm}>Salvar alteracoes</button></div>

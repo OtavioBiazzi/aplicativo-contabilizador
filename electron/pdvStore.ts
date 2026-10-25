@@ -33,6 +33,7 @@ import type {
   PdvSettings,
   PdvSale,
   PdvSnapshot,
+  PdvSupplier,
   PdvTableStatus,
   PdvTransferSelection
 } from "../src/shared/pdvTypes.js";
@@ -135,8 +136,8 @@ export class PdvStore {
         throw new Error("Banco PDV ainda nao existe.");
       }
       this.db = new this.sql.Database(await fs.readFile(this.dbFilePath));
-      if (this.databaseUserVersion() < 3) {
-        await this.backupSqliteDaily("antes-migracao-v3");
+      if (this.databaseUserVersion() < 4) {
+        await this.backupSqliteDaily("antes-migracao-v4");
       }
     } catch (error) {
       if (existingDatabase) {
@@ -160,7 +161,7 @@ export class PdvStore {
       }
       throw error;
     }
-    this.requireDb().run("PRAGMA user_version = 3");
+    this.requireDb().run("PRAGMA user_version = 4");
     await this.persist();
   }
 
@@ -186,6 +187,7 @@ export class PdvStore {
     this.db = restored;
     previous.close();
     this.migrate();
+    this.requireDb().run("PRAGMA user_version = 4");
     await this.persist();
     await this.backupSqliteDaily("pos-restauracao");
   }
@@ -200,6 +202,7 @@ export class PdvStore {
       customers: this.getCustomers(),
       receivables: this.getReceivables(),
       payables: this.getPayables(),
+      suppliers: this.getSuppliers(),
       currentCashShift: this.getCurrentCashShift(),
       recentCashShifts: this.getCashShiftHistory(),
       settings: this.getSettings(),
@@ -243,6 +246,28 @@ export class PdvStore {
     return this.getCustomers().find((customer) => customer.id === id)!;
   }
 
+  getSuppliers(): PdvSupplier[] {
+    return selectAll<PdvSupplier>(this.requireDb(), "SELECT id, name FROM suppliers ORDER BY name COLLATE NOCASE");
+  }
+
+  async saveSupplier(draft: PdvSupplier): Promise<PdvSupplier> {
+    const name = String(draft.name || "").trim();
+    if (!name) throw new Error("Informe o nome do fornecedor.");
+    const key = supplierBalanceKey(name);
+    const existing = selectAll<PdvSupplier>(this.requireDb(), "SELECT id, name FROM suppliers WHERE name_key = ?", [key])[0];
+    if (existing) return existing;
+    const id = String(draft.id || randomUUID());
+    this.requireDb().run("INSERT INTO suppliers (id, name, name_key) VALUES (?, ?, ?)", [id, name, key]);
+    await this.persist();
+    return { id, name };
+  }
+
+  async deleteSupplier(id: string): Promise<void> {
+    // O cadastro é independente dos nomes já gravados nas contas históricas.
+    this.requireDb().run("DELETE FROM suppliers WHERE id = ?", [String(id)]);
+    await this.persist();
+  }
+
   getPayables(): PdvPayable[] {
     const today = new Date().toISOString().slice(0, 10);
     const paymentsByAccount = new Map<string, PdvPayablePayment[]>();
@@ -280,7 +305,7 @@ export class PdvStore {
     }>(
       this.requireDb(),
       `SELECT id, description, supplier, category, cost_center AS costCenter, document_number AS documentNumber,
-       payment_account AS paymentAccount, tags_json AS tagsJson, created_at AS createdAt,
+       payment_account AS paymentAccount, preferred_payment_method AS preferredPaymentMethod, tags_json AS tagsJson, created_at AS createdAt,
        updated_at AS updatedAt, issue_date AS issueDate, series_id AS seriesId, series_kind AS seriesKind,
        installment_number AS installmentNumber, installment_count AS installmentCount,
        due_date AS dueDate, amount, status, note
@@ -313,6 +338,8 @@ export class PdvStore {
     if (!Number.isFinite(amount) || amount <= 0) throw new Error("Informe um valor maior que zero.");
     const id = draft.id || randomUUID();
     const existing = this.getPayables().find((item) => item.id === id);
+    const preferredPaymentMethod = draft.preferredPaymentMethod || existing?.preferredPaymentMethod || "Pix";
+    if (!["Dinheiro", "Pix", "Debito", "Credito", "Outros"].includes(preferredPaymentMethod)) throw new Error("Forma de pagamento invalida.");
     if (existing?.status === "Cancelada" || existing?.status === "Excluida") throw new Error("Uma conta cancelada ou excluida nao pode ser editada.");
     const payments = (draft.payments === undefined ? existing?.payments || [] : draft.payments).map((payment) => ({
       id: String(payment.id || randomUUID()),
@@ -348,15 +375,15 @@ export class PdvStore {
         `INSERT INTO payables
          (id, description, supplier, category, cost_center, document_number, payment_account, tags_json,
           created_at, updated_at, issue_date, series_id, series_kind, installment_number, installment_count,
-          due_date, amount, status, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          due_date, amount, status, note, preferred_payment_method)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
           description=excluded.description, supplier=excluded.supplier, category=excluded.category,
           cost_center=excluded.cost_center, document_number=excluded.document_number,
           payment_account=excluded.payment_account, tags_json=excluded.tags_json,
           updated_at=excluded.updated_at, issue_date=excluded.issue_date, series_id=excluded.series_id, series_kind=excluded.series_kind,
           installment_number=excluded.installment_number, installment_count=excluded.installment_count, due_date=excluded.due_date,
-          amount=excluded.amount, status=excluded.status, note=excluded.note`,
+          amount=excluded.amount, status=excluded.status, note=excluded.note, preferred_payment_method=excluded.preferred_payment_method`,
         [
           id,
           description,
@@ -376,10 +403,15 @@ export class PdvStore {
           dueDate,
           amount,
           nextStatus,
-          String(draft.note || "").trim()
+          String(draft.note || "").trim(),
+          preferredPaymentMethod
         ]
       );
       this.writeFinancialEvent(db, "payable", id, existing ? "Edicao" : "Criacao", existing ? "Dados da conta atualizados." : "Conta a pagar cadastrada.", "Servidor");
+      const supplier = String(draft.supplier || "").trim();
+      if (supplier && (!existing || supplier !== existing.supplier)) {
+        db.run("INSERT OR IGNORE INTO suppliers (id, name, name_key) VALUES (?, ?, ?)", [randomUUID(), supplier, supplierBalanceKey(supplier)]);
+      }
       if (draft.payments !== undefined) {
         db.run("DELETE FROM payable_payments WHERE payable_id = ?", [id]);
         for (const payment of payments) {
@@ -2410,6 +2442,7 @@ export class PdvStore {
         origin_device TEXT NOT NULL DEFAULT 'Servidor',
         operation_id TEXT UNIQUE
       );
+      CREATE TABLE IF NOT EXISTS suppliers (id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE);
       CREATE TABLE IF NOT EXISTS payables (
         id TEXT PRIMARY KEY,
         description TEXT NOT NULL,
@@ -2485,6 +2518,7 @@ export class PdvStore {
     addColumnIfMissing(db, "receivables", "updated_at", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "payables", "cost_center", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "payables", "payment_account", "TEXT NOT NULL DEFAULT ''");
+    addColumnIfMissing(db, "payables", "preferred_payment_method", "TEXT NOT NULL DEFAULT 'Pix'");
     addColumnIfMissing(db, "payables", "tags_json", "TEXT NOT NULL DEFAULT '[]'");
     addColumnIfMissing(db, "payables", "updated_at", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "payables", "issue_date", "TEXT NOT NULL DEFAULT ''");
@@ -2492,6 +2526,13 @@ export class PdvStore {
     addColumnIfMissing(db, "payables", "series_kind", "TEXT");
     addColumnIfMissing(db, "payables", "installment_number", "INTEGER");
     addColumnIfMissing(db, "payables", "installment_count", "INTEGER");
+    if (!selectAll(db, "SELECT key FROM pdv_settings WHERE key = 'supplier_registry_initialized'").length) {
+      for (const row of selectAll<{ supplier: string }>(db, "SELECT DISTINCT supplier FROM payables WHERE trim(supplier) <> ''")) {
+        const name = row.supplier.trim();
+        db.run("INSERT OR IGNORE INTO suppliers (id, name, name_key) VALUES (?, ?, ?)", [randomUUID(), name, supplierBalanceKey(name)]);
+      }
+      db.run("INSERT INTO pdv_settings (key, value) VALUES ('supplier_registry_initialized', 'true')");
+    }
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_sales_operation_id ON sales(operation_id) WHERE operation_id IS NOT NULL");
     db.run("CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at DESC)");
     db.run("CREATE INDEX IF NOT EXISTS idx_sales_status ON sales(status)");

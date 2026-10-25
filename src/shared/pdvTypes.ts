@@ -249,6 +249,13 @@ export interface PdvPayablePayment {
   operationId?: string;
 }
 
+export interface PdvSupplier {
+  id: string;
+  name: string;
+}
+
+export type FinancialPaymentMethod = Exclude<PdvPaymentMethod, "Conta a receber" | "Nao definido">;
+
 export interface PdvPayable {
   id: string;
   description: string;
@@ -257,6 +264,7 @@ export interface PdvPayable {
   costCenter: string;
   documentNumber: string;
   paymentAccount: string;
+  preferredPaymentMethod?: FinancialPaymentMethod;
   tags: string[];
   createdAt: string;
   updatedAt: string;
@@ -283,6 +291,7 @@ export interface PdvPayableDraft {
   costCenter?: string;
   documentNumber?: string;
   paymentAccount?: string;
+  preferredPaymentMethod?: FinancialPaymentMethod;
   tags?: string[];
   issueDate?: string;
   seriesId?: string;
@@ -345,6 +354,7 @@ export interface PdvSnapshot {
   customers: PdvCustomer[];
   receivables: PdvReceivable[];
   payables: PdvPayable[];
+  suppliers: PdvSupplier[];
   currentCashShift?: PdvCashShift;
   recentCashShifts: PdvCashShift[];
   settings: PdvSettings;

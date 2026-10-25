@@ -1,6 +1,9 @@
+import { PayableEditorModal } from "./components/SimplePayableEditor";
 import { IndependentUpdater } from "./components/IndependentUpdater";
 import { HelpCenter, type HelpDestination } from "./components/HelpCenter";
 import { OpenTablesSummary } from "./components/OpenTablesSummary";
+import { SimpleFinancialFilters, SimpleCollectionModal, SuppliersModal } from "./components/SimpleFinancialControls";
+import type { PdvSupplier } from "./shared/pdvTypes";
 import { createHistoryDescriptionLookup } from "./shared/historyDescription";
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -3020,6 +3023,18 @@ export function App() {
                 <div className="pdv-module-panel payables-main-panel">
                   <PayablesPanel
                   payables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.payables || []}
+                  supplierRegistry={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.suppliers || []}
+                  onSaveSupplier={async (draft) => {
+                    const supplier = remoteSession
+                      ? (await remoteRequest<{ supplier: PdvSupplier }>(remoteSession, "/api/pdv/suppliers", { method: "POST", body: JSON.stringify(draft) })).supplier
+                      : await window.caixa.savePdvSupplier(draft);
+                    if (remoteSession) await refreshRemote(remoteSession); else await reloadPdv();
+                    return supplier;
+                  }}
+                  onDeleteSupplier={async (id) => {
+                    if (remoteSession) { await remoteRequest(remoteSession, `/api/pdv/suppliers/${id}`, { method: "DELETE" }); await refreshRemote(remoteSession); }
+                    else { await window.caixa.deletePdvSupplier(id); await reloadPdv(); }
+                  }}
                   readOnly={Boolean(remoteSession && !remoteSession.permissions.manageTables)}
                   onSave={async (draft) => {
                     let payable: PdvPayable;
@@ -3207,6 +3222,9 @@ export function App() {
 
 function PayablesPanel({
   payables,
+  supplierRegistry,
+  onSaveSupplier,
+  onDeleteSupplier,
   readOnly,
   onSave,
   onPay,
@@ -3218,6 +3236,9 @@ function PayablesPanel({
   onToast
 }: {
   payables: PdvPayable[];
+  supplierRegistry: PdvSupplier[];
+  onSaveSupplier: (draft: PdvSupplier) => Promise<PdvSupplier>;
+  onDeleteSupplier: (id: string) => Promise<void>;
   readOnly: boolean;
   onSave: (draft: PdvPayableDraft) => Promise<PdvPayable>;
   onPaySupplier: (supplier: string, payment: PdvPayablePayment, operationId: string, accountIds?: string[]) => Promise<PdvPayable[]>;
@@ -3245,6 +3266,7 @@ function PayablesPanel({
   const [deleteRequest, setDeleteRequest] = useState<PdvPayable | null>(null);
   const [busy, setBusy] = useState(false);
   const [supplierView, setSupplierView] = useState(false);
+  const [managingSuppliers, setManagingSuppliers] = useState(false);
   const [supplierSelection, setSupplierSelection] = useState("");
   const [supplierPaying, setSupplierPaying] = useState<PdvPayable | null>(null);
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
@@ -3299,28 +3321,19 @@ function PayablesPanel({
   const validSelection = selected && visible.some((item) => item.id === selected.id) ? selected : null;
   const canChange = !readOnly && !!validSelection && !["Cancelada", "Excluida"].includes(validSelection.status);
   const canPay = canChange && (validSelection?.balance || 0) > 0.009;
-  const sevenDays = getLocalDateKey(new Date(new Date(`${today}T12:00:00`).getTime() + 7 * 86400000));
   const active = visible.filter((payable) => !["Cancelada", "Excluida"].includes(payable.status));
   const openBalance = roundMoney(active.reduce((sum, payable) => sum + payable.balance, 0));
   const hiddenOpenCount = payables.filter((payable) => payable.balance > 0.009 && !["Cancelada", "Excluida"].includes(payable.status) && !visible.some((item) => item.id === payable.id)).length;
-  const overdue = active.filter((payable) => payable.status === "Vencida");
   const paidInPeriod = roundMoney(active.reduce((sum, payable) => sum + payable.paidAmount, 0));
-  const dueToday = active.filter((payable) => payable.dueDate === today && !["Paga", "Cancelada", "Excluida"].includes(payable.status));
-  const dueNextSevenDays = active.filter((payable) => {
-    if (["Paga", "Cancelada", "Excluida"].includes(payable.status)) return false;
-    const days = Math.ceil((new Date(`${payable.dueDate}T12:00:00`).getTime() - new Date(`${today}T12:00:00`).getTime()) / 86400000);
-    return days >= 0 && days <= 7;
-  });
   const categories = [...new Set(payables.map((payable) => payable.category).filter(Boolean))].sort((left, right) => left.localeCompare(right, "pt-BR"));
-  const suppliers = [...new Set(payables.map((payable) => payable.supplier).filter(Boolean))].sort((left, right) => left.localeCompare(right, "pt-BR"));
   const syncSelection = (next: PdvPayable) => {
     setSelected(next);
     setPaying((current) => current?.id === next.id ? next : current);
   };
   const exportVisibleAccounts = () => downloadFinancialCsv(
     `contas-a-pagar-${today}.csv`,
-    ["Descricao", "Fornecedor", "Categoria", "Centro de custo", "Documento", "Emissao", "Vencimento", "Valor", "Pago", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao"],
-    visible.map((item) => [item.description, item.supplier, item.category, item.costCenter, item.documentNumber, item.issueDate, item.dueDate, item.amount, item.paidAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note])
+    ["Descricao", "Fornecedor", "Categoria", "Centro de custo", "Documento", "Emissao", "Vencimento", "Valor", "Pago", "Saldo", "Situacao", "Conta prevista", "Tags", "Observacao", "Forma prevista"],
+    visible.map((item) => [item.description, item.supplier, item.category, item.costCenter, item.documentNumber, item.issueDate, item.dueDate, item.amount, item.paidAmount, item.balance, item.status, item.paymentAccount, (item.tags || []).join(", "), item.note, item.preferredPaymentMethod || "Pix"])
   );
 
   return (
@@ -3336,16 +3349,17 @@ function PayablesPanel({
       {!supplierView && <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
         <button disabled={readOnly} onClick={() => setEditing("new")}><Plus /><span>Novo</span></button>
         <button disabled={!canChange} onClick={() => validSelection && setEditing(validSelection)}><Edit3 /><span>Alterar</span></button>
-        <button disabled={readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
-        <button disabled={readOnly || !visible.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
+        {selectedAccountIds.some((id) => visible.some((account) => account.id === id)) && <button disabled={readOnly || !visible.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
           const accounts = visible.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
           if (!accounts.length) return;
           if (!supplierBalanceKey(accounts[0].supplier) || accounts.some((account) => supplierBalanceKey(account.supplier) !== supplierBalanceKey(accounts[0].supplier))) { onToast("error", "Selecione contas pendentes do mesmo fornecedor."); return; }
           supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(accounts.map((account) => account.id)); setSupplierPaying({ ...accounts[0], description: accounts[0].supplier, balance: roundMoney(accounts.reduce((sum, account) => sum + account.balance, 0)) });
-        }}><Wallet /><span>Pagar selecionadas ({selectedAccountIds.filter((id) => visible.some((account) => account.id === id)).length})</span></button>
+        }}><Wallet /><span>Pagar selecionadas ({selectedAccountIds.filter((id) => visible.some((account) => account.id === id)).length})</span></button>}
         <button className="primary-command" disabled={!canPay} onClick={() => validSelection && setPaying(validSelection)}><Wallet /><span>Pagar</span></button>
-        <button disabled={!canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
-        <button disabled={!validSelection} onClick={() => setRecordView(true)}><ReceiptText /><span>Registro</span></button>
+        <details className="finance-more-actions"><summary>Mais ações</summary><div>
+          <button disabled={readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
+          <button disabled={!canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
+        </div></details>
       </div>}
       <div className="finance-view-row">
         <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
@@ -3353,7 +3367,7 @@ function PayablesPanel({
           <button role="tab" aria-selected={supplierView} onClick={() => { setSupplierView(true); setRecordView(false); }}>Por fornecedor</button>
           <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setSupplierView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
         </div>
-        <button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button>
+        <div className="finance-view-actions"><button className="finance-customer-button" onClick={() => setManagingSuppliers(true)}><Users size={14} /> Fornecedores</button><button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button></div>
       </div>
       {supplierView ? <>
         <div className="financial-filters"><label className="financial-search"><span>Buscar fornecedor</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome do fornecedor" /></label><button disabled={readOnly || !selectedSupplierRow} onClick={() => { if (selectedSupplierRow) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...selectedSupplierRow.representative, description: selectedSupplierRow.name, balance: selectedSupplierRow.balance }); } }}>Pagar ao fornecedor</button></div>
@@ -3364,26 +3378,18 @@ function PayablesPanel({
           { key: "balance", label: "Total a pagar", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{formatCurrency(row.balance)}</strong> }
         ]} totals={<><span>Saldo pendente de todos os fornecedores</span><strong>{formatCurrency(supplierRows.reduce((sum, row) => sum + row.balance, 0))}</strong></>} />
       </> : <>
-      <div className="finance-period-shortcuts"><label>Data: <select aria-label="Data usada no filtro" title="Se a conta não tiver vencimento, será usada a data de emissão" value={dateField} onChange={(event) => setDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label><button onClick={() => { setFrom(today); setTo(today); setStatus("Em aberto"); }}>Hoje</button><button onClick={() => { setDateField("due"); setFrom(today); setTo(sevenDays); setStatus("Em aberto"); }}>Próximos 7 dias</button><button onClick={() => { setFrom(monthStart); setTo(monthEnd); }}>Este mês</button><button onClick={() => { setFrom(""); setTo(""); setStatus("Vencidas"); }}>Vencidas</button></div>
-
-      <div className="financial-filters">
-        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Descrição, fornecedor, documento ou tag" /></label>
-        <label><span>De</span><input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
-        <label><span>Ate</span><input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-        <label><span>Situacao</span><select value={status} onChange={(event) => { const next = event.target.value as typeof status; setStatus(next); if (next === "Excluidas") { setFrom(""); setTo(""); } }}>{["Em aberto", "Vencidas", "Historico", "Pagas", "Canceladas", "Excluidas", "Todos"].map((value) => <option key={value}>{value}</option>)}</select></label>
-        <button title="Ampliar o período sem mudar a situação selecionada" onClick={() => { setFrom(""); setTo(""); setQuery(""); }}><RotateCcw size={15} /> Todo o período</button>
-      </div>
+      <SimpleFinancialFilters query={query} onQuery={setQuery} placeholder="Descrição ou fornecedor" from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next as typeof status); if (next === "Excluidas") { setFrom(""); setTo(""); } }} statuses={["Em aberto", "Vencidas", "Pagas", "Canceladas", "Excluidas", "Historico", "Todos"]} />
       {hiddenOpenCount > 0 && <div className="finance-filter-notice">{hiddenOpenCount} conta(s) em aberto fora dos filtros atuais. <button onClick={() => { setFrom(""); setTo(""); setStatus("Em aberto"); setQuery(""); }}>Ver todas em aberto</button></div>}
 
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
-        <FinancialGrid id="payables" rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
+        <FinancialGrid id="payables" defaultHidden={["issue", "document", "category", "method", "paid"]} rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
           { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${item.description}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
           { key: "issue", label: "Emissão", value: (item) => item.issueDate, render: (item) => item.issueDate ? new Date(`${item.issueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
           { key: "document", label: "Documento", value: (item) => item.documentNumber || "—" },
           { key: "description", label: "Descrição / fornecedor", required: true, value: (item) => item.description, render: (item) => <div className="finance-cell-title"><strong>{item.description}</strong><small>{item.supplier || "Fornecedor não informado"}</small></div> },
           { key: "category", label: "Categoria", value: (item) => item.category || "—" },
           { key: "due", label: "Vencimento", value: (item) => item.dueDate, render: (item) => item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
-          { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || "—" },
+          { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || item.preferredPaymentMethod || "Pix" },
           { key: "amount", label: "Valor", numeric: true, value: (item) => item.amount, render: (item) => formatCurrency(item.amount) },
           { key: "paid", label: "Pago", numeric: true, value: (item) => item.paidAmount, render: (item) => formatCurrency(item.paidAmount) },
           { key: "balance", label: "Saldo", numeric: true, required: true, value: (item) => item.balance, render: (item) => <strong>{formatCurrency(item.balance)}</strong> },
@@ -3396,10 +3402,10 @@ function PayablesPanel({
               <div className="financial-detail-title"><span className="pdv-eyebrow">Detalhes da conta</span><h3>{selected.description}</h3><p>{selected.note || "Sem observacoes."}</p></div>
               <dl>
                 <div><dt>Fornecedor</dt><dd>{selected.supplier || "Nao informado"}</dd></div>
-                <div><dt>Categoria</dt><dd>{selected.category || "Nao informada"}</dd></div>
-                <div><dt>Centro de custo</dt><dd>{selected.costCenter || "Nao informado"}</dd></div>
-                <div><dt>Documento</dt><dd>{selected.documentNumber || "Nao informado"}</dd></div>
-                <div><dt>Conta prevista</dt><dd>{selected.paymentAccount || "Nao informada"}</dd></div>
+                <div><dt>Forma de pagamento</dt><dd>{selected.preferredPaymentMethod || "Pix"}</dd></div>
+                {selected.category && <div><dt>Categoria</dt><dd>{selected.category}</dd></div>}
+                {selected.costCenter && <div><dt>Centro de custo</dt><dd>{selected.costCenter}</dd></div>}
+                {selected.documentNumber && <div><dt>Documento</dt><dd>{selected.documentNumber}</dd></div>}
                 <div><dt>Emissao</dt><dd>{selected.issueDate ? new Date(`${selected.issueDate}T12:00:00`).toLocaleDateString("pt-BR") : "Nao informada"}</dd></div>
                 {selected.installmentCount && selected.installmentCount > 1 && <div><dt>Parcela</dt><dd>{selected.installmentNumber}/{selected.installmentCount}</dd></div>}
                 <div><dt>Valor original</dt><dd>{formatCurrency(selected.amount)}</dd></div>
@@ -3435,6 +3441,7 @@ function PayablesPanel({
       </div>
 
       </>}
+      {managingSuppliers && <SuppliersModal suppliers={supplierRegistry} readOnly={readOnly} onSave={onSaveSupplier} onDelete={onDeleteSupplier} onClose={() => setManagingSuppliers(false)} />}
       {supplierPaying && <PayablePaymentModal payable={supplierPaying} busy={busy} onCancel={() => { if (!busy) setSupplierPaying(null); }} onConfirm={async (payment) => {
         if (busy) return; setBusy(true);
         try { await onPaySupplier(supplierPaying.supplier, payment, supplierOperationId.current, payingAccountIds); setSupplierPaying(null); setSelectedAccountIds([]); onToast("success", "Pagamento distribuído nas contas do fornecedor."); }
@@ -3446,7 +3453,9 @@ function PayablesPanel({
           payable={editing === "new" ? null : editing}
           initialSupplier={editing === "new" ? newSupplier : undefined}
           categories={categories}
-          suppliers={suppliers}
+          supplierRegistry={supplierRegistry}
+          onSaveSupplier={onSaveSupplier}
+          onDeleteSupplier={onDeleteSupplier}
           busy={busy}
           onCancel={() => { setEditing(null); setNewSupplier(""); }}
           onSave={async (draft) => {
@@ -3485,7 +3494,7 @@ function PayablesPanel({
               }
               setFrom("");
               setTo("");
-              setStatus("Todos");
+              setStatus(next.balance > 0.009 ? "Em aberto" : "Pagas");
               setQuery("");
               syncSelection(next);
               setEditing(null);
@@ -3553,171 +3562,10 @@ function PayablesPanel({
   );
 }
 
-function PayableEditorModal({
-  payable,
-  initialSupplier,
-  categories,
-  suppliers,
-  busy,
-  onCancel,
-  onSave
-}: {
-  payable: PdvPayable | null;
-  initialSupplier?: string;
-  categories: string[];
-  suppliers: string[];
-  busy: boolean;
-  onCancel: () => void;
-  onSave: (draft: PdvPayableDraft) => void;
-}) {
-  const [draft, setDraft] = useState<PdvPayableDraft>({
-    id: payable?.id || crypto.randomUUID(),
-    description: payable?.description || "",
-    supplier: payable?.supplier || initialSupplier || "",
-    category: payable?.category || "",
-    costCenter: payable?.costCenter || "",
-    documentNumber: payable?.documentNumber || "",
-    paymentAccount: payable?.paymentAccount || "",
-    tags: payable?.tags || [],
-    issueDate: payable?.issueDate || getLocalDateKey(),
-    seriesId: payable?.seriesId,
-    installmentNumber: payable?.installmentNumber,
-    installmentCount: payable?.installmentCount || 1,
-    recurrenceIntervalMonths: 0,
-    recurrenceCount: 2,
-    dueDate: payable?.dueDate || getLocalDateKey(),
-    amount: payable?.amount || 0,
-    note: payable?.note || ""
-  });
-  const [amountText, setAmountText] = useState(payable ? String(payable.amount).replace(".", ",") : "");
-  const [payments, setPayments] = useState<PdvPayablePayment[]>(() => payable?.payments.map((payment) => ({ ...payment })) || []);
-  const amount = roundMoney(parseMoney(amountText));
-  const paidAmount = roundMoney(payments.reduce((sum, payment) => sum + roundMoney(Number(payment.amount) || 0), 0));
-  const balance = roundMoney(Math.max(0, amount - paidAmount));
-  const paymentsValid = payments.every((payment) => Number.isFinite(Number(payment.amount)) && Number(payment.amount) > 0)
-    && paidAmount - amount <= 0.009;
-  const updatePayment = (id: string, patch: Partial<PdvPayablePayment>) => {
-    setPayments((current) => current.map((payment) => payment.id === id ? { ...payment, ...patch } : payment));
-  };
-  const addPayment = () => {
-    const nextAmount = balance > 0.009 ? balance : 0;
-    setPayments((current) => [...current, {
-      id: crypto.randomUUID(),
-      payableId: payable?.id || draft.id || "",
-      createdAt: new Date().toISOString(),
-      method: "Pix",
-      amount: nextAmount,
-      description: "",
-      originDevice: "Edicao da conta"
-    }]);
-  };
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <section className="modal payable-editor-modal">
-        <div className="modal-head"><div><span className="settings-overline">Contas a pagar</span><strong>{payable ? "Editar conta" : "Nova conta"}</strong></div><button className="icon-button" onClick={onCancel}><X size={18} /></button></div>
-        <div className="payable-editor-body">
-          <div className="payable-form-grid">
-            <label className="wide"><span>Descricao *</span><input autoFocus value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Ex.: Energia eletrica da loja" /></label>
-            <label><span>{!payable && (draft.installmentCount || 1) > 1 ? "Valor total *" : "Valor *"}</span><input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} placeholder="0,00" /></label>
-            {!payable && <label><span>Parcelas</span><input type="number" min="1" max="60" value={draft.installmentCount || 1} onChange={(event) => setDraft({ ...draft, installmentCount: Math.max(1, Math.min(60, Math.floor(Number(event.target.value) || 1))) })} /></label>}
-            {!payable && (draft.installmentCount || 1) === 1 && <label><span>Recorrencia</span><select value={draft.recurrenceIntervalMonths || 0} onChange={(event) => setDraft({ ...draft, recurrenceIntervalMonths: Number(event.target.value) })}><option value="0">Nao repetir</option><option value="1">Mensal</option><option value="2">Bimestral</option><option value="3">Trimestral</option><option value="6">Semestral</option><option value="12">Anual</option></select></label>}
-            {!payable && (draft.recurrenceIntervalMonths || 0) > 0 && <label><span>Quantidade de ocorrencias</span><input type="number" min="2" max="60" value={draft.recurrenceCount || 2} onChange={(event) => setDraft({ ...draft, recurrenceCount: Math.max(2, Math.min(60, Math.floor(Number(event.target.value) || 2))) })} /></label>}
-            <label><span>Data de emissao</span><input type="date" value={draft.issueDate || ""} onChange={(event) => setDraft({ ...draft, issueDate: event.target.value })} /></label>
-            <label><span>Vencimento *</span><input type="date" value={draft.dueDate} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value })} /></label>
-            <label><span>Fornecedor</span><input list="payable-suppliers" value={draft.supplier} onChange={(event) => setDraft({ ...draft, supplier: event.target.value })} placeholder="Opcional" /><datalist id="payable-suppliers">{suppliers.map((value) => <option key={value} value={value} />)}</datalist></label>
-            <label><span>Categoria</span><input list="payable-categories" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} placeholder="Ex.: Energia, aluguel..." /><datalist id="payable-categories">{categories.map((value) => <option key={value} value={value} />)}</datalist></label>
-            <label><span>Centro de custo</span><input value={draft.costCenter || ""} onChange={(event) => setDraft({ ...draft, costCenter: event.target.value })} placeholder="Ex.: Loja, cozinha, administrativo" /></label>
-            <label><span>Conta/caixa previsto</span><input value={draft.paymentAccount || ""} onChange={(event) => setDraft({ ...draft, paymentAccount: event.target.value })} placeholder="Ex.: Caixa principal, Banco" /></label>
-            <label className="wide"><span>Numero do documento</span><input value={draft.documentNumber} onChange={(event) => setDraft({ ...draft, documentNumber: event.target.value })} placeholder="Nota fiscal, boleto ou referencia opcional" /></label>
-            <label className="wide"><span>Tags</span><input value={(draft.tags || []).join(", ")} onChange={(event) => setDraft({ ...draft, tags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })} placeholder="Ex.: fixa, urgente, fornecedor local" /></label>
-            <label className="wide"><span>Observacoes</span><textarea value={draft.note} onChange={(event) => setDraft({ ...draft, note: event.target.value })} placeholder="Informacoes internas sobre esta despesa." /></label>
-          </div>
-          {!payable && (draft.installmentCount || 1) > 1 && <div className="financial-installment-preview"><CalendarDays size={17} /><span>O total sera dividido em <b>{draft.installmentCount} parcelas mensais</b>, a partir do vencimento informado. Cada parcela tera seu proprio pagamento e historico.</span></div>}
-          {!payable && (draft.installmentCount || 1) === 1 && (draft.recurrenceIntervalMonths || 0) > 0 && <div className="financial-installment-preview"><RotateCcw size={17} /><span>Serão criadas <b>{draft.recurrenceCount || 2} contas recorrentes</b>. O valor informado será repetido em cada ocorrência, com vencimentos calculados automaticamente.</span></div>}
-          <section className="payable-editor-payments">
-            <div className="payable-editor-section-head">
-              <div><strong>Pagamentos da conta</strong><span>Edite ou remova pagamentos incorretos antes de salvar.</span></div>
-              <button type="button" className="ghost-button" onClick={addPayment} disabled={balance <= 0.009 || (!payable && (draft.installmentCount || 1) > 1)}><Plus size={16} /> Adicionar pagamento</button>
-            </div>
-            <div className="payable-editor-summary">
-              <span>Valor <b>{formatCurrency(amount)}</b></span>
-              <span>Pago <b>{formatCurrency(paidAmount)}</b></span>
-              <span>Saldo <b>{formatCurrency(balance)}</b></span>
-            </div>
-            <div className="payable-editor-payment-list">
-              {payments.map((payment) => (
-                <div key={payment.id} className="payable-editor-payment-row">
-                  <label><span>Data</span><input type="date" value={String(payment.createdAt).slice(0, 10)} onChange={(event) => updatePayment(payment.id, { createdAt: `${event.target.value}T12:00:00.000Z` })} /></label>
-                  <label><span>Forma</span><select value={payment.method} onChange={(event) => updatePayment(payment.id, { method: event.target.value as PdvPayablePayment["method"] })}>{["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Nao definido"].map((value) => <option key={value}>{value}</option>)}</select></label>
-                  <label><span>Valor</span><input type="number" min="0.01" step="0.01" value={Number.isFinite(Number(payment.amount)) ? payment.amount : ""} onChange={(event) => updatePayment(payment.id, { amount: Number(event.target.value) })} /></label>
-                  <label className="payment-description"><span>Observacao</span><input value={payment.description || ""} onChange={(event) => updatePayment(payment.id, { description: event.target.value })} placeholder="Opcional" /></label>
-                  <button type="button" className="icon-button danger" title="Remover pagamento" onClick={() => setPayments((current) => current.filter((item) => item.id !== payment.id))}><Trash2 size={17} /></button>
-                </div>
-              ))}
-              {!payments.length && <div className="payable-editor-payment-empty">Nenhum pagamento registrado. A conta permanecera em aberto.</div>}
-            </div>
-            {!paymentsValid && <div className="payable-editor-warning"><TriangleAlert size={16} /> O total pago nao pode ultrapassar o valor da conta e todos os pagamentos precisam ser maiores que zero.</div>}
-          </section>
-        </div>
-        <div className="modal-actions"><button className="ghost-button" onClick={onCancel} disabled={busy}>Cancelar</button><button className="primary-button" disabled={busy || !draft.description.trim() || !draft.dueDate || amount <= 0 || !paymentsValid} onClick={() => onSave({ ...draft, amount, payments })}>{busy ? "Salvando..." : "Salvar conta"}</button></div>
-      </section>
-    </div>
-  );
-}
-
-function PayablePaymentModal({ payable, busy, onCancel, onConfirm }: { payable: PdvPayable; busy: boolean; onCancel: () => void; onConfirm: (payment: PdvPayablePayment) => void }) {
-  const methods: Array<Exclude<PdvPaymentMethod, "Conta a receber" | "Nao definido">> = ["Dinheiro", "Debito", "Credito", "Pix", "Outros"];
-  const [method, setMethod] = useState<typeof methods[number] | null>(null);
-  const [description, setDescription] = useState("");
-  const confirmPayment = (payment: PdvPayment) => {
-    onConfirm({
-      id: crypto.randomUUID(),
-      payableId: payable.id,
-      createdAt: new Date().toISOString(),
-      method: payment.method as Exclude<PdvPaymentMethod, "Conta a receber">,
-      amount: payment.amount,
-      description: description.trim() || undefined
-    });
-  };
-  return (
-    <div className="pdv-modal-backdrop pdv-nested-backdrop" role="dialog" aria-modal="true">
-      <section className="pdv-payment-modal pdv-collection-modal pdv-admin-modal payable-payment-modal">
-        <div className="pdv-section-head">
-          <div>
-            <span className="pdv-eyebrow">Pagamento de conta</span>
-            <h1>{payable.description}</h1>
-            <p>Saldo atual: {formatCurrency(payable.balance)}</p>
-          </div>
-          <button className="pdv-icon-button" onClick={onCancel} disabled={busy}><X size={18} /></button>
-        </div>
-        <div className="pdv-payment-methods" aria-label="Forma de pagamento">
-          {methods.map((value) => (
-            <button key={value} type="button" className={method === value ? "active" : ""} disabled={busy} onClick={() => setMethod(value)}>
-              {value}
-            </button>
-          ))}
-        </div>
-        <label className="pdv-payment-description">
-          <span>Observacao do pagamento</span>
-          <input value={description} maxLength={160} onChange={(event) => setDescription(event.target.value)} placeholder="Comprovante, conta utilizada ou observacao opcional" />
-          <small>A observacao ficara salva no historico desta conta.</small>
-        </label>
-        <div className="pdv-action-row">
-          <button className="pdv-ghost-button" onClick={onCancel} disabled={busy}>Voltar</button>
-        </div>
-        {method && (
-          <PaymentAmountModal
-            key={`${method}-${payable.balance}`}
-            method={method}
-            remaining={payable.balance}
-            context="payable"
-            onCancel={() => setMethod(null)}
-            onConfirm={confirmPayment}
-          />
-        )}
-      </section>
-    </div>
-  );
+function PayablePaymentModal({ payable, busy, onCancel, onConfirm }: { payable: PdvPayable; busy: boolean; onCancel: () => void; onConfirm: (payment: PdvPayablePayment) => void | Promise<void> }) {
+  return <SimpleCollectionModal mode="payable" title={payable.description} balance={payable.balance} defaultMethod={payable.preferredPaymentMethod || "Pix"} busy={busy} onCancel={onCancel} onConfirm={(payment) => onConfirm({
+    id: payment.id, payableId: payable.id, createdAt: new Date().toISOString(), method: payment.method as PdvPayablePayment["method"], amount: payment.amount, description: payment.description
+  })} />;
 }
 
 function DashboardPanel({

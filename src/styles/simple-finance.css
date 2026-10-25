@@ -1,0 +1,75 @@
+.simple-financial-filters { border: 1px solid var(--line); background: var(--panel-2); padding: 8px; }
+.simple-financial-filter-row { display: grid; grid-template-columns: minmax(180px, 1fr) 170px 170px; gap: 8px; align-items: end; }
+.simple-financial-date-row { display: grid; grid-template-columns: repeat(3, minmax(100px, 170px)); gap: 8px; padding-top: 8px; }
+.simple-financial-filters label, .simple-collection-modal label, .simple-suppliers-modal label { display: grid; gap: 4px; min-width: 0; font-size: .78rem; }
+.simple-financial-filters label > span, .simple-collection-modal label > span, .simple-suppliers-modal label > span { color: var(--muted); font-size: .73rem; }
+.simple-financial-filters :is(input, select), .simple-collection-modal :is(input, select, textarea), .simple-suppliers-modal input { width: 100%; min-width: 0; min-height: 32px; padding: 6px 9px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 1px; font: inherit; }
+#root .module-window-body .finance-command-bar { overflow: visible; flex-wrap: wrap; }
+.finance-more-actions { position: relative; margin-left: auto; align-self: center; }
+.finance-more-actions > summary { display: flex; align-items: center; min-height: 32px; padding: 5px 9px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: .75rem; cursor: pointer; list-style: none; }
+.finance-more-actions > summary::after { content: "▾"; margin-left: 8px; color: var(--muted); }
+.finance-more-actions > div { position: absolute; right: 0; top: calc(100% + 4px); display: grid; gap: 3px; width: max-content; min-width: 185px; max-width: 280px; padding: 5px; background: var(--panel-2); border: 1px solid var(--line); box-shadow: var(--shadow); z-index: 30; }
+#root .finance-more-actions > div > button { justify-content: flex-start; width: 100%; }
+.simple-extra-options { padding: 0; margin: 8px 0; color: var(--text); border: 1px solid var(--line); border-radius: 1px; background: var(--panel); }
+.simple-extra-options > summary { padding: 8px 10px; color: var(--muted); font-size: .78rem; cursor: pointer; }
+.simple-extra-options[open] > summary { border-bottom: 1px solid var(--line); color: var(--text); }
+.simple-extra-options > label { margin: 10px; }
+#root .simple-payable-editor { width: min(640px, 88vw); max-height: 86vh; min-height: 0; height: auto; display: flex; flex-direction: column; border-radius: 1px; }
+#root .simple-payable-editor .modal-head { min-height: 40px; padding: 8px 12px; flex-shrink: 0; }
+#root .simple-payable-editor .modal-head strong { font-size: 1rem; }
+#root .simple-payable-editor .payable-editor-body { padding: 10px 12px; flex: 1 1 auto; }
+#root .simple-payable-editor .payable-form-grid { padding: 0; gap: 8px 10px; }
+#root .simple-payable-editor .payable-form-grid .wide { grid-column: 1 / -1; }
+#root .simple-payable-editor .payable-form-grid :is(input, select) { min-height: 32px; height: 32px; padding: 5px 8px; border-radius: 1px; font-size: .8rem; }
+#root .simple-payable-editor .payable-form-grid textarea { min-height: 50px; height: 50px; padding: 6px 8px; border-radius: 1px; font-size: .8rem; }
+#root .simple-payable-editor .payable-form-grid label > span { font-size: .75rem; }
+#root .simple-payable-editor .simple-extra-options > .payable-form-grid { padding: 10px; }
+#root .simple-payable-editor .modal-actions { padding: 8px 12px; flex-shrink: 0; }
+#root .simple-payable-editor .modal-actions button { min-height: 32px; padding: 6px 11px; font-size: .8rem; border-radius: 1px; }
+#root :is(.simple-payable-editor, .simple-collection-modal, .simple-suppliers-modal),
+#root :is(.simple-payable-editor, .simple-collection-modal, .simple-suppliers-modal) :is(input, select, textarea, button) { border-radius: 1px !important; }
+#root .pdv-financial-editor-modal,
+#root .pdv-financial-editor-modal :is(input, select, textarea, button) { border-radius: 1px !important; }
+.simple-series-notice { font-size: .75rem; color: var(--muted); padding: 0 3px; }
+#root .pdv-financial-editor-modal:has(.financial-customer-picker) { width: min(640px, 88vw); max-height: 86vh; height: auto; border-radius: 1px; }
+#root .pdv-financial-editor-modal .pdv-section-head { min-height: 40px; padding: 10px 12px; }
+#root .pdv-financial-editor-modal .pdv-section-head :is(p, .pdv-eyebrow) { display: none; }
+#root .pdv-financial-editor-modal .pdv-section-head h1 { font-size: 1rem; }
+#root .pdv-financial-editor-grid { padding: 10px 12px; gap: 8px 10px; }
+#root .pdv-financial-editor-grid :is(input, select) { min-height: 32px; padding: 5px 8px; font-size: .8rem; border-radius: 1px; }
+#root .pdv-financial-editor-grid textarea { min-height: 50px; height: 50px; font-size: .8rem; border-radius: 1px; }
+#root .pdv-financial-editor-grid > .simple-extra-options { margin: 0; }
+#root .pdv-financial-editor-grid .simple-extra-options > .pdv-editor-grid { padding: 10px; }
+#root .pdv-financial-editor-modal > .pdv-action-row { padding: 8px 12px; }
+#root .finance-grid.is-simple table { min-width: 600px; width: 100%; }
+#root .finance-grid.is-simple :is(th, td) { padding: 8px 10px; }
+#root .finance-grid.is-simple th { padding-block: 4px; }
+#root .finance-grid.is-simple th button { min-height: 27px; padding-block: 2px; }
+#root .module-window-body > .financial-workspace { height: 100%; min-height: 0 !important; }
+#root .module-window-body .financial-content > .clients-main-panel { height: 100%; min-height: 0 !important; padding: 0 !important; }
+#root .module-window-body :is(.pdv-receivable-professional, .pdv-payable-professional) > .finance-workspace,
+#root .module-window-body :is(.pdv-receivable-professional, .pdv-payable-professional) > .finance-grid { flex: 1 1 0; min-height: 160px; overflow: hidden; }
+#root .module-window-body .finance-grid.is-simple { flex: 1 1 0; min-height: 0; overflow: hidden; }
+#root .module-window-body :is(.pdv-receivable-professional, .pdv-payable-professional) .finance-grid-scroll { flex: 1 1 0; min-height: 75px; max-height: none; }
+#root .module-window-body :is(.pdv-receivable-professional, .pdv-payable-professional) > .finance-grid table { min-width: 0; }
+#root .module-window-body .finance-workspace.show-record { overflow: auto; }
+.simple-collection-modal, .simple-suppliers-modal { width: min(460px, 88vw); max-height: 85vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 1px; box-shadow: var(--shadow); }
+.simple-suppliers-modal { width: min(560px, 88vw); }
+:is(.simple-collection-modal, .simple-suppliers-modal) > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+:is(.simple-collection-modal, .simple-suppliers-modal) h2 { margin: 0; font-size: 1rem; }
+.simple-collection-modal header span { display: block; font-size: .78rem; color: var(--muted); margin-top: 3px; }
+:is(.simple-collection-modal, .simple-suppliers-modal) button { display: inline-flex; gap: 5px; align-items: center; justify-content: center; min-height: 30px; padding: 6px 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 1px; font: inherit; font-size: .78rem; cursor: pointer; }
+:is(.simple-collection-modal, .simple-suppliers-modal) button.primary-button { background: var(--accent); color: white; }
+:is(.simple-collection-modal, .simple-suppliers-modal) button:disabled { opacity: .45; cursor: not-allowed; }
+:is(.simple-collection-modal, .simple-suppliers-modal) > header > button { width: 28px; min-height: 28px; padding: 0; }
+.simple-collection-body, .simple-suppliers-body { padding: 12px; overflow: auto; min-height: 0; }
+.simple-collection-body > p:first-child { display: flex; justify-content: space-between; gap: 12px; margin: 0 0 12px; color: var(--muted); font-size: .8rem; }
+.simple-collection-body > p:first-child strong { color: var(--text); }
+.simple-collection-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+:is(.simple-collection-modal, .simple-suppliers-modal) footer { display: flex; justify-content: flex-end; gap: 7px; padding: 9px 12px; border-top: 1px solid var(--line); flex-shrink: 0; }
+.simple-suppliers-body > form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px; margin-bottom: 12px; }
+.simple-suppliers-list { margin-top: 10px; border-top: 1px solid var(--line); }
+.simple-suppliers-list article { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: .8rem; }
+.simple-suppliers-list article > span { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; max-width: 70%; justify-content: flex-end; }
+.simple-suppliers-list article small { font-size: .72rem; color: var(--muted); }
+@media (max-width: 760px) { .simple-financial-filter-row { grid-template-columns: 1fr 1fr; } .simple-financial-search { grid-column: 1 / -1; } .simple-financial-date-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

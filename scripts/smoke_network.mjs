@@ -72,6 +72,8 @@ const server = new LocalServer({
   cancelPdvReceivable: (id) => pdvStore.cancelReceivable(id),
   deletePdvReceivable: (id, permanent) => pdvStore.deleteReceivable(id, permanent),
   savePdvPayable: (draft) => pdvStore.savePayable(draft),
+  savePdvSupplier: (draft) => pdvStore.saveSupplier(draft),
+  deletePdvSupplier: (id) => pdvStore.deleteSupplier(id),
   paySupplierPayables: (supplier, payment, origin, operationId, accountIds) => pdvStore.paySupplierPayables(supplier, payment, origin, operationId, accountIds),
   payPdvPayable: (id, payment, origin, operationId) => pdvStore.payPayable(id, payment, origin, operationId),
   cancelPdvPayable: (id) => pdvStore.cancelPayable(id),
@@ -120,6 +122,16 @@ if (!printClient || serverStateChanges < 1) {
   throw new Error("Servidor nao identificou o cliente imediatamente ao conectar.");
 }
 const headers = { "content-type": "application/json", "x-caixa-password": "smoke-password", "x-device-name": "Cliente smoke", "x-caixa-version": appVersion };
+const supplierResponse = await fetch('http://127.0.0.1:43991/api/pdv/suppliers',{method:'POST',headers,body:JSON.stringify({id:crypto.randomUUID(),name:'Fornecedor remoto smoke'})});
+if (!supplierResponse.ok) throw new Error('Cliente não cadastrou fornecedor.');
+const remoteSupplier = (await supplierResponse.json()).supplier;
+if (!(await (await fetch('http://127.0.0.1:43991/api/pdv/snapshot',{headers})).json()).suppliers.some(item=>item.id===remoteSupplier.id)) throw new Error('Snapshot remoto sem fornecedor.');
+server.setPermissions({...settings.server.permissions,manageTables:false});
+const deniedSupplier = await fetch(`http://127.0.0.1:43991/api/pdv/suppliers/${remoteSupplier.id}`,{method:'DELETE',headers});
+if (deniedSupplier.status!==403) throw new Error('Cliente excluiu fornecedor sem permissão.');
+server.setPermissions(settings.server.permissions);
+const removedSupplier = await fetch(`http://127.0.0.1:43991/api/pdv/suppliers/${remoteSupplier.id}`,{method:'DELETE',headers});
+if (!removedSupplier.ok || pdvStore.getSuppliers().some(item=>item.id===remoteSupplier.id)) throw new Error('Cliente não excluiu o cadastro do fornecedor.');
 const readEntries = () => fetch("http://127.0.0.1:43991/api/entries", { headers });
 const initial = await (await readEntries()).json();
 if (initial.clientPolicy.operationMode !== "pdv") {
