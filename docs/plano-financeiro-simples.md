@@ -41,3 +41,10 @@ Solicitação de 25/10/2026: seguir a organização simples da referência, mant
 - A permissão Gerenciar produtos controla criação, edição e exclusão de produtos/categorias pelo cliente sem exigir também a permissão dos ajustes operacionais. A restrição é conferida na interface e no servidor.
 - Rede → Permissões oferece “Liberar acesso completo”. O servidor precisa salvar essa escolha; permissões existentes não são ampliadas automaticamente. Mesas, clientes e contas a pagar/receber continuam vinculados à permissão financeira; conexão e aparência continuam locais em cada computador.
 - Verificação: compilação e testes de rede, financeiro simples e campos opcionais aprovados. No Electron, conferidos cabeçalhos em 1280 × 720 e 1024 × 600 (incluindo datas personalizadas), paginação, pagamentos agrupados, criação/edição de produto e criação de despesa pelo cliente, revogação de permissões em tempo real e o preset de acesso completo. O atalho de pendências também preservou a situação ao limpar datas.
+
+
+### Ajuste dos pagamentos registrados no formulário compacto
+
+- As colunas fixas da edição de pagamentos ultrapassavam a largura do formulário e provocavam rolagem lateral. Os campos agora usam colunas flexíveis, com observação na linha seguinte e adaptação pela largura do próprio formulário.
+- O resumo e o botão Adicionar permanecem dentro da seção, inclusive quando há vários pagamentos. Mantida a rolagem vertical para chegar aos campos inferiores.
+- Compilação aprovada. `qa_payable_fit.py` conferiu limites e foco dos campos em 1280, 1024 e 800 pixels e em formulário de 420 pixels. Também editou/incluiu/removeu pagamentos e conferiu a persistência dos meios, observação, R$ 115 pagos e saldo de R$ 5 numa conta de R$ 120 com dados isolados.
