@@ -186,3 +186,41 @@
 #root .financial-state-options > div label { display: grid; }
 #root .financial-settlement-filter:disabled .financial-state-options { visibility: hidden; }
 @container finance-filters (max-width: 900px) { #root .simple-financial-filter-row { grid-template-columns: 100px minmax(126px, 1fr) minmax(126px, 1fr); } }
+
+/* The primary filter row mirrors the ledger: dates, search, settlement state. */
+#root .simple-financial-filter-row { grid-template-columns: 100px 126px 126px minmax(160px, 1fr) 184px; grid-template-areas: "field from to search settlement"; }
+#root .financial-date-field { grid-area: field; }
+#root .financial-date-from { grid-area: from; }
+#root .financial-date-to { grid-area: to; }
+#root .simple-financial-search { grid-area: search; grid-row: auto; }
+#root .financial-settlement-filter { grid-area: settlement; justify-self: end; width: 184px; }
+#root .financial-settlement-filter > div { justify-content: flex-end; }
+#root .financial-state-options > div { display: grid; gap: 9px; }
+@container finance-filters (max-width: 760px) {
+  #root .simple-financial-filter-row { grid-template-columns: 100px minmax(126px, 1fr) minmax(184px, 1fr); grid-template-areas: "field from to" "search search settlement"; }
+}
+
+/* Receipt previews live above the module window, so resizing never clips their controls. */
+#root > .receipt-modal-backdrop { position: fixed; inset: 0; z-index: 1400; display: grid; place-items: center; padding: 16px; }
+#root > .receipt-modal-backdrop .history-receipt-modal.receipt-viewer-modal { width: min(960px, calc(100vw - 32px)); max-width: 100%; height: min(680px, calc(100vh - 32px)); max-height: calc(100vh - 32px); min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; padding: 0; margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 1px; }
+#root > .receipt-modal-backdrop .receipt-viewer-modal > .modal-head { min-width: 0; padding: 9px 12px; min-height: 0; }
+#root > .receipt-modal-backdrop .receipt-viewer-modal > .modal-head strong { font-size: 1rem; }
+#root > .receipt-modal-backdrop .receipt-viewer-modal > .modal-head p { margin: 3px 0 0; font-size: .76rem; }
+#root > .receipt-modal-backdrop .receipt-viewer-modal > .modal-head .icon-button { width: 28px; height: 28px; min-height: 28px; flex-shrink: 0; padding: 0; }
+#root > .receipt-modal-backdrop .receipt-viewer-modal > .receipt-viewer-body { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(240px, .95fr); min-width: 0; min-height: 0; padding: 12px; gap: 12px; overflow: hidden; }
+#root > .receipt-modal-backdrop :is(.receipt-preview-shell, .receipt-viewer-options) { min-width: 0; min-height: 0; overflow: auto; }
+#root > .receipt-modal-backdrop .receipt-preview-frame { display: block; width: 100%; height: 100%; min-height: 0; }
+#root > .receipt-modal-backdrop .receipt-viewer-modal > .receipt-modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; padding: 8px 12px; min-height: 0; margin: 0; }
+#root > .receipt-modal-backdrop .receipt-modal-actions > button { flex: 0 0 auto; width: auto; min-width: 90px; min-height: 32px; padding: 5px 10px; font-size: .8rem; border-radius: 1px; }
+@media (max-width: 700px) {
+  #root > .receipt-modal-backdrop .receipt-viewer-modal > .receipt-viewer-body { grid-template-columns: minmax(0, 1fr); overflow: auto; }
+  #root > .receipt-modal-backdrop .receipt-preview-shell { height: 300px; }
+}
+
+#root .simple-financial-filter-row { grid-template-columns: 100px 126px 126px minmax(160px, 1fr) 266px; }
+#root .financial-settlement-filter { width: 266px; }
+#root .financial-state-options { margin-left: 0; margin-right: auto; }
+#root .financial-state-options summary { width: 86px; padding: 4px 6px; font-size: .72rem; font-weight: 600; white-space: nowrap; }
+@container finance-filters (max-width: 830px) {
+  #root .simple-financial-filter-row { grid-template-columns: 100px minmax(126px, 1fr) minmax(266px, 1fr); grid-template-areas: "field from to" "search search settlement"; }
+}

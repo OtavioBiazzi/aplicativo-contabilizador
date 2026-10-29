@@ -86,3 +86,8 @@
 #root .finance-grid.is-simple :is(th, td).number:last-child { position: sticky; right: 0; z-index: 1; background: var(--panel); box-shadow: -1px 0 var(--line); }
 #root .finance-grid.is-simple th.number:last-child { z-index: 3; background: var(--panel-2); }
 #root .finance-grid.is-simple tr.selected td.number:last-child { background: color-mix(in srgb, var(--panel) 80%, var(--accent)); }
+
+/* Keep a visible inset inside the product form panels. */
+#root .catalog-inline-editor .pdv-product-editor-body { padding: 12px !important; }
+#root .catalog-inline-editor .pdv-product-editor-body > .pdv-editor-section { padding: 12px; border: 1px solid var(--line); background: var(--panel-2); min-height: 0; }
+#root .catalog-inline-editor .pdv-product-editor-body .pdv-editor-section-title { padding: 0 0 8px; }

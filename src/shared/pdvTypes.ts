@@ -334,7 +334,8 @@ export interface PdvOpenTable {
 export interface PdvSale {
   id: string;
   /** Usado apenas na visualizacao/impressao de um extrato, sem criar venda. */
-  receiptPurpose?: "customer-balance";
+  receiptPurpose?: "customer-balance" | "payable-account";
+  receiptReference?: { documentNumber?: string; issueDate?: string; dueDate?: string };
   createdAt: string;
   type: "Venda direta" | "Mesa" | "Onibus";
   tableNumber?: number;

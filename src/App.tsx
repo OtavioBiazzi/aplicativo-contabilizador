@@ -1,3 +1,4 @@
+import { duplicatePayableDraft, buildPayableReceipt } from "./shared/financialAccountActions";
 import { PrivacyProfiles } from "./components/PrivacyProfiles";
 import { togglePrivacy, privacyEnabled, historyValuesHidden, mergeRemotePrivacy } from "./shared/privacy";
 import { PayableEditorModal } from "./components/SimplePayableEditor";
@@ -65,7 +66,7 @@ import {
   X
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
-import { PaymentAmountModal, PaymentModal, PdvApp } from "./PdvApp";
+import { PaymentAmountModal, PaymentModal, PdvApp, PdvReceiptDraftModal } from "./PdvApp";
 import { matchesTableNumberFilter } from "./shared/tableNumberFilter";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
 import type { PdvCashShift, PdvCustomer, PdvCustomerDraft, PdvDataVersion, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
@@ -3036,6 +3037,12 @@ export function App() {
               ) : (
                 <div className="pdv-module-panel payables-main-panel">
                   <PayablesPanel
+                  receiptOptions={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.settings ? {
+                    receiptSettings: (remoteSession ? remotePdvSnapshot : pdvSnapshot)!.settings,
+                    allowPrint: !remoteSession || remoteSession.permissions.printReceipts,
+                    printTargets: remoteSession ? (remoteSession.permissions.printReceipts ? [{ id: "server", label: "Computador servidor" }] : []) : server.devices.filter((device) => device.permissions.printReceipts).map((device) => ({ id: device.id, label: device.name })),
+                    onRemotePrint: remoteSession ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) }) : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)
+                  } : undefined}
                   payables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.payables || []}
                   supplierRegistry={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.suppliers || []}
                   financialLookups={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.financialLookups || []}
@@ -3248,6 +3255,7 @@ export function App() {
 
 function PayablesPanel({
   payables,
+  receiptOptions,
   financialLookups,
   onSaveLookup,
   onDeleteLookup,
@@ -3265,6 +3273,7 @@ function PayablesPanel({
   onToast
 }: {
   payables: PdvPayable[];
+  receiptOptions?: Pick<Parameters<typeof PdvReceiptDraftModal>[0], "receiptSettings" | "allowPrint" | "printTargets" | "onRemotePrint">;
   financialLookups: PdvFinancialLookup[];
   onSaveLookup: (draft: PdvFinancialLookup) => Promise<PdvFinancialLookup>;
   onDeleteLookup: (id: string) => Promise<void>;
@@ -3292,6 +3301,9 @@ function PayablesPanel({
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Historico" | "Pagas" | "Canceladas" | "Excluidas" | "Operacionais" | "Nenhuma">("Em aberto");
   const [editing, setEditing] = useState<PdvPayable | "new" | null>(null);
+  const [initialDraft, setInitialDraft] = useState<PdvPayableDraft | undefined>();
+  const [receiptPayable, setReceiptPayable] = useState<PdvPayable | null>(null);
+  const receiptSale = useMemo(() => receiptPayable ? buildPayableReceipt(receiptPayable) : null, [receiptPayable]);
   const [paying, setPaying] = useState<PdvPayable | null>(null);
   const [selected, setSelected] = useState<PdvPayable | null>(null);
   const [cancelRequest, setCancelRequest] = useState<PdvPayable | null>(null);
@@ -3321,6 +3333,7 @@ function PayablesPanel({
 
   useEffect(() => {
     if (!createRequest) return;
+    setInitialDraft(undefined);
     setNewSupplier(createRequest.supplier);
     setEditing("new");
     onCreateRequestConsumed?.();
@@ -3381,7 +3394,7 @@ function PayablesPanel({
 
       <fieldset className="finance-navigation" disabled={Boolean(editing)}>
       <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
-        <button disabled={readOnly} onClick={() => { setSupplierView(false); setRecordView(false); setEditing("new"); }}><Plus /><span>Novo</span></button>
+        <button disabled={readOnly} onClick={() => { setSupplierView(false); setRecordView(false); setInitialDraft(undefined); setEditing("new"); }}><Plus /><span>Novo</span></button>
         <button disabled={supplierView || !canChange} onClick={() => validSelection && setEditing(validSelection)}><Edit3 /><span>Alterar</span></button>
         {!supplierView && selectedAccountIds.some((id) => visible.some((account) => account.id === id)) && <button disabled={readOnly || !visible.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
           const accounts = visible.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
@@ -3391,6 +3404,8 @@ function PayablesPanel({
         }}><Wallet /><span>Pagar selecionadas ({selectedAccountIds.filter((id) => visible.some((account) => account.id === id)).length})</span></button>}
           <button disabled={supplierView || readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
         <button className="primary-command" disabled={supplierView ? readOnly || !selectedSupplierRow : !canPay} onClick={() => { if (supplierView && selectedSupplierRow) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...selectedSupplierRow.representative, description: selectedSupplierRow.name, balance: selectedSupplierRow.balance }); } else if (!supplierView && validSelection) { setPaying(validSelection); } }}><Wallet /><span>Pagar</span></button>
+        <button disabled={supplierView || readOnly || !validSelection} onClick={() => { if (validSelection) { setInitialDraft(duplicatePayableDraft(validSelection)); setEditing("new"); } }}><Copy /><span>Duplicar</span></button>
+        <button disabled={supplierView || !validSelection || !receiptOptions} onClick={() => validSelection && setReceiptPayable(validSelection)}><ReceiptText /><span>Recibo</span></button>
         <details className="finance-more-actions"><summary>Mais ações</summary><div>
 
           <button disabled={supplierView || !canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
@@ -3483,8 +3498,9 @@ function PayablesPanel({
         catch (cause) { onToast("error", cause instanceof Error ? cause.message : "Nao foi possivel pagar."); }
         finally { setBusy(false); }
       }} />}
+      {receiptPayable && receiptSale && receiptOptions && <PdvReceiptDraftModal {...receiptOptions} sale={receiptSale} statementCustomerName={receiptPayable.supplier || "Fornecedor não informado"} customers={[]} onClose={() => setReceiptPayable(null)} onNotice={(message) => onToast("info", message)} />}
       {editing && (
-        <PayableEditorModal inline
+        <PayableEditorModal inline initialDraft={initialDraft}
           payable={editing === "new" ? null : editing}
           initialSupplier={editing === "new" ? newSupplier : undefined}
           financialLookups={financialLookups}
@@ -3494,7 +3510,7 @@ function PayablesPanel({
           onSaveSupplier={onSaveSupplier}
           onDeleteSupplier={onDeleteSupplier}
           busy={busy}
-          onCancel={() => { setEditing(null); setNewSupplier(""); }}
+          onCancel={() => { setEditing(null); setInitialDraft(undefined); setNewSupplier(""); }}
           onSave={async (draft) => {
             setBusy(true);
             try {

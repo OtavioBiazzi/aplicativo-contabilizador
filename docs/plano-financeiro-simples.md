@@ -69,3 +69,14 @@ Ideias posteriores: atalhos de teclado configuráveis; repetir uma despesa com r
 
 
 Validação: compilação completa; smoke de rede, PDV, concorrência entre submesas e perfis/status; QA visual em 1024×600 e 1280×720; criação/edição, pagamentos agrupados, quatro combinações dos filtros de situação, perfil compartilhado com ativação independente e histórico exato da mesa no dia. O fechamento de Configurações aguarda ajustes pendentes para evitar perda de edições rápidas.
+
+
+### Ajustes após conferência da interface — 29/10/2026
+
+- Corrigido o zero solto no formulário de estoque: sinalizadores numéricos do cadastro agora são tratados como booleanos na interface.
+- Margem interna consistente nos painéis Dados e preços / Estoque e códigos.
+- Filtro principal com data de emissão/vencimento, intervalo, pesquisa e seleção de abertas/quitadas à direita. O botão Mais filtros fica antes das caixas; atalhos de período e demais situações ficam nesse menu.
+- Duplicar abre um novo registro para revisão em Pagar e Receber. São copiados os dados de cadastro, sem pagamentos, identidade da venda, eventos ou parcelamento anterior. Cancelar não grava nada.
+- Recibo na barra principal das duas telas. Pagar apresenta fornecedor, documento, datas, valor, pagamentos e saldo; Receber também prepara recibos de contas manuais/antigas sem venda presente no resumo operacional.
+- Prévia do recibo fora do contêiner da janela gerencial, com fechamento e ações visíveis em 1024×600 e 1280×720.
+- Validados cadastro duplicado e prévia pelo cliente, persistência no servidor, PDFs de 80 mm/A4, smoke de PDV e rede.

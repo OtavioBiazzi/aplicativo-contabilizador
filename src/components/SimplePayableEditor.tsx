@@ -4,8 +4,8 @@ import type { FinancialPaymentMethod, PdvFinancialLookup, PdvPayable, PdvPayable
 import { formatCurrency, getLocalDateKey, parseMoney, roundMoney } from "../shared/calculations";
 import { FINANCIAL_PAYMENT_METHODS, paymentMethodLabel, SuppliersModal } from "./SimpleFinancialControls";
 
-export function PayableEditorModal({ inline = false, payable, initialSupplier, financialLookups, onSaveLookup, onDeleteLookup, supplierRegistry, onSaveSupplier, onDeleteSupplier, busy, onCancel, onSave }: {
-  inline?: boolean; payable: PdvPayable | null; initialSupplier?: string; financialLookups: PdvFinancialLookup[]; supplierRegistry: PdvSupplier[];
+export function PayableEditorModal({ inline = false, payable, initialSupplier, initialDraft, financialLookups, onSaveLookup, onDeleteLookup, supplierRegistry, onSaveSupplier, onDeleteSupplier, busy, onCancel, onSave }: {
+  inline?: boolean; payable: PdvPayable | null; initialSupplier?: string; initialDraft?: PdvPayableDraft; financialLookups: PdvFinancialLookup[]; supplierRegistry: PdvSupplier[];
   onSaveLookup: (draft: PdvFinancialLookup) => Promise<PdvFinancialLookup>; onDeleteLookup: (id: string) => Promise<void>;
   onSaveSupplier: (draft: PdvSupplier) => Promise<PdvSupplier>; onDeleteSupplier: (id: string) => Promise<void>;
   busy: boolean; onCancel: () => void; onSave: (draft: PdvPayableDraft) => void;
@@ -15,9 +15,9 @@ export function PayableEditorModal({ inline = false, payable, initialSupplier, f
     category: payable?.category || "", costCenter: payable?.costCenter || "", documentNumber: payable?.documentNumber || "", paymentAccount: payable?.paymentAccount || "",
     preferredPaymentMethod: payable?.preferredPaymentMethod || "", tags: payable?.tags || [], issueDate: payable?.issueDate || getLocalDateKey(),
     seriesId: payable?.seriesId, installmentNumber: payable?.installmentNumber, installmentCount: payable?.installmentCount || 1,
-    recurrenceIntervalMonths: 0, recurrenceCount: 2, dueDate: payable?.dueDate || "", amount: payable?.amount || 0, note: payable?.note || ""
+    recurrenceIntervalMonths: 0, recurrenceCount: 2, dueDate: payable?.dueDate || "", amount: payable?.amount || 0, note: payable?.note || "", ...(!payable ? initialDraft : {})
   }));
-  const [amountText, setAmountText] = useState(payable ? payable.amount.toFixed(2).replace(".", ",") : "");
+  const [amountText, setAmountText] = useState(payable ? payable.amount.toFixed(2).replace(".", ",") : initialDraft ? initialDraft.amount.toFixed(2).replace(".", ",") : "");
   const [payments, setPayments] = useState<PdvPayablePayment[]>(() => payable?.payments.map((payment) => ({ ...payment })) || []);
   const [managingSuppliers, setManagingSuppliers] = useState(false);
   const [managingLookup, setManagingLookup] = useState<PdvFinancialLookup["kind"] | null>(null);

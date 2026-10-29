@@ -1,6 +1,8 @@
+import { createPortal } from "react-dom";
+import { duplicateReceivableDraft, buildReceivableAccountReceipt } from "./shared/financialAccountActions";
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
 import { SimpleFinancialFilters, SimpleCollectionModal } from "./components/SimpleFinancialControls";
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { useLayoutEffect } from "react";
 import {
@@ -9,6 +11,7 @@ import {
   Check,
   CheckCircle2,
   ClipboardList,
+  Copy,
   Clock3,
   ContactRound,
   Download,
@@ -3811,7 +3814,7 @@ function SubtableManagerModal({
   );
 }
 
-function PdvReceiptDraftModal({
+export function PdvReceiptDraftModal({
   sale,
   statementCustomerName,
   statementCustomerId,
@@ -3850,6 +3853,8 @@ function PdvReceiptDraftModal({
   const [busy, setBusy] = useState(false);
   const selectedCustomer = customers.find((item) => item.id === customerId);
   const customerBalance = sale.receiptPurpose === "customer-balance";
+  const payableAccount = sale.receiptPurpose === "payable-account";
+  const statement = customerBalance || payableAccount;
 
   useEffect(() => {
     let active = true;
@@ -3911,16 +3916,16 @@ function PdvReceiptDraftModal({
     return () => window.removeEventListener("keydown", keydown);
   }, [busy, onClose]);
 
-  return (
+  return createPortal(
     <div className="modal-backdrop receipt-modal-backdrop">
       <section className="modal history-receipt-modal receipt-viewer-modal" role="dialog" aria-modal="true" aria-label="Gerar recibo">
         <div className="modal-head">
           <div>
-            <span className="settings-overline">{customerBalance ? "Recibo de contas a receber" : receivable ? "Conta a receber" : "Recibo nao fiscal"}</span>
-            <strong>{customerBalance ? customerName : receivable ? receivable.customerName : sale.tableNumber ? `Mesa ${String(sale.tableNumber).padStart(3, "0")}` : "Venda"}</strong>
-            <p>{customerBalance ? `${sale.items.length} conta(s) · total a receber ${money(sale.total)}` : receivable ? `Saldo atual: ${money(receivable.balance)}` : "Confira os dados antes de imprimir."}</p>
+            <span className="settings-overline">{payableAccount ? "Recibo de conta a pagar" : customerBalance ? "Recibo de contas a receber" : receivable ? "Conta a receber" : "Recibo nao fiscal"}</span>
+            <strong>{statement ? customerName : receivable ? receivable.customerName : sale.tableNumber ? `Mesa ${String(sale.tableNumber).padStart(3, "0")}` : "Venda"}</strong>
+            <p>{payableAccount ? `Falta pagar: ${money(Math.max(0, sale.total - sale.payments.reduce((sum, payment) => sum + payment.amount, 0)))}` : customerBalance ? `${sale.items.length} conta(s) · total a receber ${money(sale.total)}` : receivable ? `Saldo atual: ${money(receivable.balance)}` : "Confira os dados antes de imprimir."}</p>
           </div>
-          <button className="icon-button" onClick={onClose} disabled={busy}><X size={18} /></button>
+          <button className="icon-button" aria-label="Fechar recibo" onClick={onClose} disabled={busy}><X size={18} /></button>
         </div>
         <div className="history-receipt-body receipt-viewer-body">
           <div className="receipt-preview-shell">
@@ -3929,15 +3934,15 @@ function PdvReceiptDraftModal({
               : <div className="receipt-preview-loading">Preparando visualizacao...</div>}
           </div>
           <div className="receipt-viewer-options">
-            {!customerBalance && <label className="field"><span>Cliente cadastrado</span><select value={customerId} onChange={(event) => {
+            {!statement && <label className="field"><span>Cliente cadastrado</span><select value={customerId} onChange={(event) => {
               setCustomerId(event.target.value);
               if (event.target.value) {
                 setCustomerName("");
                 setCustomerDocument("");
               }
             }}><option value="">Consumidor nao identificado</option>{customers.filter((item) => item.active).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>}
-            {!customerBalance && !customerId && <label className="field"><span>Nome somente neste recibo</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Opcional" /></label>}
-            {!customerBalance && !customerId && <label className="field"><span>CPF/CNPJ somente neste recibo</span><input value={customerDocument} onChange={(event) => setCustomerDocument(formatCpfCnpj(event.target.value))} placeholder="Opcional" inputMode="numeric" /></label>}
+            {!statement && !customerId && <label className="field"><span>Nome somente neste recibo</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Opcional" /></label>}
+            {!statement && !customerId && <label className="field"><span>CPF/CNPJ somente neste recibo</span><input value={customerDocument} onChange={(event) => setCustomerDocument(formatCpfCnpj(event.target.value))} placeholder="Opcional" inputMode="numeric" /></label>}
             <label className="field"><span>Imprimir em</span><select value={printDestination} onChange={(event) => { setPrintDestination(event.target.value); saveReceiptPrintDestination(event.target.value, availablePrintTargets); }}><option value="local">Servidor</option>{printTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></label>
             {printDestination === "local" && <label className="field"><span>Impressora deste computador</span><select value={printerName} onChange={(event) => setPrinterName(event.target.value)}><option value="">Escolha uma impressora</option>{printers.map((printer) => <option key={printer.name} value={printer.name}>{printer.displayName}{printer.isDefault ? " (Padrao)" : ""}</option>)}</select></label>}
             {!allowPrint && <p className="receipt-printer-warning">O servidor nao permitiu impressao neste cliente. O PDF continua disponivel.</p>}
@@ -3954,7 +3959,7 @@ function PdvReceiptDraftModal({
           </button>
         </div>
       </section>
-    </div>
+    </div>, document.getElementById("root") || document.body
   );
 }
 
@@ -6516,14 +6521,14 @@ function ProductEditorModal({ inline = false, product, categories, products, com
     costPrice: product?.costPrice || 0,
     unit: product?.unit || "UNID",
     unitMode: product?.unitMode || "unidade",
-    active: product?.active ?? true,
-    showOnPdv: product?.showOnPdv ?? true,
-    favorite: product?.favorite ?? false,
-    canBeComplement: product?.canBeComplement ?? false,
-    hasComplements: product?.hasComplements ?? false,
+    active: Boolean(product?.active ?? true),
+    showOnPdv: Boolean(product?.showOnPdv ?? true),
+    favorite: Boolean(product?.favorite ?? false),
+    canBeComplement: Boolean(product?.canBeComplement ?? false),
+    hasComplements: Boolean(product?.hasComplements ?? false),
     complementProductIds: product?.complementProductIds || [],
     sortOrder: product?.sortOrder || 0,
-    trackStock: product?.trackStock ?? false,
+    trackStock: Boolean(product?.trackStock ?? false),
     stockQuantity: product?.stockQuantity || 0,
     minimumStock: product?.minimumStock || 0,
     sku: product?.sku || "",
@@ -6574,7 +6579,7 @@ function ProductEditorModal({ inline = false, product, categories, products, com
           <button className={section === "commercial" ? "active" : ""} onClick={() => setSection("commercial")}>Dados e precos</button>
           <button className={section === "stock" ? "active" : ""} onClick={() => setSection("stock")}>Estoque e codigos</button>
           <button className={section === "availability" ? "active" : ""} onClick={() => setSection("availability")}>Disponibilidade</button>
-          {complementsEnabled && <button className={section === "complements" ? "active" : ""} onClick={() => setSection("complements")}>Adicionais</button>}
+          {Boolean(complementsEnabled) && <button className={section === "complements" ? "active" : ""} onClick={() => setSection("complements")}>Adicionais</button>}
         </nav>
         <div className="pdv-product-editor-body">
         {section === "commercial" && <section className="pdv-editor-section">
@@ -6618,7 +6623,7 @@ function ProductEditorModal({ inline = false, product, categories, products, com
             <label><span>Codigo de barras</span><input inputMode="numeric" value={draft.barcode || ""} onChange={(event) => setDraft({ ...draft, barcode: event.target.value.replace(/\D/g, "") })} placeholder="Leia ou digite o codigo" /></label>
             <label className="pdv-editor-field-full"><span>Fornecedor</span><input value={draft.supplier || ""} onChange={(event) => setDraft({ ...draft, supplier: event.target.value })} placeholder="Nome do fornecedor principal" /></label>
           </div>
-          {draft.trackStock && parsedStock <= parsedMinimumStock && (
+          {Boolean(draft.trackStock) && parsedStock <= parsedMinimumStock && (
             <p className="pdv-product-stock-warning">A quantidade atual esta no estoque minimo. Este produto aparecera como alerta na Visao geral.</p>
           )}
         </section>}
@@ -6631,11 +6636,11 @@ function ProductEditorModal({ inline = false, product, categories, products, com
             <label className="pdv-switch-line"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /><span><strong>Produto ativo</strong><small>Pode ser utilizado em novos lancamentos.</small></span></label>
             <label className="pdv-switch-line"><input type="checkbox" checked={draft.showOnPdv} onChange={(event) => setDraft({ ...draft, showOnPdv: event.target.checked })} /><span><strong>Exibir no PDV</strong><small>Aparece na grade de venda e mesas.</small></span></label>
             <label className="pdv-switch-line"><input type="checkbox" checked={draft.favorite} onChange={(event) => setDraft({ ...draft, favorite: event.target.checked })} /><span><strong>Favorito no topo</strong><small>Recebe prioridade dentro da categoria.</small></span></label>
-            {complementsEnabled && <label className="pdv-switch-line"><input type="checkbox" checked={draft.canBeComplement} onChange={(event) => setDraft({ ...draft, canBeComplement: event.target.checked })} /><span><strong>Pode ser adicional</strong><small>Pode ser vinculado a outros produtos.</small></span></label>}
-            {complementsEnabled && <label className="pdv-switch-line"><input type="checkbox" checked={draft.hasComplements} onChange={(event) => setDraft({ ...draft, hasComplements: event.target.checked })} /><span><strong>Solicitar adicionais</strong><small>Abre a selecao antes de lancar no carrinho.</small></span></label>}
+            {Boolean(complementsEnabled) && <label className="pdv-switch-line"><input type="checkbox" checked={draft.canBeComplement} onChange={(event) => setDraft({ ...draft, canBeComplement: event.target.checked })} /><span><strong>Pode ser adicional</strong><small>Pode ser vinculado a outros produtos.</small></span></label>}
+            {Boolean(complementsEnabled) && <label className="pdv-switch-line"><input type="checkbox" checked={draft.hasComplements} onChange={(event) => setDraft({ ...draft, hasComplements: event.target.checked })} /><span><strong>Solicitar adicionais</strong><small>Abre a selecao antes de lancar no carrinho.</small></span></label>}
           </div>
         </section>}
-        {section === "complements" && complementsEnabled && <section className="pdv-complement-config pdv-editor-section">
+        {section === "complements" && Boolean(complementsEnabled) && <section className="pdv-complement-config pdv-editor-section">
           <div className="pdv-editor-section-title">
             <strong>Adicionais permitidos</strong>
             <small>Somente produtos marcados como "Pode ser adicional" aparecem aqui.</small>
@@ -6947,6 +6952,7 @@ function ReceivablesScreen({
   const [to, setTo] = useState(monthEnd);
   const [selected, setSelected] = useState<PdvReceivable | null>(null);
   const [creating, setCreating] = useState(false);
+  const [initialDraft, setInitialDraft] = useState<PdvReceivableDraft | undefined>();
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [editing, setEditing] = useState<PdvReceivable | null>(null);
   const [receiving, setReceiving] = useState<PdvReceivable | null>(null);
@@ -7006,11 +7012,7 @@ function ReceivablesScreen({
   };
 
   const openReceipt = (receivable: PdvReceivable) => {
-    const sale = snapshot.recentSales.find((item) => item.id === receivable.saleId);
-    if (!sale) {
-      setNotice("A venda vinculada nao foi encontrada.");
-      return;
-    }
+    const sale = snapshot.recentSales.find((item) => item.id === receivable.saleId) || buildReceivableAccountReceipt(receivable);
     setReceiptTarget({ sale, receivable });
   };
 
@@ -7035,7 +7037,7 @@ function ReceivablesScreen({
       {!hideNavigation && <HistoryViewTabs value={view} onChange={onViewChange} showSales={showSales} />}
       <fieldset className="finance-navigation" disabled={Boolean(editing || creating)}>
       <div className="finance-command-bar" aria-label="Comandos de contas a receber">
-        <button disabled={readOnly} onClick={() => { setCustomerView(false); setRecordView(false); setCreating(true); }}><Plus /><span>Novo</span></button>
+        <button disabled={readOnly} onClick={() => { setCustomerView(false); setRecordView(false); setInitialDraft(undefined); setCreating(true); }}><Plus /><span>Novo</span></button>
         <button disabled={customerView || !canChange} onClick={() => validSelection && setEditing(validSelection)}><Pencil /><span>Alterar</span></button>
         {!customerView && selectedAccountIds.some((id) => receivables.some((account) => account.id === id)) && <button disabled={readOnly || !receivables.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
           const accounts = receivables.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
@@ -7045,10 +7047,11 @@ function ReceivablesScreen({
         }}><Wallet /><span>Receber selecionadas ({selectedAccountIds.filter((id) => receivables.some((account) => account.id === id)).length})</span></button>}
         <button disabled={customerView || readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
         <button className="primary-command" disabled={customerView ? readOnly || !selectedCustomerRow : !canReceive} onClick={() => { if (customerView && selectedCustomerRow) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...selectedCustomerRow.representative, balance: selectedCustomerRow.balance }); } else if (!customerView && validSelection) { setReceiving(validSelection); } }}><Wallet /><span>Receber</span></button>
+        <button disabled={customerView || readOnly || !validSelection} onClick={() => { if (validSelection) { setInitialDraft(duplicateReceivableDraft(validSelection)); setCreating(true); } }}><Copy /><span>Duplicar</span></button>
+        <button disabled={customerView || !validSelection} onClick={() => validSelection && openReceipt(validSelection)}><ReceiptText /><span>Recibo</span></button>
         <details className="finance-more-actions"><summary>Mais ações</summary><div>
 
         <button disabled={customerView || !canChange || (validSelection?.receivedAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
-        <button disabled={customerView || !validSelection || !snapshot.recentSales.some((sale) => sale.id === validSelection.saleId)} onClick={() => validSelection && openReceipt(validSelection)}><ReceiptText /><span>Recibo</span></button>
         <button disabled={customerView ? !selectedCustomerRow : !validSelection || !customerOutstandingAccounts(snapshot.receivables, validSelection).length} onClick={() => { const account = customerView ? selectedCustomerRow?.representative : validSelection; if (account) openCustomerReceipt(account); }}><ReceiptText /><span>Recibo do cliente</span></button>
         </div></details>
       </div>
@@ -7115,7 +7118,7 @@ function ReceivablesScreen({
         setCustomerReceiving(null); setSelectedAccountIds([]); await onChanged(); setNotice("Recebimento distribuído nas contas do cliente.");
       }} />}
       {receiving && <ReceivableCollectionModal receivable={receiving} onCancel={() => setReceiving(null)} onConfirm={(payment) => registerPayment(receiving, payment)} />}
-      {creating && <ReceivableDraftModal inline customers={snapshot.customers} onSaveCustomer={async (draft) => { const customer = await onSaveCustomer(draft); await onChanged(); return customer; }} onCancel={() => setCreating(false)} onSave={async (draft) => { const next = await onSaveReceivable(draft); setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); setSelected(next); setCreating(false); await onChanged(); setNotice("Conta a receber cadastrada."); }} />}
+      {creating && <ReceivableDraftModal inline initialDraft={initialDraft} customers={snapshot.customers} onSaveCustomer={async (draft) => { const customer = await onSaveCustomer(draft); await onChanged(); return customer; }} onCancel={() => setCreating(false)} onSave={async (draft) => { const next = await onSaveReceivable(draft); setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); setSelected(next); setCreating(false); await onChanged(); setNotice("Conta a receber cadastrada."); }} />}
       {creatingCustomer && <CustomerEditorModal onCancel={() => setCreatingCustomer(false)} onSave={async (draft) => { await onSaveCustomer(draft); setCreatingCustomer(false); await onChanged(); }} />}
       {editing && <ReceivableEditorModal inline receivable={editing} sale={snapshot.recentSales.find((item) => item.id === editing.saleId)} onCancel={() => setEditing(null)} onDelete={() => { setDeleteRequest(editing); setEditing(null); }} onSave={async (patch) => { const next = await onUpdateReceivable(editing.id, patch); setSelected(next); setEditing(null); await onChanged(); setNotice("Conta a receber atualizada."); }} />}
       {cancelRequest && <PdvConfirmModal title="Cancelar conta a receber?" message={`A conta de ${cancelRequest.customerName} sera marcada como cancelada. A venda permanecera no Historico.`} onCancel={() => setCancelRequest(null)} onConfirm={() => void onCancelReceivable(cancelRequest.id).then(async () => { setSelected((current) => current?.id === cancelRequest.id ? null : current); setCancelRequest(null); await onChanged(); })} />}
@@ -7127,9 +7130,9 @@ function ReceivablesScreen({
   );
 }
 
-function ReceivableDraftModal({ inline = false, customers, onSaveCustomer, onCancel, onSave }: { inline?: boolean; customers: PdvCustomer[]; onSaveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>; onCancel: () => void; onSave: (draft: PdvReceivableDraft) => Promise<void> }) {
-  const [draft, setDraft] = useState<PdvReceivableDraft>({ id: crypto.randomUUID(), customerId: "", description: "", dueDate: localDateInputValue(), amount: 0, tags: [] });
-  const [amountText, setAmountText] = useState("");
+function ReceivableDraftModal({ inline = false, initialDraft, customers, onSaveCustomer, onCancel, onSave }: { inline?: boolean; initialDraft?: PdvReceivableDraft; customers: PdvCustomer[]; onSaveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>; onCancel: () => void; onSave: (draft: PdvReceivableDraft) => Promise<void> }) {
+  const [draft, setDraft] = useState<PdvReceivableDraft>({ id: crypto.randomUUID(), customerId: "", description: "", dueDate: localDateInputValue(), amount: 0, tags: [], ...initialDraft });
+  const [amountText, setAmountText] = useState(initialDraft ? initialDraft.amount.toFixed(2).replace(".", ",") : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [creatingCustomer, setCreatingCustomer] = useState(false);

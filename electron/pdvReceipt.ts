@@ -126,6 +126,8 @@ export function buildPdvReceiptHtml(
   const totalChange = sale.payments.reduce((sum, payment) => sum + (payment.change || 0), 0);
   const pendingTotal = Math.max(0, sale.total - paidTotal);
   const customerBalance = sale.receiptPurpose === "customer-balance";
+  const payableAccount = sale.receiptPurpose === "payable-account";
+  const referenceDate = (value: string | undefined) => value ? value.split("-").reverse().join("/") : "Sem data";
   const payments = sale.payments.map((payment) => `
     <div class="row"><span>${escapeHtml(payment.method)}${payment.description ? ` - ${escapeHtml(payment.description)}` : ""}</span><b>${money(payment.amount)}</b></div>
     ${payment.received ? `<div class="subrow"><span>Recebido</span><b>${money(payment.received)}</b></div>` : ""}
@@ -148,7 +150,7 @@ export function buildPdvReceiptHtml(
   const displayCustomerName = customerName || customer?.name || "";
   const customerDocument = customerDocumentOverride || customer?.document || "";
   const orderNumber = sale.operationId || sale.id;
-  const receiptStatus = customerBalance ? "RECIBO DE CONTAS A RECEBER" : pendingTotal > 0.009 ? "CONTA EM ABERTO" : "COMPROVANTE DE PAGAMENTO";
+  const receiptStatus = payableAccount ? "RECIBO DE CONTA A PAGAR" : customerBalance ? "RECIBO DE CONTAS A RECEBER" : pendingTotal > 0.009 ? "CONTA EM ABERTO" : "COMPROVANTE DE PAGAMENTO";
   const accountReceipts = receivable?.payments.map((payment) => `
     <div class="item">
       <div class="row"><span>${escapeHtml(payment.method)} - ${new Date(payment.createdAt).toLocaleDateString("pt-BR")}</span><b>${money(payment.amount)}</b></div>
@@ -195,17 +197,18 @@ export function buildPdvReceiptHtml(
     </div>
     <div class="status">${receiptStatus}</div>
     <div class="box">
-      <div class="box-title">${customerBalance ? "CONTAS A RECEBER DO CLIENTE" : sale.tableNumber ? `MESA: ${String(sale.tableNumber).padStart(3, "0")}` : escapeHtml(sale.type || "VENDA")}</div>
+      <div class="box-title">${payableAccount ? "CONTA A PAGAR" : customerBalance ? "CONTAS A RECEBER DO CLIENTE" : sale.tableNumber ? `MESA: ${String(sale.tableNumber).padStart(3, "0")}` : escapeHtml(sale.type || "VENDA")}</div>
       <div class="section">
-        <div class="row"><span>${customerBalance ? "EMITIDO EM" : `PEDIDO: ${escapeHtml(String(orderNumber).slice(0, 12))}`}</span><b>${new Date(sale.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</b></div>
-        ${displayCustomerName ? `<div>CLIENTE: ${escapeHtml(displayCustomerName)}</div>` : ""}
+        <div class="row"><span>${customerBalance || payableAccount ? "EMITIDO EM" : `PEDIDO: ${escapeHtml(String(orderNumber).slice(0, 12))}`}</span><b>${new Date(sale.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</b></div>
+        ${displayCustomerName ? `<div>${payableAccount ? "FORNECEDOR" : "CLIENTE"}: ${escapeHtml(displayCustomerName)}</div>` : ""}
         ${customerDocument ? `<div>CPF/CNPJ: ${escapeHtml(customerDocument)}</div>` : ""}
+        ${payableAccount ? `<div>DOCUMENTO: ${escapeHtml(sale.receiptReference?.documentNumber || "Não informado")}</div><div>EMISSÃO: ${escapeHtml(referenceDate(sale.receiptReference?.issueDate))}</div><div>VENCIMENTO: ${escapeHtml(referenceDate(sale.receiptReference?.dueDate))}</div>` : ""}
       </div>
     </div>
     <div class="columns"><span>${customerBalance ? "Nº" : "QTD"}</span><span>DESCRICAO</span><span>${customerBalance ? "SALDO" : "TOTAL"}</span></div>
     ${items}
     <div class="divider dashed"></div>
-    ${customerBalance ? `<div class="row total"><span>TOTAL A RECEBER</span><b>${money(sale.total)}</b></div>` : `
+    ${customerBalance ? `<div class="row total"><span>TOTAL A RECEBER</span><b>${money(sale.total)}</b></div>` : payableAccount ? `<div class="row total"><span>VALOR DA CONTA</span><b>${money(sale.total)}</b></div>` : `
     <div class="row"><span>Subtotal</span><b>${money(sale.subtotal)}</b></div>
     <div class="row"><span>${sale.discount < 0 ? "Acrescimo" : "Desconto"}</span><b>${money(Math.abs(sale.discount))}</b></div>
     <div class="row total"><span>Total</span><b>${money(sale.total)}</b></div>`}
