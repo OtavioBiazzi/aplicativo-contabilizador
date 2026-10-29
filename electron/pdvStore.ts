@@ -2166,14 +2166,16 @@ export class PdvStore {
         ? (remainingTotal <= 0.009 || session?.status === "Fechamento" ? "Fechamento" : "Ocupada")
         : session?.status === "Reservada"
           ? "Reservada"
-          : "Livre";
+          : session?.status === "Fechamento"
+            ? "Fechamento"
+            : "Livre";
       return {
         id: `mesa-${number}`,
         sessionId: session?.id,
         number,
         status: visualStatus,
         openedAt: items.length ? session?.openedAt || null : null,
-        people: visualStatus === "Livre" ? 0 : session?.people || 0,
+        people: !items.length && visualStatus !== "Reservada" ? 0 : session?.people || 0,
         note: items.length || session?.status === "Reservada" ? session?.note || "" : "",
         total: remainingTotal,
         items,

@@ -131,6 +131,7 @@ export interface ServerAutoConnectionSettings {
 }
 
 export interface RemoteClientPolicy {
+  privacyDefinitions?: Pick<PrivacySettings, "profiles" | "enabledProfileId" | "disabledProfileId">;
   operationMode: OperationMode;
   defaultType: EntryType;
   defaultPeople: number;
@@ -157,6 +158,25 @@ export interface FloatingSettings {
   dragWholeBar: boolean;
   theme: FloatingThemeMode;
   syncMoneyWithEntryType: boolean;
+}
+
+export type HistoryPrivacyMode = "show" | "search" | "hide";
+export interface PrivacyProfile {
+  id: string;
+  name: string;
+  hideHeaderTotal: boolean;
+  hideReportTotals: boolean;
+  historyValues: HistoryPrivacyMode;
+}
+export interface PrivacySettings {
+  hideHeaderTotal: boolean;
+  hideReportTotals: boolean;
+  historyValues?: HistoryPrivacyMode;
+  enabled?: boolean;
+  profiles?: PrivacyProfile[];
+  enabledProfileId?: string;
+  disabledProfileId?: string;
+  activeProfileId?: string;
 }
 
 export interface AppSettings {
@@ -195,10 +215,7 @@ export interface AppSettings {
   operationMode: OperationMode;
   profiles: Record<string, Partial<AppSettings>>;
   activeProfile: string;
-  privacy: {
-    hideHeaderTotal: boolean;
-    hideReportTotals: boolean;
-  };
+  privacy: PrivacySettings;
   quickTabs: QuickTabSettings[];
   floating: FloatingSettings;
   server: {

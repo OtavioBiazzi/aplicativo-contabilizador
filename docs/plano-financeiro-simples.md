@@ -48,3 +48,24 @@ Solicitação de 25/10/2026: seguir a organização simples da referência, mant
 - As colunas fixas da edição de pagamentos ultrapassavam a largura do formulário e provocavam rolagem lateral. Os campos agora usam colunas flexíveis, com observação na linha seguinte e adaptação pela largura do próprio formulário.
 - O resumo e o botão Adicionar permanecem dentro da seção, inclusive quando há vários pagamentos. Mantida a rolagem vertical para chegar aos campos inferiores.
 - Compilação aprovada. `qa_payable_fit.py` conferiu limites e foco dos campos em 1280, 1024 e 800 pixels e em formulário de 420 pixels. Também editou/incluiu/removeu pagamentos e conferiu a persistência dos meios, observação, R$ 115 pagos e saldo de R$ 5 numa conta de R$ 120 com dados isolados.
+
+
+## Revisão visual e operacional — 29/10/2026
+
+- [x] Pesquisa e Registro compartilham a mesma janela em Contas a Pagar/Receber.
+- [x] Comandos compactos, datas visíveis, colunas separadas e totais à direita.
+- [x] Caixas independentes A pagar/Pagas e A receber/Recebidas; canceladas/excluídas no menu complementar.
+- [x] Produtos, Categorias, Adicionais e Clientes usam lista, comandos no topo e Registro no mesmo espaço.
+- [x] Revisão de contraste, formulários compactos e pesquisa sem acentos nesses cadastros.
+- [x] Histórico pelo botão direito da mesa abre na data atual.
+- [x] Preservar marcação explícita de fechamento e priorizar sua cor verde.
+- [x] Remover Ir para Mesas do resumo de mesas abertas.
+- [x] Perfis de privacidade definidos pelo servidor: criar, duplicar, editar, excluir e associar ao Total do Dia ativado/desativado. O cliente recebe as mesmas regras e mantém a ativação local independente.
+- [x] Valores no histórico sempre visíveis, somente durante pesquisa ou sempre ocultos, conforme o perfil.
+- [x] Visão Geral mais compacta com indicadores e ações organizados.
+- [x] Validação dos perfis, filtros combinados, cliente conectado e status de fechamento.
+
+Ideias posteriores: atalhos de teclado configuráveis; repetir uma despesa com revisão antes de salvar; pesquisas favoritas; diagnóstico de tempo de resposta da rede. São sugestões e não fazem parte desta implementação.
+
+
+Validação: compilação completa; smoke de rede, PDV, concorrência entre submesas e perfis/status; QA visual em 1024×600 e 1280×720; criação/edição, pagamentos agrupados, quatro combinações dos filtros de situação, perfil compartilhado com ativação independente e histórico exato da mesa no dia. O fechamento de Configurações aguarda ajustes pendentes para evitar perda de edições rápidas.

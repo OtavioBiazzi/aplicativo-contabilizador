@@ -1,3 +1,5 @@
+import { PrivacyProfiles } from "./components/PrivacyProfiles";
+import { togglePrivacy, privacyEnabled, historyValuesHidden, mergeRemotePrivacy } from "./shared/privacy";
 import { PayableEditorModal } from "./components/SimplePayableEditor";
 import { IndependentUpdater } from "./components/IndependentUpdater";
 import { HelpCenter, type HelpDestination } from "./components/HelpCenter";
@@ -1265,6 +1267,7 @@ export function App() {
   const [currentDateKey, setCurrentDateKey] = useState(() => getLocalDateKey());
   const [totalMenuOpen, setTotalMenuOpen] = useState(false);
   const [openTablesSummary, setOpenTablesSummary] = useState(false);
+  const settingsSaveRef = useRef<(() => Promise<void>) | null>(null);
   const totalMenuRef = useRef<HTMLDivElement | null>(null);
   const [modulesMenuOpen, setModulesMenuOpen] = useState(false);
   const modulesMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1709,6 +1712,8 @@ export function App() {
         });
       }
     }
+    const definitions = currentRemote?.clientPolicy.privacyDefinitions;
+    if (definitions?.profiles?.length) next = { ...next, privacy: mergeRemotePrivacy(next.privacy, { profiles: definitions.profiles, enabledProfileId: definitions.enabledProfileId || "private", disabledProfileId: definitions.disabledProfileId || "normal" }) };
     const saved = await window.caixa.saveSettings(next);
     setSettings(saved);
     if (!options?.silent) {
@@ -1723,10 +1728,7 @@ export function App() {
     const previous = settings;
     const next = {
       ...settings,
-      privacy: {
-        ...settings.privacy,
-        hideHeaderTotal: !settings.privacy.hideHeaderTotal
-      }
+      privacy: togglePrivacy(settings.privacy)
     };
     setSettings(next);
     setTotalMenuOpen(false);
@@ -1963,6 +1965,17 @@ export function App() {
       payables: [...current.payables.filter((item) => item.id !== payable.id), payable]
     } : current);
   };
+
+  const remotePrivacyKey = JSON.stringify(remoteSession?.clientPolicy.privacyDefinitions || null);
+  useEffect(() => {
+    const definitions = remoteSession?.clientPolicy.privacyDefinitions;
+    if (!settings || !definitions?.profiles?.length) return;
+    const privacy = mergeRemotePrivacy(settings.privacy, { profiles: definitions.profiles, enabledProfileId: definitions.enabledProfileId || "private", disabledProfileId: definitions.disabledProfileId || "normal" });
+    if (JSON.stringify(privacy) === JSON.stringify(settings.privacy)) return;
+    const next = { ...settings, privacy };
+    setSettings(next);
+    void window.caixa.saveSettings(next).catch(() => showToast("error", "Não foi possível salvar os perfis recebidos do servidor."));
+  }, [remotePrivacyKey]);
 
   const refreshRemote = async (session = remoteSessionRef.current, fullSales = remoteFullSalesRef.current) => {
     if (!session || !settings) {
@@ -2697,7 +2710,7 @@ export function App() {
           {totalMenuOpen && canUseTotalMenu && (
             <div className="total-popover" role="menu">
               <div><strong>Hoje</strong><span>{displaySummary.count} lancamento(s)</span></div>
-              <button type="button" onClick={toggleHeaderPrivacy}><Eye size={16} />{settings.privacy.hideHeaderTotal ? "Mostrar total no topo" : "Ativar privacidade"}</button>
+              <button type="button" onClick={toggleHeaderPrivacy}><Eye size={16} />{privacyEnabled(settings.privacy) ? "Desativar privacidade" : "Ativar privacidade"}</button>
               <button type="button" onClick={openTodayReport}><BarChart3 size={16} />Relatorio deste dia</button>
               <button type="button" onClick={() => { setHistoryFocus({ date: currentDateKey, nonce: Date.now() }); requestNavigation("history"); setTotalMenuOpen(false); }}><History size={16} />Historico de hoje</button>
               <button type="button" onClick={() => { setOpenTablesSummary(true); setTotalMenuOpen(false); }}><Utensils size={16} />Mesas em aberto</button>
@@ -2828,7 +2841,7 @@ export function App() {
                 ? async (_targetId, payload) => remoteRequest(remoteSession, "/api/pdv/print-receipt", { method: "POST", body: JSON.stringify(payload) })
                 : async (targetId, payload) => window.caixa.requestRemotePdvReceiptPrint(targetId, payload)}
               onNavigateMain={(tab, tableNumber) => {
-                if (tab === "history" && tableNumber) setHistoryFocus({ tableNumber, nonce: Date.now() });
+                if (tab === "history" && tableNumber) setHistoryFocus({ date: getLocalDateKey(), tableNumber, nonce: Date.now() });
                 requestNavigation(tab);
               }}
               onOperationalTabChange={(tab) => { setBaseOperationalTab(tab); setActiveTab(tab); }}
@@ -2899,7 +2912,7 @@ export function App() {
                 <div><span>{moduleHeader.eyebrow}</span><strong>{moduleHeader.title}</strong></div>
                 <div className="module-window-controls">
                   <button type="button" className="module-window-maximize" title={moduleWindowIsMaximized ? "Restaurar janela" : "Maximizar janela"} aria-label={moduleWindowIsMaximized ? "Restaurar janela" : "Maximizar janela"} onClick={() => { setModuleWindowOffset({ x: 0, y: 0 }); setModuleWindowMaximized(!moduleWindowIsMaximized); }}>{moduleWindowIsMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
-                  <button type="button" className="module-window-close" title="Fechar" aria-label="Fechar" onClick={() => { setActiveTab(baseOperationalTab); setSettingsWindowCategory(null); setModuleWindowOffset({ x: 0, y: 0 }); setModuleWindowMaximized(null); }}><X size={16} /></button>
+                  <button type="button" className="module-window-close" title="Fechar" aria-label="Fechar" onClick={async () => { try { await settingsSaveRef.current?.(); } catch (error) { showToast("error", error instanceof Error ? error.message : "Não foi possível salvar as configurações."); return; } setActiveTab(baseOperationalTab); setSettingsWindowCategory(null); setModuleWindowOffset({ x: 0, y: 0 }); setModuleWindowMaximized(null); }}><X size={16} /></button>
                 </div>
               </header>
               <div className="module-window-body">
@@ -2969,7 +2982,7 @@ export function App() {
             sales={remoteSession ? remotePdvSales : pdvSnapshot?.recentSales || []}
             remoteConnected={Boolean(remoteSession)}
             connectedDevices={remoteSession ? 1 : server.devices.length}
-            canViewTotals={canViewRemoteTotals}
+            canViewTotals={canViewRemoteTotals && !settings.privacy.hideReportTotals}
             onOpenReports={() => { setReportWindowTab(null); requestNavigation("reports"); }}
             onOpenClients={() => {
               requestNavigation("receivables");
@@ -3162,7 +3175,7 @@ export function App() {
         )}
 
         {activeTab === "settings" && (
-            <SettingsPanel
+            <SettingsPanel pendingSaveRef={settingsSaveRef}
               settings={settings}
               remoteSession={remoteSession}
               remoteClientActive={Boolean(remoteSession)}
@@ -3182,7 +3195,7 @@ export function App() {
         )}
       </main>
 
-      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} onOpenTables={() => { setOpenTablesSummary(false); requestNavigation("tables"); }} />}
+      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} />}
 
       {importPreview && (
         <ImportPreviewModal
@@ -3277,7 +3290,7 @@ function PayablesPanel({
   const [to, setTo] = useState(monthEnd);
   const [dateField, setDateField] = useState<FinancialDateField>("emission");
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Historico" | "Pagas" | "Canceladas" | "Excluidas">("Em aberto");
+  const [status, setStatus] = useState<"Todos" | "Em aberto" | "Vencidas" | "Historico" | "Pagas" | "Canceladas" | "Excluidas" | "Operacionais" | "Nenhuma">("Em aberto");
   const [editing, setEditing] = useState<PdvPayable | "new" | null>(null);
   const [paying, setPaying] = useState<PdvPayable | null>(null);
   const [selected, setSelected] = useState<PdvPayable | null>(null);
@@ -3314,6 +3327,7 @@ function PayablesPanel({
   }, [createRequest?.nonce]);
 
   const visible = payables.filter((payable) => {
+    if (status === "Nenhuma" || (status === "Operacionais" && ["Cancelada", "Excluida"].includes(payable.status))) return false;
     const inPeriod = inFinancialPeriod(payable, from, to, dateField);
     const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
     const queryMatch = !normalizedQuery || [
@@ -3326,7 +3340,7 @@ function PayablesPanel({
       ...(payable.tags || []),
       payable.note
     ].some((value) => value.toLocaleLowerCase("pt-BR").includes(normalizedQuery));
-    const statusMatch = status === "Todos"
+    const statusMatch = (status === "Todos" || status === "Operacionais")
       || (status === "Em aberto" && ["Em aberto", "Parcialmente paga", "Vencida"].includes(payable.status))
       || (status === "Vencidas" && payable.status === "Vencida")
       || (status === "Pagas" && payable.status === "Paga")
@@ -3365,8 +3379,9 @@ function PayablesPanel({
         </div>
       </div>
 
+      <fieldset className="finance-navigation" disabled={Boolean(editing)}>
       <div className="finance-command-bar" aria-label="Comandos de contas a pagar">
-        <button disabled={readOnly} onClick={() => setEditing("new")}><Plus /><span>Novo</span></button>
+        <button disabled={readOnly} onClick={() => { setSupplierView(false); setRecordView(false); setEditing("new"); }}><Plus /><span>Novo</span></button>
         <button disabled={supplierView || !canChange} onClick={() => validSelection && setEditing(validSelection)}><Edit3 /><span>Alterar</span></button>
         {!supplierView && selectedAccountIds.some((id) => visible.some((account) => account.id === id)) && <button disabled={readOnly || !visible.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
           const accounts = visible.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
@@ -3374,21 +3389,23 @@ function PayablesPanel({
           if (!supplierBalanceKey(accounts[0].supplier) || accounts.some((account) => supplierBalanceKey(account.supplier) !== supplierBalanceKey(accounts[0].supplier))) { onToast("error", "Selecione contas pendentes do mesmo fornecedor."); return; }
           supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(accounts.map((account) => account.id)); setSupplierPaying({ ...accounts[0], description: accounts[0].supplier, balance: roundMoney(accounts.reduce((sum, account) => sum + account.balance, 0)) });
         }}><Wallet /><span>Pagar selecionadas ({selectedAccountIds.filter((id) => visible.some((account) => account.id === id)).length})</span></button>}
+          <button disabled={supplierView || readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
         <button className="primary-command" disabled={supplierView ? readOnly || !selectedSupplierRow : !canPay} onClick={() => { if (supplierView && selectedSupplierRow) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...selectedSupplierRow.representative, description: selectedSupplierRow.name, balance: selectedSupplierRow.balance }); } else if (!supplierView && validSelection) { setPaying(validSelection); } }}><Wallet /><span>Pagar</span></button>
         <details className="finance-more-actions"><summary>Mais ações</summary><div>
-          <button disabled={supplierView || readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
+
           <button disabled={supplierView || !canChange || (validSelection?.paidAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
         </div></details>
       </div>
       <div className="finance-view-row">
         <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
-          <button role="tab" aria-selected={!recordView && !supplierView} onClick={() => { setSupplierView(false); setRecordView(false); }}>Pesquisa</button>
-          <button role="tab" aria-selected={supplierView} onClick={() => { setSupplierView(true); setRecordView(false); }}>Por fornecedor</button>
-          <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setSupplierView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
+          <button role="tab" aria-selected={!recordView && !supplierView && !Boolean(editing)} onClick={() => { setSupplierView(false); setRecordView(false); }}>Pesquisa</button>
+          <button role="tab" aria-selected={supplierView && !editing} onClick={() => { setSupplierView(true); setRecordView(false); }}>Por fornecedor</button>
+          <button role="tab" aria-selected={recordView || Boolean(editing)} disabled={!validSelection} onClick={() => { setSupplierView(false); if (canChange && validSelection) setEditing(validSelection); else setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
         </div>
         <div className="finance-view-actions"><button className="finance-customer-button" onClick={() => setManagingSuppliers(true)}><Users size={14} /> Fornecedores</button><button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button></div>
       </div>
-      <SimpleFinancialFilters grouped={supplierView} pendingNotice={{ count: hiddenOpenCount, onShowAll: () => { setFrom(""); setTo(""); setStatus("Em aberto"); setQuery(""); } }} query={query} onQuery={setQuery} placeholder={supplierView ? "Nome do fornecedor" : "Descrição ou fornecedor"} from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next as typeof status); if (next === "Excluidas") { setFrom(""); setTo(""); } }} statuses={["Em aberto", "Vencidas", "Pagas", "Canceladas", "Excluidas", "Historico", "Todos"]} />
+</fieldset>
+      <SimpleFinancialFilters settlement={{ pendingStatus: "Em aberto", paidStatus: "Pagas", pendingLabel: "A pagar", paidLabel: "Pagas" }} grouped={supplierView} pendingNotice={{ count: hiddenOpenCount, onShowAll: () => { setFrom(""); setTo(""); setStatus("Em aberto"); setQuery(""); } }} query={query} onQuery={setQuery} placeholder={supplierView ? "Nome do fornecedor" : "Descrição ou fornecedor"} from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next as typeof status); if (next === "Excluidas") { setFrom(""); setTo(""); } }} statuses={["Em aberto", "Vencidas", "Pagas", "Canceladas", "Excluidas", "Historico", "Todos"]} />
       {supplierView ? <>
         <FinancialGrid id="supplier-balances" rows={visibleSupplierRows} selectedId={supplierSelection} onSelect={(row) => setSupplierSelection(row.id)} onOpen={(row) => { if (!readOnly) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...row.representative, description: row.name, balance: row.balance }); } }} columns={[
           { key: "name", label: "Fornecedor", required: true, value: (row) => row.name },
@@ -3398,11 +3415,12 @@ function PayablesPanel({
       </> : <>
 
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
-        <FinancialGrid id="payables" defaultHidden={["issue", "document", "category", "method", "paid"]} rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
+        <FinancialGrid id="payables" defaultHidden={["category", "paid"]} rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); if (!readOnly && !["Cancelada", "Excluida"].includes(item.status)) setEditing(item); else setRecordView(true); }} columns={[
           { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${payableLabel(item)}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
           { key: "issue", label: "Emissão", value: (item) => item.issueDate, render: (item) => item.issueDate ? new Date(`${item.issueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
           { key: "document", label: "Documento", value: (item) => item.documentNumber || "—" },
-          { key: "description", label: "Conta / fornecedor", required: true, value: (item) => payableLabel(item), render: (item) => <div className="finance-cell-title"><strong>{payableLabel(item)}</strong><small>{[item.description ? item.supplier : item.category, item.installmentCount && item.installmentCount > 1 ? `Parcela ${item.installmentNumber}/${item.installmentCount}` : ""].filter(Boolean).join(" · ")}</small></div> },
+          { key: "description", label: "Descrição", required: true, value: (item) => item.description || "—" },
+          { key: "supplier", label: "Fornecedor", value: (item) => item.supplier || "—" },
           { key: "category", label: "Categoria", value: (item) => item.category || "—" },
           { key: "due", label: "Vencimento", value: (item) => item.dueDate, render: (item) => item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
           { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || item.preferredPaymentMethod || "Não definida" },
@@ -3466,7 +3484,7 @@ function PayablesPanel({
         finally { setBusy(false); }
       }} />}
       {editing && (
-        <PayableEditorModal
+        <PayableEditorModal inline
           payable={editing === "new" ? null : editing}
           initialSupplier={editing === "new" ? newSupplier : undefined}
           financialLookups={financialLookups}
@@ -3656,8 +3674,8 @@ function DashboardPanel({
       <div className="dashboard-intro">
         <div>
           <span className="settings-overline">Resumo operacional de hoje</span>
-          <h2>O que precisa da sua atencao agora</h2>
-          <p>Vendas, mesas, recebimentos, estoque e rede reunidos sem interromper o fluxo do caixa.</p>
+          <h2>Visão geral</h2>
+          <p>Acompanhe os resultados de hoje e as pendências que precisam de atenção.</p>
         </div>
         <div className={`dashboard-network ${remoteConnected || connectedDevices > 0 ? "online" : ""}`}>
           <Wifi size={18} />
@@ -4757,7 +4775,7 @@ function HistoryPanel({
     return summary;
   }, { active: 0, activeTotal: 0, cancelled: 0, deleted: 0 }), [filtered]);
   const filteredTotal = roundMoney(filteredSummary.activeTotal);
-  const historyTotalHidden = settings.privacy.hideHeaderTotal || settings.privacy.hideReportTotals;
+  const historyTotalHidden = historyValuesHidden(settings.privacy, Boolean(query.trim() || tableNumberFilter.trim()));
 
   useEffect(() => {
     setVisibleCount(HISTORY_PAGE_SIZE);
@@ -4899,14 +4917,14 @@ function HistoryPanel({
                   <td>{entry.tableNumber ? entry.tableNumber : "-"}</td>
                   <td>{entry.busNumber || "-"}</td>
                   <td>{paymentLabelForEntry(entry)}</td>
-                  <td>{formatCurrency(entry.finalValue)}</td>
+                  <td>{historyTotalHidden ? "Privado" : formatCurrency(entry.finalValue)}</td>
                   <td><span className={`status-dot ${entry.status}`}>{statusLabel(entry.status)}</span></td>
                   <td>
                     <div className="row-actions">
-                      <button title="Editar" disabled={!canEdit} onClick={() => setEditing(entry)}><Edit3 size={15} /></button>
-                      {entry.sourceSaleId && onSavePayments && <button title="Editar pagamentos" aria-label="Editar pagamentos" disabled={!canEdit || entry.status !== "active" || pdvReceivables.some((account) => account.saleId === entry.sourceSaleId)} onClick={() => { const sale = pdvSaleById.get(entry.sourceSaleId!); if (sale) setEditingPayments(sale); }}><Wallet size={15} /></button>}
-                      {entry.sourceSaleId && <button className="history-sale-details-button" title="Ver produtos e pagamentos" aria-label="Ver produtos e pagamentos" onClick={() => openSaleDetails(entry)}><Eye size={15} /></button>}
-                      <button className="history-receipt-button" title="Gerar recibo ou cupom" aria-label="Gerar recibo ou cupom" onClick={() => openReceipt(entry)}><ReceiptText size={15} /></button>
+                      <button title="Editar" disabled={!canEdit || historyTotalHidden} onClick={() => setEditing(entry)}><Edit3 size={15} /></button>
+                      {entry.sourceSaleId && onSavePayments && <button title="Editar pagamentos" aria-label="Editar pagamentos" disabled={!canEdit || historyTotalHidden || entry.status !== "active" || pdvReceivables.some((account) => account.saleId === entry.sourceSaleId)} onClick={() => { const sale = pdvSaleById.get(entry.sourceSaleId!); if (sale) setEditingPayments(sale); }}><Wallet size={15} /></button>}
+                      {entry.sourceSaleId && <button className="history-sale-details-button" title="Ver produtos e pagamentos" aria-label="Ver produtos e pagamentos" disabled={historyTotalHidden} onClick={() => openSaleDetails(entry)}><Eye size={15} /></button>}
+                      <button className="history-receipt-button" title="Gerar recibo ou cupom" aria-label="Gerar recibo ou cupom" disabled={historyTotalHidden} onClick={() => openReceipt(entry)}><ReceiptText size={15} /></button>
                       <button title={entry.sourceSaleId ? "Vendas do PDV nao podem ser duplicadas como lancamentos" : onEditRemote ? "Duplicacao indisponivel no cliente" : "Duplicar"} disabled={Boolean(entry.sourceSaleId || onEditRemote)} onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
                       {entry.status === "deleted" || entry.status === "cancelled" ? (
                          <button title="Restaurar" onClick={() => run(() => onRestoreRemote ? onRestoreRemote(entry) : window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
@@ -7018,6 +7036,7 @@ function normalizeRemoteBaseUrl(value: string, defaultPort = 4317, localIps: str
 
 function SettingsPanel({
   settings,
+  pendingSaveRef,
   remoteSession,
   remoteClientActive,
   remoteClientPermissions,
@@ -7030,6 +7049,7 @@ function SettingsPanel({
   onImportLedgerFolder
 }: {
   settings: AppSettings;
+  pendingSaveRef?: React.MutableRefObject<(() => Promise<void>) | null>;
   remoteSession: RemoteClientSession | null;
   remoteClientActive: boolean;
   remoteClientPermissions?: ServerPermissions | null;
@@ -7056,6 +7076,9 @@ function SettingsPanel({
   const [pdvSettingsDirty, setPdvSettingsDirty] = useState(false);
   const [autoSaveState, setAutoSaveState] = useState<"saved" | "pending" | "saving" | "error">("saved");
   const lastSavedSettingsRef = useRef(JSON.stringify(settings));
+  const latestDraftRef = useRef(draft);
+  latestDraftRef.current = draft;
+  const saveInFlightRef = useRef<Promise<void> | null>(null);
   const remoteCustomizationAllowed = Boolean(remoteClientPermissions?.allowClientCustomization);
   const effectiveSettingsOperationMode = remoteSession?.clientPolicy.operationMode || draft.operationMode;
   const remoteLockedCategoryList: SettingsCategory[] = ["operation", "defaults", "profiles", "files", "pdv", "pdvTables", "pdvOperation", "printing", "server", "advanced"];
@@ -7066,8 +7089,9 @@ function SettingsPanel({
   useEffect(() => {
     const serialized = JSON.stringify(settings);
     if (serialized !== lastSavedSettingsRef.current) {
+      const previousSaved = lastSavedSettingsRef.current;
       lastSavedSettingsRef.current = serialized;
-      setDraft(settings);
+      setDraft((current) => JSON.stringify(current) === previousSaved ? settings : current);
       setAutoSaveState("saved");
     }
   }, [settings]);
@@ -7119,42 +7143,34 @@ function SettingsPanel({
     action();
   };
 
-  useEffect(() => {
-    const serializedDraft = JSON.stringify(draft);
-    const draftChanged = serializedDraft !== lastSavedSettingsRef.current;
-    if (!draftChanged && !pdvSettingsDirty) {
-      setAutoSaveState("saved");
-      return;
+  const flushDraft = async () => {
+    if (saveInFlightRef.current) await saveInFlightRef.current;
+    const next = latestDraftRef.current;
+    const serialized = JSON.stringify(next);
+    const changed = serialized !== lastSavedSettingsRef.current;
+    if (!changed && !pdvSettingsDirty) return;
+    if (remoteClientActive && JSON.stringify(remoteLockedSettingsSnapshot(settings, remoteCustomizationAllowed)) !== JSON.stringify(remoteLockedSettingsSnapshot(next, remoteCustomizationAllowed))) {
+      throw new Error("Esta configuração é controlada pelo servidor e não pode ser alterada neste cliente.");
     }
+    const operation = (async () => {
+      setAutoSaveState("saving");
+      try {
+        if (changed) { await onSave(next, { silent: true }); lastSavedSettingsRef.current = serialized; }
+        if (pdvSettingsDirty) await pdvSettingsActionsRef.current?.save();
+        setAutoSaveState(JSON.stringify(latestDraftRef.current) === serialized ? "saved" : "pending");
+      } catch (error) { setAutoSaveState("error"); throw error; }
+    })();
+    saveInFlightRef.current = operation;
+    try { await operation; } finally { if (saveInFlightRef.current === operation) saveInFlightRef.current = null; }
+  };
+  useEffect(() => {
+    if (pendingSaveRef) pendingSaveRef.current = flushDraft;
+    return () => { if (pendingSaveRef) pendingSaveRef.current = null; };
+  });
+  useEffect(() => {
+    if (JSON.stringify(draft) === lastSavedSettingsRef.current && !pdvSettingsDirty) return;
     setAutoSaveState("pending");
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        if (
-          remoteClientActive &&
-          JSON.stringify(remoteLockedSettingsSnapshot(settings, remoteCustomizationAllowed)) !==
-            JSON.stringify(remoteLockedSettingsSnapshot(draft, remoteCustomizationAllowed))
-        ) {
-          setAutoSaveState("error");
-          onToast("error", "Esta configuracao e controlada pelo servidor e nao pode ser alterada neste cliente.");
-          setDraft(settings);
-          return;
-        }
-        try {
-          setAutoSaveState("saving");
-          if (draftChanged) {
-            await onSave(draft, { silent: true });
-            lastSavedSettingsRef.current = serializedDraft;
-          }
-          if (pdvSettingsDirty) {
-            await pdvSettingsActionsRef.current?.save();
-          }
-          setAutoSaveState("saved");
-        } catch (error) {
-          setAutoSaveState("error");
-          onToast("error", error instanceof Error ? error.message : "Nao foi possivel salvar as configuracoes automaticamente.");
-        }
-      })();
-    }, 450);
+    const timer = window.setTimeout(() => { void flushDraft().catch((error) => onToast("error", error instanceof Error ? error.message : "Não foi possível salvar as configurações automaticamente.")); }, 450);
     return () => window.clearTimeout(timer);
   }, [draft, pdvSettingsDirty, remoteClientActive, remoteCustomizationAllowed, settings]);
 
@@ -7973,79 +7989,7 @@ function SettingsPanel({
         </section>
 
         <section className={categoryClass("privacy", "settings-group wide privacy-settings")}>
-          <div className="privacy-overview">
-            <div className="privacy-mark">
-              <ShieldCheck size={22} />
-            </div>
-            <div>
-              <span className="settings-overline">Valores sensiveis</span>
-              <h3>Privacidade de caixa</h3>
-              <p>
-                Esconda totais grandes quando o app estiver visivel para cliente, atendente ou outro computador.
-                Os lancamentos continuam salvos normalmente na planilha.
-              </p>
-            </div>
-            <strong>{draft.privacy.hideHeaderTotal || draft.privacy.hideReportTotals ? "Protecao ativa" : "Visao aberta"}</strong>
-          </div>
-
-          <div className="privacy-mode-grid">
-            <button
-              type="button"
-              className={`privacy-mode-card ${!draft.privacy.hideHeaderTotal && !draft.privacy.hideReportTotals ? "active" : ""}`}
-              onClick={() => update("privacy", { ...draft.privacy, hideHeaderTotal: false, hideReportTotals: false })}
-            >
-              <Eye size={18} />
-              <strong>Normal</strong>
-              <span>Mostra total do dia e relatorios completos.</span>
-            </button>
-            <button
-              type="button"
-              className={`privacy-mode-card ${draft.privacy.hideHeaderTotal && !draft.privacy.hideReportTotals ? "active" : ""}`}
-              onClick={() => update("privacy", { ...draft.privacy, hideHeaderTotal: true, hideReportTotals: false })}
-            >
-              <ShieldCheck size={18} />
-              <strong>Balcao</strong>
-              <span>Esconde o total no topo, mas deixa relatorio disponivel.</span>
-            </button>
-            <button
-              type="button"
-              className={`privacy-mode-card ${draft.privacy.hideHeaderTotal && draft.privacy.hideReportTotals ? "active" : ""}`}
-              onClick={() => update("privacy", { ...draft.privacy, hideHeaderTotal: true, hideReportTotals: true })}
-            >
-              <BarChart3 size={18} />
-              <strong>Reservado</strong>
-              <span>Abre relatorios com totais ocultos por padrao.</span>
-            </button>
-          </div>
-
-          <div className="privacy-control-grid">
-            <label className={`privacy-toggle-card ${draft.privacy.hideHeaderTotal ? "enabled" : ""}`}>
-              <input
-                type="checkbox"
-                checked={draft.privacy.hideHeaderTotal}
-                onChange={(event) => update("privacy", { ...draft.privacy, hideHeaderTotal: event.target.checked })}
-              />
-              <span>
-                <strong>Ocultar total no topo</strong>
-                <small>Troca o valor do card superior por "Privado" e reduz exposicao na tela principal.</small>
-              </span>
-            </label>
-            <label className={`privacy-toggle-card ${draft.privacy.hideReportTotals ? "enabled" : ""}`}>
-              <input
-                type="checkbox"
-                checked={draft.privacy.hideReportTotals}
-                onChange={(event) => update("privacy", { ...draft.privacy, hideReportTotals: event.target.checked })}
-              />
-              <span>
-                <strong>Relatorios abrirem ocultos</strong>
-                <small>O relatorio abre protegido, e voce decide quando revelar os totais na tela.</small>
-              </span>
-            </label>
-          </div>
-
-          <p className="settings-note">
-            Privacidade muda somente a visualizacao local. Ela nao altera permissao do servidor, historico, importacao ou arquivo Excel.
-          </p>
+          <PrivacyProfiles readOnly={remoteClientActive} value={draft.privacy} onChange={(privacy) => update("privacy", privacy)} />
         </section>
 
         <section className={categoryClass("server", "settings-group wide")} {...remoteSectionProps("server")}>

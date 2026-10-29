@@ -46,7 +46,7 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
   const shown = ordered.slice(currentPage * size, (currentPage + 1) * size);
   const visibleColumns = columns.filter((column) => column.required || !preferences.hidden.includes(column.key));
   return <div className={`finance-grid ${preferences.compact ? "is-compact" : ""} ${defaultHidden.length ? "is-simple" : ""}`}>
-    <div className="finance-grid-caption"><span>{rows.length} registro(s)</span>
+    <div className="finance-grid-caption">
       <div className="finance-grid-options"><button type="button" aria-expanded={options} onClick={() => setOptions(!options)}><Columns3 size={15} /> Visualização <ChevronDown size={13} /></button>
         {options && <div className="finance-column-menu" onKeyDown={(event) => { if (event.key === "Escape") setOptions(false); }}>
           <strong>Personalizar esta tabela</strong>
@@ -56,7 +56,7 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
         </div>}
       </div>
     </div>
-    <div className="finance-grid-scroll"><table><thead><tr>{visibleColumns.map((column) => <th key={column.key} className={column.numeric ? "number" : ""} aria-sort={sort.key === column.key ? sort.descending ? "descending" : "ascending" : "none"}><button onClick={() => setSort({ key: column.key, descending: sort.key === column.key && !sort.descending })}>{column.label}<ArrowUpDown size={12} /></button></th>)}</tr></thead>
+    <div className="finance-grid-scroll"><table><thead><tr>{visibleColumns.map((column) => <th key={column.key} data-column={column.key} className={column.numeric ? "number" : ""} aria-sort={sort.key === column.key ? sort.descending ? "descending" : "ascending" : "none"}><button onClick={() => setSort({ key: column.key, descending: sort.key === column.key && !sort.descending })}>{column.label}<ArrowUpDown size={12} /></button></th>)}</tr></thead>
       <tbody>{shown.map((row) => <tr key={row.id} tabIndex={0} aria-selected={selectedId === row.id} className={selectedId === row.id ? "selected" : ""} onClick={() => onSelect(row)} onDoubleClick={() => onOpen(row)} onKeyDown={(event) => {
         if (event.key === "Enter") { event.preventDefault(); onOpen(row); }
         if (event.key === " ") { event.preventDefault(); onSelect(row); }
@@ -64,9 +64,9 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
           event.preventDefault(); const next = event.key === "ArrowDown" ? event.currentTarget.nextElementSibling : event.currentTarget.previousElementSibling;
           (next as HTMLElement | null)?.focus();
         }
-      }}>{visibleColumns.map((column) => <td key={column.key} className={column.numeric ? "number" : ""}>{column.render ? column.render(row) : column.value(row)}</td>)}</tr>)}</tbody>
-    </table>{!rows.length && <div className="finance-grid-empty"><strong>Nenhum registro encontrado</strong><span>Altere a pesquisa ou os filtros para consultar outras contas.</span></div>}</div>
-    <div className="finance-grid-footer">{pages > 1 && <nav className="finance-pagination" aria-label="Páginas das contas"><button aria-label="Página anterior" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage + 1} / {pages}</span><button aria-label="Próxima página" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></nav>}<div className="finance-grid-totals">{totals}</div></div>
+      }}>{visibleColumns.map((column) => <td key={column.key} data-column={column.key} className={column.numeric ? "number" : ""}>{column.render ? column.render(row) : column.value(row)}</td>)}</tr>)}</tbody>
+    </table>{!rows.length && <div className="finance-grid-empty"><strong>Nenhum registro encontrado</strong><span>Altere a pesquisa ou os filtros.</span></div>}</div>
+    <div className="finance-grid-footer"><span className="finance-record-count">Registros: {rows.length}</span>{pages > 1 && <nav className="finance-pagination" aria-label="Páginas das contas"><button aria-label="Página anterior" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage + 1} / {pages}</span><button aria-label="Próxima página" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></nav>}<div className="finance-grid-totals">{totals}</div></div>
   </div>;
 }
 

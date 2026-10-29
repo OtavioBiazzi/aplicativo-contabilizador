@@ -1,0 +1,56 @@
+/* Compact local privacy profiles and operational overview. */
+#root .privacy-profiles { display: grid; gap: 12px; width: 100%; min-width: 0; }
+#root .privacy-profile-switches { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; border: 1px solid var(--line); background: var(--panel-2); }
+#root .privacy-profiles label { display: grid; gap: 5px; min-width: 0; font-size: .8rem; color: var(--text); }
+#root .privacy-profiles label > span { color: var(--muted); font-size: .75rem; }
+#root .privacy-profiles :is(input:not([type="checkbox"]), select) { width: 100%; min-width: 0; height: 34px; padding: 5px 8px; background: var(--panel); color: var(--text); -webkit-text-fill-color: var(--text); border: 1px solid var(--line); border-radius: 1px; font: inherit; font-size: .8rem; }
+#root .privacy-profile-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 6px; }
+#root .privacy-profile-toolbar > label { flex: 1 1 230px; }
+#root .privacy-profiles button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 34px; padding: 5px 10px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 1px; font-size: .78rem; cursor: pointer; }
+#root .privacy-profiles button:disabled { opacity: .45; cursor: default; }
+#root .privacy-profile-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 12px; border: 1px solid var(--line); background: var(--panel); border-radius: 0; }
+#root .privacy-profile-editor .privacy-profile-check { display: flex; align-items: center; gap: 7px; padding: 10px; border: 1px solid var(--line); background: var(--panel-2); }
+#root .privacy-profile-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+#root .privacy-profile-apply { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; grid-column: 1 / -1; padding-top: 10px; border-top: 1px solid var(--line); }
+#root .privacy-profile-apply > span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: .75rem; }
+#root .privacy-profile-apply button { border-color: var(--accent); color: var(--accent); }
+#root .module-window-body .settings-standalone .settings-hero { min-height: 0; padding: 8px 10px; border-radius: 0; }
+#root .module-window-body .settings-hero .settings-overline { display: none; }
+#root .module-window-body .settings-hero h2 { font-size: 1rem; margin: 0; }
+#root .module-window-body .settings-hero p { margin: 3px 0 0; font-size: .76rem; }
+#root .module-window-body .settings-hero button { min-height: 30px; padding: 4px 8px; font-size: .75rem; border-radius: 1px; }
+#root .module-window-body .dashboard-panel { padding: 10px; min-width: 0; color: var(--text); }
+#root .module-window-body .dashboard-intro { padding: 0 0 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line); gap: 12px; }
+#root .module-window-body .dashboard-intro h2 { margin: 2px 0; font-size: 1.15rem; }
+#root .module-window-body .dashboard-intro p { font-size: .78rem; margin: 4px 0 0; color: var(--muted); }
+#root .module-window-body .dashboard-intro .settings-overline { font-size: .65rem; }
+#root .module-window-body .dashboard-metrics { gap: 8px; margin-bottom: 12px; }
+#root .module-window-body .dashboard-metrics > button { min-height: 90px; padding: 10px; border-radius: 1px; background: var(--panel-2); border: 1px solid var(--line); border-top: 3px solid var(--accent); }
+#root .module-window-body .dashboard-metrics > button.warning { border-top-color: #e4a34a; }
+#root .module-window-body .dashboard-metrics > button strong { font-size: 1.25rem; color: var(--text); }
+#root .module-window-body .dashboard-metrics > button small { font-size: .72rem; color: var(--muted); }
+#root .module-window-body .dashboard-grid { grid-template-columns: minmax(0, 1.5fr) minmax(250px, 1fr); gap: 12px; }
+#root .module-window-body :is(.dashboard-performance, .dashboard-attention) { min-width: 0; border: 1px solid var(--line); border-radius: 1px; background: var(--panel); padding: 10px; }
+#root .module-window-body .dashboard-section-head { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+#root .module-window-body .dashboard-section-head strong { font-size: .85rem; }
+#root .module-window-body .dashboard-section-head small { font-size: .72rem; }
+#root .module-window-body .dashboard-section-head button { min-height: 30px; padding: 5px 8px; font-size: .75rem; border-radius: 1px; }
+#root .module-window-body .dashboard-profit-line { gap: 8px; }
+#root .module-window-body .dashboard-profit-line > div { padding: 8px; min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 1px; }
+#root .module-window-body .dashboard-profit-line strong { font-size: 1rem; }
+#root .module-window-body .dashboard-attention > button { padding: 9px; margin-bottom: 6px; border-radius: 1px; background: var(--panel-2); border: 1px solid var(--line); min-height: 54px; }
+#root .module-window-body .dashboard-top-products > div { padding-block: 7px; }
+#root .module-window-body .dashboard-top-products b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#root .catalog-inline-editor .pdv-product-basics-grid, #root .catalog-inline-editor .pdv-product-stock-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+#root .catalog-inline-editor .pdv-product-basics-grid .pdv-editor-field-wide { grid-column: 1 / -1; }
+#root .finance-navigation:disabled [aria-selected="true"] { opacity: 1; }
+@media (max-width: 900px) {
+  #root .module-window-body .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+  #root .catalog-inline-editor .pdv-product-basics-grid, #root .catalog-inline-editor .pdv-product-stock-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 650px) {
+  #root .privacy-profile-switches, #root .privacy-profile-editor { grid-template-columns: minmax(0, 1fr); }
+}
+
+#root .privacy-profile-definitions { margin: 0; border: 0; padding: 0; min-width: 0; }
+#root .privacy-profiles :disabled { opacity: .65; }

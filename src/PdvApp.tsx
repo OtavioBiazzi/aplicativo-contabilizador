@@ -2038,10 +2038,10 @@ export function PdvApp({
                     ? { label: "Alteracao offline", className: "offline-change", Icon: WifiOff }
                     : pendingSync
                       ? { label: "Sincronizando", className: "pending-sync", Icon: Clock3 }
-                      : waitingPayment
-                        ? { label: "Aguardando pagamento", className: "waiting-payment", Icon: Banknote }
-                        : table.status === "Fechamento"
-                          ? { label: "Em fechamento", className: "closing", Icon: Lock }
+                      : table.status === "Fechamento"
+                        ? { label: "Em fechamento", className: "closing", Icon: Lock }
+                        : waitingPayment
+                          ? { label: "Aguardando pagamento", className: "waiting-payment", Icon: Banknote }
                           : hasSubtableDefinitions
                             ? { label: hasMainItems ? "Principal + submesas" : "Submesas", className: "subtables", Icon: Layers3 }
                             : table.status === "Livre"
@@ -6362,6 +6362,8 @@ function FileImportButton({ onPreview, onImport, onImported, busy }: { onPreview
 function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImportCose, onPreviewCose, onRemoveCose, onPreviewImportFile, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct, removePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; canImport?: boolean; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onRemoveCose: () => Promise<number>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>; removePdvProduct: (id: string) => ReturnType<typeof window.caixa.removePdvProduct> }) {
   const [section, setSection] = useState<"products" | "categories" | "complements" | "imports">("products");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [targetCategoryId, setTargetCategoryId] = useState(snapshot.categories[0]?.id || "");
   const [filterCategoryId, setFilterCategoryId] = useState("todos");
   const [statusFilter, setStatusFilter] = useState<"todos" | "ativos" | "inativos" | "ocultos">("todos");
@@ -6371,161 +6373,100 @@ function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImport
   const [removeProductRequest, setRemoveProductRequest] = useState<PdvProduct | null>(null);
   const [removeCoseConfirm, setRemoveCoseConfirm] = useState(false);
   const [notice, setNotice] = useState("");
+  const [updating, setUpdating] = useState(false);
+  const normalized = normalizeTableSearch(productQuery);
   const filteredProducts = snapshot.products.filter((product) => {
-    const categoryMatch = filterCategoryId === "todos" || product.categoryId === filterCategoryId;
-    const normalizedQuery = productQuery.trim().toLocaleLowerCase("pt-BR");
-    const queryMatch = !normalizedQuery || [
-      product.name,
-      product.sku,
-      product.barcode,
-      product.supplier
-    ].some((value) => String(value || "").toLocaleLowerCase("pt-BR").includes(normalizedQuery));
-    const statusMatch = statusFilter === "todos"
-      || (statusFilter === "ativos" && product.active && product.showOnPdv)
-      || (statusFilter === "inativos" && !product.active)
-      || (statusFilter === "ocultos" && !product.showOnPdv);
-    const sectionMatch = section !== "complements" || product.canBeComplement || product.hasComplements || product.complementProductIds.length > 0;
-    return categoryMatch && queryMatch && statusMatch && sectionMatch;
+    const statusMatch = statusFilter === "todos" || (statusFilter === "ativos" && product.active && product.showOnPdv) || (statusFilter === "inativos" && !product.active) || (statusFilter === "ocultos" && !product.showOnPdv);
+    return (filterCategoryId === "todos" || product.categoryId === filterCategoryId)
+      && (!normalized || [product.name, product.sku, product.barcode, product.supplier, product.categoryName].some((value) => normalizeTableSearch(value || "").includes(normalized)))
+      && statusMatch && (section !== "complements" || product.canBeComplement || product.hasComplements || product.complementProductIds.length > 0);
   });
-  const showAllProducts = () => {
-    setSection("products");
-    setProductQuery("");
-    setFilterCategoryId("todos");
-    setStatusFilter("todos");
-    setSelectedIds([]);
-  };
+  const categories = snapshot.categories.filter((category) => !normalized || normalizeTableSearch(category.name).includes(normalized));
+  const selected = filteredProducts.find((product) => product.id === selectedId);
+  const selectedCategory = categories.find((category) => category.id === categoryId);
+  const visibleSelectedIds = selectedIds.filter((id) => filteredProducts.some((product) => product.id === id));
+  const editing = Boolean(editingProduct || editingCategory);
+  const showAllProducts = () => { setProductQuery(""); setFilterCategoryId("todos"); setStatusFilter("todos"); setSelectedIds([]); };
   const updateSelected = async (patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => {
-    await updatePdvProducts(selectedIds, patch);
-    setSelectedIds([]);
-    onProductsUpdated();
+    if (updating || !visibleSelectedIds.length) return;
+    setUpdating(true);
+    try { await updatePdvProducts(visibleSelectedIds, patch); setSelectedIds([]); onProductsUpdated(); }
+    catch (error) { setNotice(error instanceof Error ? error.message : "Não foi possível atualizar os produtos."); }
+    finally { setUpdating(false); }
   };
   const saveProduct = async (draft: PdvProductDraft) => {
-    await savePdvProduct(draft);
-    setEditingProduct(null);
-    onProductsUpdated();
+    const product = await savePdvProduct(draft);
+    showAllProducts(); if (section === "complements" && !product.canBeComplement && !product.hasComplements && !product.complementProductIds.length) setSection("products"); setSelectedId(product.id); setEditingProduct(null); onProductsUpdated();
   };
   const saveCategory = async (draft: PdvCategoryDraft) => {
-    await savePdvCategory(draft);
-    setEditingCategory(null);
-    onProductsUpdated();
+    const category = await savePdvCategory(draft);
+    setProductQuery(""); setCategoryId(category.id); setEditingCategory(null); onProductsUpdated();
   };
   const removeProduct = async () => {
     if (!removeProductRequest) return;
-    const result = await removePdvProduct(removeProductRequest.id);
-    setRemoveProductRequest(null);
-    setSelectedIds((current) => current.filter((id) => id !== result.id));
-    setNotice(result.mode === "deleted"
-      ? "Produto excluido. Nenhum historico foi alterado."
-      : "Produto arquivado porque possui lancamentos. O historico foi preservado.");
-    onProductsUpdated();
+    try {
+      const result = await removePdvProduct(removeProductRequest.id);
+      setRemoveProductRequest(null); setSelectedIds((current) => current.filter((id) => id !== result.id));
+      setNotice(result.mode === "deleted" ? "Produto excluído. O histórico foi preservado." : "Produto arquivado porque possui lançamentos. O histórico foi preservado.");
+      onProductsUpdated();
+    } catch (error) { setRemoveProductRequest(null); setNotice(error instanceof Error ? error.message : "Não foi possível excluir o produto."); }
   };
-  return (
-    <section className="pdv-panel pdv-products-settings-screen">
-      <div className="pdv-section-head">
-        <div>
-          <span className="pdv-eyebrow">Catalogo e estoque</span>
-          <h1>Produtos e categorias</h1>
-          <p>{snapshot.products.length} produtos em {snapshot.categories.length} categorias · {snapshot.products.filter((product) => product.trackStock).length} com estoque controlado.</p>
-        </div>
-        <div className="pdv-action-row">
-          {!readOnly && section === "products" && <button className="pdv-primary-button" onClick={() => setEditingProduct("new")}><Plus size={16} /> Novo produto</button>}
-          {!readOnly && section === "categories" && <button className="pdv-primary-button" onClick={() => setEditingCategory("new")}><Plus size={16} /> Nova categoria</button>}
-        </div>
+  const openSelected = () => { if (readOnly) return; if (section === "categories" && selectedCategory) setEditingCategory(selectedCategory); else if (selected) setEditingProduct(selected); };
+  return <section className="pdv-panel pdv-products-settings-screen catalog-workspace">
+    <fieldset className="finance-navigation" disabled={editing || updating}>
+      <div className="finance-command-bar" aria-label="Comandos de produtos">
+        <button disabled={readOnly || section === "imports"} onClick={() => section === "categories" ? setEditingCategory("new") : setEditingProduct("new")}><Plus /><span>Novo</span></button>
+        <button disabled={readOnly || (section === "categories" ? !selectedCategory : section === "imports" || !selected)} onClick={openSelected}><Pencil /><span>Alterar</span></button>
+        <button disabled={readOnly || section === "categories" || section === "imports" || !selected} onClick={() => selected && setRemoveProductRequest(selected)}><Trash2 /><span>Excluir</span></button>
       </div>
-      <div className="pdv-settings-nav" role="tablist" aria-label="Cadastro do PDV">
-        <button className={section === "products" ? "active" : ""} onClick={() => setSection("products")}>Produtos <span>{snapshot.products.length}</span></button>
-        <button className={section === "categories" ? "active" : ""} onClick={() => setSection("categories")}>Categorias <span>{snapshot.categories.length}</span></button>
-        <button className={section === "complements" ? "active" : ""} onClick={() => setSection("complements")}>Adicionais</button>
-        <button className={section === "imports" ? "active" : ""} onClick={() => setSection("imports")}>Importacao</button>
-      </div>
-
-      {(section === "products" || section === "complements") && (
-        <div className="pdv-products-content">
-          <div className="pdv-product-filterbar">
-            <button className={filterCategoryId === "todos" && statusFilter === "todos" && !productQuery ? "active" : ""} onClick={showAllProducts}>
-              Todos os produtos <span>{snapshot.products.length}</span>
-            </button>
-            <div className="pdv-search pdv-settings-search">
-              <Search size={17} />
-              <input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="Nome, codigo, barras ou fornecedor" />
-            </div>
-            <select value={filterCategoryId} onChange={(event) => setFilterCategoryId(event.target.value)}>
-              <option value="todos">Todas as categorias</option>
-              {snapshot.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
-              <option value="todos">Todos os estados</option>
-              <option value="ativos">Ativos no PDV</option>
-              <option value="inativos">Inativos</option>
-              <option value="ocultos">Ocultos do PDV</option>
-            </select>
-            <strong>{filteredProducts.length} exibido(s)</strong>
-          </div>
-          {!readOnly && selectedIds.length > 0 && (
-            <div className="pdv-selection-toolbar">
-              <strong>{selectedIds.length} selecionado(s)</strong>
-              <select value={targetCategoryId} onChange={(event) => setTargetCategoryId(event.target.value)}>
-                {snapshot.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-              </select>
-              <button onClick={() => updateSelected({ categoryId: targetCategoryId })}>Mover</button>
-              <button onClick={() => updateSelected({ showOnPdv: true })}>Exibir</button>
-              <button onClick={() => updateSelected({ showOnPdv: false })}>Ocultar</button>
-              <button onClick={() => updateSelected({ favorite: true })}>Favoritar</button>
-              <button onClick={() => setSelectedIds([])}>Limpar</button>
-            </div>
-          )}
-          <div className="pdv-product-table">
-            {filteredProducts.map((product) => (
-              <article key={product.id} className={product.active ? "" : "inactive"}>
-                {!readOnly && <input type="checkbox" aria-label={`Selecionar ${product.name}`} checked={selectedIds.includes(product.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, product.id])] : current.filter((id) => id !== product.id))} />}
-                <div className="pdv-product-main">
-                  <strong>{product.name}</strong>
-                  <small>{product.categoryName} · {product.unitMode === "kg" ? "Kg" : product.unitMode === "grama" ? "Grama" : "Unidade"}{product.sku ? ` · ${product.sku}` : ""}</small>
-                </div>
-                <div className="pdv-product-price-cell">
-                  <b>{money(product.price)}</b>
-                  <small>{product.costPrice ? `Custo ${money(product.costPrice)}` : "Custo nao informado"}</small>
-                </div>
-                <div className="pdv-product-badges">
-                  <span className={product.active && product.showOnPdv ? "success" : "muted"}>{product.active ? (product.showOnPdv ? "No PDV" : "Oculto") : "Inativo"}</span>
-                  {product.trackStock && (
-                    <span className={(product.stockQuantity || 0) <= (product.minimumStock || 0) ? "danger" : "success"}>
-                      Estoque {formatQuantity(product.stockQuantity || 0)}
-                    </span>
-                  )}
-                  {Boolean(product.favorite) && <span>Favorito</span>}
-                  {Boolean(product.canBeComplement) && <span>Adicional</span>}
-                  {product.complementProductIds.length > 0 && <span>{product.complementProductIds.length} vinculado(s)</span>}
-                  {product.importSource && <span>{product.importSource}</span>}
-                </div>
-                {!readOnly && (
-                  <div className="pdv-row-actions">
-                    <button className="pdv-icon-button" title="Editar produto" onClick={() => setEditingProduct(product)}><Pencil size={16} /></button>
-                    <button className="pdv-icon-button danger" title="Excluir ou arquivar produto" onClick={() => setRemoveProductRequest(product)}><Trash2 size={16} /></button>
-                  </div>
-                )}
-              </article>
-            ))}
-            {!filteredProducts.length && <div className="pdv-empty">Nenhum produto encontrado. Use “Todos os produtos” para limpar os filtros.</div>}
-          </div>
-        </div>
-      )}
-
-      {section === "categories" && (
-        <div className="pdv-category-settings-list">
-          {snapshot.categories.map((category) => {
-            const count = snapshot.products.filter((product) => product.categoryId === category.id).length;
-            return (
-              <article key={category.id} className={category.active ? "" : "inactive"}>
-                <div><strong>{category.name}</strong><span>{count} produto(s)</span></div>
-                <small>{category.active ? "Visivel no lancamento" : "Categoria oculta"}{category.favorite ? " · Favorita" : ""}</small>
-                {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditingCategory(category)}>Editar</button>}
-              </article>
-            );
-          })}
-        </div>
-      )}
-
+      <div className="finance-view-row"><div className="finance-view-tabs" role="tablist" aria-label="Cadastro do PDV">
+        {([["products", "Pesquisa"], ["categories", "Categorias"], ["complements", "Adicionais"], ["imports", "Importação"]] as const).map(([key, label]) => <button key={key} role="tab" aria-selected={section === key && !editing} onClick={() => { setSection(key); setProductQuery(""); }}>{label}</button>)}
+        <button role="tab" aria-selected={editing} disabled={readOnly || (section === "categories" ? !selectedCategory : section === "imports" || !selected)} onClick={openSelected}>Registro</button>
+      </div></div>
+    </fieldset>
+    {!editing && <div className="catalog-main">
+      {section !== "imports" && <div className="catalog-filters">
+        <label className="catalog-search"><span>Pesquisar</span><input aria-label="Buscar cadastro" value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder={section === "categories" ? "Nome da categoria" : "Nome, código, barras, fornecedor ou categoria"} /></label>
+        {section !== "categories" && <>
+          <label><span>Categoria</span><select value={filterCategoryId} onChange={(event) => setFilterCategoryId(event.target.value)}><option value="todos">Todas as categorias</option>{snapshot.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+          <label><span>Situação</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}><option value="todos">Todas</option><option value="ativos">Ativos no PDV</option><option value="inativos">Inativos</option><option value="ocultos">Ocultos do PDV</option></select></label>
+        </>}
+        <button onClick={showAllProducts}><RotateCcw size={14} /> Limpar</button>
+      </div>}
+      {(section === "products" || section === "complements") && <>
+        {!readOnly && visibleSelectedIds.length > 0 && <div className="catalog-selection">
+          <strong>{visibleSelectedIds.length} selecionado(s)</strong>
+          <label><span className="sr-only">Mover para categoria</span><select aria-label="Mover para categoria" value={targetCategoryId} disabled={updating} onChange={(event) => setTargetCategoryId(event.target.value)}>{snapshot.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+          <button disabled={updating || !targetCategoryId} onClick={() => void updateSelected({ categoryId: targetCategoryId })}>Mover</button>
+          <button disabled={updating} onClick={() => void updateSelected({ showOnPdv: true })}>Exibir</button>
+          <button disabled={updating} onClick={() => void updateSelected({ showOnPdv: false })}>Ocultar</button>
+          <button disabled={updating} onClick={() => void updateSelected({ favorite: true })}>Favoritar</button>
+          <button disabled={updating} onClick={() => setSelectedIds([])}>Limpar seleção</button>
+        </div>}
+        <FinancialGrid id="product-catalog" rows={filteredProducts} selectedId={selected?.id} onSelect={(product) => setSelectedId(product.id)} onOpen={(product) => { if (!readOnly) setEditingProduct(product); }} defaultHidden={["cost", "supplier", "barcode", "source"]} columns={[
+          { key: "select", label: "Selecionar", required: true, value: (product) => selectedIds.includes(product.id) ? 1 : 0, render: (product) => <input type="checkbox" aria-label={`Selecionar ${product.name}`} disabled={readOnly || updating} checked={selectedIds.includes(product.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, product.id])] : current.filter((id) => id !== product.id))} /> },
+          { key: "sku", label: "Código", value: (product) => product.sku || "—" },
+          { key: "name", label: "Produto", required: true, value: (product) => product.name },
+          { key: "category", label: "Categoria", value: (product) => product.categoryName },
+          { key: "unit", label: "Unidade", value: (product) => product.unit || "UNID" },
+          { key: "stock", label: "Estoque", numeric: true, value: (product) => product.trackStock ? product.stockQuantity || 0 : -1, render: (product) => product.trackStock ? <span className={(product.stockQuantity || 0) <= (product.minimumStock || 0) ? "catalog-stock-low" : ""}>{formatQuantity(product.stockQuantity || 0)}</span> : "—" },
+          { key: "status", label: "Situação", value: (product) => !product.active ? "Inativo" : product.showOnPdv ? "No PDV" : "Oculto" },
+          { key: "favorite", label: "Favorito", value: (product) => product.favorite ? "Sim" : "—" },
+          { key: "complements", label: "Adicionais", value: (product) => [product.canBeComplement ? "Adicional" : "", product.hasComplements ? "Solicita" : "", product.complementProductIds.length ? `${product.complementProductIds.length} vinculado(s)` : ""].filter(Boolean).join(" · ") || "—" },
+          { key: "supplier", label: "Fornecedor", value: (product) => product.supplier || "—" },
+          { key: "barcode", label: "Código de barras", value: (product) => product.barcode || "—" },
+          { key: "source", label: "Origem", value: (product) => product.importSource || "Manual" },
+          { key: "cost", label: "Custo", numeric: true, value: (product) => product.costPrice || 0, render: (product) => money(product.costPrice || 0) },
+          { key: "price", label: "Preço", required: true, numeric: true, value: (product) => product.price, render: (product) => money(product.price) },
+        ]} totals={<span>{snapshot.products.length} produtos cadastrados</span>} />
+      </>}
+      {section === "categories" && <FinancialGrid id="category-catalog" rows={categories} selectedId={selectedCategory?.id} defaultHidden={["order"]} onSelect={(category) => setCategoryId(category.id)} onOpen={(category) => { if (!readOnly) setEditingCategory(category); }} columns={[
+        { key: "name", label: "Categoria", required: true, value: (category) => category.name },
+        { key: "count", label: "Produtos", numeric: true, value: (category) => snapshot.products.filter((product) => product.categoryId === category.id).length },
+        { key: "status", label: "Situação", value: (category) => category.active ? "Ativa" : "Oculta" },
+        { key: "favorite", label: "Favorita", value: (category) => category.favorite ? "Sim" : "—" },
+        { key: "order", label: "Ordem", numeric: true, value: (category) => category.sortOrder },
+      ]} totals={<span>{snapshot.categories.length} categorias cadastradas</span>} />}
       {section === "imports" && (
         <div className="pdv-import-settings">
           <div>
@@ -6541,23 +6482,10 @@ function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImport
           </div>
         </div>
       )}
-      {editingProduct && (
-        <ProductEditorModal
-          product={editingProduct === "new" ? null : editingProduct}
-          categories={snapshot.categories}
-          products={snapshot.products}
-          complementsEnabled={snapshot.settings.complementsEnabled}
-          onCancel={() => setEditingProduct(null)}
-          onSave={saveProduct}
-        />
-      )}
-      {editingCategory && (
-        <CategoryEditorModal
-          category={editingCategory === "new" ? null : editingCategory}
-          onCancel={() => setEditingCategory(null)}
-          onSave={saveCategory}
-        />
-      )}
+
+    </div>}
+    {editingProduct && <ProductEditorModal inline product={editingProduct === "new" ? null : editingProduct} categories={snapshot.categories} products={snapshot.products} complementsEnabled={snapshot.settings.complementsEnabled} onCancel={() => setEditingProduct(null)} onSave={saveProduct} />}
+    {editingCategory && <CategoryEditorModal inline category={editingCategory === "new" ? null : editingCategory} onCancel={() => setEditingCategory(null)} onSave={saveCategory} />}
       {removeCoseConfirm && (
         <PdvConfirmModal
           title="Remover importacao Cose Dell Abadia?"
@@ -6575,11 +6503,10 @@ function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImport
         />
       )}
       {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
-    </section>
-  );
+    </section>;
 }
 
-function ProductEditorModal({ product, categories, products, complementsEnabled, onCancel, onSave }: { product: PdvProduct | null; categories: PdvCategory[]; products: PdvProduct[]; complementsEnabled: boolean; onCancel: () => void; onSave: (draft: PdvProductDraft) => void }) {
+function ProductEditorModal({ inline = false, product, categories, products, complementsEnabled, onCancel, onSave }: { inline?: boolean; product: PdvProduct | null; categories: PdvCategory[]; products: PdvProduct[]; complementsEnabled: boolean; onCancel: () => void; onSave: (draft: PdvProductDraft) => void | Promise<void> }) {
   const [section, setSection] = useState<"commercial" | "stock" | "availability" | "complements">("commercial");
   const [draft, setDraft] = useState<PdvProductDraft>({
     id: product?.id,
@@ -6614,15 +6541,21 @@ function ProductEditorModal({ product, categories, products, complementsEnabled,
   const parsedStock = roundQuantity(parseBrazilianNumber(stockText || "0"));
   const parsedMinimumStock = roundQuantity(parseBrazilianNumber(minimumStockText || "0"));
   const margin = parsedPrice > 0 ? ((parsedPrice - parsedCost) / parsedPrice) * 100 : 0;
-  const saveDraft = () => onSave({
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const saveDraft = async () => {
+    if (saving) return;
+    setSaving(true); setError("");
+    try { await onSave({
     ...draft,
     price: parsedPrice,
     costPrice: parsedCost,
     stockQuantity: parsedStock,
     minimumStock: parsedMinimumStock
-  });
+    }); } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível salvar o produto."); } finally { setSaving(false); }
+  };
   return (
-    <div className="pdv-modal-backdrop">
+    <div className={inline ? "financial-inline-editor catalog-inline-editor" : "pdv-modal-backdrop"} role={inline ? "region" : "dialog"} aria-label={product ? "Editar produto" : "Novo produto"} aria-modal={inline ? undefined : true}>
       <section className="pdv-payment-modal pdv-editor-modal pdv-product-editor-modal">
         <div className="pdv-section-head">
           <div>
@@ -6730,16 +6663,17 @@ function ProductEditorModal({ product, categories, products, complementsEnabled,
           </div>
         </section>}
         </div>
+        {error && <p role="alert" className="pdv-inline-warning">{error}</p>}
         <div className="pdv-action-row">
-          <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
-          <button className="pdv-primary-button" disabled={!draft.name.trim() || !draft.categoryId || parsedPrice <= 0} onClick={saveDraft}>Salvar produto</button>
+          <button className="pdv-danger-button" disabled={saving} onClick={onCancel}>Cancelar</button>
+          <button className="pdv-primary-button" disabled={saving || !draft.name.trim() || !draft.categoryId || parsedPrice <= 0} onClick={() => void saveDraft()}>{saving ? "Salvando…" : "Salvar produto"}</button>
         </div>
       </section>
     </div>
   );
 }
 
-function CategoryEditorModal({ category, onCancel, onSave }: { category: PdvCategory | null; onCancel: () => void; onSave: (draft: PdvCategoryDraft) => void }) {
+function CategoryEditorModal({ inline = false, category, onCancel, onSave }: { inline?: boolean; category: PdvCategory | null; onCancel: () => void; onSave: (draft: PdvCategoryDraft) => void | Promise<void> }) {
   const [draft, setDraft] = useState<PdvCategoryDraft>({
     id: category?.id,
     name: category?.name || "",
@@ -6747,8 +6681,11 @@ function CategoryEditorModal({ category, onCancel, onSave }: { category: PdvCate
     favorite: category?.favorite ?? false,
     sortOrder: category?.sortOrder || 0
   });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const save = async () => { if (saving) return; setSaving(true); setError(""); try { await onSave(draft); } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível salvar a categoria."); } finally { setSaving(false); } };
   return (
-    <div className="pdv-modal-backdrop">
+    <div className={inline ? "financial-inline-editor catalog-inline-editor" : "pdv-modal-backdrop"} role={inline ? "region" : "dialog"} aria-label={category ? "Editar categoria" : "Nova categoria"} aria-modal={inline ? undefined : true}>
       <section className="pdv-payment-modal pdv-editor-modal">
         <div className="pdv-section-head">
           <div>
@@ -6762,9 +6699,10 @@ function CategoryEditorModal({ category, onCancel, onSave }: { category: PdvCate
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Categoria ativa</label>
           <label className="pdv-switch-line"><input type="checkbox" checked={draft.favorite} onChange={(event) => setDraft({ ...draft, favorite: event.target.checked })} /> Categoria favorita no topo</label>
         </div>
+        {error && <p role="alert" className="pdv-inline-warning">{error}</p>}
         <div className="pdv-action-row">
-          <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
-          <button className="pdv-primary-button" disabled={!draft.name.trim()} onClick={() => onSave(draft)}>Salvar categoria</button>
+          <button className="pdv-danger-button" disabled={saving} onClick={onCancel}>Cancelar</button>
+          <button className="pdv-primary-button" disabled={saving || !draft.name.trim()} onClick={() => void save()}>{saving ? "Salvando…" : "Salvar categoria"}</button>
         </div>
       </section>
     </div>
@@ -7021,9 +6959,10 @@ function ReceivablesScreen({
   const normalized = query.trim().toLocaleLowerCase("pt-BR");
   const receivables = snapshot.receivables.filter((item) => {
     if (!inFinancialPeriod(item, from, to, dateField)) return false;
+    if (status === "Nenhuma" || (status === "Operacionais" && ["Cancelada", "Excluida"].includes(item.status))) return false;
     if (status === "Pendentes" && !["Em aberto", "Parcialmente recebida", "Vencida"].includes(item.status)) return false;
     if (status === "Historico" && !["Recebida", "Cancelada", "Excluida"].includes(item.status)) return false;
-    if (status !== "Todos" && status !== "Pendentes" && status !== "Historico" && item.status !== status) return false;
+    if (status !== "Todos" && status !== "Operacionais" && status !== "Pendentes" && status !== "Historico" && item.status !== status) return false;
     if (!normalized) return true;
     const sale = snapshot.recentSales.find((value) => value.id === item.saleId);
     return [
@@ -7094,8 +7033,9 @@ function ReceivablesScreen({
         <div><span className="pdv-eyebrow">Financeiro</span><h1>Contas a receber</h1><p>Cobrancas, vencimentos e recebimentos vinculados aos clientes.</p></div>
       </div>
       {!hideNavigation && <HistoryViewTabs value={view} onChange={onViewChange} showSales={showSales} />}
+      <fieldset className="finance-navigation" disabled={Boolean(editing || creating)}>
       <div className="finance-command-bar" aria-label="Comandos de contas a receber">
-        <button disabled={readOnly} onClick={() => setCreating(true)}><Plus /><span>Novo</span></button>
+        <button disabled={readOnly} onClick={() => { setCustomerView(false); setRecordView(false); setCreating(true); }}><Plus /><span>Novo</span></button>
         <button disabled={customerView || !canChange} onClick={() => validSelection && setEditing(validSelection)}><Pencil /><span>Alterar</span></button>
         {!customerView && selectedAccountIds.some((id) => receivables.some((account) => account.id === id)) && <button disabled={readOnly || !receivables.some((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009)} onClick={() => {
           const accounts = receivables.filter((account) => selectedAccountIds.includes(account.id) && account.balance > 0.009 && !["Cancelada", "Excluida"].includes(account.status));
@@ -7103,9 +7043,10 @@ function ReceivablesScreen({
           if (!accounts[0].customerId || accounts.some((account) => account.customerId !== accounts[0].customerId)) { setNotice("Selecione contas pendentes do mesmo cliente."); return; }
           customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(accounts.map((account) => account.id)); setCustomerReceiving({ ...accounts[0], balance: roundMoney(accounts.reduce((sum, account) => sum + account.balance, 0)) });
         }}><Wallet /><span>Receber selecionadas ({selectedAccountIds.filter((id) => receivables.some((account) => account.id === id)).length})</span></button>}
+        <button disabled={customerView || readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
         <button className="primary-command" disabled={customerView ? readOnly || !selectedCustomerRow : !canReceive} onClick={() => { if (customerView && selectedCustomerRow) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...selectedCustomerRow.representative, balance: selectedCustomerRow.balance }); } else if (!customerView && validSelection) { setReceiving(validSelection); } }}><Wallet /><span>Receber</span></button>
         <details className="finance-more-actions"><summary>Mais ações</summary><div>
-        <button disabled={customerView || readOnly || !validSelection} onClick={() => validSelection && setDeleteRequest(validSelection)}><Trash2 /><span>{validSelection?.status === "Excluida" ? "Apagar de vez" : "Excluir"}</span></button>
+
         <button disabled={customerView || !canChange || (validSelection?.receivedAmount || 0) > 0.009} onClick={() => validSelection && setCancelRequest(validSelection)}><X /><span>Cancelar conta</span></button>
         <button disabled={customerView || !validSelection || !snapshot.recentSales.some((sale) => sale.id === validSelection.saleId)} onClick={() => validSelection && openReceipt(validSelection)}><ReceiptText /><span>Recibo</span></button>
         <button disabled={customerView ? !selectedCustomerRow : !validSelection || !customerOutstandingAccounts(snapshot.receivables, validSelection).length} onClick={() => { const account = customerView ? selectedCustomerRow?.representative : validSelection; if (account) openCustomerReceipt(account); }}><ReceiptText /><span>Recibo do cliente</span></button>
@@ -7113,16 +7054,17 @@ function ReceivablesScreen({
       </div>
       <div className="finance-view-row">
         <div className="finance-view-tabs" role="tablist" aria-label="Consulta da conta">
-          <button role="tab" aria-selected={!recordView && !customerView} onClick={() => { setCustomerView(false); setRecordView(false); }}>Pesquisa</button>
-          <button role="tab" aria-selected={customerView} onClick={() => { setCustomerView(true); setRecordView(false); }}>Por cliente</button>
-          <button role="tab" aria-selected={recordView} disabled={!validSelection} onClick={() => { setCustomerView(false); setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
+          <button role="tab" aria-selected={!recordView && !customerView && !Boolean(editing || creating)} onClick={() => { setCustomerView(false); setRecordView(false); }}>Pesquisa</button>
+          <button role="tab" aria-selected={customerView && !editing && !creating} onClick={() => { setCustomerView(true); setRecordView(false); }}>Por cliente</button>
+          <button role="tab" aria-selected={recordView || Boolean(editing || creating)} disabled={!validSelection} onClick={() => { setCustomerView(false); if (canChange && validSelection) setEditing(validSelection); else setRecordView(true); }}>Registro {validSelection?.documentNumber ? `· ${validSelection.documentNumber}` : ""}</button>
         </div>
         <div className="finance-view-actions">
           {!readOnly && <button className="finance-customer-button" onClick={() => setCreatingCustomer(true)}><Plus size={14} /> Novo cliente</button>}
           <button className="finance-export-button" title="Exportar CSV" aria-label="Exportar CSV" onClick={exportVisibleAccounts}><Download size={16} /></button>
         </div>
       </div>
-      <SimpleFinancialFilters grouped={customerView} pendingNotice={{ count: hiddenPendingCount, onShowAll: () => { setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); } }} query={query} onQuery={setQuery} placeholder={customerView ? "Nome do cliente" : "Cliente, descrição ou produto"} from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }} statuses={["Pendentes", "Recebida", "Vencida", "Cancelada", "Excluida", "Historico", "Em aberto", "Parcialmente recebida", "Todos"]} />
+</fieldset>
+      <SimpleFinancialFilters settlement={{ pendingStatus: "Pendentes", paidStatus: "Recebida", pendingLabel: "A receber", paidLabel: "Recebidas" }} grouped={customerView} pendingNotice={{ count: hiddenPendingCount, onShowAll: () => { setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); } }} query={query} onQuery={setQuery} placeholder={customerView ? "Nome do cliente" : "Cliente, descrição ou produto"} from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }} statuses={["Pendentes", "Recebida", "Vencida", "Cancelada", "Excluida", "Historico", "Em aberto", "Parcialmente recebida", "Todos"]} />
       {customerView ? <>
         <FinancialGrid id="customer-balances" totals={<><span>Falta receber<strong>{money(visibleCustomerRows.reduce((sum, row) => sum + row.balance, 0))}</strong></span></>} rows={visibleCustomerRows} selectedId={customerSelection} onSelect={(row) => setCustomerSelection(row.id)} onOpen={(row) => { if (!readOnly) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...row.representative, balance: row.balance }); } }} columns={[
           { key: "name", label: "Cliente", required: true, value: (row) => row.name },
@@ -7131,11 +7073,12 @@ function ReceivablesScreen({
         ]} />
       </> : <>
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
-        <FinancialGrid id="receivables" defaultHidden={["created", "document", "method", "received"]} rows={receivables} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); setRecordView(true); }} columns={[
+        <FinancialGrid id="receivables" defaultHidden={["received"]} rows={receivables} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); if (!readOnly && !["Cancelada", "Excluida"].includes(item.status)) setEditing(item); else setRecordView(true); }} columns={[
           { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${item.description || item.id}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
           { key: "created", label: "Emissão", value: (item) => item.createdAt, render: (item) => new Date(item.createdAt).toLocaleDateString("pt-BR") },
           { key: "document", label: "Documento", value: (item) => item.documentNumber || "—" },
-          { key: "customer", label: "Cliente / descrição", required: true, value: (item) => item.customerName, render: (item) => <div className="finance-cell-title"><strong>{item.customerName}</strong><small>{item.description || (item.tableNumber ? `Mesa ${item.tableNumber}${item.subtableName ? ` · ${item.subtableName}` : ""}` : "Conta avulsa")}</small></div> },
+          { key: "description", label: "Descrição", value: (item) => item.description || (item.tableNumber ? `Mesa ${item.tableNumber}${item.subtableName ? ` · ${item.subtableName}` : ""}` : "Conta avulsa") },
+          { key: "customer", label: "Cliente", required: true, value: (item) => item.customerName },
           { key: "due", label: "Vencimento", value: (item) => item.dueDate || "", render: (item) => item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "Sem data" },
           { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || "—" },
           { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <FinancialStatus value={item.status} /> },
@@ -7172,9 +7115,9 @@ function ReceivablesScreen({
         setCustomerReceiving(null); setSelectedAccountIds([]); await onChanged(); setNotice("Recebimento distribuído nas contas do cliente.");
       }} />}
       {receiving && <ReceivableCollectionModal receivable={receiving} onCancel={() => setReceiving(null)} onConfirm={(payment) => registerPayment(receiving, payment)} />}
-      {creating && <ReceivableDraftModal customers={snapshot.customers} onSaveCustomer={async (draft) => { const customer = await onSaveCustomer(draft); await onChanged(); return customer; }} onCancel={() => setCreating(false)} onSave={async (draft) => { const next = await onSaveReceivable(draft); setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); setSelected(next); setCreating(false); await onChanged(); setNotice("Conta a receber cadastrada."); }} />}
+      {creating && <ReceivableDraftModal inline customers={snapshot.customers} onSaveCustomer={async (draft) => { const customer = await onSaveCustomer(draft); await onChanged(); return customer; }} onCancel={() => setCreating(false)} onSave={async (draft) => { const next = await onSaveReceivable(draft); setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); setSelected(next); setCreating(false); await onChanged(); setNotice("Conta a receber cadastrada."); }} />}
       {creatingCustomer && <CustomerEditorModal onCancel={() => setCreatingCustomer(false)} onSave={async (draft) => { await onSaveCustomer(draft); setCreatingCustomer(false); await onChanged(); }} />}
-      {editing && <ReceivableEditorModal receivable={editing} sale={snapshot.recentSales.find((item) => item.id === editing.saleId)} onCancel={() => setEditing(null)} onDelete={() => { setDeleteRequest(editing); setEditing(null); }} onSave={async (patch) => { const next = await onUpdateReceivable(editing.id, patch); setSelected(next); setEditing(null); await onChanged(); setNotice("Conta a receber atualizada."); }} />}
+      {editing && <ReceivableEditorModal inline receivable={editing} sale={snapshot.recentSales.find((item) => item.id === editing.saleId)} onCancel={() => setEditing(null)} onDelete={() => { setDeleteRequest(editing); setEditing(null); }} onSave={async (patch) => { const next = await onUpdateReceivable(editing.id, patch); setSelected(next); setEditing(null); await onChanged(); setNotice("Conta a receber atualizada."); }} />}
       {cancelRequest && <PdvConfirmModal title="Cancelar conta a receber?" message={`A conta de ${cancelRequest.customerName} sera marcada como cancelada. A venda permanecera no Historico.`} onCancel={() => setCancelRequest(null)} onConfirm={() => void onCancelReceivable(cancelRequest.id).then(async () => { setSelected((current) => current?.id === cancelRequest.id ? null : current); setCancelRequest(null); await onChanged(); })} />}
       {deleteRequest && <PdvConfirmModal title={deleteRequest.status === "Excluida" ? "Apagar conta definitivamente?" : "Excluir conta a receber?"} message={deleteRequest.status === "Excluida" ? `A conta de ${deleteRequest.customerName} e seus recebimentos serao removidos do sistema. Esta acao nao pode ser desfeita.` : `A conta de ${deleteRequest.customerName} saira das listas operacionais e permanecera somente no historico como excluida.`} confirmLabel={deleteRequest.status === "Excluida" ? "Apagar definitivamente" : "Excluir conta"} danger onCancel={() => setDeleteRequest(null)} onConfirm={() => void onDeleteReceivable(deleteRequest.id, deleteRequest.status === "Excluida").then(async () => { setSelected((current) => current?.id === deleteRequest.id ? null : current); setDeleteRequest(null); await onChanged(); setNotice(deleteRequest.status === "Excluida" ? "Conta apagada definitivamente." : "Conta movida para o historico de excluidas."); }).catch((error) => { setDeleteRequest(null); setNotice(error instanceof Error ? error.message : "Nao foi possivel apagar a conta."); })} />}
       {receiptTarget && <PdvReceiptDraftModal sale={receiptTarget.sale} receivable={receiptTarget.receivable} receiptSettings={snapshot.settings} customers={snapshot.customers} allowPrint={allowPrint} printTargets={receiptPrintTargets} onRemotePrint={onRemoteReceiptPrint} onClose={() => setReceiptTarget(null)} onNotice={setNotice} />}
@@ -7184,7 +7127,7 @@ function ReceivablesScreen({
   );
 }
 
-function ReceivableDraftModal({ customers, onSaveCustomer, onCancel, onSave }: { customers: PdvCustomer[]; onSaveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>; onCancel: () => void; onSave: (draft: PdvReceivableDraft) => Promise<void> }) {
+function ReceivableDraftModal({ inline = false, customers, onSaveCustomer, onCancel, onSave }: { inline?: boolean; customers: PdvCustomer[]; onSaveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>; onCancel: () => void; onSave: (draft: PdvReceivableDraft) => Promise<void> }) {
   const [draft, setDraft] = useState<PdvReceivableDraft>({ id: crypto.randomUUID(), customerId: "", description: "", dueDate: localDateInputValue(), amount: 0, tags: [] });
   const [amountText, setAmountText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -7208,7 +7151,7 @@ function ReceivableDraftModal({ customers, onSaveCustomer, onCancel, onSave }: {
   };
   useModalConfirmShortcut(() => void confirm(), onCancel, valid && !busy && !creatingCustomer);
   return (
-    <div className="pdv-modal-backdrop pdv-nested-backdrop" role="dialog" aria-modal="true">
+    <div className={inline ? "financial-inline-editor" : "pdv-modal-backdrop pdv-nested-backdrop"} role={inline ? "region" : "dialog"} aria-modal={inline ? undefined : true}>
       <section className="pdv-payment-modal pdv-admin-modal pdv-financial-editor-modal">
         <div className="pdv-section-head"><div><span className="pdv-eyebrow">Contas a receber</span><h1>Nova conta</h1><p>Cadastre uma cobranca sem precisar criar uma venda no PDV.</p></div><button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button></div>
         <div className="pdv-editor-grid pdv-financial-editor-grid">
@@ -7280,78 +7223,69 @@ function CustomersScreen({
   const [detailCustomer, setDetailCustomer] = useState<PdvCustomer | null>(null);
   const [detailSection, setDetailSection] = useState<"summary" | "pending">("summary");
   const [notice, setNotice] = useState("");
-  const normalized = query.trim().toLocaleLowerCase("pt-BR");
-  const balanceFor = (id: string) => roundMoney(snapshot.receivables.filter((item) => item.customerId === id && !["Cancelada", "Excluida"].includes(item.status)).reduce((sum, item) => sum + item.balance, 0));
-  const accountCountFor = (id: string) => snapshot.receivables.filter((item) => item.customerId === id).length;
+  const normalized = normalizeTableSearch(query);
+  const accountTotals = useMemo(() => {
+    const result = new Map<string, { balance: number; count: number; pending: number }>();
+    for (const account of snapshot.receivables) {
+      const total = result.get(account.customerId) || { balance: 0, count: 0, pending: 0 };
+      total.count++;
+      if (!["Cancelada", "Excluida"].includes(account.status)) {
+        total.balance = roundMoney(total.balance + account.balance);
+        if (account.balance > .009) total.pending++;
+      }
+      result.set(account.customerId, total);
+    }
+    return result;
+  }, [snapshot.receivables]);
+  const balanceFor = (id: string) => accountTotals.get(id)?.balance || 0;
   const customers = snapshot.customers.filter((customer) => {
-    const matchesQuery = !normalized || [customer.name, customer.document, customer.phone, customer.email, customer.note].join(" ").toLocaleLowerCase("pt-BR").includes(normalized);
-    const matchesStatus = customerStatus === "Todos"
-      || (customerStatus === "Ativos" && customer.active)
-      || (customerStatus === "Inativos" && !customer.active)
-      || (customerStatus === "Com saldo" && balanceFor(customer.id) > 0.009);
-    return matchesQuery && matchesStatus;
+    const matchesQuery = !normalized || normalizeTableSearch([customer.name, customer.document, customer.phone, customer.email, customer.note].join(" ")).includes(normalized);
+    return matchesQuery && (customerStatus === "Todos" || (customerStatus === "Ativos" && customer.active) || (customerStatus === "Inativos" && !customer.active) || (customerStatus === "Com saldo" && balanceFor(customer.id) > .009));
   });
-  const activeCustomers = snapshot.customers.filter((customer) => customer.active);
-  const customersWithBalance = snapshot.customers.filter((customer) => balanceFor(customer.id) > 0.009);
-  const outstandingBalance = roundMoney(customersWithBalance.reduce((sum, customer) => sum + balanceFor(customer.id), 0));
-  const registeredAccounts = snapshot.receivables.filter((item) => !["Cancelada", "Excluida"].includes(item.status)).length;
+  const selected = customers.find((customer) => customer.id === selectedCustomer?.id);
+  const outstandingBalance = roundMoney(customers.reduce((sum, customer) => sum + balanceFor(customer.id), 0));
   return (
-    <section className="pdv-panel financial-module-shell pdv-customer-professional">
-      <div className="pdv-section-head financial-module-head"><div><span className="pdv-eyebrow">Relacionamento</span><h1>Clientes</h1><p>Cadastros, contatos, saldos e movimentacoes reunidos em uma unica ficha.</p></div>{!readOnly && <button className="pdv-primary-button" onClick={() => setEditing("new")}><Plus size={16} /> Novo cliente</button>}</div>
+    <section className="pdv-panel financial-module-shell pdv-customer-professional catalog-workspace">
       {!hideNavigation && <HistoryViewTabs value={view} onChange={onViewChange} showSales={showSales} />}
-      <div className="financial-metrics customer-financial-metrics">
-        <button onClick={() => setCustomerStatus("Todos")}><span>Total de clientes</span><strong>{snapshot.customers.length}</strong><small>Cadastros encontrados</small></button>
-        <button onClick={() => setCustomerStatus("Ativos")}><span>Clientes ativos</span><strong>{activeCustomers.length}</strong><small>Disponiveis para lancamentos</small></button>
-        <button className={customersWithBalance.length ? "warning" : ""} onClick={() => setCustomerStatus("Com saldo")}><span>Com saldo pendente</span><strong>{customersWithBalance.length}</strong><small>Precisam de acompanhamento</small></button>
-        <button onClick={() => setCustomerStatus("Com saldo")}><span>Saldo a receber</span><strong>{money(outstandingBalance)}</strong><small>Somado entre clientes</small></button>
-        <button onClick={() => setCustomerStatus("Todos")}><span>Contas registradas</span><strong>{registeredAccounts}</strong><small>Ativas no financeiro</small></button>
-      </div>
-      <div className="financial-filters customer-financial-filters">
-        <label className="financial-search"><span>Buscar</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome, telefone, e-mail, CPF/CNPJ ou observacao" /></label>
-        <label><span>Situacao</span><select value={customerStatus} onChange={(event) => setCustomerStatus(event.target.value as typeof customerStatus)}><option>Todos</option><option>Ativos</option><option>Inativos</option><option>Com saldo</option></select></label>
-        <button onClick={() => { setQuery(""); setCustomerStatus("Todos"); }}><RotateCcw size={15} /> Exibir tudo</button>
-      </div>
-      <div className="financial-master-detail customer-master-detail">
-        <div className="financial-account-list financial-customer-list">
-          <div className="financial-account-list-head"><span>Cliente</span><span>Contato</span><span>Contas</span><span>Saldo</span><span>Situacao</span></div>
-          {customers.map((customer) => (
-            <article key={customer.id} className={`${!customer.active ? "inactive" : ""} ${selectedCustomer?.id === customer.id ? "selected" : ""}`} onClick={() => setSelectedCustomer(customer)}>
-              <div><strong>{customer.name}</strong><small>{customer.document || customer.note || "Sem documento informado"}</small></div>
-              <span>{customer.phone || customer.email || "Sem contato informado"}</span>
-              <b>{accountCountFor(customer.id)}</b>
-              <b>{money(balanceFor(customer.id))}</b>
-              <span className={`financial-status ${customer.active ? "status-recebida" : "status-cancelada"}`}>{customer.active ? "Ativo" : "Inativo"}</span>
-            </article>
-          ))}
-          {!customers.length && <div className="financial-detail-empty"><Search size={28} /><strong>Nenhum cliente encontrado</strong><span>Altere a busca ou o filtro de situacao.</span></div>}
+      <fieldset className="finance-navigation" disabled={Boolean(editing)}>
+        <div className="finance-command-bar" aria-label="Comandos de clientes">
+          <button disabled={readOnly} onClick={() => setEditing("new")}><Plus /><span>Novo</span></button>
+          <button disabled={readOnly || !selected} onClick={() => selected && setEditing(selected)}><Pencil /><span>Alterar</span></button>
+          <button disabled={!selected} onClick={() => { if (selected) { setDetailSection("summary"); setDetailCustomer(selected); } }}><ContactRound /><span>Ficha completa</span></button>
+          <button disabled={!selected} onClick={() => { if (selected) { setDetailSection("pending"); setDetailCustomer(selected); } }}><Wallet /><span>Contas pendentes{selected ? ` (${accountTotals.get(selected.id)?.pending || 0})` : ""}</span></button>
         </div>
-        <aside className="financial-account-detail financial-customer-detail">
-          {selectedCustomer ? <>
-            <div className="financial-detail-title"><span className="pdv-eyebrow">Resumo do cliente</span><h3>{selectedCustomer.name}</h3><p>{selectedCustomer.note || "Sem observacoes cadastradas."}</p></div>
-            <dl>
-              <div><dt>Telefone</dt><dd>{selectedCustomer.phone || "Nao informado"}</dd></div>
-              <div><dt>E-mail</dt><dd>{selectedCustomer.email || "Nao informado"}</dd></div>
-              <div><dt>CPF/CNPJ</dt><dd>{selectedCustomer.document || "Nao informado"}</dd></div>
-              <div><dt>Contas vinculadas</dt><dd>{accountCountFor(selectedCustomer.id)}</dd></div>
-              <div><dt>Saldo pendente</dt><dd>{money(balanceFor(selectedCustomer.id))}</dd></div>
-            </dl>
-            <div className="financial-detail-actions customer-detail-actions">
-              <button className="pdv-primary-button" onClick={() => { setDetailSection("pending"); setDetailCustomer(selectedCustomer); }}>Contas pendentes ({snapshot.receivables.filter((item) => item.customerId === selectedCustomer.id && item.balance > 0.009 && !["Cancelada", "Excluida", "Recebida"].includes(item.status)).length})</button>
-              <button className="pdv-ghost-button" onClick={() => { setDetailSection("summary"); setDetailCustomer(selectedCustomer); }}>Abrir ficha completa</button>
-              {!readOnly && <button className="pdv-ghost-button" onClick={() => setEditing(selectedCustomer)}><Pencil size={15} /> Editar</button>}
-              {!readOnly && onCreatePayableForCustomer && <button className="pdv-ghost-button" onClick={() => onCreatePayableForCustomer(selectedCustomer)}><Wallet size={15} /> Conta a pagar</button>}
-            </div>
-            <div className="customer-detail-guidance"><ContactRound size={20} /><span><strong>Ficha centralizada</strong><small>Abra a ficha para consultar vendas, recebimentos, historico e emitir recibos.</small></span></div>
-          </> : <div className="financial-detail-empty"><ContactRound size={30} /><strong>Selecione um cliente</strong><span>Contato, saldo e atalhos aparecerao aqui.</span></div>}
-        </aside>
-      </div>
+        <div className="finance-view-row"><div className="finance-view-tabs" role="tablist" aria-label="Cadastro de clientes">
+          <button role="tab" aria-selected={!editing}>Pesquisa</button>
+          <button role="tab" aria-selected={Boolean(editing)} disabled={readOnly || !selected} onClick={() => selected && setEditing(selected)}>Registro</button>
+        </div></div>
+      </fieldset>
+      {!editing && <div className="catalog-main">
+        <div className="catalog-filters customer-catalog-filters">
+          <label className="catalog-search"><span>Pesquisar</span><input aria-label="Buscar cliente" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome, telefone, e-mail ou CPF/CNPJ" /></label>
+          <label><span>Situação</span><select value={customerStatus} onChange={(event) => setCustomerStatus(event.target.value as typeof customerStatus)}><option>Todos</option><option>Ativos</option><option>Inativos</option><option>Com saldo</option></select></label>
+          <button onClick={() => { setQuery(""); setCustomerStatus("Todos"); }}><RotateCcw size={14} /> Limpar</button>
+        </div>
+        <FinancialGrid id="customer-catalog" rows={customers} selectedId={selected?.id} defaultHidden={["address", "note", "count", "email"]} onSelect={setSelectedCustomer} onOpen={(customer) => { setDetailSection("summary"); setDetailCustomer(customer); }} columns={[
+          { key: "name", label: "Cliente", required: true, value: (customer) => customer.name },
+          { key: "document", label: "CPF/CNPJ", value: (customer) => customer.document || "—" },
+          { key: "phone", label: "Telefone", value: (customer) => customer.phone || "—" },
+          { key: "email", label: "E-mail", value: (customer) => customer.email || "—" },
+          { key: "address", label: "Endereço", value: (customer) => customer.address || "—" },
+          { key: "note", label: "Observação", value: (customer) => customer.note || "—" },
+          { key: "pending", label: "Pendentes", numeric: true, value: (customer) => accountTotals.get(customer.id)?.pending || 0 },
+          { key: "count", label: "Total de contas", numeric: true, value: (customer) => accountTotals.get(customer.id)?.count || 0 },
+          { key: "status", label: "Situação", value: (customer) => customer.active ? "Ativo" : "Inativo" },
+          { key: "balance", label: "Falta receber", numeric: true, required: true, value: (customer) => balanceFor(customer.id), render: (customer) => money(balanceFor(customer.id)) },
+        ]} totals={<span className="finance-outstanding-total">Falta receber<strong>{money(outstandingBalance)}</strong></span>} />
+      </div>}
       {editing && (
-        <CustomerEditorModal
+        <CustomerEditorModal inline
           customer={editing === "new" ? undefined : editing}
           onCancel={() => setEditing(null)}
           onSave={async (draft) => {
             try {
-              await onSave(draft);
+              const customer = await onSave(draft);
+              setSelectedCustomer(customer); setQuery(""); setCustomerStatus("Todos");
               setEditing(null);
               await onChanged();
             } catch (error) {
@@ -7560,7 +7494,7 @@ function CustomerDetailModal({
   );
 }
 
-function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }: { receivable: PdvReceivable; sale?: PdvSale; onCancel: () => void; onSave: (patch: PdvReceivablePatch) => void | Promise<void>; onDelete: () => void }) {
+function ReceivableEditorModal({ inline = false, receivable, sale, onCancel, onSave, onDelete }: { inline?: boolean; receivable: PdvReceivable; sale?: PdvSale; onCancel: () => void; onSave: (patch: PdvReceivablePatch) => void | Promise<void>; onDelete: () => void }) {
   const manualAccount = receivable.saleId.startsWith("financial-") && !sale?.items.length;
   const [dueDate, setDueDate] = useState(receivable.dueDate || "");
   const [note, setNote] = useState(receivable.note || "");
@@ -7604,10 +7538,11 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
     setAddingPayment(false);
   };
   return (
-    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+    <div className={inline ? "financial-inline-editor" : "pdv-modal-backdrop pdv-nested-backdrop"}>
       <section className="pdv-payment-modal pdv-admin-modal pdv-receivable-full-editor">
         <div className="pdv-section-head"><div><h1>Editar conta a receber</h1><p>{receivable.customerName} · Saldo {money(Math.max(0, remaining))}</p></div><button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button></div>
         <div className="pdv-receivable-editor-scroll">
+          {inline && <div className="financial-record-summary"><span>Cliente<strong>{receivable.customerName}</strong></span><span>Recebido<strong>{money(receivedTotal)}</strong></span><span>Falta receber<strong>{money(Math.max(0, remaining))}</strong></span></div>}
           <div className="pdv-editor-grid pdv-receivable-editor-fields">
             <label><span>Data de vencimento</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
             {manualAccount && <label><span>Valor da conta</span><input inputMode="decimal" value={manualAmountText} onChange={(event) => setManualAmountText(event.target.value)} /></label>}
@@ -7686,7 +7621,7 @@ function ReceivableEditorModal({ receivable, sale, onCancel, onSave, onDelete }:
   );
 }
 
-function CustomerEditorModal({ customer, onCancel, onSave }: { customer?: PdvCustomer; onCancel: () => void; onSave: (draft: PdvCustomerDraft) => void | Promise<void> }) {
+function CustomerEditorModal({ inline = false, customer, onCancel, onSave }: { inline?: boolean; customer?: PdvCustomer; onCancel: () => void; onSave: (draft: PdvCustomerDraft) => void | Promise<void> }) {
   const [draft, setDraft] = useState<PdvCustomerDraft>(() => customer || { id: crypto.randomUUID(), name: "", active: true });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -7700,7 +7635,7 @@ function CustomerEditorModal({ customer, onCancel, onSave }: { customer?: PdvCus
   };
   useModalConfirmShortcut(() => void confirm(), () => { if (!busy) onCancel(); }, Boolean(draft.name.trim()) && !busy);
   return (
-    <div className="pdv-modal-backdrop">
+    <div className={inline ? "financial-inline-editor catalog-inline-editor" : "pdv-modal-backdrop"} role={inline ? "region" : "dialog"} aria-label={customer ? "Editar cliente" : "Novo cliente"} aria-modal={inline ? undefined : true}>
       <section className="pdv-payment-modal pdv-editor-modal pdv-admin-modal pdv-customer-editor-modal">
         <div className="pdv-section-head"><div><span className="pdv-eyebrow">Cliente</span><h1>{customer ? "Editar cliente" : "Novo cliente"}</h1></div><button className="pdv-icon-button" disabled={busy} onClick={onCancel}><X size={18} /></button></div>
         <div className="pdv-customer-editor-scroll">

@@ -1,3 +1,4 @@
+import { sharedPrivacyDefinitions } from "../src/shared/privacy.js";
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -881,6 +882,7 @@ function buildClientPolicy(settings: AppSettings): RemoteClientPolicy {
   const visibleFields = normalizeRemoteFields(settings.floating.visibleFields, settings);
 
   return {
+    privacyDefinitions: sharedPrivacyDefinitions(settings.privacy),
     operationMode: settings.operationMode || "pdv",
     defaultType,
     defaultPeople: Math.max(1, Math.floor(settings.defaultPeople || 1)),

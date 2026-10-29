@@ -7,32 +7,40 @@ import type { FinancialPaymentMethod, PdvPayment, PdvSupplier } from "../shared/
 export const FINANCIAL_PAYMENT_METHODS: FinancialPaymentMethod[] = ["Pix", "Dinheiro", "Debito", "Credito", "Outros"];
 export const paymentMethodLabel = (method: string) => ({ Debito: "Cartão de débito", Credito: "Cartão de crédito" }[method] || method);
 
-export function SimpleFinancialFilters({ query, onQuery, placeholder, from, to, onPeriod, dateField, onDateField, status, onStatus, statuses, grouped = false, pendingNotice }: {
+export function SimpleFinancialFilters({ query, onQuery, placeholder, from, to, onPeriod, dateField, onDateField, status, onStatus, statuses, grouped = false, pendingNotice, settlement }: {
+  settlement: { pendingStatus: string; paidStatus: string; pendingLabel: string; paidLabel: string };
   query: string; onQuery: (value: string) => void; placeholder: string; from: string; to: string; onPeriod: (from: string, to: string) => void;
   dateField: FinancialDateField; onDateField: (value: FinancialDateField) => void; status: string; onStatus: (value: string) => void; statuses: string[]; grouped?: boolean; pendingNotice?: { count: number; onShowAll: () => void };
 }) {
   const today = getLocalDateKey();
   const start = `${today.slice(0, 7)}-01`;
   const end = getLocalDateKey(new Date(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 0));
-  const [custom, setCustom] = useState(false);
-  useEffect(() => { if (!from && !to) setCustom(false); }, [from, to]);
-  const period = custom ? "custom" : !from && !to ? "all" : from === start && to === end ? "month" : from === today && to === today ? "today" : "custom";
+  const period = !from && !to ? "all" : from === start && to === end ? "month" : from === today && to === today ? "today" : "custom";
+  const operational = status === "Operacionais";
+  const pendingChecked = grouped || operational || [settlement.pendingStatus, "Em aberto", "Vencidas", "Vencida", "Parcialmente recebida"].includes(status);
+  const paidChecked = !grouped && (operational || status === settlement.paidStatus);
+  const updateChecks = (pending: boolean, paid: boolean) => onStatus(pending && paid ? "Operacionais" : pending ? settlement.pendingStatus : paid ? settlement.paidStatus : "Nenhuma");
   return <div className="simple-financial-filters">
     <div className="simple-financial-filter-row">
-      <label className="simple-financial-search"><div className="financial-search-heading"><span>Buscar</span>{!grouped && pendingNotice && pendingNotice.count > 0 && <button type="button" aria-label="Ver todas em aberto" onClick={pendingNotice.onShowAll}>Ver todas em aberto ({pendingNotice.count})</button>}</div><input aria-label="Buscar" value={query} onChange={(event) => onQuery(event.target.value)} placeholder={placeholder} /></label>
-      <label><span>Situação</span><select disabled={grouped} value={grouped ? "group-pending" : status} onChange={(event) => onStatus(event.target.value)}>{grouped && <option value="group-pending">Em aberto</option>}{statuses.map((value) => <option key={value} value={value}>{{ Historico: "Histórico", Excluida: "Excluída", Excluidas: "Excluídas" }[value] || value}</option>)}</select></label>
-      <label><span>Período{dateField === "due" ? " (vencimento)" : ""}</span><select aria-label="Período das contas" disabled={grouped} value={grouped ? "all" : period} onChange={(event) => {
-        const value = event.target.value; setCustom(value === "custom");
+      <label><span>Data de</span><select aria-label="Data de" disabled={grouped} value={dateField} onChange={(event) => onDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label>
+      <label><span>De</span><input type="date" disabled={grouped} value={grouped ? "" : from} onChange={(event) => onPeriod(event.target.value, to)} /></label>
+      <label><span>Até</span><input type="date" disabled={grouped} value={grouped ? "" : to} onChange={(event) => onPeriod(from, event.target.value)} /></label>
+      <label className="simple-financial-search"><span>Pesquisar</span><input aria-label="Buscar" value={query} onChange={(event) => onQuery(event.target.value)} placeholder={placeholder} /></label>
+      <fieldset className="financial-settlement-filter" disabled={grouped}><legend>Exibir</legend><div>
+        <label><input type="checkbox" checked={pendingChecked} onChange={(event) => updateChecks(event.target.checked, paidChecked)} />{settlement.pendingLabel}</label>
+        <label><input type="checkbox" checked={paidChecked} onChange={(event) => updateChecks(pendingChecked, event.target.checked)} />{settlement.paidLabel}</label>
+        <details className="financial-state-options"><summary aria-label="Outras situações" title="Outras situações">⋯</summary><div>
+          <label><span>Situação</span><select aria-label="Situação das contas" value={status} onChange={(event) => onStatus(event.target.value)}><option value="Operacionais">Em aberto e quitadas</option><option value="Nenhuma">Nenhuma selecionada</option>{statuses.map((value) => <option key={value} value={value}>{{ Historico: "Histórico", Excluida: "Excluída", Excluidas: "Excluídas" }[value] || value}</option>)}</select></label>
+        </div></details>
+      </div></fieldset>
+      <label><span>Período</span><select aria-label="Período das contas" disabled={grouped} value={grouped ? "all" : period} onChange={(event) => {
+        const value = event.target.value;
         if (value === "all") onPeriod("", "");
         if (value === "month") onPeriod(start, end);
         if (value === "today") onPeriod(today, today);
-      }}><option value="month">Este mês</option><option value="today">Hoje</option><option value="all">Todo o período</option><option value="custom">Escolher datas…</option></select></label>
+      }}><option value="month">Este mês</option><option value="today">Hoje</option><option value="all">Todo o período</option><option value="custom" disabled>Personalizado</option></select></label>
     </div>
-    {(custom || period === "custom") && <div className="simple-financial-date-row">
-      <label><span>De</span><input type="date" disabled={grouped} value={from} onChange={(event) => onPeriod(event.target.value, to)} /></label>
-      <label><span>Até</span><input type="date" disabled={grouped} value={to} onChange={(event) => onPeriod(from, event.target.value)} /></label>
-      <label><span>Usar a data de</span><select disabled={grouped} value={dateField} onChange={(event) => onDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label>
-    </div>}
+    {!grouped && pendingNotice && pendingNotice.count > 0 && <div className="financial-search-heading"><button type="button" aria-label="Ver todas em aberto" onClick={pendingNotice.onShowAll}>Ver todas em aberto ({pendingNotice.count} fora do filtro)</button></div>}
   </div>;
 }
 

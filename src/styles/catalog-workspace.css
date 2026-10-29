@@ -1,0 +1,88 @@
+/* Products, categories and customers use the same compact ledger frame. */
+#root .catalog-workspace { display: flex; flex-direction: column; gap: 0; height: 100%; min-height: 0; min-width: 0; padding: 0; overflow: hidden; color: var(--text); background: var(--panel); border-radius: 0; }
+#root .catalog-workspace > * { flex-shrink: 0; }
+#root .catalog-workspace .finance-command-bar { min-height: 0; margin: 3px 0 0; padding: 4px; gap: 4px; align-items: center; overflow: visible; flex-wrap: wrap; border-radius: 0; }
+#root .catalog-workspace .finance-command-bar button { flex-direction: row; min-width: 0; min-height: 34px; gap: 5px; padding: 5px 9px; font-size: .75rem; border-radius: 1px; }
+#root .catalog-workspace .finance-command-bar button svg { width: 15px; height: 15px; }
+#root .catalog-workspace .finance-view-row { flex: 0 0 auto; }
+#root .catalog-workspace .finance-view-tabs { height: 34px; min-height: 34px; }
+#root .catalog-main { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; }
+#root .catalog-filters { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(140px, 210px) 150px auto; align-items: end; gap: 7px; padding: 6px 8px; background: var(--panel-2); border: 1px solid var(--line); }
+#root .customer-catalog-filters { grid-template-columns: minmax(160px, 1fr) 160px auto; }
+#root .catalog-filters label { display: grid; gap: 3px; min-width: 0; font-size: .73rem; }
+#root .catalog-workspace label > span, #root .catalog-workspace .pdv-editor-section-title small { color: var(--muted) !important; -webkit-text-fill-color: var(--muted) !important; }
+#root .catalog-workspace :is(input, select, textarea) { min-width: 0; background: var(--panel) !important; color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; border: 1px solid var(--line); border-radius: 1px; font: inherit; font-size: .8rem; }
+#root .catalog-workspace :is(input, select):not([type="checkbox"]) { width: 100%; height: 32px; min-height: 32px; padding: 5px 8px; }
+#root .catalog-workspace input[type="checkbox"] { width: 16px; height: 16px; min-height: 16px; accent-color: var(--accent); flex-shrink: 0; }
+#root .catalog-workspace input::placeholder, #root .catalog-workspace textarea::placeholder { color: var(--muted); -webkit-text-fill-color: var(--muted); opacity: .9; }
+#root .catalog-workspace :is(option, optgroup) { color: var(--text); background: var(--panel); -webkit-text-fill-color: var(--text); }
+#root .catalog-workspace :is(button, summary, strong, b, h1, h2, h3), #root .catalog-workspace .pdv-switch-line { color: var(--text); -webkit-text-fill-color: currentColor; }
+#root .catalog-filters > button, #root .catalog-selection button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 32px; padding: 4px 8px; font-size: .75rem; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 1px; white-space: nowrap; }
+#root .catalog-selection { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 5px 8px; border-inline: 1px solid var(--line); background: var(--panel-2); font-size: .75rem; }
+#root .catalog-selection label { max-width: 180px; }
+#root .catalog-selection strong { margin-right: 5px; }
+#root .catalog-selection label > span { display: none; }
+#root .catalog-main > .finance-grid { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; }
+#root .catalog-main .finance-grid-scroll { flex: 1 1 0; min-height: 60px; max-height: none; }
+#root .catalog-main .finance-grid :is(th, td) { color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; }
+#root .catalog-main .finance-grid td[data-column="name"] { max-width: 300px; overflow: hidden; text-overflow: ellipsis; }
+#root .catalog-main .finance-grid td:is([data-column="email"], [data-column="complements"]) { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+#root .catalog-main .finance-grid td .catalog-stock-low { color: #ffba67 !important; -webkit-text-fill-color: #ffba67 !important; }
+#root .catalog-main .finance-grid-footer { min-height: 42px; }
+#root .catalog-main .finance-grid-totals { font-size: .75rem; }
+#root .catalog-main .pdv-import-settings { overflow: auto; padding: 12px; }
+#root .catalog-main .pdv-import-settings > div { min-width: 0; background: var(--panel-2); border: 1px solid var(--line); border-radius: 1px; color: var(--text); }
+#root .catalog-main .pdv-import-settings span { color: var(--muted); }
+#root .catalog-inline-editor > section { display: flex; flex-direction: column; width: 100%; max-width: none; height: 100%; max-height: none; min-height: 0; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 0; box-shadow: none; }
+#root .catalog-inline-editor :is(.pdv-product-editor-body, .pdv-customer-editor-scroll) { flex: 1 1 0; min-height: 0; overflow: auto; padding: 10px 12px; background: var(--panel); }
+#root .catalog-inline-editor > section > .pdv-editor-grid { flex: 1 1 0; min-height: 0; overflow: auto; align-content: start; padding: 12px; }
+#root .catalog-inline-editor .pdv-product-editor-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; flex: 0 0 auto; margin: 0; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+#root .catalog-inline-editor .pdv-product-editor-summary > div { display: grid; gap: 2px; padding: 0; border: 0; background: transparent; min-height: 0; }
+#root .catalog-inline-editor .pdv-product-editor-summary span { font-size: .7rem; color: var(--muted); -webkit-text-fill-color: var(--muted); }
+#root .catalog-inline-editor .pdv-product-editor-summary strong { font-size: .85rem; color: var(--text); -webkit-text-fill-color: var(--text); }
+#root .catalog-inline-editor .pdv-product-editor-nav { display: flex; flex: 0 0 auto; flex-wrap: wrap; gap: 3px; padding: 4px 8px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+#root .catalog-inline-editor .pdv-product-editor-nav button { min-height: 30px; padding: 5px 9px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 1px; font-size: .75rem; }
+#root .catalog-inline-editor .pdv-product-editor-nav button.active { background: var(--accent); border-color: var(--accent); color: white; -webkit-text-fill-color: white; }
+#root .catalog-inline-editor .pdv-editor-section { margin: 0 0 10px; padding: 0; border: 0; border-radius: 0; background: var(--panel); color: var(--text); }
+#root .catalog-inline-editor .pdv-editor-section-title { padding: 0 0 7px; margin: 0 0 7px; min-height: 0; border-bottom: 1px solid var(--line); }
+#root .catalog-inline-editor .pdv-editor-section-title strong { color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; font-size: .8rem; }
+#root .catalog-inline-editor .pdv-editor-section-title small { display: none; }
+#root .catalog-inline-editor .pdv-editor-grid { gap: 8px 10px; padding: 0; }
+#root .catalog-inline-editor label { min-width: 0; font-size: .78rem; }
+#root .catalog-inline-editor textarea { min-height: 50px; height: 50px; padding: 6px 8px; border-radius: 1px; }
+#root .catalog-inline-editor :is(.pdv-switch-line, .pdv-stock-control-toggle) { padding: 8px; min-height: 36px; background: var(--panel-2); color: var(--text) !important; border: 1px solid var(--line); border-radius: 1px; }
+#root .catalog-inline-editor .pdv-switch-line strong { color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; }
+#root .catalog-inline-editor .pdv-switch-line small { color: var(--muted) !important; -webkit-text-fill-color: var(--muted) !important; }
+#root .catalog-inline-editor .pdv-complement-config-list { max-height: none; }
+#root .financial-inline-editor .pdv-action-row { display: flex; flex-wrap: wrap; min-height: 0; gap: 8px; }
+#root .financial-inline-editor .pdv-action-row > button { flex: 0 0 auto; width: auto; min-width: 100px; min-height: 32px; height: 32px; padding: 5px 12px; font-size: .8rem; border-radius: 1px; }
+#root .financial-inline-editor .pdv-action-row .pdv-primary-button { color: white; -webkit-text-fill-color: white; }
+#root .financial-inline-editor .pdv-action-row .pdv-danger-button { background: var(--panel-2); color: var(--text); -webkit-text-fill-color: var(--text); border: 1px solid var(--line); }
+#root .financial-record-summary { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 10px; padding: 7px 9px; margin-bottom: 10px; border: 1px solid var(--line); background: var(--panel-2); }
+#root .financial-record-summary > span { display: grid; gap: 3px; min-width: 0; color: var(--muted); font-size: .72rem; }
+#root .financial-record-summary > span:not(:first-child) { text-align: right; }
+#root .financial-record-summary strong { font-size: .95rem; color: var(--text); }
+@media (max-width: 760px) {
+  #root .catalog-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #root .catalog-search { grid-column: 1 / -1; }
+  #root .catalog-inline-editor .pdv-product-editor-summary { gap: 5px; padding-inline: 8px; }
+}
+
+/* Products are a standalone register, so the settings introduction adds no value here. */
+#root .module-window-body:has(.pdv-settings-panel.active-category .catalog-workspace) { overflow: hidden; }
+#root .module-window-body .settings-standalone:has(.pdv-settings-panel.active-category .catalog-workspace) { height: 100%; min-height: 0; padding: 0; }
+#root .module-window-body .settings-standalone:has(.pdv-settings-panel.active-category .catalog-workspace) :is(.settings-layout, .settings-content, .settings-grid, .pdv-settings-panel.active-category, .pdv-shell, .pdv-workspace) { display: flex; flex-direction: column; flex: 1 1 0; height: 100%; min-height: 0; min-width: 0; margin: 0; padding: 0; overflow: hidden; }
+#root .module-window-body .settings-standalone:has(.pdv-settings-panel.active-category .catalog-workspace) .settings-hero { display: none; }
+#root .module-window-body .settings-standalone:has(.pdv-settings-panel.active-category .catalog-workspace) .pdv-settings-panel.active-category { border: 0; }
+
+#root .module-window-body .pdv-customer-professional.catalog-workspace { display: flex !important; flex-direction: column; gap: 0; height: 100%; min-height: 0 !important; padding: 8px !important; }
+#root .module-window-body .pdv-customer-professional.catalog-workspace > .catalog-main { flex: 1 1 0; min-height: 0; }
+/* An explicit closing status takes precedence over subtable and waiting-payment decoration. */
+#root .pdv-shell .pdv-table-card.fechamento,
+#root .pdv-shell.vibrant-mode .pdv-table-card.fechamento { background: #16804b; border-color: #54c58b; color: #fff; }
+#root .pdv-shell .pdv-table-card.fechamento:hover { background: #1b9157; border-color: #b4f5d0; }
+
+/* Keep the amount visible while optional columns scroll on smaller screens. */
+#root .finance-grid.is-simple :is(th, td).number:last-child { position: sticky; right: 0; z-index: 1; background: var(--panel); box-shadow: -1px 0 var(--line); }
+#root .finance-grid.is-simple th.number:last-child { z-index: 3; background: var(--panel-2); }
+#root .finance-grid.is-simple tr.selected td.number:last-child { background: color-mix(in srgb, var(--panel) 80%, var(--accent)); }
