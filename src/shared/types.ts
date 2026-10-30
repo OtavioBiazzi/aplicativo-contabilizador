@@ -169,6 +169,7 @@ export interface PrivacyProfile {
   historyValues: HistoryPrivacyMode;
 }
 export interface PrivacySettings {
+  defaultsVersion?: number;
   hideHeaderTotal: boolean;
   hideReportTotals: boolean;
   historyValues?: HistoryPrivacyMode;

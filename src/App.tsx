@@ -11,6 +11,7 @@ import { payableLabel } from "./shared/financialLabels";
 import { createHistoryDescriptionLookup } from "./shared/historyDescription";
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowUp,
@@ -2964,6 +2965,9 @@ export function App() {
               await reload(); if (remoteSession) await refreshRemote(remoteSession);
             }}
             canEdit={!remoteSession || remoteSession.permissions.edit}
+            canViewReceiptValues={canViewRemoteEntryValues}
+            canViewHistoryTotals={canViewRemoteTotals}
+            allowReceiptPrint={!remoteSession || remoteSession.permissions.printReceipts}
             onEditRemote={remoteSession ? editRemoteEntry : undefined}
             onCancelRemote={remoteSession ? cancelRemoteEntry : undefined}
             onDeleteRemote={remoteSession ? deleteRemoteEntry : undefined}
@@ -4631,6 +4635,9 @@ function HistoryPanel({
   onSavePayments,
   onSaveCustomer,
   canEdit = true,
+  canViewReceiptValues = true,
+  canViewHistoryTotals = true,
+  allowReceiptPrint = true,
   onCancelRemote,
   onDeleteRemote,
   onRestoreRemote,
@@ -4651,6 +4658,9 @@ function HistoryPanel({
   onSaveCustomer?: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
   onSavePayments?: (sale: PdvSale, payments: PdvPayment[]) => Promise<void>;
   canEdit?: boolean;
+  canViewReceiptValues?: boolean;
+  canViewHistoryTotals?: boolean;
+  allowReceiptPrint?: boolean;
   onCancelRemote?: (entry: LedgerEntry) => Promise<void>;
   onDeleteRemote?: (entry: LedgerEntry, permanent?: boolean) => Promise<void>;
   onRestoreRemote?: (entry: LedgerEntry) => Promise<void>;
@@ -4791,7 +4801,8 @@ function HistoryPanel({
     return summary;
   }, { active: 0, activeTotal: 0, cancelled: 0, deleted: 0 }), [filtered]);
   const filteredTotal = roundMoney(filteredSummary.activeTotal);
-  const historyTotalHidden = historyValuesHidden(settings.privacy, Boolean(query.trim() || tableNumberFilter.trim()));
+  const historyTotalHidden = !canViewReceiptValues || historyValuesHidden(settings.privacy, Boolean(query.trim() || tableNumberFilter.trim()));
+  const historySummaryHidden = !canViewHistoryTotals || settings.privacy.hideReportTotals || historyTotalHidden;
 
   useEffect(() => {
     setVisibleCount(HISTORY_PAGE_SIZE);
@@ -4899,7 +4910,7 @@ function HistoryPanel({
       <div className="history-summary-strip">
         <div><span>Resultados</span><strong>{filtered.length}</strong></div>
         <div><span>Ativos</span><strong>{filteredSummary.active}</strong></div>
-        <div><span>Total filtrado</span><strong className={historyTotalHidden ? "private-value" : ""}>{historyTotalHidden ? "Privado" : formatCurrency(filteredTotal)}</strong></div>
+        <div><span>Total filtrado</span><strong className={historySummaryHidden ? "private-value" : ""}>{historySummaryHidden ? "Privado" : formatCurrency(filteredTotal)}</strong></div>
         <div><span>Cancelados</span><strong>{filteredSummary.cancelled}</strong></div>
         <div><span>Lixeira</span><strong>{filteredSummary.deleted}</strong></div>
       </div>
@@ -4940,7 +4951,7 @@ function HistoryPanel({
                       <button title="Editar" disabled={!canEdit || historyTotalHidden} onClick={() => setEditing(entry)}><Edit3 size={15} /></button>
                       {entry.sourceSaleId && onSavePayments && <button title="Editar pagamentos" aria-label="Editar pagamentos" disabled={!canEdit || historyTotalHidden || entry.status !== "active" || pdvReceivables.some((account) => account.saleId === entry.sourceSaleId)} onClick={() => { const sale = pdvSaleById.get(entry.sourceSaleId!); if (sale) setEditingPayments(sale); }}><Wallet size={15} /></button>}
                       {entry.sourceSaleId && <button className="history-sale-details-button" title="Ver produtos e pagamentos" aria-label="Ver produtos e pagamentos" disabled={historyTotalHidden} onClick={() => openSaleDetails(entry)}><Eye size={15} /></button>}
-                      <button className="history-receipt-button" title="Gerar recibo ou cupom" aria-label="Gerar recibo ou cupom" disabled={historyTotalHidden} onClick={() => openReceipt(entry)}><ReceiptText size={15} /></button>
+                      <button className="history-receipt-button" title="Gerar recibo ou cupom" aria-label="Gerar recibo ou cupom" disabled={!canViewReceiptValues} onClick={() => openReceipt(entry)}><ReceiptText size={15} /></button>
                       <button title={entry.sourceSaleId ? "Vendas do PDV nao podem ser duplicadas como lancamentos" : onEditRemote ? "Duplicacao indisponivel no cliente" : "Duplicar"} disabled={Boolean(entry.sourceSaleId || onEditRemote)} onClick={() => run(() => window.caixa.duplicateEntry(entry.id), "Lancamento duplicado.")}><Copy size={15} /></button>
                       {entry.status === "deleted" || entry.status === "cancelled" ? (
                          <button title="Restaurar" onClick={() => run(() => onRestoreRemote ? onRestoreRemote(entry) : window.caixa.updateEntry(entry.id, { status: "active" }), "Lancamento restaurado.")}><Undo2 size={15} /></button>
@@ -4994,7 +5005,7 @@ function HistoryPanel({
         />
       )}
       {details && <HistorySaleDetailModal sale={details} onClose={() => setDetails(null)} onReceipt={() => setReceiptSale(details)} />}
-      {receiptSale && (
+      {receiptSale && canViewReceiptValues && (
         <HistoryReceiptModal
           sale={receiptSale}
           customers={pdvCustomers}
@@ -5002,6 +5013,7 @@ function HistoryPanel({
           receiptSettings={pdvSettings}
           printDevices={printDevices}
           onPrintServer={onPrintServer}
+          allowPrint={allowReceiptPrint}
           onClose={() => setReceiptSale(null)}
           onToast={onToast}
         />
@@ -5144,6 +5156,7 @@ function HistoryReceiptModal({
   receiptSettings,
   printDevices = [],
   onPrintServer,
+  allowPrint = true,
   onClose,
   onToast
 }: {
@@ -5152,6 +5165,7 @@ function HistoryReceiptModal({
   receivable?: PdvReceivable;
   receiptSettings?: PdvSettings;
   printDevices?: ServerDevice[];
+  allowPrint?: boolean;
   onPrintServer?: (payload: { sale: PdvSale; customer?: PdvCustomer; receivable?: PdvReceivable; customerName?: string; customerDocument?: string }) => Promise<{ ok: boolean; message: string }>;
   onClose: () => void;
   onToast: (tone: ToastState["tone"], message: string) => void;
@@ -5165,8 +5179,9 @@ function HistoryReceiptModal({
   const [previewHtml, setPreviewHtml] = useState("");
   const [printers, setPrinters] = useState<Array<{ name: string; displayName: string; isDefault: boolean }>>([]);
   const [printerName, setPrinterName] = useState("");
+  const [receiptError, setReceiptError] = useState("");
   const availablePrintTargets: ReceiptPrintTarget[] = [
-    { id: "local", label: "Servidor" },
+    { id: "local", label: "Este computador" },
     ...(onPrintServer ? [{ id: "server", label: "Computador servidor" }] : []),
     ...printDevices.map((device) => ({ id: device.id, label: device.name }))
   ];
@@ -5184,6 +5199,8 @@ function HistoryReceiptModal({
       setPreviewHtml(html);
       setPrinters(availablePrinters);
       setPrinterName((current) => current || snapshot.settings.receiptPrinterName || availablePrinters.find((item) => item.isDefault)?.name || "");
+    }).catch((error) => {
+      if (active) setReceiptError(error instanceof Error ? error.message : "Nao foi possivel preparar o recibo.");
     });
     return () => {
       active = false;
@@ -5191,6 +5208,8 @@ function HistoryReceiptModal({
   }, [sale, selectedCustomer, receivable, customerName, customerDocument, receiptSettings]);
 
   const generate = async (action: "open" | "save" | "print") => {
+    if (busy) return;
+    setReceiptError("");
     setBusy(true);
     try {
       if (action === "print" && printDestination !== "local") {
@@ -5205,6 +5224,7 @@ function HistoryReceiptModal({
           ? await onPrintServer(payload)
           : await window.caixa.requestRemotePdvReceiptPrint(printDestination, payload);
         onToast(result.ok ? "success" : "error", result.message);
+        if (!result.ok) setReceiptError(result.message);
         if (result.ok) onClose();
         return;
       }
@@ -5215,9 +5235,12 @@ function HistoryReceiptModal({
         { customerName: customerName.trim(), customerDocument: customerDocument.trim(), action, printerName, receiptSettings }
       );
       onToast(result.ok ? "success" : "error", result.message);
+      if (!result.ok) setReceiptError(result.message);
       if (result.ok) onClose();
     } catch (error) {
-      onToast("error", error instanceof Error ? error.message : "Nao foi possivel gerar o recibo.");
+      const message = error instanceof Error ? error.message : "Nao foi possivel gerar o recibo.";
+      setReceiptError(message);
+      onToast("error", message);
     } finally {
       setBusy(false);
     }
@@ -5237,7 +5260,7 @@ function HistoryReceiptModal({
     return () => window.removeEventListener("keydown", keydown);
   });
 
-  return (
+  return createPortal(
     <div className="modal-backdrop receipt-modal-backdrop">
       <div className="modal history-receipt-modal receipt-viewer-modal" role="dialog" aria-modal="true" aria-label="Gerar recibo">
         <div className="modal-head">
@@ -5294,7 +5317,7 @@ function HistoryReceiptModal({
             <label className="field">
               <span>Imprimir em</span>
               <select value={printDestination} onChange={(event) => { setPrintDestination(event.target.value); saveReceiptPrintDestination(event.target.value, availablePrintTargets); }}>
-                <option value="local">Servidor</option>
+                <option value="local">Este computador</option>
                 {onPrintServer && <option value="server">Computador servidor</option>}
                 {printDevices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
               </select>
@@ -5308,16 +5331,18 @@ function HistoryReceiptModal({
             </label>}
             {printDestination === "local" && !printers.length && <p className="receipt-printer-warning">O Windows nao informou impressoras disponíveis. O PDF continua funcionando normalmente.</p>}
             <p className="settings-note">O recibo inclui itens, pagamentos, troco e dados da conta a receber quando existirem.</p>
+            {!allowPrint && <p className="receipt-printer-warning">O servidor nao permitiu impressao neste cliente. O PDF continua disponivel.</p>}
+            {receiptError && <p className="receipt-printer-warning" role="alert">{receiptError}</p>}
           </div>
         </div>
         <div className="modal-actions receipt-modal-actions">
           <button className="ghost-button" onClick={onClose} disabled={busy}>Cancelar</button>
           <button className="ghost-button" onClick={() => void generate("save")} disabled={busy}><Download size={16} /> Salvar PDF</button>
           <button className="ghost-button" onClick={() => void generate("open")} disabled={busy}><Eye size={16} /> Abrir PDF</button>
-          <button className="primary-button" onClick={() => void generate("print")} disabled={busy || (printDestination === "local" && !printerName)}><ReceiptText size={16} /> {busy ? "Enviando..." : "Imprimir agora"}</button>
+          <button className="primary-button" onClick={() => void generate("print")} disabled={busy || !allowPrint || (printDestination === "local" && !printerName)}><ReceiptText size={16} /> {busy ? "Enviando..." : "Imprimir agora"}</button>
         </div>
       </div>
-    </div>
+    </div>, document.getElementById("root") || document.body
   );
 }
 

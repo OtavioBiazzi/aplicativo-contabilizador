@@ -1309,7 +1309,8 @@ export function PdvApp({
     const customer = latest.customers.find((item) => item.id === customerId);
     const result = await window.caixa.printPdvReceipt(sale, customer, undefined, {
       action: latest.settings.receiptPrinterName ? "print" : "open",
-      printerName: latest.settings.receiptPrinterName
+      printerName: latest.settings.receiptPrinterName,
+      receiptSettings: latest.settings
     });
     if (!result.ok && !/cancel/i.test(result.message)) setToast(result.message, true);
   };
@@ -3845,8 +3846,9 @@ export function PdvReceiptDraftModal({
   const [previewHtml, setPreviewHtml] = useState("");
   const [printers, setPrinters] = useState<Array<{ name: string; displayName: string; isDefault: boolean }>>([]);
   const [printerName, setPrinterName] = useState("");
+  const [receiptError, setReceiptError] = useState("");
   const availablePrintTargets: ReceiptPrintTarget[] = [
-    { id: "local", label: "Servidor" },
+    { id: "local", label: "Este computador" },
     ...printTargets
   ];
   const [printDestination, setPrintDestination] = useState(() => readReceiptPrintDestination(availablePrintTargets));
@@ -3877,9 +3879,11 @@ export function PdvReceiptDraftModal({
 
   const generate = async (action: "open" | "save" | "print") => {
     if (busy) return;
+    setReceiptError("");
     setBusy(true);
     try {
-      if (action === "print" && printDestination !== "local" && onRemotePrint) {
+      if (action === "print" && printDestination !== "local") {
+        if (!onRemotePrint) throw new Error("O computador selecionado nao esta disponivel para impressao.");
         const result = await onRemotePrint(printDestination, {
           sale,
           customer: selectedCustomer,
@@ -3888,6 +3892,7 @@ export function PdvReceiptDraftModal({
           customerDocument: customerDocument.trim()
         });
         onNotice(result.message);
+        if (!result.ok) setReceiptError(result.message);
         if (result.ok) onClose();
         return;
       }
@@ -3899,7 +3904,12 @@ export function PdvReceiptDraftModal({
         receiptSettings
       });
       onNotice(result.message);
+      if (!result.ok) setReceiptError(result.message);
       if (result.ok) onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Nao foi possivel gerar ou imprimir o recibo. Tente novamente.";
+      setReceiptError(message);
+      onNotice(message);
     } finally {
       setBusy(false);
     }
@@ -3943,11 +3953,12 @@ export function PdvReceiptDraftModal({
             }}><option value="">Consumidor nao identificado</option>{customers.filter((item) => item.active).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>}
             {!statement && !customerId && <label className="field"><span>Nome somente neste recibo</span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Opcional" /></label>}
             {!statement && !customerId && <label className="field"><span>CPF/CNPJ somente neste recibo</span><input value={customerDocument} onChange={(event) => setCustomerDocument(formatCpfCnpj(event.target.value))} placeholder="Opcional" inputMode="numeric" /></label>}
-            <label className="field"><span>Imprimir em</span><select value={printDestination} onChange={(event) => { setPrintDestination(event.target.value); saveReceiptPrintDestination(event.target.value, availablePrintTargets); }}><option value="local">Servidor</option>{printTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></label>
+            <label className="field"><span>Imprimir em</span><select value={printDestination} onChange={(event) => { setPrintDestination(event.target.value); saveReceiptPrintDestination(event.target.value, availablePrintTargets); }}><option value="local">Este computador</option>{printTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</select></label>
             {printDestination === "local" && <label className="field"><span>Impressora deste computador</span><select value={printerName} onChange={(event) => setPrinterName(event.target.value)}><option value="">Escolha uma impressora</option>{printers.map((printer) => <option key={printer.name} value={printer.name}>{printer.displayName}{printer.isDefault ? " (Padrao)" : ""}</option>)}</select></label>}
             {!allowPrint && <p className="receipt-printer-warning">O servidor nao permitiu impressao neste cliente. O PDF continua disponivel.</p>}
             {printDestination === "local" && !printers.length && <p className="receipt-printer-warning">O Windows nao informou impressoras disponiveis. Atualize a lista em Ajuste &gt; Impressao.</p>}
             <p className="settings-note">Papel, cores, logotipo e conteudo seguem as configuracoes do computador servidor.</p>
+            {receiptError && <p className="receipt-printer-warning" role="alert">{receiptError}</p>}
           </div>
         </div>
         <div className="modal-actions receipt-modal-actions">

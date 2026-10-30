@@ -1030,11 +1030,17 @@ function registerIpc() {
       const appSettings = await store.getSettings();
       const snapshot = await pdvStore.getSnapshot();
       const receiptSettings = options?.receiptSettings ? { ...snapshot.settings, ...options.receiptSettings } : snapshot.settings;
+      let printFailure = "Nenhuma impressora foi selecionada.";
       if (options?.action === "print") {
         const printerName = options.printerName || snapshot.settings.receiptPrinterName || "";
         if (printerName) {
-          const directResult = await printPdvReceiptDirect(sale, receiptSettings, printerName, customer, receivable, options.customerName, options.customerDocument);
-          if (directResult.ok) return directResult;
+          try {
+            const directResult = await printPdvReceiptDirect(sale, receiptSettings, printerName, customer, receivable, options.customerName, options.customerDocument);
+            if (directResult.ok) return directResult;
+            printFailure = directResult.message;
+          } catch (error) {
+            printFailure = error instanceof Error ? error.message : "A impressora nao aceitou o documento.";
+          }
         }
       }
       const pdf = await printPdvReceipt(sale, receiptSettings, customer, receivable, options?.customerName, options?.customerDocument);
@@ -1067,11 +1073,11 @@ function registerIpc() {
         }
       }
       return {
-        ok: true,
+        ok: options?.action !== "print",
         message: options?.action === "save"
           ? "Recibo salvo em PDF."
           : options?.action === "print"
-            ? "A impressora configurada nao respondeu. O recibo foi aberto em PDF."
+            ? `Nao foi possivel imprimir: ${printFailure} O recibo foi aberto em PDF.`
             : "Recibo aberto. Use a opcao Imprimir do visualizador.",
         filePath
       };

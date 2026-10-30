@@ -1,5 +1,4 @@
 import { BrowserWindow } from "electron";
-import { PDFDocument } from "pdf-lib";
 import type { PdvCustomer, PdvReceivable, PdvSale, PdvSettings } from "../src/shared/pdvTypes.js";
 import { groupPdvReceiptItems } from "../src/shared/pdvReceipt.js";
 
@@ -11,43 +10,18 @@ export async function printPdvReceipt(
   customerName?: string,
   customerDocumentOverride?: string
 ): Promise<Buffer> {
-  const paper = receiptPaper(settings);
-  const window = new BrowserWindow({
-    show: false,
-    width: paper.viewportWidth,
-    height: 900,
-    webPreferences: { sandbox: true }
-  });
+  const { window, paper, heightMm } = await prepareReceiptWindow(sale, settings, customer, receivable, customerName, customerDocumentOverride);
   try {
-    const html = buildPdvReceiptHtml(sale, settings, customer, receivable, customerName, customerDocumentOverride);
-    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-    const contentHeight = await window.webContents.executeJavaScript(
-      "document.fonts.ready.then(() => Math.ceil(Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, 420)))"
-    ) as number;
-    const viewportWidth = paper.viewportWidth;
-    const viewportHeight = Math.max(420, Math.min(20000, contentHeight + 8));
-    window.setContentSize(viewportWidth, viewportHeight);
-    const image = await window.webContents.capturePage({ x: 0, y: 0, width: viewportWidth, height: viewportHeight });
-    const pdf = await PDFDocument.create();
-    const png = await pdf.embedPng(image.toPNG());
-    if (settings.receiptPaperWidth === "a4") {
-      const page = pdf.addPage([595.28, 841.89]);
-      const maxWidth = 535;
-      const maxHeight = 782;
-      const scale = Math.min(maxWidth / png.width, maxHeight / png.height);
-      const width = png.width * scale;
-      const height = png.height * scale;
-      page.drawImage(png, { x: (595.28 - width) / 2, y: 841.89 - height - 30, width, height });
-    } else {
-      const pageWidth = paper.widthMm * 2.83465;
-      const dynamicHeight = pageWidth * (png.height / png.width);
-      const configuredHeight = settings.receiptPaperWidth === "custom" ? paper.heightMm * 2.83465 : 0;
-      const pageHeight = Math.max(120, configuredHeight, dynamicHeight);
-      const page = pdf.addPage([pageWidth, pageHeight]);
-      const imageHeight = Math.min(pageHeight, dynamicHeight);
-      page.drawImage(png, { x: 0, y: pageHeight - imageHeight, width: pageWidth, height: imageHeight });
-    }
-    return Buffer.from(await pdf.save());
+    // Use the print renderer so PDF and printer keep the same physical text size.
+    // A4 paginates naturally instead of shrinking the whole receipt into one image.
+    return await window.webContents.printToPDF({
+      printBackground: true,
+      displayHeaderFooter: false,
+      scale: 1,
+      pageSize: settings.receiptPaperWidth === "a4" ? "A4" : { width: paper.widthMm / 25.4, height: heightMm / 25.4 },
+      margins: { top: 0, bottom: 0, left: 0, right: 0 },
+      preferCSSPageSize: true
+    });
   } finally {
     if (!window.isDestroyed()) window.destroy();
   }
@@ -62,30 +36,8 @@ export async function printPdvReceiptDirect(
   customerName?: string,
   customerDocumentOverride?: string
 ): Promise<{ ok: boolean; message: string }> {
-  const paper = receiptPaper(settings);
-  const window = new BrowserWindow({
-    show: false,
-    width: paper.viewportWidth,
-    height: 900,
-    webPreferences: { sandbox: true }
-  });
+  const { window, paper, heightMm } = await prepareReceiptWindow(sale, settings, customer, receivable, customerName, customerDocumentOverride);
   try {
-    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildPdvReceiptHtml(sale, settings, customer, receivable, customerName, customerDocumentOverride))}`);
-    let directHeightMm = paper.heightMm;
-    if (settings.receiptPaperWidth !== "a4") {
-      const contentHeight = await window.webContents.executeJavaScript(
-        "document.fonts.ready.then(() => Math.ceil(Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, 240)))"
-      ) as number;
-      directHeightMm = Math.max(60, Math.ceil((contentHeight / 96) * 25.4));
-      window.setContentSize(paper.viewportWidth, Math.max(240, contentHeight + 8));
-      await window.webContents.executeJavaScript(`
-        (() => {
-          const style = document.createElement("style");
-          style.textContent = "@page { margin: 0; size: ${paper.widthMm}mm ${directHeightMm}mm; }";
-          document.head.appendChild(style);
-        })()
-      `);
-    }
     return await new Promise((resolve) => {
       window.webContents.print({
         silent: true,
@@ -96,7 +48,7 @@ export async function printPdvReceiptDirect(
         scaleFactor: 100,
         pageSize: settings.receiptPaperWidth === "a4"
           ? "A4"
-          : { width: Math.round(paper.widthMm * 1000), height: Math.round(directHeightMm * 1000) },
+          : { width: Math.round(paper.widthMm * 1000), height: Math.round(heightMm * 1000) },
         copies: Math.max(1, Math.min(5, settings.receiptCopies || 1)),
         margins: { marginType: "none" }
       }, (success, reason) => resolve({
@@ -106,6 +58,49 @@ export async function printPdvReceiptDirect(
     });
   } finally {
     if (!window.isDestroyed()) window.destroy();
+  }
+}
+
+async function prepareReceiptWindow(
+  sale: PdvSale,
+  settings: PdvSettings,
+  customer?: PdvCustomer,
+  receivable?: PdvReceivable,
+  customerName?: string,
+  customerDocumentOverride?: string
+) {
+  const paper = receiptPaper(settings);
+  const window = new BrowserWindow({
+    show: false,
+    useContentSize: true,
+    width: paper.viewportWidth,
+    height: 240,
+    backgroundColor: "#ffffff",
+    webPreferences: { sandbox: true }
+  });
+  try {
+    await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildPdvReceiptHtml(sale, settings, customer, receivable, customerName, customerDocumentOverride))}`);
+    await window.webContents.executeJavaScript("document.fonts.ready");
+    let heightMm = paper.heightMm;
+    if (settings.receiptPaperWidth !== "a4") {
+      const contentHeight = await window.webContents.executeJavaScript(
+        "Math.ceil(Math.max(document.body.scrollHeight, document.body.getBoundingClientRect().height))"
+      ) as number;
+      // Measuring the body avoids counting the hidden window's empty viewport.
+      // Extremely long rolls paginate rather than exceeding printer page limits.
+      heightMm = Math.min(1000, Math.max(60, settings.receiptPaperWidth === "custom" ? paper.heightMm : 0, Math.ceil((contentHeight / 96) * 25.4) + 1));
+      await window.webContents.executeJavaScript(`
+        (() => {
+          const style = document.createElement("style");
+          style.textContent = "@page { margin: 0; size: ${paper.widthMm}mm ${heightMm}mm; }";
+          document.head.appendChild(style);
+        })()
+      `);
+    }
+    return { window, paper, heightMm };
+  } catch (error) {
+    if (!window.isDestroyed()) window.destroy();
+    throw error;
   }
 }
 
@@ -121,6 +116,7 @@ export function buildPdvReceiptHtml(
   const layout = receiptLayout(settings, paper.widthMm);
   const width = `${Math.max(36, paper.widthMm - layout.leftMm - layout.rightMm)}mm`;
   const pageSize = `${paper.widthMm}mm ${paper.heightMm}mm`;
+  const printMargins = settings.receiptPaperWidth === "a4" ? `${layout.topMm}mm ${layout.rightMm}mm ${layout.bottomMm}mm ${layout.leftMm}mm` : "0";
   const accentColor = settings.receiptUseColor ? "#0f5f96" : "#111";
   const paidTotal = sale.payments.reduce((sum, payment) => sum + payment.amount, 0);
   const totalChange = sale.payments.reduce((sum, payment) => sum + (payment.change || 0), 0);
@@ -160,7 +156,7 @@ export function buildPdvReceiptHtml(
   `).join("") || "";
   return `<!doctype html>
   <html><head><meta charset="utf-8"><style>
-    @page { margin: 0; size: ${pageSize}; }
+    @page { margin: ${printMargins}; size: ${pageSize}; }
     * { box-sizing: border-box; }
     html, body { overflow-x: hidden; }
     body { width: ${width}; margin: 0; margin-left: ${layout.leftMm}mm; padding: ${layout.topMm}mm 0 ${layout.bottomMm}mm; color: #080808; font: ${layout.fontSize}px/1.25 Arial, sans-serif; }
@@ -181,12 +177,15 @@ export function buildPdvReceiptHtml(
     .row b, .subrow b { flex: 0 0 auto; white-space: nowrap; }
     .subrow { padding-left: 8px; font-size: 10px; color: #222; }
     .status { margin: 4px 0; padding: 3px; border: 1.5px solid ${accentColor}; color: ${accentColor}; text-align: center; font-size: 12px; font-weight: 900; letter-spacing: .4px; }
-    .columns { display: grid; grid-template-columns: 10mm minmax(0, 1fr) 18mm; gap: 3px; font-weight: 800; border-bottom: 1px solid #111; padding: 3px 4px; }
+    .columns { display: grid; grid-template-columns: 8mm minmax(0, 1fr) 18mm; gap: 3px; font-size: ${Math.min(layout.fontSize, 10)}px; font-weight: 800; border-bottom: 1px solid #111; padding: 3px 4px; }
+    .columns span:last-child { text-align: right; }
     .item { padding: 2px 4px; border-bottom: 1px solid #ddd; }
+    .item, .row, .subrow, .top, .box { break-inside: avoid; }
     .item-main span { font-weight: 700; }
     small { display: block; padding-left: 13mm; color: #222; }
     .total { color: ${accentColor}; font-size: 15px; font-weight: 900; }
     .footer { margin-top: 12px; text-align: center; font-size: 10px; }
+    ${settings.receiptPaperWidth === "a4" ? "@media print { body { width: auto; margin: 0; padding: 0; } }" : ""}
   </style></head><body>
     <div class="top">
       ${settings.receiptShowLogo !== false && settings.receiptLogoDataUrl ? `<img class="logo" src="${escapeHtml(settings.receiptLogoDataUrl)}" alt="Logotipo">` : ""}
@@ -252,7 +251,7 @@ function escapeHtml(value: unknown): string {
 
 function receiptPaper(settings: PdvSettings): { widthMm: number; heightMm: number; viewportWidth: number } {
   if (settings.receiptPaperWidth === "a4") return { widthMm: 210, heightMm: 297, viewportWidth: 794 };
-  if (settings.receiptPaperWidth === "58") return { widthMm: 58, heightMm: 200, viewportWidth: 330 };
+  if (settings.receiptPaperWidth === "58") return { widthMm: 58, heightMm: 200, viewportWidth: Math.round((58 / 25.4) * 96) };
   const widthMm = settings.receiptPaperWidth === "custom"
     ? Math.max(40, Math.min(300, Number(settings.receiptCustomPaperWidthMm) || 80))
     : 80;

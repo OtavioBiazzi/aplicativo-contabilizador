@@ -1,12 +1,27 @@
 import type { PrivacyProfile, PrivacySettings } from "./types.js";
 
+/** One-time correction of the stock profile; custom definitions remain untouched. */
+export function normalizePrivacyDefaults(privacy: PrivacySettings): PrivacySettings {
+  if ((privacy.defaultsVersion || 0) >= 2) return privacy;
+  let updatedDefault = false;
+  const profiles = privacy.profiles?.map((profile) => {
+    if (profile.id === "private" && profile.name === "Reservado" && profile.hideHeaderTotal && profile.hideReportTotals && profile.historyValues === "hide") {
+      updatedDefault = true;
+      return { ...profile, name: "Totais ocultos", historyValues: "show" as const };
+    }
+    return profile;
+  });
+  const result = { ...privacy, defaultsVersion: 2, historyValues: privacy.historyValues || "show" as const, ...(profiles ? { profiles } : {}) };
+  return updatedDefault && privacy.activeProfileId === "private" ? { ...result, historyValues: "show" } : result;
+}
+
 export function privacyProfiles(privacy: PrivacySettings): PrivacyProfile[] {
   if (privacy.profiles?.length) return privacy.profiles;
   return [
     { id: "normal", name: "Aberto", hideHeaderTotal: false, hideReportTotals: false, historyValues: "show" },
     { id: "search", name: "Consulta discreta", hideHeaderTotal: true, hideReportTotals: true, historyValues: "search" },
-    { id: "private", name: "Reservado", hideHeaderTotal: true, hideReportTotals: true, historyValues: "hide" },
-    { id: "current", name: "Meu ajuste atual", hideHeaderTotal: privacy.hideHeaderTotal, hideReportTotals: privacy.hideReportTotals, historyValues: privacy.historyValues || (privacy.hideHeaderTotal || privacy.hideReportTotals ? "hide" : "show") }
+    { id: "private", name: "Totais ocultos", hideHeaderTotal: true, hideReportTotals: true, historyValues: "show" },
+    { id: "current", name: "Meu ajuste atual", hideHeaderTotal: privacy.hideHeaderTotal, hideReportTotals: privacy.hideReportTotals, historyValues: privacy.historyValues || "show" }
   ];
 }
 export function privacyEnabled(privacy: PrivacySettings): boolean { return privacy.enabled ?? privacy.hideHeaderTotal; }
@@ -20,7 +35,7 @@ export function togglePrivacy(privacy: PrivacySettings): PrivacySettings {
   return applyPrivacyProfile(privacy, enabled ? privacy.enabledProfileId || "private" : privacy.disabledProfileId || "normal", enabled);
 }
 export function historyValuesHidden(privacy: PrivacySettings, searching: boolean): boolean {
-  const mode = privacy.historyValues || (privacy.hideHeaderTotal || privacy.hideReportTotals ? "hide" : "show");
+  const mode = privacy.historyValues || "show";
   return mode === "hide" || mode === "search" && !searching;
 }
 

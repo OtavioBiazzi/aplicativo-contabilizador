@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DEFAULT_QUICK_TABS, ENTRY_TYPES, SIMPLE_COLUMNS, createDefaultSettings } from "../src/shared/defaults.js";
 import { calculateCash, getLocalDateKey, roundMoney } from "../src/shared/calculations.js";
+import { normalizePrivacyDefaults } from "../src/shared/privacy.js";
 import type { AppSettings, DataBackupInfo, EntryDraft, EntryType, LedgerEntry, QuickTabSettings } from "../src/shared/types.js";
 
 const SETTINGS_FILE = "settings.json";
@@ -383,10 +384,10 @@ function mergeSettings(defaults: AppSettings, saved: Partial<AppSettings>): AppS
         ...saved.server?.permissions
       }
     },
-    privacy: {
+    privacy: normalizePrivacyDefaults({
       ...defaults.privacy,
       ...saved.privacy
-    },
+    }),
     shortcuts: {
       ...defaults.shortcuts,
       ...saved.shortcuts
