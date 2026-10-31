@@ -1,0 +1,39 @@
+.open-tables-projection { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:0 14px 12px; }
+.open-tables-projection > div { display:flex; justify-content:space-between; align-items:center; gap:10px; border:1px solid var(--line); padding:9px 11px; background:var(--panel); }
+.open-tables-projection strong { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.open-tables-projection > div:last-child strong { color:var(--accent); font-size:19px; }
+.professional-history-panel .row-actions button { display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; line-height:1; gap:0; }
+.professional-history-panel .row-actions button svg { display:block; margin:0; flex:none; }
+.catalog-frequent-option { display:flex; align-items:center; gap:7px; padding:6px 10px; font-size:12px; }
+.catalog-frequent-option input { width:14px; height:14px; }
+:root[data-theme="dark"] :is(.simple-collection-body,.simple-payable-editor) input[type="datetime-local"] { color-scheme:dark; }
+.history-payment-backdrop { z-index:1100; padding:16px; }
+.simple-history-payments { width:min(760px,calc(100vw - 32px)); max-height:88vh; display:flex; flex-direction:column; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:0; overflow:hidden; }
+.simple-history-payments button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid var(--line); border-radius:0; background:var(--panel-2,var(--panel)); color:var(--text); font:inherit; }
+.simple-history-payments button.primary-button { background:var(--accent); border-color:var(--accent); color:#fff; }
+.simple-history-payments > header,.simple-history-payments > footer { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; background:var(--panel-2,var(--panel)); flex-shrink:0; }
+.simple-history-payments > header { border-bottom:1px solid var(--line); }
+.simple-history-payments h2 { font-size:15px; margin:0; }
+.simple-history-payments > header button { display:grid; place-items:center; width:28px; min-height:28px; padding:0; }
+.simple-history-payments > footer { justify-content:flex-end; border-top:1px solid var(--line); }
+.simple-history-payments > footer button { min-height:31px; padding:5px 13px; border-radius:0; }
+.simple-history-payments-body { display:grid; gap:10px; min-height:0; min-width:0; border:0; margin:0; overflow-y:auto; padding:12px; }
+.simple-history-payments-body > .ghost-button { justify-self:start; width:max-content; min-height:30px; padding:4px 9px; }
+.history-payment-totals { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border:1px solid var(--line); padding:8px; gap:10px; }
+.history-payment-totals span { display:grid; gap:3px; font-size:11px; }
+.history-payment-totals strong { font-size:16px; font-variant-numeric:tabular-nums; }
+.simple-history-payment-row { display:grid; grid-template-columns:minmax(130px,1fr) minmax(110px,.55fr) 30px; gap:7px; padding:9px; border:1px solid var(--line); }
+.simple-history-payments label { display:grid; gap:4px; font-size:11px; min-width:0; }
+.simple-history-payments :is(input,select) { box-sizing:border-box; width:100%; min-width:0; min-height:31px; color:var(--text); background:var(--input-bg,var(--panel)); border:1px solid var(--line); border-radius:0; padding:5px 7px; }
+.simple-history-payment-row > .icon-button { height:31px; min-height:31px; align-self:end; display:grid; place-items:center; padding:0; }
+.simple-history-payment-row :is(.history-payment-identification,.financial-customer-picker) { grid-column:1/-1; }
+.history-inline-customer { display:flex; gap:7px; align-items:end; }
+.history-inline-customer label { flex:1; }
+.customer-catalog-filters { grid-template-columns:minmax(180px,1fr) minmax(145px,.45fr) minmax(120px,.4fr) auto; }
+@media (max-width:600px) {
+  .open-tables-projection { grid-template-columns:1fr; }
+  .simple-history-payment-row { grid-template-columns:minmax(100px,1fr) minmax(90px,.7fr) 28px; padding:7px; }
+  .history-payment-totals { gap:5px; }
+  .history-payment-totals strong { font-size:14px; }
+  .customer-catalog-filters { grid-template-columns:1fr 1fr; }
+}

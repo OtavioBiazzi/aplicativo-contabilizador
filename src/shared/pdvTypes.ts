@@ -97,6 +97,7 @@ export interface PdvCartItem {
 }
 
 export interface PdvPayment {
+  createdAt?: string;
   id: string;
   method: PdvPaymentMethod;
   amount: number;
@@ -135,6 +136,7 @@ export interface PdvCashShift {
 }
 
 export interface PdvCustomer {
+  role?: "customer" | "supplier" | "both";
   id: string;
   name: string;
   document: string;
@@ -147,6 +149,7 @@ export interface PdvCustomer {
 }
 
 export interface PdvCustomerDraft {
+  role?: "customer" | "supplier" | "both";
   id?: string;
   name: string;
   document?: string;
@@ -250,6 +253,7 @@ export interface PdvPayablePayment {
 }
 
 export interface PdvSupplier {
+  customerId?: string;
   id: string;
   name: string;
 }
@@ -353,6 +357,7 @@ export interface PdvSale {
 }
 
 export interface PdvSnapshot {
+  frequentProductIds?: string[];
   version?: PdvDataVersion;
   categories: PdvCategory[];
   products: PdvProduct[];
@@ -370,6 +375,7 @@ export interface PdvSnapshot {
 }
 
 export interface PdvSettings {
+  frequentCategoryEnabled?: boolean;
   tableCount: number;
   complementsEnabled: boolean;
   subtablesEnabled: boolean;

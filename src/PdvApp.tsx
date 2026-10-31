@@ -1,3 +1,4 @@
+import { KeyboardSelect } from "./components/KeyboardSelect";
 import { createPortal } from "react-dom";
 import { duplicateReceivableDraft, buildReceivableAccountReceipt } from "./shared/financialAccountActions";
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
@@ -1211,9 +1212,10 @@ export function PdvApp({
     const items = snapshot?.products.filter((product) => product.active && product.showOnPdv) || [];
     const direction = snapshot?.settings.productSortDirection === "za" ? -1 : 1;
     return items
-      .filter((product) => activeCategory === "todos" || product.categoryId === activeCategory)
-      .sort((left, right) => direction * left.name.localeCompare(right.name, "pt-BR", { numeric: true }));
-  }, [activeCategory, snapshot?.products]);
+      .filter((product) => activeCategory === "todos" || (activeCategory === "frequente" ? Boolean(snapshot?.frequentProductIds?.includes(product.id)) : product.categoryId === activeCategory))
+      .sort((left, right) => activeCategory === "frequente" ? (snapshot?.frequentProductIds?.indexOf(left.id) ?? 0) - (snapshot?.frequentProductIds?.indexOf(right.id) ?? 0) : direction * left.name.localeCompare(right.name, "pt-BR", { numeric: true }));
+  }, [activeCategory, snapshot?.products, snapshot?.frequentProductIds, snapshot?.settings.productSortDirection]);
+  useEffect(()=>{if(activeCategory==="frequente"&&!snapshot?.settings.frequentCategoryEnabled)setActiveCategory("todos");},[activeCategory,snapshot?.settings.frequentCategoryEnabled]);
 
   const saleTotal = useMemo(() => roundMoney(cart.reduce((total, item) => total + item.total, 0)), [cart]);
   const saleFinal = Math.max(0, roundMoney(saleTotal - discount));
@@ -2200,7 +2202,7 @@ export function PdvApp({
           />
         )}
 
-        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={!canConfigureProducts} canImport={!isRemoteClient} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} removePdvProduct={removePdvProduct} />}
+        {tab === "products" && <ProductsScreen snapshot={snapshot} readOnly={!canConfigureProducts} canImport={!isRemoteClient} onToggleFrequent={async (enabled) => { if (isRemoteClient && remoteSession) await remotePdvRequest(remoteSession, "/api/pdv/products/preferences", {method:"PATCH",body:JSON.stringify({frequentCategoryEnabled:enabled})}); else await window.caixa.savePdvSettings({frequentCategoryEnabled:enabled}); await load(); }} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onRemoveCose={removePdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onProductsUpdated={load} updatePdvProducts={updatePdvProducts} savePdvCategory={savePdvCategory} savePdvProduct={savePdvProduct} removePdvProduct={removePdvProduct} />}
         {tab === "history" && <HistoryScreen snapshot={snapshot} initialView={initialHistoryView} hideNavigation={hideHistoryNavigation} readOnly={isRemoteClient && remoteSession?.permissions?.manageTables === false} onChanged={load} saveCustomer={savePdvCustomer} saveReceivable={savePdvReceivable} receiveReceivable={receivePdvReceivable} receiveCustomerReceivables={receiveCustomerReceivables} updateReceivable={updatePdvReceivable} cancelReceivable={cancelPdvReceivable} deleteReceivable={deletePdvReceivable} allowPrint={!isRemoteClient || (snapshot.settings.receiptAllowClientPrint !== false && remoteSession?.allowPrint !== false)} receiptPrintTargets={receiptPrintTargets} onRemoteReceiptPrint={onRemoteReceiptPrint} onNavigateMain={onNavigateMain} onCreatePayableForCustomer={onCreatePayableForCustomer} />}
         {tab === "reports" && <ReportsScreen snapshot={snapshot} />}
         {tab === "advanced" && <AdvancedScreen snapshot={snapshot} readOnly={!canConfigureServer} clientVisualSettings={clientVisualSettings} onClientVisualSettingsChange={saveClientVisualSettings} onImportCose={importPdvPreset} onPreviewCose={previewPdvPreset} onPreviewImportFile={previewImportFile} onImportFile={importFile} busy={busy} onSettingsUpdated={load} savePdvSettings={savePdvSettings} externalActionsRef={advancedSettingsActionsRef} onDirtyChange={onAdvancedSettingsDirtyChange} forcedSection={advancedSection} hideNavigation={hideAdvancedNavigation} />}
@@ -2869,6 +2871,7 @@ function PdvSaleScreen(props: {
               {category.name}
             </button>
           ))}
+          {props.snapshot.settings.frequentCategoryEnabled && <button className={props.activeCategory === "frequente" ? "active" : ""} onClick={()=>props.setActiveCategory("frequente")} title="Até 24 produtos mais vendidos">FREQUENTE</button>}
         </div>
         <div className="pdv-resize-handle pdv-resize-vertical" role="separator" aria-label="Redimensionar categorias e produtos" onPointerDown={(event) => startResize("vertical", event)} />
         <div
@@ -6375,7 +6378,11 @@ function FileImportButton({ onPreview, onImport, onImported, busy }: { onPreview
   );
 }
 
-function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImportCose, onPreviewCose, onRemoveCose, onPreviewImportFile, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct, removePdvProduct }: { snapshot: PdvSnapshot; readOnly?: boolean; canImport?: boolean; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onRemoveCose: () => Promise<number>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>; removePdvProduct: (id: string) => ReturnType<typeof window.caixa.removePdvProduct> }) {
+function ProductsScreen({ snapshot, onToggleFrequent, readOnly = false, canImport = true, onImportCose, onPreviewCose, onRemoveCose, onPreviewImportFile, onImportFile, busy, onProductsUpdated, updatePdvProducts, savePdvCategory, savePdvProduct, removePdvProduct }: { snapshot: PdvSnapshot; onToggleFrequent: (enabled: boolean) => Promise<void>; readOnly?: boolean; canImport?: boolean; onImportCose: () => Promise<PdvProductImportResult>; onPreviewCose: () => Promise<PdvProductImportPreview>; onRemoveCose: () => Promise<number>; onPreviewImportFile: () => Promise<PdvProductImportPreview | null>; onImportFile: (filePath: string) => Promise<PdvProductImportResult>; busy: boolean; onProductsUpdated: () => void; updatePdvProducts: (ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }) => Promise<void>; savePdvCategory: (draft: PdvCategoryDraft) => Promise<PdvCategory>; savePdvProduct: (draft: PdvProductDraft) => Promise<PdvProduct>; removePdvProduct: (id: string) => ReturnType<typeof window.caixa.removePdvProduct> }) {
+  const [copyingProduct, setCopyingProduct] = useState(false);
+  const [savingPreference, setSavingPreference] = useState(false);
+  const [frequentEnabled,setFrequentEnabled]=useState(Boolean(snapshot.settings.frequentCategoryEnabled));
+  useEffect(()=>setFrequentEnabled(Boolean(snapshot.settings.frequentCategoryEnabled)),[snapshot.settings.frequentCategoryEnabled]);
   const [section, setSection] = useState<"products" | "categories" | "complements" | "imports">("products");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -6412,7 +6419,7 @@ function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImport
   };
   const saveProduct = async (draft: PdvProductDraft) => {
     const product = await savePdvProduct(draft);
-    showAllProducts(); if (section === "complements" && !product.canBeComplement && !product.hasComplements && !product.complementProductIds.length) setSection("products"); setSelectedId(product.id); setEditingProduct(null); onProductsUpdated();
+    showAllProducts(); if (section === "complements" && !product.canBeComplement && !product.hasComplements && !product.complementProductIds.length) setSection("products"); setSelectedId(product.id); setEditingProduct(null); setCopyingProduct(false); onProductsUpdated();
   };
   const saveCategory = async (draft: PdvCategoryDraft) => {
     const category = await savePdvCategory(draft);
@@ -6427,13 +6434,14 @@ function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImport
       onProductsUpdated();
     } catch (error) { setRemoveProductRequest(null); setNotice(error instanceof Error ? error.message : "Não foi possível excluir o produto."); }
   };
-  const openSelected = () => { if (readOnly) return; if (section === "categories" && selectedCategory) setEditingCategory(selectedCategory); else if (selected) setEditingProduct(selected); };
+  const openSelected = () => { if (readOnly) return; setCopyingProduct(false); if (section === "categories" && selectedCategory) setEditingCategory(selectedCategory); else if (selected) setEditingProduct(selected); };
   return <section className="pdv-panel pdv-products-settings-screen catalog-workspace">
     <fieldset className="finance-navigation" disabled={editing || updating}>
       <div className="finance-command-bar" aria-label="Comandos de produtos">
-        <button disabled={readOnly || section === "imports"} onClick={() => section === "categories" ? setEditingCategory("new") : setEditingProduct("new")}><Plus /><span>Novo</span></button>
+        <button disabled={readOnly || section === "imports"} onClick={() => {setCopyingProduct(false); section === "categories" ? setEditingCategory("new") : setEditingProduct("new");}}><Plus /><span>Novo</span></button>
         <button disabled={readOnly || (section === "categories" ? !selectedCategory : section === "imports" || !selected)} onClick={openSelected}><Pencil /><span>Alterar</span></button>
         <button disabled={readOnly || section === "categories" || section === "imports" || !selected} onClick={() => selected && setRemoveProductRequest(selected)}><Trash2 /><span>Excluir</span></button>
+        <button disabled={readOnly || section === "categories" || section === "imports" || !selected} onClick={() => { if(selected){setCopyingProduct(true);setEditingProduct({...selected,id:crypto.randomUUID(),name:selected.name+" (cópia)",sku:"",barcode:"",stockQuantity:0,importSource:undefined});} }}><Copy /><span>Duplicar</span></button>
       </div>
       <div className="finance-view-row"><div className="finance-view-tabs" role="tablist" aria-label="Cadastro do PDV">
         {([["products", "Pesquisa"], ["categories", "Categorias"], ["complements", "Adicionais"], ["imports", "Importação"]] as const).map(([key, label]) => <button key={key} role="tab" aria-selected={section === key && !editing} onClick={() => { setSection(key); setProductQuery(""); }}>{label}</button>)}
@@ -6441,6 +6449,7 @@ function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImport
       </div></div>
     </fieldset>
     {!editing && <div className="catalog-main">
+      {section === "products" && <label className="catalog-frequent-option"><input type="checkbox" checked={frequentEnabled} disabled={readOnly||savingPreference} onChange={async event=>{const enabled=event.target.checked;setFrequentEnabled(enabled);setSavingPreference(true);try{await onToggleFrequent(enabled);}catch(cause){setFrequentEnabled(!enabled);setNotice(cause instanceof Error?cause.message:"Não foi possível alterar a aba frequente.");}finally{setSavingPreference(false);}}}/> Habilitar aba FREQUENTE</label>}
       {section !== "imports" && <div className="catalog-filters">
         <label className="catalog-search"><span>Pesquisar</span><input aria-label="Buscar cadastro" value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder={section === "categories" ? "Nome da categoria" : "Nome, código, barras, fornecedor ou categoria"} /></label>
         {section !== "categories" && <>
@@ -6500,7 +6509,7 @@ function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImport
       )}
 
     </div>}
-    {editingProduct && <ProductEditorModal inline product={editingProduct === "new" ? null : editingProduct} categories={snapshot.categories} products={snapshot.products} complementsEnabled={snapshot.settings.complementsEnabled} onCancel={() => setEditingProduct(null)} onSave={saveProduct} />}
+    {editingProduct && <ProductEditorModal inline duplicating={copyingProduct} product={editingProduct === "new" ? null : editingProduct} categories={snapshot.categories} products={snapshot.products} complementsEnabled={snapshot.settings.complementsEnabled} onCancel={() => {setEditingProduct(null);setCopyingProduct(false);}} onSave={saveProduct} />}
     {editingCategory && <CategoryEditorModal inline category={editingCategory === "new" ? null : editingCategory} onCancel={() => setEditingCategory(null)} onSave={saveCategory} />}
       {removeCoseConfirm && (
         <PdvConfirmModal
@@ -6522,7 +6531,7 @@ function ProductsScreen({ snapshot, readOnly = false, canImport = true, onImport
     </section>;
 }
 
-function ProductEditorModal({ inline = false, product, categories, products, complementsEnabled, onCancel, onSave }: { inline?: boolean; product: PdvProduct | null; categories: PdvCategory[]; products: PdvProduct[]; complementsEnabled: boolean; onCancel: () => void; onSave: (draft: PdvProductDraft) => void | Promise<void> }) {
+function ProductEditorModal({ inline = false, duplicating = false, product, categories, products, complementsEnabled, onCancel, onSave }: { inline?: boolean; duplicating?: boolean; product: PdvProduct | null; categories: PdvCategory[]; products: PdvProduct[]; complementsEnabled: boolean; onCancel: () => void; onSave: (draft: PdvProductDraft) => void | Promise<void> }) {
   const [section, setSection] = useState<"commercial" | "stock" | "availability" | "complements">("commercial");
   const [draft, setDraft] = useState<PdvProductDraft>({
     id: product?.id,
@@ -6571,12 +6580,12 @@ function ProductEditorModal({ inline = false, product, categories, products, com
     }); } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível salvar o produto."); } finally { setSaving(false); }
   };
   return (
-    <div className={inline ? "financial-inline-editor catalog-inline-editor" : "pdv-modal-backdrop"} role={inline ? "region" : "dialog"} aria-label={product ? "Editar produto" : "Novo produto"} aria-modal={inline ? undefined : true}>
+    <div className={inline ? "financial-inline-editor catalog-inline-editor" : "pdv-modal-backdrop"} role={inline ? "region" : "dialog"} aria-label={duplicating ? "Duplicar produto" : product ? "Editar produto" : "Novo produto"} aria-modal={inline ? undefined : true}>
       <section className="pdv-payment-modal pdv-editor-modal pdv-product-editor-modal">
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Cadastro</span>
-            <h1>{product ? "Editar produto" : "Novo produto"}</h1>
+            <h1>{duplicating ? "Duplicar produto" : product ? "Editar produto" : "Novo produto"}</h1>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
@@ -6600,19 +6609,19 @@ function ProductEditorModal({ inline = false, product, categories, products, com
           </div>
           <div className="pdv-editor-grid pdv-product-basics-grid">
             <label className="pdv-editor-field-wide"><span>Nome do produto</span><input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Ex.: Cafe com leite 300 ml" /></label>
-            <label><span>Categoria</span><select value={draft.categoryId} onChange={(event) => setDraft({ ...draft, categoryId: event.target.value })}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <label><span>Categoria</span><KeyboardSelect value={draft.categoryId} onChange={(event) => setDraft({ ...draft, categoryId: event.target.value })}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</KeyboardSelect></label>
             <label><span>Preco de venda</span><input inputMode="decimal" value={priceText} onChange={(event) => setPriceText(event.target.value)} placeholder="Ex.: 12,90" /></label>
             <label><span>Preco de custo</span><input inputMode="decimal" value={costText} onChange={(event) => setCostText(event.target.value)} placeholder="Ex.: 6,40" /></label>
             <label>
               <span>Tipo de venda</span>
-              <select value={draft.unitMode} onChange={(event) => {
+              <KeyboardSelect value={draft.unitMode} onChange={(event) => {
                 const unitMode = event.target.value as PdvProductDraft["unitMode"];
                 setDraft({ ...draft, unitMode, unit: unitMode === "kg" ? "KG" : unitMode === "grama" ? "G" : "UNID" });
               }}>
                 <option value="unidade">Unidade</option>
                 <option value="kg">Quilograma</option>
                 <option value="grama">Grama</option>
-              </select>
+              </KeyboardSelect>
             </label>
             <label><span>Unidade exibida</span><input value={draft.unit} onChange={(event) => setDraft({ ...draft, unit: event.target.value.toUpperCase() })} placeholder="UNID" /></label>
             <label className="pdv-editor-field-full"><span>Descricao interna</span><textarea value={draft.description || ""} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Detalhes, tamanho, sabor ou observacoes para a equipe." /></label>
@@ -7013,7 +7022,7 @@ function ReceivablesScreen({
     const next = await onReceive(receivable.id, {
       ...payment,
       receivableId: receivable.id,
-      createdAt: new Date().toISOString(),
+      createdAt: payment.createdAt || new Date().toISOString(),
       method: payment.method
     }, crypto.randomUUID());
     setSelected(next);
@@ -7125,7 +7134,7 @@ function ReceivablesScreen({
       </>}
       {customerReceiving && <ReceivableCollectionModal receivable={customerReceiving} onCancel={() => setCustomerReceiving(null)} onConfirm={async (payment) => {
         if (payment.method === "Conta a receber" || payment.method === "Nao definido") return;
-        await onReceiveCustomer(customerReceiving.customerId, { ...payment, receivableId: "", createdAt: new Date().toISOString(), method: payment.method }, customerOperationId.current, receivingAccountIds);
+        await onReceiveCustomer(customerReceiving.customerId, { ...payment, receivableId: "", createdAt: payment.createdAt || new Date().toISOString(), method: payment.method }, customerOperationId.current, receivingAccountIds);
         setCustomerReceiving(null); setSelectedAccountIds([]); await onChanged(); setNotice("Recebimento distribuído nas contas do cliente.");
       }} />}
       {receiving && <ReceivableCollectionModal receivable={receiving} onCancel={() => setReceiving(null)} onConfirm={(payment) => registerPayment(receiving, payment)} />}
@@ -7169,7 +7178,7 @@ function ReceivableDraftModal({ inline = false, initialDraft, customers, onSaveC
       <section className="pdv-payment-modal pdv-admin-modal pdv-financial-editor-modal">
         <div className="pdv-section-head"><div><span className="pdv-eyebrow">Contas a receber</span><h1>Nova conta</h1><p>Cadastre uma cobranca sem precisar criar uma venda no PDV.</p></div><button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button></div>
         <div className="pdv-editor-grid pdv-financial-editor-grid">
-          <div className="pdv-wide-field financial-customer-picker"><label><span>Cliente *</span><select autoFocus value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}><option value="">Selecione um cliente</option>{availableCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.document ? ` · ${customer.document}` : ""}</option>)}</select></label><button type="button" className="pdv-ghost-button" onClick={() => setCreatingCustomer(true)}><Plus size={15} /> Novo cliente</button></div>
+          <div className="pdv-wide-field financial-customer-picker"><label><span>Cliente *</span><KeyboardSelect autoFocus value={draft.customerId} onChange={(event) => setDraft({ ...draft, customerId: event.target.value })}><option value="">Selecione um cliente</option>{availableCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.document ? ` · ${customer.document}` : ""}</option>)}</KeyboardSelect></label><button type="button" className="pdv-ghost-button" onClick={() => setCreatingCustomer(true)}><Plus size={15} /> Novo cliente</button></div>
           <label className="pdv-wide-field"><span>Descricao *</span><input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Ex.: Encomenda, mensalidade ou venda a prazo" /></label>
           <label><span>Valor *</span><input inputMode="decimal" value={amountText} onChange={(event) => setAmountText(event.target.value)} placeholder="0,00" /></label>
           <label><span>Vencimento</span><input type="date" value={draft.dueDate || ""} onChange={(event) => setDraft({ ...draft, dueDate: event.target.value })} /></label>
@@ -7230,6 +7239,7 @@ function CustomersScreen({
   onNavigateMain?: (tab: "history" | "reports", tableNumber?: number) => void;
   onCreatePayableForCustomer?: (customer: PdvCustomer) => void;
 }) {
+  const [roleFilter,setRoleFilter]=useState("all");
   const [query, setQuery] = useState("");
   const [customerStatus, setCustomerStatus] = useState<"Todos" | "Ativos" | "Inativos" | "Com saldo">("Todos");
   const [editing, setEditing] = useState<PdvCustomer | "new" | null>(null);
@@ -7254,7 +7264,7 @@ function CustomersScreen({
   const balanceFor = (id: string) => accountTotals.get(id)?.balance || 0;
   const customers = snapshot.customers.filter((customer) => {
     const matchesQuery = !normalized || normalizeTableSearch([customer.name, customer.document, customer.phone, customer.email, customer.note].join(" ")).includes(normalized);
-    return matchesQuery && (customerStatus === "Todos" || (customerStatus === "Ativos" && customer.active) || (customerStatus === "Inativos" && !customer.active) || (customerStatus === "Com saldo" && balanceFor(customer.id) > .009));
+    return matchesQuery && (roleFilter==="all" || (customer.role||"customer")===roleFilter || customer.role==="both") && (customerStatus === "Todos" || (customerStatus === "Ativos" && customer.active) || (customerStatus === "Inativos" && !customer.active) || (customerStatus === "Com saldo" && balanceFor(customer.id) > .009));
   });
   const selected = customers.find((customer) => customer.id === selectedCustomer?.id);
   const outstandingBalance = roundMoney(customers.reduce((sum, customer) => sum + balanceFor(customer.id), 0));
@@ -7276,11 +7286,13 @@ function CustomersScreen({
       {!editing && <div className="catalog-main">
         <div className="catalog-filters customer-catalog-filters">
           <label className="catalog-search"><span>Pesquisar</span><input aria-label="Buscar cliente" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nome, telefone, e-mail ou CPF/CNPJ" /></label>
+          <label><span>Tipo de cadastro</span><KeyboardSelect value={roleFilter} onChange={event=>setRoleFilter(event.target.value)}><option value="all">Todos</option><option value="customer">Clientes</option><option value="supplier">Fornecedores</option><option value="both">Cliente e fornecedor</option></KeyboardSelect></label>
           <label><span>Situação</span><select value={customerStatus} onChange={(event) => setCustomerStatus(event.target.value as typeof customerStatus)}><option>Todos</option><option>Ativos</option><option>Inativos</option><option>Com saldo</option></select></label>
-          <button onClick={() => { setQuery(""); setCustomerStatus("Todos"); }}><RotateCcw size={14} /> Limpar</button>
+          <button onClick={() => { setQuery(""); setCustomerStatus("Todos"); setRoleFilter("all"); }}><RotateCcw size={14} /> Limpar</button>
         </div>
         <FinancialGrid id="customer-catalog" rows={customers} selectedId={selected?.id} defaultHidden={["address", "note", "count", "email"]} onSelect={setSelectedCustomer} onOpen={(customer) => { setDetailSection("summary"); setDetailCustomer(customer); }} columns={[
           { key: "name", label: "Cliente", required: true, value: (customer) => customer.name },
+          { key: "role", label:"Tipo", value:(customer)=>customer.role==="supplier"?"Fornecedor":customer.role==="both"?"Cliente e fornecedor":"Cliente" },
           { key: "document", label: "CPF/CNPJ", value: (customer) => customer.document || "—" },
           { key: "phone", label: "Telefone", value: (customer) => customer.phone || "—" },
           { key: "email", label: "E-mail", value: (customer) => customer.email || "—" },
@@ -7299,7 +7311,7 @@ function CustomersScreen({
           onSave={async (draft) => {
             try {
               const customer = await onSave(draft);
-              setSelectedCustomer(customer); setQuery(""); setCustomerStatus("Todos");
+              setSelectedCustomer(customer); setQuery(""); setCustomerStatus("Todos"); setRoleFilter("all");
               setEditing(null);
               await onChanged();
             } catch (error) {
@@ -7412,7 +7424,7 @@ function CustomerDetailModal({
     await onReceive(receivable.id, {
       ...payment,
       receivableId: receivable.id,
-      createdAt: new Date().toISOString(),
+      createdAt: payment.createdAt || new Date().toISOString(),
       method: payment.method
     }, crypto.randomUUID());
     setReceiving(null);
@@ -7540,7 +7552,7 @@ function ReceivableEditorModal({ inline = false, receivable, sale, onCancel, onS
     setPayments((current) => [...current, {
       id: payment.id || crypto.randomUUID(),
       receivableId: receivable.id,
-      createdAt: new Date().toISOString(),
+      createdAt: payment.createdAt || new Date().toISOString(),
       method,
       amount: payment.amount,
       received: payment.received,
@@ -7657,6 +7669,7 @@ function CustomerEditorModal({ inline = false, customer, onCancel, onSave }: { i
             <div className="pdv-editor-section-title"><strong>Identificacao</strong><small>Nome e documento usados na conta e no recibo.</small></div>
             <div className="pdv-editor-grid">
               <label className="pdv-wide-field"><span>Nome *</span><input autoFocus value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+              <label><span>Tipo de cadastro</span><KeyboardSelect value={draft.role || "customer"} onChange={event=>setDraft({...draft,role:event.target.value as PdvCustomerDraft["role"]})}><option value="customer">Cliente</option><option value="supplier">Fornecedor</option><option value="both">Cliente e fornecedor</option></KeyboardSelect></label>
               <label><span>CPF/CNPJ</span><input value={draft.document || ""} onChange={(event) => setDraft({ ...draft, document: formatCpfCnpj(event.target.value) })} inputMode="numeric" /></label>
               <label><span>Telefone</span><input value={draft.phone || ""} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} /></label>
             </div>
@@ -7669,7 +7682,7 @@ function CustomerEditorModal({ inline = false, customer, onCancel, onSave }: { i
               <label className="pdv-wide-field"><span>Observacao</span><textarea rows={3} value={draft.note || ""} onChange={(event) => setDraft({ ...draft, note: event.target.value })} /></label>
             </div>
           </div>
-          <label className="pdv-switch-line pdv-customer-active-line"><input type="checkbox" checked={draft.active !== false} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Cliente ativo e disponivel para novas contas</label>
+          <label className="pdv-switch-line pdv-customer-active-line"><input type="checkbox" checked={draft.active !== false} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Cadastro ativo e disponivel para novas contas</label>
         </div>
         {error && <div className="pdv-inline-warning" role="alert">{error}</div>}
         <div className="pdv-action-row"><button className="pdv-danger-button" disabled={busy} onClick={onCancel}>Cancelar</button><button className="pdv-primary-button" disabled={!draft.name.trim() || busy} onClick={() => void confirm()}>{busy ? "Salvando..." : "Salvar cliente"}</button></div>

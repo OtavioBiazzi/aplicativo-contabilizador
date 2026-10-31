@@ -14,7 +14,7 @@ db.run('DROP TABLE financial_lookups');
 db.run("DELETE FROM pdv_settings WHERE key='financial_lookups_initialized'");
 db.run('PRAGMA user_version=4');await store.persist();
 store=new PdvStore(dir);await store.initialize();
-assert((await readdir(path.join(dir,'pdv-backups'))).some(name=>name.includes('antes-migracao-v5')));
+assert((await readdir(path.join(dir,'pdv-backups'))).some(name=>name.includes('antes-migracao-v6')));
 assert(store.getFinancialLookups().some(x=>x.kind==='category' && x.name==='Bebidas'));
 assert(store.getFinancialLookups().some(x=>x.kind==='costCenter' && x.name==='Loja'));
 let old=store.getPayables().find(x=>x.id===original.id);

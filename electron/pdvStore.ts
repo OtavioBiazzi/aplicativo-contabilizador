@@ -1,5 +1,6 @@
-import { supplierBalanceKey } from "../src/shared/financialDates.js";
+import { supplierBalanceKey, financialPaymentTimestamp } from "../src/shared/financialDates.js";
 import { joinSaleLabels } from "../src/shared/saleDescription.js";
+import { adaptAutomaticDescription } from "../src/shared/automaticDescription.js";
 import { matchesTableNumberFilter } from "../src/shared/tableNumberFilter.js";
 ﻿import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -40,6 +41,7 @@ import type {
 } from "../src/shared/pdvTypes.js";
 
 const require = createRequire(import.meta.url);
+const frequentProductsCache = new WeakMap<Database, string[]>();
 const DEFAULT_PDV_SETTINGS: PdvSettings = {
   tableCount: 47,
   complementsEnabled: true,
@@ -137,8 +139,8 @@ export class PdvStore {
         throw new Error("Banco PDV ainda nao existe.");
       }
       this.db = new this.sql.Database(await fs.readFile(this.dbFilePath));
-      if (this.databaseUserVersion() < 5) {
-        await this.backupSqliteDaily("antes-migracao-v5");
+      if (this.databaseUserVersion() < 6) {
+        await this.backupSqliteDaily("antes-migracao-v6");
       }
     } catch (error) {
       if (existingDatabase) {
@@ -162,7 +164,7 @@ export class PdvStore {
       }
       throw error;
     }
-    this.requireDb().run("PRAGMA user_version = 5");
+    this.requireDb().run("PRAGMA user_version = 6");
     await this.persist();
   }
 
@@ -188,13 +190,14 @@ export class PdvStore {
     this.db = restored;
     previous.close();
     this.migrate();
-    this.requireDb().run("PRAGMA user_version = 5");
+    this.requireDb().run("PRAGMA user_version = 6");
     await this.persist();
     await this.backupSqliteDaily("pos-restauracao");
   }
 
   async getSnapshot(salesLimit?: number): Promise<PdvSnapshot> {
     return {
+      frequentProductIds: this.getSettings().frequentCategoryEnabled ? this.getFrequentProductIds() : [],
       version: this.getVersion(),
       categories: this.getCategories(),
       products: this.getProducts(),
@@ -212,10 +215,22 @@ export class PdvStore {
     };
   }
 
+  private getFrequentProductIds(): string[] {
+    const db = this.requireDb();
+    const cached = frequentProductsCache.get(db);
+    if (cached) return cached;
+    const ids = selectAll<{id: string}>(db, `SELECT i.product_id AS id FROM sale_items i
+      JOIN sales s ON s.id = i.sale_id JOIN products p ON p.id = i.product_id
+      WHERE s.status NOT IN ('Cancelada', 'deleted') AND p.active = 1 AND p.show_on_pdv = 1
+      GROUP BY i.product_id ORDER BY SUM(i.quantity) DESC, p.name COLLATE NOCASE, i.product_id LIMIT 24`).map(row => row.id);
+    frequentProductsCache.set(db, ids);
+    return ids;
+  }
+
   getCustomers(): PdvCustomer[] {
     return selectAll<PdvCustomer>(
       this.requireDb(),
-      `SELECT id, name, document, phone, email, address, note, active, created_at AS createdAt
+      `SELECT id, name, role, document, phone, email, address, note, active, created_at AS createdAt
        FROM customers ORDER BY active DESC, name COLLATE NOCASE`
     ).map((customer) => ({ ...customer, active: Boolean(customer.active) }));
   }
@@ -224,17 +239,24 @@ export class PdvStore {
     const name = String(draft.name || "").trim();
     if (!name) throw new Error("Informe o nome do cliente.");
     const id = draft.id || randomUUID();
+    const previousRole = this.getCustomers().find((customer) => customer.id === id)?.role || "customer";
+    const role = draft.role || previousRole;
+    if (!["customer", "supplier", "both"].includes(role)) throw new Error("Tipo de cadastro invalido.");
     const createdAt = draft.id
       ? selectAll<{ createdAt: string }>(this.requireDb(), "SELECT created_at AS createdAt FROM customers WHERE id = ?", [id])[0]?.createdAt || new Date().toISOString()
       : new Date().toISOString();
-    this.requireDb().run(
-      `INSERT INTO customers (id, name, document, phone, email, address, note, active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    const db = this.requireDb();
+    db.run("BEGIN IMMEDIATE");
+    try {
+    db.run(
+      `INSERT INTO customers (id, name, role, document, phone, email, address, note, active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET name=excluded.name, document=excluded.document, phone=excluded.phone,
-       email=excluded.email, address=excluded.address, note=excluded.note, active=excluded.active`,
+       email=excluded.email, address=excluded.address, note=excluded.note, active=excluded.active, role=excluded.role`,
       [
         id,
         name,
+        role,
         String(draft.document || "").trim(),
         String(draft.phone || "").trim(),
         String(draft.email || "").trim(),
@@ -244,6 +266,16 @@ export class PdvStore {
         createdAt
       ]
     );
+    if (role !== "customer" && draft.active !== false) {
+      const linked = selectAll<{id: string}>(db, "SELECT id FROM suppliers WHERE customer_id = ?", [id])[0];
+      const named = selectAll<{id: string; customerId?: string}>(db, "SELECT id, customer_id AS customerId FROM suppliers WHERE name_key = ?", [supplierBalanceKey(name)])[0];
+      if (named && named.id !== linked?.id && named.customerId && named.customerId !== id) throw new Error("Ja existe outro fornecedor vinculado a esse nome.");
+      if (linked && named && linked.id !== named.id) throw new Error("Ja existe um fornecedor com esse nome. Use um nome diferente.");
+      if (linked || named) db.run("UPDATE suppliers SET name = ?, name_key = ?, customer_id = ? WHERE id = ?", [name, supplierBalanceKey(name), id, linked?.id || named!.id]);
+      else db.run("INSERT INTO suppliers (id, name, name_key, customer_id) VALUES (?, ?, ?, ?)", [randomUUID(), name, supplierBalanceKey(name), id]);
+    } else db.run("DELETE FROM suppliers WHERE customer_id = ?", [id]);
+    db.run("COMMIT");
+    } catch (error) { db.run("ROLLBACK"); throw error; }
     await this.persist();
     return this.getCustomers().find((customer) => customer.id === id)!;
   }
@@ -270,7 +302,7 @@ export class PdvStore {
   }
 
   getSuppliers(): PdvSupplier[] {
-    return selectAll<PdvSupplier>(this.requireDb(), "SELECT id, name FROM suppliers ORDER BY name COLLATE NOCASE");
+    return selectAll<PdvSupplier>(this.requireDb(), "SELECT id, name, customer_id AS customerId FROM suppliers ORDER BY name COLLATE NOCASE");
   }
 
   async saveSupplier(draft: PdvSupplier): Promise<PdvSupplier> {
@@ -287,6 +319,8 @@ export class PdvStore {
 
   async deleteSupplier(id: string): Promise<void> {
     // O cadastro é independente dos nomes já gravados nas contas históricas.
+    const linked = this.getSuppliers().find(supplier => supplier.id === id)?.customerId;
+    if (linked) this.requireDb().run("UPDATE customers SET role = CASE WHEN role = 'both' THEN 'customer' ELSE role END, active = CASE WHEN role = 'supplier' THEN 0 ELSE active END WHERE id = ?", [linked]);
     this.requireDb().run("DELETE FROM suppliers WHERE id = ?", [String(id)]);
     await this.persist();
   }
@@ -473,6 +507,7 @@ export class PdvStore {
     originDevice = "Servidor",
     operationId?: string
   ): Promise<PdvPayable> {
+    const paymentDate = financialPaymentTimestamp(payment.createdAt);
     const payable = this.getPayables().find((item) => item.id === payableId);
     if (!payable || payable.status === "Cancelada" || payable.status === "Excluida") throw new Error("Conta a pagar nao encontrada, cancelada ou excluida.");
     if (operationId) {
@@ -493,7 +528,7 @@ export class PdvStore {
         [
           payment.id || randomUUID(),
           payableId,
-          new Date().toISOString(),
+          paymentDate,
           payment.method || "Nao definido",
           amount,
           String(payment.description || "").trim(),
@@ -514,8 +549,9 @@ export class PdvStore {
   }
 
   async paySupplierPayables(supplier: string, payment: PdvPayablePayment, originDevice = "Servidor", operationId: string, accountIds?: string[]): Promise<PdvPayable[]> {
+    const paymentDate = financialPaymentTimestamp(payment.createdAt);
     const db = this.requireDb(); const key = supplierBalanceKey(supplier);
-    const signature = JSON.stringify(["supplier", key, payment.method, payment.amount, payment.description || "", accountIds ? [...new Set(accountIds)].sort() : null]);
+    const signature = JSON.stringify(["supplier", key, payment.method, payment.amount, payment.description || "", accountIds ? [...new Set(accountIds)].sort() : null, ...(payment.createdAt ? [paymentDate] : [])]);
     const existing = selectAll<{ request_json: string; account_ids_json: string }>(db, "SELECT request_json, account_ids_json FROM financial_group_operations WHERE operation_id = ?", [operationId])[0];
     if (existing) {
       if (existing.request_json !== signature) throw new Error("Este pagamento ja foi utilizado com outros dados.");
@@ -537,7 +573,7 @@ export class PdvStore {
         if (!remaining) break;
         const amountCents = Math.min(remaining, Math.round(account.balance * 100)); remaining -= amountCents;
         db.run(`INSERT INTO payable_payments (id, payable_id, created_at, method, amount, description, origin_device, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [randomUUID(), account.id, new Date().toISOString(), payment.method, amountCents / 100, String(payment.description || "Pagamento do saldo do fornecedor").trim(), originDevice, `${operationId}:${account.id}`]);
+          [randomUUID(), account.id, paymentDate, payment.method, amountCents / 100, String(payment.description || "Pagamento do saldo do fornecedor").trim(), originDevice, `${operationId}:${account.id}`]);
         db.run("UPDATE payables SET status = ? WHERE id = ?", [Math.round(account.balance * 100) === amountCents ? "Paga" : "Parcialmente paga", account.id]);
         this.writeFinancialEvent(db, "payable", account.id, "Pagamento", "Pagamento distribuido pelo saldo do fornecedor.", originDevice, amountCents / 100); affected.push(account.id);
       }
@@ -712,6 +748,7 @@ export class PdvStore {
     originDevice = "Servidor",
     operationId?: string
   ): Promise<PdvReceivable> {
+    const paymentDate = financialPaymentTimestamp(payment.createdAt);
     const receivable = this.getReceivables().find((item) => item.id === receivableId);
     if (!receivable || receivable.status === "Cancelada" || receivable.status === "Excluida") throw new Error("Conta a receber nao encontrada, cancelada ou excluida.");
     if (operationId) {
@@ -736,7 +773,7 @@ export class PdvStore {
         [
           payment.id || randomUUID(),
           receivableId,
-          new Date().toISOString(),
+          paymentDate,
           payment.method,
           amount,
           received ?? null,
@@ -759,8 +796,9 @@ export class PdvStore {
   }
 
   async receiveCustomerReceivables(customerId: string, payment: PdvReceivablePayment, originDevice = "Servidor", operationId: string, accountIds?: string[]): Promise<PdvReceivable[]> {
+    const paymentDate = financialPaymentTimestamp(payment.createdAt);
     const db = this.requireDb();
-    const signature = JSON.stringify([customerId, payment.method, payment.amount, payment.received ?? null, payment.description || "", accountIds ? [...new Set(accountIds)].sort() : null]);
+    const signature = JSON.stringify([customerId, payment.method, payment.amount, payment.received ?? null, payment.description || "", accountIds ? [...new Set(accountIds)].sort() : null, ...(payment.createdAt ? [paymentDate] : [])]);
     const existing = selectAll<{ request_json: string; account_ids_json: string }>(db, "SELECT request_json, account_ids_json FROM financial_group_operations WHERE operation_id = ?", [operationId])[0];
     if (existing) {
       if (existing.request_json !== signature) throw new Error("Este recebimento ja foi utilizado com outros dados.");
@@ -787,7 +825,7 @@ export class PdvStore {
         remaining -= amountCents;
         const changeCents = remaining === 0 ? receivedCents - cents : 0;
         db.run(`INSERT INTO receivable_payments (id, receivable_id, created_at, method, amount, received, change, description, origin_device, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [randomUUID(), account.id, new Date().toISOString(), payment.method, amountCents / 100, payment.method === "Dinheiro" ? (amountCents + changeCents) / 100 : null, changeCents / 100, String(payment.description || "Recebimento do saldo do cliente").trim(), originDevice, `${operationId}:${account.id}`]);
+          [randomUUID(), account.id, paymentDate, payment.method, amountCents / 100, payment.method === "Dinheiro" ? (amountCents + changeCents) / 100 : null, changeCents / 100, String(payment.description || "Recebimento do saldo do cliente").trim(), originDevice, `${operationId}:${account.id}`]);
         db.run("UPDATE receivables SET status = ? WHERE id = ?", [Math.round(account.balance * 100) === amountCents ? "Recebida" : "Parcialmente recebida", account.id]);
         this.writeFinancialEvent(db, "receivable", account.id, "Pagamento", "Recebimento distribuido pelo saldo do cliente.", originDevice, amountCents / 100);
         affected.push(account.id);
@@ -1056,6 +1094,7 @@ export class PdvStore {
   }
 
   async updateProducts(ids: string[], patch: { categoryId?: string; canBeComplement?: boolean; hasComplements?: boolean; showOnPdv?: boolean; favorite?: boolean }): Promise<void> {
+    frequentProductsCache.delete(this.requireDb());
     if (!ids.length) {
       return;
     }
@@ -1106,6 +1145,7 @@ export class PdvStore {
   }
 
   async saveProduct(draft: PdvProductDraft): Promise<PdvProduct> {
+    frequentProductsCache.delete(this.requireDb());
     const price = Number(draft.price);
     if (!Number.isFinite(price) || price <= 0) {
       throw new Error("Informe um preco de venda maior que zero.");
@@ -1207,6 +1247,7 @@ export class PdvStore {
   }
 
   async removeProduct(id: string): Promise<"deleted" | "archived"> {
+    frequentProductsCache.delete(this.requireDb());
     const productId = String(id || "").trim();
     const db = this.requireDb();
     const product = selectAll<{ id: string }>(db, "SELECT id FROM products WHERE id = ?", [productId])[0];
@@ -1978,6 +2019,7 @@ export class PdvStore {
   }
 
   async updateSale(id: string, patch: Record<string, any>): Promise<void> {
+    frequentProductsCache.delete(this.requireDb());
     const db = this.requireDb();
     if (!selectAll<{ id: string }>(db, "SELECT id FROM sales WHERE id = ?", [id]).length) {
       throw new Error("Venda nao encontrada.");
@@ -1986,6 +2028,9 @@ export class PdvStore {
     if (!currentSale) {
       throw new Error("Venda nao encontrada.");
     }
+    const tableText = patch.tableNumber === undefined ? String(currentSale.tableNumber || "") : String(patch.tableNumber).trim();
+    if (tableText && (!/^\d+$/.test(tableText) || Number(tableText) < 1 || Number(tableText) > 999999)) throw new Error("Numero de mesa invalido.");
+    const nextTable = tableText ? Number(tableText) : undefined;
     const nextTotal = patch.finalValue === undefined ? currentSale.total : roundMoney(Number(patch.finalValue));
     if (!Number.isFinite(nextTotal) || nextTotal < 0) {
       throw new Error("Total final invalido.");
@@ -1999,6 +2044,8 @@ export class PdvStore {
       : patch.finalValue !== undefined && nextTotal !== currentSale.total
         ? normalizePaymentsForTotal(currentSale.payments.map((payment) => ({ ...payment, amount: nextTotal, received: payment.method === "Dinheiro" ? Math.max(payment.received ?? nextTotal, nextTotal) : undefined })), nextTotal)
         : null;
+    if (nextPayments && paymentMethodChanged) for (const payment of nextPayments) payment.description = adaptAutomaticDescription(payment.description || "", {method: currentSale.payments[0]?.method}, {method: payment.method});
+    const nextDescription = typeof patch.description === "string" ? patch.description.trim() : adaptAutomaticDescription(currentSale.description || "", {table: currentSale.tableNumber, method: currentSale.payments[0]?.method}, {table: nextTable, method: nextPayments?.[0]?.method || currentSale.payments[0]?.method});
     let status = patch.status;
     if (status === "cancelled") status = "Cancelada";
     if (status === "active") status = "Finalizada";
@@ -2019,15 +2066,18 @@ export class PdvStore {
       if (patch.finalValue !== undefined) {
         db.run("UPDATE sales SET total = ? WHERE id = ?", [patch.finalValue, id]);
       }
+      if (patch.tableNumber !== undefined) db.run("UPDATE sales SET table_number = ? WHERE id = ?", [nextTable ?? null, id]);
+      if (patch.type !== undefined) {
+        const nextType = patch.type === "Mesa" ? "Mesa" : patch.type === "Onibus" ? "Onibus" : patch.type === "Venda" || patch.type === "Venda direta" ? "Venda direta" : currentSale.type;
+        db.run("UPDATE sales SET type = ? WHERE id = ?", [nextType, id]);
+      }
       if (patch.originalValue !== undefined) {
         db.run("UPDATE sales SET subtotal = ? WHERE id = ?", [patch.originalValue, id]);
       }
       if (patch.difference !== undefined) {
         db.run("UPDATE sales SET discount = ? WHERE id = ?", [-patch.difference, id]);
       }
-      if (typeof patch.description === "string") {
-        db.run("UPDATE sales SET description = ? WHERE id = ?", [patch.description.trim(), id]);
-      }
+      db.run("UPDATE sales SET description = ? WHERE id = ?", [nextDescription, id]);
       if (typeof patch.observations === "string") {
         db.run("UPDATE sales SET observations = ? WHERE id = ?", [patch.observations.trim(), id]);
       }
@@ -2079,11 +2129,20 @@ export class PdvStore {
       throw new Error("A venda possui conta a receber. Use a tela de contas para registrar ou corrigir recebimentos.");
     }
     const normalizedPayments = normalizePaymentsForTotal(payments, sale.total);
+    let description = sale.description || "";
+    for (const previous of sale.payments) {
+      const next = normalizedPayments.find(payment => payment.id === previous.id);
+      if (next && next.method !== previous.method) {
+        description = adaptAutomaticDescription(description, {method: previous.method}, {method: next.method});
+        next.description = adaptAutomaticDescription(next.description || "", {method: previous.method}, {method: next.method});
+      }
+    }
     const db = this.requireDb();
     db.run("BEGIN IMMEDIATE");
     try {
       db.run("DELETE FROM sale_payments WHERE sale_id = ?", [id]);
       writeSalePayments(db, id, normalizedPayments);
+      db.run("UPDATE sales SET description = ? WHERE id = ?", [description, id]);
       createReceivablesForPayments(db, id, sale.tableNumber, sale.createdAt, sale.items, normalizedPayments);
       db.run("COMMIT");
     } catch (error) {
@@ -2534,6 +2593,9 @@ export class PdvStore {
     addColumnIfMissing(db, "sales", "origin_device", "TEXT NOT NULL DEFAULT 'Servidor'");
     addColumnIfMissing(db, "sales", "operation_id", "TEXT");
     addColumnIfMissing(db, "sales", "financial_only", "INTEGER NOT NULL DEFAULT 0");
+    addColumnIfMissing(db, "customers", "role", "TEXT NOT NULL DEFAULT 'customer'");
+    addColumnIfMissing(db, "suppliers", "customer_id", "TEXT");
+    db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_customer ON suppliers(customer_id) WHERE customer_id IS NOT NULL");
     addColumnIfMissing(db, "sale_payments", "description", "TEXT NOT NULL DEFAULT ''");
     addColumnIfMissing(db, "sale_payments", "customer_id", "TEXT");
     addColumnIfMissing(db, "sale_payments", "customer_name", "TEXT NOT NULL DEFAULT ''");
@@ -2649,6 +2711,7 @@ export class PdvStore {
       receiptAllowClientPrint: parseBooleanSetting(map.get("receipt_allow_client_print"), true),
       receiptGroupIdenticalItems: parseBooleanSetting(map.get("receipt_group_identical_items"), true),
       receiptUseColor: parseBooleanSetting(map.get("receipt_use_color"), false),
+      frequentCategoryEnabled: parseBooleanSetting(map.get("frequent_category_enabled"), false),
       cashControlMode: map.get("cash_control_mode") === "manual" ? "manual" : "automatic"
     };
   }
@@ -2731,6 +2794,7 @@ export class PdvStore {
 }
 
 function insertSale(db: Database, sale: PdvSale) {
+  frequentProductsCache.delete(db);
   db.run("INSERT INTO sales (id, created_at, type, table_number, table_session_id, status, subtotal, discount, total, description, observations, origin_device, operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
     sale.id,
     sale.createdAt,
@@ -2803,6 +2867,7 @@ function applySaleStock(
   movementType: string,
   note: string
 ) {
+  frequentProductsCache.delete(db);
   const quantities = new Map<string, number>();
   sale.items.forEach((item) => {
     if (item.productId && !item.productId.startsWith("manual-") && !item.productId.startsWith("valor-avulso-")) {
@@ -2886,6 +2951,7 @@ function writeSalePayments(db: Database, saleId: string, payments: PdvPayment[])
 }
 
 function writeSaleItems(db: Database, saleId: string, items: PdvCartItem[]) {
+  frequentProductsCache.delete(db);
   const statement = db.prepare(
     `INSERT INTO sale_items
      (id, sale_id, product_id, product_name, category_name, quantity, measure_label, unit_price, base_unit_price, discount, total, subtable_name, note, complements_json)

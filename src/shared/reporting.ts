@@ -2,6 +2,7 @@ import { getLocalDateKey, roundMoney } from "./calculations.js";
 import type { PdvCartItem, PdvPayment, PdvSale } from "./pdvTypes.js";
 import type { LedgerEntry } from "./types.js";
 import { matchesTableNumberFilter } from "./tableNumberFilter.js";
+import { scopePaymentAmounts } from "./paymentScope.js";
 
 export type ReportRecordStatus = "active" | "cancelled" | "deleted";
 
@@ -137,7 +138,7 @@ export function filterReportRecords(records: ReportRecord[], filters: ReportFilt
       ...record.payments.flatMap((payment) => [payment.method, payment.description])
     ].join(" ").toLocaleLowerCase("pt-BR");
     return haystack.includes(query);
-  });
+  }).map(record => scopePaymentAmounts(record, filters.payment));
 }
 
 export function buildReportDataset(records: ReportRecord[]): ReportDataset {

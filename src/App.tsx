@@ -1,6 +1,8 @@
 import { duplicatePayableDraft, buildPayableReceipt } from "./shared/financialAccountActions";
 import { PrivacyProfiles } from "./components/PrivacyProfiles";
 import { togglePrivacy, privacyEnabled, historyValuesHidden, mergeRemotePrivacy } from "./shared/privacy";
+import { historyPaymentAmount } from "./shared/paymentScope";
+import { HistoryPaymentsEditor } from "./components/HistoryPaymentsEditor";
 import { PayableEditorModal } from "./components/SimplePayableEditor";
 import { IndependentUpdater } from "./components/IndependentUpdater";
 import { HelpCenter, type HelpDestination } from "./components/HelpCenter";
@@ -67,7 +69,7 @@ import {
   X
 } from "lucide-react";
 import { ENTRY_TYPES, PAYMENT_METHODS, DEFAULT_COLUMNS, SIMPLE_COLUMNS, DEFAULT_FLOATING_FIELDS, DEFAULT_QUICK_TABS, createDefaultSettings } from "./shared/defaults";
-import { PaymentAmountModal, PaymentModal, PdvApp, PdvReceiptDraftModal } from "./PdvApp";
+import { PaymentAmountModal, PdvApp, PdvReceiptDraftModal } from "./PdvApp";
 import { matchesTableNumberFilter } from "./shared/tableNumberFilter";
 import type { PdvAdvancedSection, PdvAdvancedSettingsActions } from "./PdvApp";
 import type { PdvCashShift, PdvCustomer, PdvCustomerDraft, PdvDataVersion, PdvOpenTable, PdvPayable, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvPaymentMethod, PdvReceivable, PdvSale, PdvSettings, PdvSnapshot } from "./shared/pdvTypes";
@@ -3206,7 +3208,7 @@ export function App() {
         )}
       </main>
 
-      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} />}
+      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary todayTotal={displaySummary.total} tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} />}
 
       {importPreview && (
         <ImportPreviewModal
@@ -3621,7 +3623,7 @@ function PayablesPanel({
 
 function PayablePaymentModal({ payable, busy, onCancel, onConfirm }: { payable: PdvPayable; busy: boolean; onCancel: () => void; onConfirm: (payment: PdvPayablePayment) => void | Promise<void> }) {
   return <SimpleCollectionModal mode="payable" title={payableLabel(payable)} balance={payable.balance} defaultMethod={payable.preferredPaymentMethod || ""} busy={busy} onCancel={onCancel} onConfirm={(payment) => onConfirm({
-    id: payment.id, payableId: payable.id, createdAt: new Date().toISOString(), method: payment.method as PdvPayablePayment["method"], amount: payment.amount, description: payment.description
+    id: payment.id, payableId: payable.id, createdAt: payment.createdAt || new Date().toISOString(), method: payment.method as PdvPayablePayment["method"], amount: payment.amount, description: payment.description
   })} />;
 }
 
@@ -4758,7 +4760,8 @@ function HistoryPanel({
       const normalizedOrigin = displayOriginDevice(entry.originDevice);
       const sameOrigin = originFilter === "Todos" || normalizedOrigin === originFilter;
       const samePayment = paymentFilter === "Todos" || entry.paymentMethod === paymentFilter || Boolean(entry.paymentBreakdown?.some((item) => item.method === paymentFilter));
-      const sameValue = (minimum === null || entry.finalValue >= minimum) && (maximum === null || entry.finalValue <= maximum);
+      const scopedValue = historyPaymentAmount(entry, paymentFilter);
+      const sameValue = (minimum === null || scopedValue >= minimum) && (maximum === null || scopedValue <= maximum);
       const movementMatches = movementFilter === "Todos"
         || (movementFilter === "Mesas canceladas" && entry.customType === "Mesa cancelada")
         || (movementFilter === "Submesas canceladas" && entry.customType === "Submesa cancelada")
@@ -4792,14 +4795,14 @@ function HistoryPanel({
   const filteredSummary = useMemo(() => filtered.reduce((summary, entry) => {
     if (entry.status === "active") {
       summary.active += 1;
-      summary.activeTotal += entry.finalValue;
+      summary.activeTotal += historyPaymentAmount(entry, paymentFilter);
     } else if (entry.status === "cancelled") {
       summary.cancelled += 1;
     } else if (entry.status === "deleted") {
       summary.deleted += 1;
     }
     return summary;
-  }, { active: 0, activeTotal: 0, cancelled: 0, deleted: 0 }), [filtered]);
+  }, { active: 0, activeTotal: 0, cancelled: 0, deleted: 0 }), [filtered, paymentFilter]);
   const filteredTotal = roundMoney(filteredSummary.activeTotal);
   const historyTotalHidden = !canViewReceiptValues || historyValuesHidden(settings.privacy, Boolean(query.trim() || tableNumberFilter.trim()));
   const historySummaryHidden = !canViewHistoryTotals || settings.privacy.hideReportTotals || historyTotalHidden;
@@ -4944,7 +4947,7 @@ function HistoryPanel({
                   <td>{entry.tableNumber ? entry.tableNumber : "-"}</td>
                   <td>{entry.busNumber || "-"}</td>
                   <td>{paymentLabelForEntry(entry)}</td>
-                  <td>{historyTotalHidden ? "Privado" : formatCurrency(entry.finalValue)}</td>
+                  <td>{historyTotalHidden ? "Privado" : formatCurrency(historyPaymentAmount(entry, paymentFilter))}</td>
                   <td><span className={`status-dot ${entry.status}`}>{statusLabel(entry.status)}</span></td>
                   <td>
                     <div className="row-actions">
@@ -4986,10 +4989,10 @@ function HistoryPanel({
         )}
       </div>
 
-      {editingPayments && onSavePayments && <PaymentModal total={editingPayments.total} busy={paymentsBusy} customers={pdvCustomers} onSaveCustomer={onSaveCustomer || ((draft) => window.caixa.savePdvCustomer(draft))} initialPayments={editingPayments.payments} title="Editar pagamentos" confirmLabel="Salvar pagamentos" skipConfirmation onCancel={() => { if (!paymentsBusy) setEditingPayments(null); }} onConfirm={async (payments) => {
+      {editingPayments && onSavePayments && <HistoryPaymentsEditor total={editingPayments.total} busy={paymentsBusy} customers={pdvCustomers} onSaveCustomer={onSaveCustomer || ((draft) => window.caixa.savePdvCustomer(draft))} initialPayments={editingPayments.payments} onCancel={() => { if (!paymentsBusy) setEditingPayments(null); }} onConfirm={async (payments) => {
         setPaymentsBusy(true);
         try { await onSavePayments(editingPayments, payments); setEditingPayments(null); onToast("success", "Pagamentos atualizados."); }
-        catch (cause) { onToast("error", cause instanceof Error ? cause.message : "Nao foi possivel editar pagamentos."); }
+        catch (cause) { onToast("error", cause instanceof Error ? cause.message : "Nao foi possivel editar pagamentos."); throw cause; }
         finally { setPaymentsBusy(false); }
       }} />}
       {editing && (
@@ -5515,7 +5518,7 @@ function EditEntryModal({
     if (saving) return;
     setSaving(true); setError("");
     try {
-      await onSave({ type, description, ...(parseMoney(finalValue) !== entry.finalValue ? { finalValue: parseMoney(finalValue) } : {}), tableNumber, busNumber, ...(paymentMethod !== entry.paymentMethod ? { paymentMethod } : {}), observations });
+      await onSave({ type, ...(description !== entry.description ? {description} : {}), ...(parseMoney(finalValue) !== entry.finalValue ? { finalValue: parseMoney(finalValue) } : {}), tableNumber, busNumber, ...(paymentMethod !== entry.paymentMethod ? { paymentMethod } : {}), ...(observations !== entry.observations ? {observations} : {}) });
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Nao foi possivel salvar."); } finally {
       setSaving(false);
     }

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { financialPaymentTimestamp, localPaymentDateTime } from "../shared/financialDates";
+import { KeyboardSelect } from "./KeyboardSelect";
 import { Plus, Trash2, X } from "lucide-react";
 import { formatCurrency, getLocalDateKey, parseMoney, roundMoney } from "../shared/calculations";
 import type { FinancialDateField } from "../shared/financialDates";
@@ -22,20 +24,20 @@ export function SimpleFinancialFilters({ query, onQuery, placeholder, from, to, 
   const updateChecks = (pending: boolean, paid: boolean) => onStatus(pending && paid ? "Operacionais" : pending ? settlement.pendingStatus : paid ? settlement.paidStatus : "Nenhuma");
   return <div className="simple-financial-filters">
     <div className="simple-financial-filter-row">
-      <label className="financial-date-field"><span>Data de</span><select aria-label="Data de" disabled={grouped} value={dateField} onChange={(event) => onDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></select></label>
+      <label className="financial-date-field"><span>Data de</span><KeyboardSelect aria-label="Data de" disabled={grouped} value={dateField} onChange={(event) => onDateField(event.target.value as FinancialDateField)}><option value="emission">Emissão</option><option value="due">Vencimento</option></KeyboardSelect></label>
       <label className="financial-date-from"><span>De</span><input type="date" disabled={grouped} value={grouped ? "" : from} onChange={(event) => onPeriod(event.target.value, to)} /></label>
       <label className="financial-date-to"><span>Até</span><input type="date" disabled={grouped} value={grouped ? "" : to} onChange={(event) => onPeriod(from, event.target.value)} /></label>
       <label className="simple-financial-search"><span>Pesquisar</span><input aria-label="Buscar" value={query} onChange={(event) => onQuery(event.target.value)} placeholder={placeholder} /></label>
       <fieldset className="financial-settlement-filter" disabled={grouped}><legend>Exibir</legend><div>
         <details className="financial-state-options"><summary aria-label="Mais filtros" title="Período e outras situações">Mais filtros</summary><div>
-          <label><span>Situação</span><select aria-label="Situação das contas" value={status} onChange={(event) => onStatus(event.target.value)}><option value="Operacionais">Em aberto e quitadas</option><option value="Nenhuma">Nenhuma selecionada</option>{statuses.map((value) => <option key={value} value={value}>{{ Historico: "Histórico", Excluida: "Excluída", Excluidas: "Excluídas" }[value] || value}</option>)}</select></label>
+          <label><span>Situação</span><KeyboardSelect aria-label="Situação das contas" value={status} onChange={(event) => onStatus(event.target.value)}><option value="Operacionais">Em aberto e quitadas</option><option value="Nenhuma">Nenhuma selecionada</option>{statuses.map((value) => <option key={value} value={value}>{{ Historico: "Histórico", Excluida: "Excluída", Excluidas: "Excluídas" }[value] || value}</option>)}</KeyboardSelect></label>
 
-      <label><span>Período</span><select aria-label="Período das contas" disabled={grouped} value={grouped ? "all" : period} onChange={(event) => {
+      <label><span>Período</span><KeyboardSelect aria-label="Período das contas" disabled={grouped} value={grouped ? "all" : period} onChange={(event) => {
         const value = event.target.value;
         if (value === "all") onPeriod("", "");
         if (value === "month") onPeriod(start, end);
         if (value === "today") onPeriod(today, today);
-      }}><option value="month">Este mês</option><option value="today">Hoje</option><option value="all">Todo o período</option><option value="custom" disabled>Personalizado</option></select></label>
+      }}><option value="month">Este mês</option><option value="today">Hoje</option><option value="all">Todo o período</option><option value="custom" disabled>Personalizado</option></KeyboardSelect></label>
         </div></details>
         <label><input type="checkbox" checked={pendingChecked} onChange={(event) => updateChecks(event.target.checked, paidChecked)} />{settlement.pendingLabel}</label>
         <label><input type="checkbox" checked={paidChecked} onChange={(event) => updateChecks(pendingChecked, event.target.checked)} />{settlement.paidLabel}</label>
@@ -55,6 +57,7 @@ export function SimpleCollectionModal({ mode, title, balance, defaultMethod = ""
   const [amount, setAmount] = useState(balance.toFixed(2).replace(".", ","));
   const [received, setReceived] = useState("");
   const [description, setDescription] = useState("");
+  const [paidAt, setPaidAt] = useState(() => localPaymentDateTime());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const value = roundMoney(parseMoney(amount));
@@ -64,15 +67,16 @@ export function SimpleCollectionModal({ mode, title, balance, defaultMethod = ""
   const confirm = async () => {
     if (!valid || !method || busy || saving) return;
     setSaving(true); setError("");
-    try { await onConfirm({ id: crypto.randomUUID(), method, amount: value, ...(cash ? { received: handed, change: roundMoney(Math.max(0, handed - value)) } : {}), description: description.trim() || undefined }); }
+    try { await onConfirm({ id: crypto.randomUUID(), createdAt: financialPaymentTimestamp(paidAt), method, amount: value, ...(cash ? { received: handed, change: roundMoney(Math.max(0, handed - value)) } : {}), description: description.trim() || undefined }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível registrar o pagamento."); }
     finally { setSaving(false); }
   };
   return <div className="pdv-modal-backdrop pdv-nested-backdrop" role="dialog" aria-modal="true" aria-label={mode === "payable" ? "Pagar conta" : "Receber conta"}>
     <form className="simple-collection-modal" onSubmit={(event) => { event.preventDefault(); void confirm(); }} onKeyDown={(event) => { if (event.key === "Escape" && !busy && !saving) { event.preventDefault(); event.stopPropagation(); onCancel(); } }}>
-      <header><div><h2>{mode === "payable" ? "Pagar conta" : "Receber conta"}</h2><span>{title}</span></div><button type="button" aria-label="Fechar pagamento" onClick={onCancel} disabled={busy || saving}><X size={17} /></button></header>
+      <header><div><h2>{mode === "payable" ? "Pagar conta" : "Receber conta"}</h2><span>{title}</span></div><button type="button" tabIndex={-1} aria-label="Fechar pagamento" onClick={onCancel} disabled={busy || saving}><X size={17} /></button></header>
       <div className="simple-collection-body"><div className="financial-outstanding"><span>{mode === "payable" ? "Falta pagar" : "Falta receber"}</span><strong>{formatCurrency(balance)}</strong></div>
-        <div className="simple-collection-fields"><label><span>Forma de pagamento</span><select value={method} onChange={(event) => setMethod(event.target.value as FinancialPaymentMethod | "")}><option value="">Selecione…</option>{FINANCIAL_PAYMENT_METHODS.map((value) => <option key={value} value={value}>{paymentMethodLabel(value)}</option>)}</select></label><label><span>Valor {mode === "payable" ? "a pagar" : "a receber"}</span><input autoFocus inputMode="decimal" value={amount} onFocus={(event) => event.target.select()} onChange={(event) => setAmount(event.target.value)} /></label></div>
+        <div className="simple-collection-fields"><label><span>Forma de pagamento</span><KeyboardSelect autoFocus={!defaultMethod} value={method} onChange={(event) => setMethod(event.target.value as FinancialPaymentMethod | "")}><option value="">Selecione…</option>{FINANCIAL_PAYMENT_METHODS.map((value) => <option key={value} value={value}>{paymentMethodLabel(value)}</option>)}</KeyboardSelect></label><label><span>Valor {mode === "payable" ? "a pagar" : "a receber"}</span><input autoFocus={Boolean(defaultMethod)} inputMode="decimal" value={amount} onFocus={(event) => event.target.select()} onChange={(event) => setAmount(event.target.value)} /></label></div>
+        <label><span>Data e hora do pagamento</span><input type="datetime-local" required value={paidAt} onChange={(event) => setPaidAt(event.target.value)} /></label>
         {cash && <label><span>Dinheiro entregue pelo cliente</span><input aria-label="Dinheiro entregue pelo cliente" inputMode="decimal" value={received} onChange={(event) => setReceived(event.target.value)} placeholder={amount} /><small>Troco: {formatCurrency(Math.max(0, handed - value))}</small></label>}
         <details className="simple-extra-options"><summary>Adicionar observação</summary><label><textarea rows={2} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Opcional" /></label></details>
         {error && <p className="pdv-inline-warning" role="alert">{error}</p>}

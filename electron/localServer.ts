@@ -309,6 +309,14 @@ export class LocalServer {
       }
     });
 
+    app.patch("/api/pdv/products/preferences", this.authorize("manageProducts"), async (request, response) => {
+      try {
+        if (typeof request.body?.frequentCategoryEnabled !== "boolean") throw new Error("Preferencia de produtos invalida.");
+        const settings = await this.options.savePdvSettings({frequentCategoryEnabled: request.body.frequentCategoryEnabled});
+        this.broadcast({type:"pdv-changed"}); this.options.onRemotePdvChange(); response.json({settings});
+      } catch (error) { response.status(400).json({error:error instanceof Error ? error.message : "Nao foi possivel salvar a preferencia."}); }
+    });
+
     app.patch("/api/pdv/settings", this.authorize("allowClientCustomization"), async (request, response) => {
       try {
         const settings = await this.options.savePdvSettings(request.body || {});

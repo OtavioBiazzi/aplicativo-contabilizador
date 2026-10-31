@@ -4,6 +4,7 @@ import path from "node:path";
 import { DEFAULT_QUICK_TABS, ENTRY_TYPES, SIMPLE_COLUMNS, createDefaultSettings } from "../src/shared/defaults.js";
 import { calculateCash, getLocalDateKey, roundMoney } from "../src/shared/calculations.js";
 import { normalizePrivacyDefaults } from "../src/shared/privacy.js";
+import { adaptAutomaticDescription } from "../src/shared/automaticDescription.js";
 import type { AppSettings, DataBackupInfo, EntryDraft, EntryType, LedgerEntry, QuickTabSettings } from "../src/shared/types.js";
 
 const SETTINGS_FILE = "settings.json";
@@ -107,6 +108,8 @@ export class LedgerStore {
     const updated: LedgerEntry = {
       ...entries[index],
       ...patch,
+      description: patch.description === undefined ? adaptAutomaticDescription(entries[index].description, {table: entries[index].tableNumber, method: entries[index].paymentMethod}, {table: patch.tableNumber ?? entries[index].tableNumber, method: patch.paymentMethod ?? entries[index].paymentMethod}) : patch.description,
+      ...(patch.paymentMethod && patch.paymentMethod !== entries[index].paymentMethod ? {paymentBreakdown: [{method: patch.paymentMethod, amount: patch.finalValue ?? entries[index].finalValue}]} : {}),
       id,
       updatedAt: new Date().toISOString()
     };

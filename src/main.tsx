@@ -8,6 +8,7 @@ import "./styles/help-and-summary.css";
 import "./styles/simple-finance.css";
 import "./styles/catalog-workspace.css";
 import "./styles/privacy-and-overview.css";
+import "./styles/operations-refinements.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

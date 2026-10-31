@@ -23,7 +23,7 @@ assert.equal(account.preferredPaymentMethod,'');
 assert.equal(account.balance,40);
 assert.equal(account.payments.length,1);
 assert.equal(account.paymentAccount,'Dado anterior preservado');
-assert((await readdir(path.join(dir,'pdv-backups'))).some(name=>name.includes('antes-migracao-v5')));
+assert((await readdir(path.join(dir,'pdv-backups'))).some(name=>name.includes('antes-migracao-v6')));
 const migrated = store.getSuppliers().find(item=>item.name==='Fornecedor Antigo');
 assert(migrated);
 await store.deleteSupplier(migrated.id);

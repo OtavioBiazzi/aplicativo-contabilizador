@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { scopePaymentAmounts } from "../src/shared/paymentScope.js";
 import path from "node:path";
 import JSZip from "jszip";
 import type { PdvCustomer, PdvExportFilters, PdvPaymentMethod, PdvReceivable, PdvSale } from "../src/shared/pdvTypes.js";
@@ -48,7 +49,7 @@ export class PdvExporter {
       const reportToken = sanitizeFilePart(fileLabel) || `pdv-relatorio-${periodToken(filters)}`;
       const filePath = path.join(this.outputDirectory, replaceExisting ? `${reportToken}.xlsx` : `${reportToken}-${timestampToken()}.xlsx`);
       const integratedSales = [...sales, ...legacyEntries.filter((entry) => matchesLegacyFilters(entry, filters)).map(legacyEntryToSale)]
-        .filter((sale) => sale.status !== "Cancelada" && sale.status !== "deleted");
+        .filter((sale) => sale.status !== "Cancelada" && sale.status !== "deleted").map(sale => scopePaymentAmounts(sale, filters.payment));
       await writeXlsx(filePath, buildSheets(integratedSales, filters, reportSections, customers, receivables));
       return {
         ok: true,
