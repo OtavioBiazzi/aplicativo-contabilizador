@@ -1,3 +1,4 @@
+import type { TableClosedNotice } from "./shared/closeReminders";
 import type {
   AppSettings,
   AppSnapshot,
@@ -116,6 +117,7 @@ export interface CaixaApi {
   onRemoteReceiptPrintResult: (callback: (result: { jobId: string; ok: boolean; message: string; deviceName: string }) => void) => () => void;
   onPinnedChanged: (callback: (pinned: boolean) => void) => () => void;
   onSettingsChanged: (callback: (settings: AppSettings) => void) => () => void;
+  onTableClosed: (callback: (notice: TableClosedNotice) => void) => () => void;
   onPdvChanged: (callback: () => void) => () => void;
 }
 

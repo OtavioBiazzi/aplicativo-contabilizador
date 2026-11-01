@@ -1528,6 +1528,9 @@ export class PdvStore {
     }
     const currentItems = this.getTableItems(tableNumber);
     const baseline = Array.isArray(baseItemIds) ? new Set(baseItemIds.map(String)) : null;
+    if (baseline && items.some((item) => baseline.has(item.id) && !currentItems.some((current) => current.id === item.id))) {
+      throw new Error("Um item foi transferido ou removido em outro terminal. Atualize a mesa antes de continuar.");
+    }
     // Cada terminal informa os itens que conhecia ao abrir/atualizar a mesa.
     // Itens incluidos por outro terminal depois dessa base sao preservados;
     // alteracoes e remocoes dos itens conhecidos continuam sendo aplicadas.
@@ -1642,7 +1645,9 @@ export class PdvStore {
     const sourceItems = this.getTableItems(sourceTableNumber);
     const targetItems = targetTableNumber === sourceTableNumber ? sourceItems : this.getTableItems(targetTableNumber);
     const selectedById = new Map(selections.map((selection) => [selection.itemId, selection]));
+    if (selectedById.size !== selections.length) throw new Error("O mesmo item foi selecionado mais de uma vez.");
     const movedItems: PdvCartItem[] = [];
+    const movedBySource = new Map<string, PdvCartItem>();
     for (const selection of selections) {
       const source = sourceItems.find((item) => item.id === selection.itemId);
       const quantity = Number(selection.quantity);
@@ -1654,17 +1659,18 @@ export class PdvStore {
       }
       const ratio = source.quantity > 0 ? quantity / source.quantity : 1;
       const discount = roundMoney(source.discount * ratio);
-      movedItems.push({
+      const moved: PdvCartItem = {
         ...source,
         id: randomUUID(),
         quantity: roundQuantity(quantity),
         paidQuantity: 0,
         subtableName: String(selection.subtableName || "").trim(),
         discount,
-        total: /\bg\s*$/i.test(source.measureLabel || "")
-          ? roundMoney(Math.max(0, source.total * ratio))
-          : roundMoney(Math.max(0, quantity * source.unitPrice - discount))
-      });
+        measureLabel: scaledTransferMeasure(source.measureLabel, ratio),
+        total: roundMoney(Math.max(0, source.total * ratio))
+      };
+      movedItems.push(moved);
+      movedBySource.set(source.id, moved);
     }
     const remainingItems = sourceItems.flatMap((item) => {
       const selection = selectedById.get(item.id);
@@ -1676,14 +1682,14 @@ export class PdvStore {
         return [];
       }
       const ratio = item.quantity > 0 ? remainingQuantity / item.quantity : 1;
-      const discount = roundMoney(item.discount * ratio);
+      const moved = movedBySource.get(item.id)!;
+      const discount = roundMoney(item.discount - moved.discount);
       return [{
         ...item,
         quantity: remainingQuantity,
         discount,
-        total: /\bg\s*$/i.test(item.measureLabel || "")
-          ? roundMoney(Math.max(0, item.total * ratio))
-          : roundMoney(Math.max(0, remainingQuantity * item.unitPrice - discount))
+        measureLabel: scaledTransferMeasure(item.measureLabel, ratio),
+        total: roundMoney(Math.max(0, item.total - moved.total))
       }];
     });
     const nextTargetItems = targetTableNumber === sourceTableNumber
@@ -3322,3 +3328,9 @@ function roundQuantity(value: number): number {
   return Math.round((value + Number.EPSILON) * 1_000) / 1_000;
 }
 
+
+function scaledTransferMeasure(label: string | undefined, ratio: number): string | undefined {
+  if (!label || !/\bg\s*$/i.test(label)) return label;
+  const grams = Number(label.replace(/[^0-9,.]/g, "").replace(",", "."));
+  return Number.isFinite(grams) ? `${Math.round(grams * ratio * 1000) / 1000} g` : label;
+}

@@ -1,4 +1,5 @@
-﻿import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
+import type { TableClosedNotice } from "../src/shared/closeReminders.js";
+import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
 import type { PdvSupplier, PdvFinancialLookup } from "../src/shared/pdvTypes.js";
 import { nativeImage } from "electron";
@@ -669,6 +670,7 @@ async function bootstrap() {
     removePdvPreset: () => pdvStore.removeImportedProducts("Cose Dell Abadia"),
     closePdvTable: async (tableNumber, payments, discount, originDevice, operationId) => {
       const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice, operationId);
+      publishTableClosed(sale);
       automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
@@ -681,6 +683,7 @@ async function bootstrap() {
     },
     savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId, observations, closeScope) => {
       const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId, observations, closeScope);
+      if (closeScope) publishTableClosed(sale, closeScope.kind === "subtable" ? closeScope.subtableName : undefined);
       automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
@@ -741,6 +744,13 @@ function sendToAll(channel: string, ...args: unknown[]) {
   if (floatingWindow && !floatingWindow.isDestroyed()) {
     floatingWindow.webContents.send(channel, ...args);
   }
+}
+
+function publishTableClosed(sale: PdvSale, subtableName?: string) {
+  if (!sale.tableNumber) return;
+  const notice: TableClosedNotice = { id: sale.id, tableNumber: sale.tableNumber, subtableName, createdAt: sale.createdAt };
+  sendToAll("pdv:table-closed", notice);
+  localServer.broadcast({ type: "table-closed", closeNotice: notice });
 }
 
 function publishPdvChanged() {
@@ -897,6 +907,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
     const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Servidor", operationId || randomUUID());
+    publishTableClosed(sale);
     automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();
@@ -918,6 +929,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string, closeScope?: PdvCloseScope): Promise<PdvSale> => {
     const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Servidor", operationId || randomUUID(), observations, closeScope);
+    if (closeScope) publishTableClosed(sale, closeScope.kind === "subtable" ? closeScope.subtableName : undefined);
     automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();

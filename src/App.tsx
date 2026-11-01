@@ -1,3 +1,5 @@
+import { dispatchTableClosed, LocalTableOptions, TableCloseReminders } from "./components/TableCloseReminders";
+import type { TableClosedNotice } from "./shared/closeReminders";
 import { duplicatePayableDraft, buildPayableReceipt } from "./shared/financialAccountActions";
 import { PrivacyProfiles } from "./components/PrivacyProfiles";
 import { togglePrivacy, privacyEnabled, historyValuesHidden, mergeRemotePrivacy } from "./shared/privacy";
@@ -275,7 +277,7 @@ const MODULE_GROUPS: Array<{
     items: [
       { key: "clients", label: "Clientes", description: "Cadastro, historico e contas vinculadas aos clientes", icon: Users },
       { key: "settings", settingsCategory: "pdv", label: "Produtos", description: "Produtos, categorias, importacao e adicionais", icon: LayoutPanelTop },
-      { key: "settings", settingsCategory: "pdvTables", label: "Mesas", description: "Quantidade, submesas e contas separadas", icon: Utensils }
+      { key: "settings", settingsCategory: "pdvTables", label: "Mesas", description: "Funcionamento, visual e lembretes de comandas", icon: Utensils }
     ]
   },
   {
@@ -349,6 +351,7 @@ interface StoredHistoryFilters {
 }
 
 interface RemoteSocketMessage {
+  closeNotice?: TableClosedNotice;
   type?: string;
   table?: PdvOpenTable;
   version?: PdvDataVersion;
@@ -1255,6 +1258,7 @@ export function App() {
   const [remotePdvSnapshot, setRemotePdvSnapshot] = useState<PdvSnapshot | null>(null);
   const [exportStatus, setExportStatus] = useState<ExportStatus | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("tables");
+  const [insideOperationalTable, setInsideOperationalTable] = useState(false);
   const [baseOperationalTab, setBaseOperationalTab] = useState<"sale" | "tables">("tables");
   const [moduleWindowOffset, setModuleWindowOffset] = useState({ x: 0, y: 0 });
   const [moduleWindowMaximized, setModuleWindowMaximized] = useState<boolean | null>(null);
@@ -1830,6 +1834,10 @@ export function App() {
       let receiptJob: RemoteSocketMessage | null = null;
       try {
         const message = JSON.parse(String(event.data || "{}")) as RemoteSocketMessage;
+        if (message.type === "table-closed" && message.closeNotice) {
+          dispatchTableClosed(message.closeNotice);
+          return;
+        }
         if (message.type === "pdv-changed") {
           isPdvChange = true;
         } else if (message.type === "pdv-table-changed" && message.table) {
@@ -2802,6 +2810,7 @@ export function App() {
         </div>
       )}
 
+      <TableCloseReminders client={Boolean(remoteSession)} hidden={insideOperationalTable || activeTab !== "tables" || modulesMenuOpen} />
       <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>
         {!pdvMainTab && (
           <header className="workspace-header">
@@ -2848,6 +2857,7 @@ export function App() {
                 if (tab === "history" && tableNumber) setHistoryFocus({ date: getLocalDateKey(), tableNumber, nonce: Date.now() });
                 requestNavigation(tab);
               }}
+              onActiveTableChange={setInsideOperationalTable}
               onOperationalTabChange={(tab) => { setBaseOperationalTab(tab); setActiveTab(tab); }}
             />
           </div>
@@ -7108,6 +7118,7 @@ function SettingsPanel({
   const [draft, setDraft] = useState(settings);
   const [categorySearch, setCategorySearch] = useState("");
   const [category, setCategory] = useState<SettingsCategory>("appearance");
+  const [sectionTabs, setSectionTabs] = useState<Partial<Record<SettingsCategory, string>>>({});
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
@@ -7584,7 +7595,7 @@ function SettingsPanel({
     { key: "floating", label: "Barra auxiliar", description: "Janela flutuante, tamanho, posicao, campos e tema.", icon: Pin },
     { key: "quick", label: "Barra rapida", description: "Abas e atalhos visuais usados dentro da barra fixa classica.", icon: LayoutPanelTop },
     { key: "pdv", label: "Produtos", description: "Produtos, categorias, importacao, favoritos, unidade, kg, grama e adicionais.", icon: LayoutPanelTop },
-    { key: "pdvTables", label: "Mesas", description: "Quantidade de mesas, submesas e contas separadas.", icon: Utensils },
+    { key: "pdvTables", label: "Mesas", description: "Funcionamento, grade, status e lembretes de comandas.", icon: Utensils },
     { key: "pdvOperation", label: "Operacoes", description: "Lancamentos, agrupamento, complementos, divisao e fechamento.", icon: Wallet },
     { key: "printing", label: "Impressao", description: "Recibo, impressora, papel, logotipo e PDF.", icon: ReceiptText },
     { key: "files", label: "Planilha e backup", description: "Exportacao Excel/CSV, pasta, colunas e backups gerados a partir do banco local.", icon: FileSpreadsheet },
@@ -7614,7 +7625,17 @@ function SettingsPanel({
     printing: "printing",
     files: "data"
   };
-  const activePdvAdvancedSection = pdvAdvancedSectionByCategory[category];
+  const selectedSectionTab = sectionTabs[category] || "general";
+  const sectionTabOptions = category === "pdvTables" ? [
+    { key: "general", label: "Funcionamento" }, { key: "visual", label: "Visual" }, { key: "reminders", label: "Lembretes" }
+  ] : category === "appearance" ? [
+    { key: "general", label: "Interface" }, { key: "products", label: "Venda e produtos" }, { key: "notifications", label: "Avisos gerais" }
+  ] : [];
+  const activePdvAdvancedSection = category === "pdvTables"
+    ? selectedSectionTab === "general" ? "tables" : selectedSectionTab === "visual" ? "tableAppearance" : undefined
+    : category === "appearance" ? selectedSectionTab === "products" ? "appearance" : undefined : pdvAdvancedSectionByCategory[category];
+  const localTableSection = category === "pdvTables" && selectedSectionTab !== "general";
+  const activeSectionLocked = isRemoteLockedCategory(category) && !localTableSection;
 
   useEffect(() => {
     if (!visibleSettingsCategories.some((item) => item.key === category)) {
@@ -7652,7 +7673,7 @@ function SettingsPanel({
               <button
                 key={item.key}
                 className={`${category === item.key ? "active" : ""} ${locked ? "server-locked-nav" : ""}`}
-                onClick={() => setCategory(item.key)}
+                onClick={async () => { try { await flushDraft(); setCategory(item.key); } catch (error) { onToast("error", error instanceof Error ? error.message : "Não foi possível salvar os ajustes."); } }}
                 title={locked ? "Controlado pelo computador servidor enquanto conectado como cliente" : item.description}
               >
                 <Icon size={16} />
@@ -7663,15 +7684,17 @@ function SettingsPanel({
         </aside>}
 
         <div className="settings-content">
-          <div className={`settings-hero ${isRemoteLockedCategory(category) ? "remote-locked-hero" : ""}`}>
+          <div className={`settings-hero ${activeSectionLocked ? "remote-locked-hero" : ""}`}>
             <div>
               <span className="settings-overline">Categoria</span>
               <h2>{activeCategory.label}</h2>
               <p>{activeCategory.description}</p>
               {remoteClientActive && (
                 <p className="remote-lock-banner">
-                  {isRemoteLockedCategory(category)
+                  {activeSectionLocked
                     ? "Esta area esta travada no cliente. O servidor controla campos, modos, planilha e permissoes em tempo real."
+                    : localTableSection
+                      ? "Preferências deste computador: não alteram o servidor nem os outros clientes."
                     : remoteCustomizationAllowed
                       ? "Modo cliente remoto ativo: o servidor define o modo, e este PC pode personalizar a aparencia e a barra classica local."
                       : "Modo cliente remoto ativo: voce pode ajustar aparencia, privacidade local, barra classica e atualizacoes deste PC."}
@@ -7682,17 +7705,24 @@ function SettingsPanel({
               <span className={`settings-autosave-status ${autoSaveState}`}>
                 {autoSaveState === "saving" ? "Salvando..." : autoSaveState === "pending" ? "Alteracoes pendentes" : autoSaveState === "error" ? "Erro ao salvar" : "Salvo automaticamente"}
               </span>
-              <button className="ghost-button" type="button" onClick={() => lockedClick(category, () => {
+              {selectedSectionTab === "general" && category !== "pdvTables" && <button className="ghost-button" type="button" onClick={() => lockedClick(category, () => {
                 resetCategory(category);
                 if (activePdvAdvancedSection) {
                   pdvSettingsActionsRef.current?.discard();
                 }
-              })}><RotateCcw size={16} /> Restaurar categoria</button>
+              })}><RotateCcw size={16} /> Restaurar categoria</button>}
             </div>
           </div>
 
+          {sectionTabOptions.length > 0 && <nav className="settings-section-tabs" role="tablist" aria-label={`Seções de ${activeCategory.label}`}>
+            {sectionTabOptions.map((item) => <button type="button" key={item.key} role="tab" aria-selected={selectedSectionTab === item.key} onClick={async () => {
+              try { await flushDraft(); setSectionTabs((current) => ({ ...current, [category]: item.key })); }
+              catch (error) { onToast("error", error instanceof Error ? error.message : "Não foi possível salvar os ajustes."); }
+            }}>{item.label}</button>)}
+          </nav>}
       <div className="settings-grid">
-        <section className={categoryClass("appearance")}>
+        {category === "pdvTables" && selectedSectionTab === "reminders" && <section className="settings-group wide active-category"><LocalTableOptions client={Boolean(remoteSession)} /></section>}
+        {category === "appearance" && selectedSectionTab === "general" && <section className={categoryClass("appearance")}>
           <div className="settings-theme-picker"><span>Tema do aplicativo</span><div>
             {(["datacaixa", "dark"] as const).map((theme) => <button type="button" key={theme} className={`settings-theme-option ${theme === "dark" ? "theme-dark" : "theme-light"} ${((draft.theme === "dark" || draft.theme === "datacaixa-dark") ? "dark" : "datacaixa") === theme ? "selected" : ""}`} aria-pressed={((draft.theme === "dark" || draft.theme === "datacaixa-dark") ? "dark" : "datacaixa") === theme} onClick={() => setDraft((current) => ({ ...current, theme, accentColor: themeDefaultAccent(theme) }))}><span className="settings-theme-thumbnail"><i /><b /><b /><b /></span><strong>{theme === "dark" ? "Escuro" : "Claro"}</strong><small>{theme === "dark" ? "Contraste suave para ambientes escuros" : "Leitura nítida para o dia a dia"}</small></button>)}
           </div><small>A alteracao e aplicada automaticamente. O layout de Venda e Mesas e mantido.</small></div>
@@ -7731,6 +7761,19 @@ function SettingsPanel({
               <option value="compact">Compacto para telas pequenas</option>
             </select>
           </label>
+          <label className="switch-line simple-mode-toggle">
+            <input type="checkbox" checked={Boolean(draft.simpleMode)} onChange={(event) => update("simpleMode", event.target.checked)} />
+            Modo Simples: interface mais quadrada, compacta e sem animacoes de rolagem
+          </label>
+          <label className="switch-line">
+            <input type="checkbox" checked={draft.hideHeaderBrand} onChange={(event) => update("hideHeaderBrand", event.target.checked)} />
+            Ocultar marca Caixa PDV no cabecalho
+          </label>
+        </section>}
+
+        {category === "appearance" && selectedSectionTab === "notifications" && <section className="settings-group wide active-category">
+          <h3>Avisos gerais</h3>
+          <p className="settings-note">Mensagens informativas deste computador. Lembretes de comandas ficam em Mesas → Lembretes; erros de operação continuam sendo exibidos.</p>
           <label className="field"><span>Tempo dos avisos</span>
             <select value={draft.notificationDurationMs || 3200} onChange={(event) => update("notificationDurationMs", Number(event.target.value))}>
               <option value={1800}>Rapido (1,8 s)</option>
@@ -7743,15 +7786,7 @@ function SettingsPanel({
             <input type="checkbox" checked={draft.notificationsEnabled !== false} onChange={(event) => update("notificationsEnabled", event.target.checked)} />
             Ativar notificacoes e avisos informativos
           </label>
-          <label className="switch-line simple-mode-toggle">
-            <input type="checkbox" checked={Boolean(draft.simpleMode)} onChange={(event) => update("simpleMode", event.target.checked)} />
-            Modo Simples: interface mais quadrada, compacta e sem animacoes de rolagem
-          </label>
-          <label className="switch-line">
-            <input type="checkbox" checked={draft.hideHeaderBrand} onChange={(event) => update("hideHeaderBrand", event.target.checked)} />
-            Ocultar marca Caixa PDV no cabecalho
-          </label>
-        </section>
+        </section>}
 
         <section className={categoryClass("floating", "settings-group wide")} {...remoteSectionProps("floating")}>
           <h3>Barra fixa classica</h3>
@@ -8318,10 +8353,11 @@ function SettingsPanel({
         </section>
 
         <section
-          className={`settings-group wide pdv-settings-panel ${activePdvAdvancedSection ? "active-category" : "hidden-category"} ${isRemoteLockedCategory(category) ? "remote-locked-section" : ""}`}
-          {...remoteSectionProps(category)}
+          className={`settings-group wide pdv-settings-panel ${activePdvAdvancedSection ? "active-category" : "hidden-category"} ${activeSectionLocked ? "remote-locked-section" : ""}`}
+          {...(localTableSection ? {} : remoteSectionProps(category))}
         >
-          <PdvApp
+          {activePdvAdvancedSection && <PdvApp
+            key={activePdvAdvancedSection}
             embedded
             initialTab="advanced"
             hideTopbar
@@ -8332,7 +8368,7 @@ function SettingsPanel({
             hideAdvancedNavigation
             advancedSettingsActionsRef={pdvSettingsActionsRef}
             onAdvancedSettingsDirtyChange={setPdvSettingsDirty}
-          />
+          />}
         </section>
       </div>
         </div>

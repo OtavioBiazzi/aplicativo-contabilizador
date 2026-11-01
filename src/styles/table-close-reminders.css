@@ -1,0 +1,62 @@
+.table-close-reminders {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(210px, calc(100vw - 16px));
+  max-height: calc(100dvh - 110px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.table-close-reminders article {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--text);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 2px 6px #0004;
+  border-radius: 0;
+}
+.table-close-reminders article > div { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.table-close-reminders small { font-size: 10px; color: var(--muted); }
+.table-close-reminders strong { font-size: 14px; line-height: 1.15; }
+.table-close-reminders span { font-size: 11px; overflow-wrap: anywhere; }
+.table-close-reminders button { flex: 0 0 32px; min-height: 26px; padding: 3px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-weight: 800; border-radius: 0; cursor: pointer; }
+.table-close-reminders button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* A modal or context menu must always have the available interaction area. */
+body:has(.pdv-modal-backdrop, .module-window, .managerial-menu, .open-tables-backdrop, .pdv-context-menu) .table-close-reminders { visibility: hidden; }
+.local-table-options { display: grid; gap: 10px; width: 100%; }
+.local-table-options h3, .local-table-options p { margin: 0; }
+.local-table-options p, .local-table-options small { color: var(--text-muted, #91a9bd); font-size: 12px; }
+.local-table-options > label:not(.switch-line) { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(170px, 1fr); align-items: center; gap: 10px; }
+.local-table-options input, .local-table-options select { min-width: 0; }
+.local-table-options input[aria-invalid="true"] { outline: 1px solid #e99a53; }
+.reminder-weekdays { display: flex; gap: 12px; flex-wrap: wrap; }
+.reminder-weekdays label { display: flex; align-items: center; gap: 4px; }
+.reminder-weekdays input { width: 14px; min-height: 14px; }
+@media (max-width: 650px) { .local-table-options > label:not(.switch-line) { grid-template-columns: 1fr; } }
+
+#root .settings-section-tabs { display: flex; gap: 0; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: var(--panel-2); padding: 0 6px; margin-bottom: 10px; }
+#root .settings-section-tabs button { min-height: 33px; padding: 6px 15px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; }
+#root .settings-section-tabs button[aria-selected="true"] { color: var(--text); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border-bottom-color: var(--accent); }
+#root .settings-section-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+#root .local-visual-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; padding: 10px; }
+#root .local-visual-settings > .local-visual-intro, #root .local-visual-settings > .pdv-visual-presets, #root .local-visual-settings > .pdv-switch-line { grid-column: 1 / -1; }
+#root .local-visual-intro { display: grid; gap: 4px; }
+#root .local-visual-intro p { margin: 0; font-size: 12px; color: var(--muted); }
+#root .local-visual-settings .pdv-setting-line { display: grid; grid-template-columns: 1fr; gap: 6px; min-width: 0; }
+#root .local-visual-settings .pdv-setting-line :is(input, select) { width: 100%; min-width: 0; }
+#root .local-visual-settings .pdv-local-visual-toggle { padding: 8px; margin: 0; }
+@media (max-width: 650px) { #root .local-visual-settings { grid-template-columns: 1fr; } }
+
+#root .module-window-body .local-visual-settings .pdv-setting-line :is(input:not([type="range"]), select) { height: 32px; min-height: 32px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 0; background: var(--panel-2) !important; color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; font-size: 12px; }
+#root .local-visual-settings .pdv-visual-presets { padding: 6px 8px; gap: 5px; }
+#root .local-visual-settings .pdv-visual-presets button { min-height: 28px; height: 28px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 0; background: var(--panel-2); color: var(--text); font-size: 12px; }

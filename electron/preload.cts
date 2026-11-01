@@ -1,3 +1,4 @@
+import type { TableClosedNotice } from "../src/shared/closeReminders.js";
 import { contextBridge, ipcRenderer } from "electron";
 import type { AppSettings, EntryDraft, LedgerEntry, ServerState } from "../src/shared/types.js";
 import type { PdvCloseScope, PdvCartItem, PdvCategoryDraft, PdvCustomer, PdvCustomerDraft, PdvExportFilters, PdvPayableDraft, PdvPayablePayment, PdvPayment, PdvProductDraft, PdvReceivable, PdvReceivableDraft, PdvReceivablePatch, PdvReceivablePayment, PdvSale, PdvSettings, PdvTableStatus, PdvTransferSelection } from "../src/shared/pdvTypes.js";
@@ -128,6 +129,11 @@ contextBridge.exposeInMainWorld("caixa", {
     const handler = (_event: Electron.IpcRendererEvent, settings: AppSettings) => callback(settings);
     ipcRenderer.on("settings:changed", handler);
     return () => ipcRenderer.removeListener("settings:changed", handler);
+  },
+  onTableClosed: (callback: (notice: TableClosedNotice) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, notice: TableClosedNotice) => callback(notice);
+    ipcRenderer.on("pdv:table-closed", handler);
+    return () => ipcRenderer.removeListener("pdv:table-closed", handler);
   },
   onPdvChanged: (callback: () => void) => {
     const handler = () => callback();
