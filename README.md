@@ -1,293 +1,128 @@
-# Contabilizador Caixa
+# Caixa PDV
 
-Aplicativo desktop para caixa/PDV local com venda direta, mesas, produtos, adicionais, pagamentos multiplos, historico, relatorios e exportacao para Excel/CSV.
+Aplicativo desktop para Windows de caixa/PDV local, feito para bares, restaurantes e pequenos comércios que trabalham com **mesas, comandas e vários computadores na mesma rede**. Tudo funciona offline, sem mensalidade e sem depender de nuvem.
 
-A versao `0.3.x` inicia o remake do PDV local simples. O app antigo foi preservado no codigo, mas a tela principal nova usa SQLite como fonte principal dos dados do PDV. Excel agora e saida de relatorio/exportacao, nao banco principal.
+> Versão atual: **0.4.15** · [Baixar na página de Releases](https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases)
+>
+> O projeto começou como "Contabilizador Caixa" (uma calculadora de caixa com exportação para Excel) e evoluiu para um PDV completo. O histórico de cada versão está nas notas das releases e em [`docs/`](docs/).
 
-## Plano de remake
+## Instalação
 
-O roadmap de redesign e evolucao do app esta em [`docs/plano-remake.md`](docs/plano-remake.md). Ele organiza barra fixada, temas, relatorios, configuracoes, servidor, permissoes, icone, atualizacoes e qualidade em fases testaveis.
+Na página de [Releases](https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases), baixe o arquivo da última versão:
 
-## Stack escolhida
+| Arquivo | Para quê |
+| --- | --- |
+| `Caixa.PDV.Setup.<versão>.exe` | Instalador (atalho na área de trabalho e no menu iniciar) |
+| `Caixa.PDV.<versão>.exe` | Versão portátil, sem instalar |
 
-- **Electron**: melhor encaixe para app desktop real, janela sempre visivel, acesso a arquivos locais, dialogos de pasta e empacotamento Windows.
-- **React + Vite + TypeScript**: interface rapida, componentizada e facil de evoluir.
-- **SQLite local via sql.js**: banco principal do novo PDV, salvo como `pdv.sqlite`.
-- **XLSX local + CSV nativo**: geracao local de planilhas `.xlsx` e `.csv`, sem depender de Excel aberto.
-- **Express + WebSocket**: servidor local com senha para outro computador na mesma rede visualizar ou registrar lancamentos.
-- **JSON local legado + SQLite PDV**: os dados antigos continuam em JSON local; os dados novos do PDV ficam no SQLite.
+O Windows pode mostrar o aviso do SmartScreen, pois o instalador ainda não tem assinatura de código por certificado pago. O app pode se atualizar sozinho em **Menu Gerencial > Atualizações** (também disponível na tela de conexão do cliente).
 
-## Funcionalidades implementadas
+## O que o app faz
 
-### PDV local novo
+### Vendas e mesas
+- **Venda direta** e **Mesas** com carrinhos separados; quantidade, desconto, observação, peso (o valor é recalculado) e duplicar produto pelo botão direito.
+- **Mesas** com número de pessoas, reserva, submesas nomeadas, transferência de itens entre mesas, busca por várias mesas (`001, 004, 021`) e resumo de mesas em aberto (realizado hoje + saldo pendente = previsão do total).
+- **Divisão de conta** por pessoas, divisão avançada com partes nomeadas e submesas, e divisão de um item entre pessoas. O valor por pessoa já vem sugerido no pagamento.
+- **Pagamentos múltiplos** na mesma conta, pagamentos parciais, dinheiro recebido com cálculo de troco e limite pelo saldo restante nos demais meios.
+- **Lembretes de retirada de comandas** após o fechamento (desativados por padrão, configuráveis por dia da semana e por mesa).
 
-- Venda direta com carrinho, quantidade, desconto, observacao e preco editavel apenas no lancamento.
-- Mesas com status, abertura, itens persistidos, fechamento total e fechamento parcial.
-- Submesas/comandas opcionais por mesa, com fechamento separado e movimentacao de itens.
-- Produtos e categorias no SQLite, com importacao da planilha `produtos.xlsx` da Cose Dell Abadia.
-- Preset nativo **Cose Dell Abadia** para uso em qualquer instalacao.
-- Adicionais opcionais: um produto pode continuar como item normal e tambem ser marcado como complemento de outro produto.
-- Produtos que abrem adicionais mostram selecao de complementos; `Shift+clique` lanca direto sem abrir a tela.
-- Pagamentos multiplos com dinheiro recebido e troco, sem gravar troco como pagamento.
-- Historico detalhado por venda, mesa, item, adicional e pagamento, com cancelamento preservado como auditoria.
-- Relatorios por periodo, pagamento, produto, categoria e horario.
-- Exportacao Excel do PDV com abas `Resumo`, `Vendas`, `Itens` e `Pagamentos`.
-- Configuracao de quantidade de mesas, submesas e complementos em **Avancado**.
-- Backup automatico do `pdv.sqlite` antes de migracoes/importacoes e backup de seguranca ao atualizar de versoes antigas.
+### Produtos
+- Categorias, adicionais, favoritos, disponibilidade, códigos e controle de estoque com quantidade mínima (alertas na Visão Geral).
+- Importação de produtos, duplicação de cadastro e aba opcional **FREQUENTE** com os mais vendidos.
 
-### Caixa legado preservado
+### Histórico, relatórios e recibos
+- **Histórico** de todas as vendas, com edição (inclusive de todos os meios de pagamento), cancelamento e filtros por mesa, dia, pagamento e produto.
+- **Relatórios** com comparativo de período, produtos por categoria, formas de pagamento, recebimentos, mesas e vendas, horários e auditoria, com exportação para Excel/CSV.
+- **Recibos** com prévia, impressão e PDF nos formatos 58 mm, 80 mm, A4 e papel personalizado.
+- **Caixa**: abertura, fechamento (total ou parcial) e saldo.
 
-- Registro rapido com valor, descricao, tipo, pessoas, mesa, onibus, pagamento e observacoes.
-- Descricao automatica como `Venda` quando o campo fica vazio.
-- Modos de lancamento: Venda, Mesa, Onibus, Dinheiro/Troco, Divisao de conta, Taxa, Extra, Cancelado/Estorno e Personalizado.
-- Divisao de conta com arredondamento por multiplos de R$ 0,05 a R$ 5,00 e direcao para cima, para baixo ou mais proxima.
-- Divisao de conta com aviso opcional de quanto sera cobrado a mais ou a menos quando o arredondamento alterar o total.
-- Modo dinheiro/troco com quebra em notas e moedas do real.
-- Historico editavel com filtros, duplicar, cancelar, lixeira, restauracao e exclusao definitiva.
-- Relatorios por periodo iniciando no mes atual, com filtros por tipo, mesa, onibus, forma de pagamento e busca, fechamento, tendencia diaria com dia da semana, ranking, alertas, origem/caixa e exportacao do recorte filtrado.
-- Exportacao automatica para Excel ou CSV, com XLSX formatado, cabecalho, filtro, congelamento da primeira linha, larguras ajustadas e linha TOTAL com formulas.
-- Organizacao dos arquivos por dia real do lancamento, mes com abas, arquivo fixo ou arquivos separados por tipo.
-- Importacao de planilhas Excel/CSV/TSV compativeis com previa, confirmacao e deduplicacao por ID ou assinatura do lancamento.
-- Importacao de pasta inteira com varias planilhas `.xlsx`, `.csv` e `.tsv`, incluindo varios dias de movimento.
-- Diagnostico em **Ajustes > Avancado** com pasta de dados, pasta de planilhas, estado da exportacao, ultimos eventos e backups recentes.
-- Backup local do caixa em JSON, com historico e configuracoes, mais restauracao segura criando backup do estado atual antes de substituir dados.
-- Configuracoes persistentes: tema padrao DataCaixa PDV, DataCaixa escuro, cor principal, densidade, layout, abas rapidas, campos do modo fixado, mesa/onibus ativaveis separadamente, colunas do arquivo, pasta padrao, formato, backup e padroes de lancamento.
-- Perfis de configuracao para alternar rapidamente entre PC, Notebook, tela pequena, fixado e perfis personalizados, sem trocar pasta de arquivos, planilha ou servidor.
-- Criacao de perfil por campo proprio dentro dos ajustes, com aplicacao real de tema, densidade, padroes e barra fixada.
-- Exportacao e importacao de configuracoes em JSON, com importacao em rascunho antes de aplicar.
-- Modo fixado/flutuante em janela separada, sem borda de aplicativo, com barra rapida sempre visivel.
-- Barra fixada com abas rapidas configuraveis, alternancia Conta/Dinheiro, seletor de tipo, campos Mesa e Onibus separados, divisao por pessoas, campo Pago com, troco direto e elementos que podem ser ocultados.
-- Alternancia Conta/Dinheiro pode manter o contexto atual: Conta Onibus vira Dinheiro/Onibus e volta para Onibus.
-- Presets da barra fixada: Caixa completo, Mesa rapida, Onibus enxuto, Dinheiro e troco e Minimalista, todos editaveis depois.
-- Presets da barra fixada ajustam apenas a barra, sem alterar fonte, densidade ou layout global do aplicativo.
-- Editor de abas rapidas nos ajustes para ativar, renomear, escolher modo, vincular Dinheiro/Troco e reordenar a barra fixada.
-- Barra fixada com tema proprio opcional, seguindo o tema principal por padrao, transparencia corrigida, limite minimo menor para notebooks e opcao de arrastar pela barra inteira.
-- Barra fixada com modos **Adaptavel**, **Compacto** e **Mini caixa**. O Mini caixa ocupa pouca altura, esconde rotulos e prioriza valor, vinculo Mesa/Onibus, pago com e enviar.
-- Barra fixada com layout recalculado por linhas: ao ocultar abas ou campos, o espaco livre realmente diminui, sem reservar faixa fantasma nem jogar o valor para baixo.
-- Total de hoje no topo abre um menu rapido para privacidade, relatorio do dia e historico, respeitando permissoes do cliente remoto.
-- Menu do total abre direto a central **Privacidade** quando o usuario clica em ajustes de privacidade.
-- Temas DataCaixa PDV, DataCaixa PDV escuro e Italia como base do remake visual, com contraste revisado em menus e hovers.
-- Modo Dinheiro/Troco aceita registro com apenas valor e permite vincular o pagamento a Mesa, Balcao/Venda, Onibus, Extra ou Personalizado.
-- Historico com lixeira, restauracao e exclusao definitiva.
-- Planilha simples por padrao com Data, Hora, Valor pago, Descricao, Tipo, Pessoas, Pago com, Troco e linha TOTAL por formula.
-- Lancamentos removidos deixam de aparecer na exportacao Excel/CSV.
-- Arquivos diarios/mensais antigos gerados pelo app sao limpos quando o ultimo lancamento daquele dia/mes e apagado ou movido, evitando dados fantasmas em planilhas antigas.
-- Escrita de Excel/CSV usa arquivo temporario e troca atomica para reduzir risco de arquivo corrompido se o Excel estiver aberto, travado ou se ocorrer falha durante a gravacao.
-- Total do dia, painel lateral e servidor local somam somente lancamentos do dia atual.
-- Servidor local com senha, permissoes, cliente remoto dentro do proprio app, mini-caixa web em estilo DataCaixa, cadastro remoto, edicao, cancelamento, lixeira, origem do dispositivo e atualizacao em tempo real via WebSocket.
-- Cliente remoto obedece o contrato do servidor: modos permitidos, campos visiveis, mesa/onibus, pagamento e descricao seguem o computador principal para nao mudar o formato do Excel.
-- O modo operacional do cliente e independente por maquina: um PC pode registrar Onibus enquanto outro fica em Mesa ou Dinheiro, desde que esses modos estejam permitidos pelo servidor.
-- Permissoes, campos da barra e modos permitidos mudam em tempo real nos clientes conectados, incluindo a barra fixada aberta.
-- Cliente remoto volta automaticamente para modo local quando o servidor e desligado ou a conexao cai.
-- Permissao opcional para o servidor liberar acesso local completo do cliente a aparencia, vendas, perfis, barra fixada e barra rapida, sem liberar planilha, backup, servidor, avancado ou contrato do Excel.
-- Relatorios no cliente remoto respeitam as permissoes do servidor: sem permissao de totais, o cliente nao recalcula valores mesmo mudando periodo.
-- Modo leve para clientes remotos: o app cliente carrega os lancamentos recentes e metadados de contagem, reduzindo trafego e memoria em PCs mais fracos.
-- Historico local renderiza em blocos com **Mostrar mais**, evitando tabelas gigantes na tela de uma vez.
-- Relatorios usam calculos memorizados e busca suavizada para manter a interface responsiva com historico maior.
-- Navegacao em estilo PDV por modulos: Caixa, Historico, Relatorios, Rede e Ajustes.
-- Marca CDA no topo esquerdo do aplicativo usando o icone real do projeto.
-- Configuracoes por categorias: Aparencia, Barra fixada, Barra rapida, Vendas, Planilha, Privacidade, Servidor, Atalhos, Atualizacoes e Avancado.
-- Categoria Perfis para aplicar, atualizar, criar e remover perfis sem mexer nos dados de venda.
-- Tela de configuracoes com cabecalho por categoria, presets operacionais e layout mais controlado para monitores grandes.
-- Cabecalho principal contextual por aba, separando operacao de caixa, historico, relatorios, rede e ajustes.
-- Central de privacidade local com modos Normal, Balcao e Reservado para ocultar total do topo/painel e abrir relatorios com totais escondidos sem apagar valores.
-- Permissoes remotas separadas para ver valores de vendas e ver totais sensiveis no servidor.
-- Aba Rede com criador de servidor, instrucoes de conexao para outro PC e permissoes separadas.
-- Checagem de releases pela area de Atualizacoes, com botao para baixar, fechar, instalar e abrir o app de novo sem abrir o GitHub nem janela de terminal.
-- Icone do aplicativo em `assets/icon/`, configurado para instalador, janela e atalhos.
-- Smoke test da interface com Playwright, cobrindo previa de importacao, backup/restauracao, deduplicacao, barra fixada, preset Onibus enxuto, relatorios profissionais, servidor e planilha.
+### Financeiro
+- **Contas a pagar** e **contas a receber** com parcelas e recorrência, pagamento e recebimento parcial ou agrupado, saldo por cliente e por fornecedor, filtros por emissão ou vencimento e recibos.
+- **Cadastro de pessoas** como Cliente, Fornecedor ou Ambos.
+- Categorias e centros de custo.
 
-## Requisitos
+### Rede (servidor e clientes)
+- Um computador é o **servidor** e os demais se conectam como **clientes**, com conexão automática ou manual e sincronização em tempo real.
+- **Permissões** definidas no servidor (ver valores, ver totais, imprimir, editar configurações, gerenciar produtos, acesso completo).
+- **Perfis de privacidade** editáveis, para esconder totais ou valores conforme quem está usando. Isso é uma proteção de tela, não uma barreira de segurança.
+- Aparência, avisos e preferências visuais são locais em cada computador.
+- Servidor e clientes devem estar **na mesma versão**.
 
-- Node.js 22 ou superior.
-- npm 10 ou superior.
-- Windows recomendado para gerar instalador `.exe` com Electron Builder.
+### Outros
+- Ajuda pesquisável dentro do app (mais de 25 tutoriais com atalhos), atalhos de teclado (Tab, F2 para cadastros, busca por prefixo).
+- Barra fixada sempre visível, temas e interface compacta (testada em 1024×600).
+- Exportação automática da planilha do dia em segundo plano.
 
-## Instalar
+## Onde ficam os dados
+
+Os dados ficam na pasta do usuário, em `AppData\Roaming\<nome do app>\data` (o Menu Gerencial tem atalhos para abrir as pastas de dados e de planilhas):
+
+| Arquivo | Conteúdo |
+| --- | --- |
+| `pdv.sqlite` | Banco principal do PDV (vendas, mesas, produtos, financeiro) |
+| `settings.json` | Configurações |
+| `ledger.json` | Lançamentos do modo calculadora antigo |
+| `planilhas/` | Planilhas Excel/CSV exportadas (são saídas, não o banco) |
+
+Faça backup dessa pasta (ou da pasta de planilhas, se ela estiver sincronizada na nuvem).
+
+## Tecnologias
+
+- **Electron** + **React 19** + **Vite** + **TypeScript**
+- **SQLite** (`sql.js`) como banco local
+- **Express** + **WebSocket** para o servidor da rede local
+- **pdf-lib** (recibos em PDF), **jszip** e geração de XLSX/CSV
+- **electron-builder** (instalador NSIS e versão portátil)
+
+## Desenvolvimento
+
+Requisitos: Node.js 20+ e Windows.
 
 ```bash
 npm install
+npm run dev          # Vite + Electron com recarga
+npm run typecheck    # checagem de tipos
+npm run build        # gera dist/ e dist-electron/
+npm run start        # build + abre o app
+npm run dist         # gera o instalador em release/
 ```
 
-## Rodar em desenvolvimento
+Testes de fumaça (rodam sobre o build):
 
 ```bash
-npm run dev
+npm run smoke:pdv       # núcleo do PDV
+npm run smoke:network   # servidor, clientes e sincronização
 ```
 
-Esse comando inicia o Vite, compila o processo principal do Electron em modo watch e abre o aplicativo desktop.
+Há também scripts `smoke_*.mjs` e `qa_*.py` em [`scripts/`](scripts/) para fluxos específicos (concorrência entre terminais, financeiro, recibos, privacidade, layout em vários tamanhos de tela). Os `qa_*.py` precisam de Python com Playwright.
 
-## Build de producao
-
-```bash
-npm run build
-```
-
-O build gera:
-
-- `dist/`: interface React compilada.
-- `dist-electron/`: processo principal e preload do Electron compilados.
-
-## Gerar aplicativo instalavel
-
-```bash
-npm run dist
-```
-
-Os instaladores ficam em `release/`.
-
-## Usar o app
-
-1. Abra o app.
-2. Digite o valor principal.
-3. Escolha o tipo de lancamento ou deixe como `Venda`.
-4. Preencha descricao, mesa, onibus ou dados de pagamento quando precisar.
-5. Clique em **Registrar**.
-
-Atalhos principais:
-
-- `Enter`: registrar.
-- `Ctrl + D`: modo Dinheiro/Troco.
-- `Ctrl + M`: modo Mesa.
-- `Ctrl + O`: modo Onibus.
-- `Ctrl + F`: abrir/fechar barra fixada.
-- `Ctrl + H`: historico.
-- `Ctrl + ,`: configuracoes.
-- `Ctrl + R`: repetir ultimo lancamento.
-
-Os atalhos podem ser alterados ou desativados em **Ajustes > Atalhos**: clique no comando, pressione a nova combinacao ou use **Desativar**.
-
-## Arquivos locais
-
-O app salva dados internos no diretorio de dados do Electron do usuario e exporta planilhas para a pasta configurada em **Configuracoes > Arquivos**.
-
-Por padrao, novas instalacoes salvam planilhas em uma pasta interna segura do app para reduzir alertas do Windows Defender em pastas protegidas:
-
-```text
-AppData/Roaming/Contabilizador Caixa/planilhas
-```
-
-Voce ainda pode escolher **Documentos/Contabilizador Caixa** ou qualquer outra pasta em **Ajustes > Planilha e backup**. Se o Windows Defender avisar sobre pasta protegida, use **Usar pasta segura** nessa mesma tela e salve as configuracoes.
-
-Exemplos de arquivos:
-
-```text
-vendas-2026-06-28.xlsx
-caixa-2026-06.xlsx
-caixa-geral.csv
-venda-2026-06-28.xlsx
-onibus-2026-06-28.xlsx
-```
-
-O remake PDV cria tambem:
-
-```text
-pdv.sqlite
-pdv-backups/
-upgrade-backups/
-```
-
-`ledger.json` e `settings.json` continuam sendo preservados para os dados e configuracoes antigas. Na primeira abertura da base nova, o app cria um backup de seguranca em `upgrade-backups/` quando encontra arquivos antigos ou um `pdv.sqlite` existente.
-
-Em **Ajustes > Planilha e backup**, use **Importar Excel/CSV** para trazer planilhas antigas compativeis para o historico do app. Antes de gravar, o app mostra uma previa com linhas novas, duplicadas, ignoradas, avisos e uma amostra dos lancamentos. Linhas `TOTAL` sao ignoradas e lancamentos repetidos sao pulados automaticamente.
-
-Use **Importar pasta** para apontar uma pasta com varios arquivos de dias diferentes. O app procura `.xlsx`, `.csv` e `.tsv`, pula duplicados e atualiza o historico local.
-
-Na mesma area, **Gerar/abrir arquivo** forca uma nova exportacao e abre a pasta no arquivo atual do dia, mes ou modo configurado. Se o Excel estiver segurando o arquivo aberto, o lancamento permanece salvo no banco local e a exportacao fica pendente para uma nova tentativa.
-
-Quando backup automatico estiver ativo, arquivos existentes sao copiados para a subpasta `backups/` antes da nova exportacao. O backup interno do caixa fica em **Ajustes > Avancado** e salva o JSON principal do app para restauracao futura.
-
-## Servidor local
-
-1. Abra a aba **Rede**.
-2. Use **Criar servidor** para definir porta e senha.
-3. Em **Permissoes**, escolha visualizar, registrar, editar, apagar, ver totais vendidos e, se quiser, liberar o acesso local completo do cliente.
-4. Clique em **Abrir servidor**.
-5. Em outro computador da mesma rede, abra o endereco mostrado pelo app ou use a subaba **Conectar** para montar o link.
-6. Para usar outro PC com o proprio aplicativo, abra **Rede > Conectar**, informe endereco, senha e nome do caixa, e clique em **Conectar no app**. O campo aceita link completo, `IP:porta`, apenas o IP ou so o ultimo numero do IP quando os computadores estao na mesma rede.
-
-No modo cliente, a aparencia local continua podendo ser ajustada, mas o resultado enviado para o Excel segue o computador principal. Se o servidor esconder descricao, tipo, mesa, onibus, pagamento ou outro campo da barra, o cliente tambem nao envia esse campo. A barra fixada do cliente usa a mesma sessao remota e manda os lancamentos para o caixa principal.
-
-Cada computador escolhe seu modo de trabalho localmente. Por exemplo, o servidor pode estar atendendo Mesa, um cliente pode registrar Onibus e outro pode usar Dinheiro/Troco ao mesmo tempo. O servidor so limita quais modos e campos sao aceitos para manter a planilha consistente.
-
-Mudancas de permissoes, campos da barra e modos permitidos sao enviadas em tempo real para os clientes conectados. Se o servidor ocultar Mesa, Onibus, pagamento, descricao ou totais vendidos, a tela principal, a barra fixada e os relatorios do cliente atualizam sem reiniciar.
-
-Se a permissao **Cliente pode editar configuracoes do servidor** estiver ativada, o cliente pode alterar os ajustes operacionais da calculadora e do PDV, incluindo mesas, operacao e impressao; essas mudancas sao gravadas no computador servidor. Aparencia e preferencias puramente visuais continuam locais, enquanto arquivos, backup, conexao do servidor, avancado e permissoes sensiveis permanecem protegidos.
-
-Para PCs mais fracos, o cliente remoto trabalha em modo leve por padrao: baixa os lancamentos mais recentes para historico/operacao e recebe do servidor a contagem do dia e os totais permitidos. O computador servidor continua mantendo o historico completo e a planilha principal.
-
-Enquanto conectado como cliente, os ajustes que mudam planilha, backup, servidor e avancado ficam somente leitura. Sem a permissao de acesso local completo, Vendas, Perfis, Barra fixada e Barra rapida tambem ficam travados. O usuario ainda consegue ver essas telas; ao clicar nelas, o app avisa que so o computador servidor pode editar. Ao desconectar, ou se o servidor for desligado, as configuracoes locais daquele PC voltam a ser editaveis normalmente.
-
-Quando este computador esta com o servidor aberto, a opcao **Conectar** fica desativada ate o servidor ser desligado. Assim o mesmo app nao tenta ser caixa principal e cliente de outro caixa ao mesmo tempo.
-
-Se o servidor estiver desligado, o aplicativo continua funcionando normalmente no computador principal.
-
-## Smoke test
-
-O teste visual usa Playwright com uma ponte Electron simulada.
-
-```bash
-python -m pip install playwright
-python -m playwright install chromium
-python scripts/smoke_playwright.py
-```
-
-O núcleo do PDV novo tambem tem um smoke sem Playwright:
-
-```bash
-npm run smoke:pdv
-```
-
-No desenvolvimento local deste projeto, o teste abre o Electron real via porta de depuracao e validou:
-
-- carregamento da tela principal;
-- registro de uma venda;
-- aparicao no historico;
-- abertura dos relatorios;
-- filtros mensais padrao, dia da semana e origem/caixa nos relatorios;
-- marca CDA no topo e cabecalho da categoria de ajustes;
-- categoria Perfis e API de exportar/importar configuracoes;
-- barra fixada com troca de modo e troco;
-- elementos configuraveis da barra fixada;
-- barra fixada compacta em 76px de altura com controles principais visiveis e modo Mini caixa;
-- importacao CSV e XLSX com deduplicacao;
-- hover legivel no tema DataCaixa;
-- total de hoje sem somar lancamentos de ontem;
-- exportacao diaria separada pela data real do lancamento;
-- cliente remoto dentro do app, mini-caixa web, totais mascarados, permissao em tempo real, payload remoto limitado, modo operacional independente, registro, edicao, cancelamento e lixeira;
-- desconexao automatica do cliente quando o servidor para e permissao de acesso local completo liberada pelo servidor;
-- XLSX com estilo, filtro e formula de total;
-- ausencia de erros de console.
-
-## Estrutura
+### Estrutura
 
 ```text
 electron/
-  main.ts          Processo principal, janela, IPC e comandos nativos
-  preload.ts       Ponte segura exposta ao React
-  storage.ts       JSON local e operacoes de lancamento
-  exporter.ts      Exportacao Excel/CSV e backups
-  pdvStore.ts      SQLite do PDV local
-  pdvExporter.ts   Exportacao Excel do PDV
-  productImporter.ts Importacao de produtos para o PDV
-  localServer.ts   Servidor HTTP/WebSocket local
+  main.ts            Processo principal, janelas, IPC e atualização
+  pdvStore.ts        Banco SQLite do PDV (vendas, mesas, financeiro)
+  pdvExporter.ts     Exportação Excel/CSV do PDV
+  pdvReceipt.ts      Recibos (prévia, impressão e PDF)
+  productImporter.ts Importação de produtos
+  localServer.ts     Servidor HTTP/WebSocket da rede local
+  storage.ts         Armazenamento JSON do modo calculadora antigo
+  preload.cts        Ponte entre o Electron e a interface
 src/
-  App.tsx          Interface principal
-  PdvApp.tsx       Interface principal do remake PDV local
-  main.tsx         Bootstrap React
-  shared/          Tipos, defaults e calculos reutilizaveis
-  styles/          CSS da aplicacao
-scripts/
-  smoke_playwright.py
-  smoke_pdv.mjs
+  PdvApp.tsx         Interface do PDV
+  App.tsx            Interface do modo calculadora antigo e configurações
+  shared/            Tipos, valores padrão e cálculos
+  styles/            CSS
+docs/                Planos de cada fase, auditoria e notas de release
+scripts/             Testes de fumaça e QA
 ```
 
-## Observacoes de seguranca
+## Documentação
 
-- O servidor local exige senha.
-- A senha e configuravel pelo usuario.
-- O app usa `contextIsolation` no Electron e expõe ao renderer somente uma API controlada pelo preload.
-- A permissao **Ver totais vendidos** mascara valores monetarios na API remota quando desativada.
-- Remover lancamentos envia o item para a lixeira; apagar definitivo remove do historico local.
-- Se a exportacao falhar, o lancamento continua salvo no JSON local e a exportacao fica pendente para nova tentativa.
-- Avisos do Windows SmartScreen/antivirus so reduzem de forma consistente com assinatura de codigo por certificado confiavel; o app ja define nome, icone e metadados do instalador.
+- Notas de cada versão: [Releases](https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases) e `docs/release-*.md`
+- Contexto geral do projeto: [`docs/CONTEXTO-CAIXA-PDV.md`](docs/CONTEXTO-CAIXA-PDV.md)
+- Planos por área: [`docs/`](docs/)
+
+## Licença
+
+[MIT](LICENSE) © Otavio Biazzi
