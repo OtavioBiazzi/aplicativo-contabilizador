@@ -1,4 +1,5 @@
 import { sharedPrivacyDefinitions } from "../src/shared/privacy.js";
+import { RollingMeter } from "./performanceMeter.js";
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
@@ -86,6 +87,13 @@ export class LocalServer {
   private server: http.Server | null = null;
   private wsServer: WebSocketServer | null = null;
   private clients = new Map<string, ClientRecord>();
+  /** Medidor: tamanho do pacote completo que cada cliente baixa ao atualizar. */
+  readonly snapshotMeter = new RollingMeter();
+  private snapshotMs = 0;
+
+  getSnapshotStats() {
+    return { count: this.snapshotMeter.count, lastBytes: this.snapshotMeter.last, avgBytes: this.snapshotMeter.average, lastMs: this.snapshotMs, lastAt: this.snapshotMeter.lastAt };
+  }
   private port = 0;
   private password = "";
   private permissions: ServerPermissions;
@@ -229,7 +237,11 @@ export class LocalServer {
     });
 
     app.get("/api/pdv/snapshot", this.authorize("view"), async (request, response) => {
-      response.json(await this.options.getPdvSnapshot(normalizeEntryLimit(request.query.salesLimit)));
+      const startedAt = performance.now();
+      const body = JSON.stringify(await this.options.getPdvSnapshot(normalizeEntryLimit(request.query.salesLimit)));
+      this.snapshotMeter.add(Buffer.byteLength(body));
+      this.snapshotMs = performance.now() - startedAt;
+      response.type("application/json").send(body);
     });
 
     app.post("/api/pdv/close-notices/:id/ack", this.authorize("view"), (request, response) => {

@@ -8307,6 +8307,35 @@ function SettingsPanel({
               <FileSpreadsheet size={16} /> Planilhas
             </button>
           </div>
+          {diagnostics?.performance && (() => {
+            const perf = diagnostics.performance;
+            const ms = (value: number) => value < 1 ? "<1 ms" : value < 1000 ? `${Math.round(value)} ms` : `${(value / 1000).toFixed(1).replace(".", ",")} s`;
+            // Faixas de referencia: abaixo disso nao vale a pena otimizar.
+            const level = (value: number, warn: number, slow: number) => value >= slow ? "slow" : value >= warn ? "warn" : "ok";
+            const cards = [
+              { title: "Tamanho do banco", value: formatFileSize(perf.databaseBytes), detail: "Cada alteração regrava o arquivo inteiro.", state: level(perf.databaseBytes, 20 * 1024 * 1024, 60 * 1024 * 1024) },
+              { title: "Gravação no banco", value: perf.writes.count ? ms(perf.writes.avgMs) : "—", detail: perf.writes.count ? `média · última ${ms(perf.writes.lastMs)} · pior ${ms(perf.writes.maxMs)} · ${perf.writes.count} gravações` : "Ainda sem gravações desde que o app abriu.", state: level(perf.writes.avgMs, 150, 500) },
+              { title: "Planilha automática", value: perf.spreadsheet.count ? ms(perf.spreadsheet.avgMs) : "—", detail: perf.spreadsheet.count ? `média · última ${ms(perf.spreadsheet.lastMs)} · pior ${ms(perf.spreadsheet.maxMs)} · roda em segundo plano` : "Ainda não atualizada desde que o app abriu.", state: level(perf.spreadsheet.avgMs, 1500, 5000) },
+              { title: "Pacote dos clientes", value: perf.remoteSnapshot.count ? formatFileSize(perf.remoteSnapshot.avgBytes) : "—", detail: perf.remoteSnapshot.count ? `médio por atualização · último ${formatFileSize(perf.remoteSnapshot.lastBytes)} · ${perf.remoteSnapshot.count} envios` : "Só aparece no servidor, quando há clientes conectados.", state: level(perf.remoteSnapshot.avgBytes, 512 * 1024, 2 * 1024 * 1024) }
+            ];
+            return (
+              <div className="diagnostics-panel performance-meter">
+                <div className="section-title">
+                  <strong>Desempenho</strong>
+                  <span>Medido neste computador desde que o app abriu. Verde: tudo certo; amarelo: vale acompanhar; vermelho: hora de otimizar.</span>
+                </div>
+                <div className="performance-grid">
+                  {cards.map((card) => (
+                    <article key={card.title} className={`performance-card ${card.state}`}>
+                      <span>{card.title}</span>
+                      <strong>{card.value}</strong>
+                      <small>{card.detail}</small>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           <div className="diagnostics-panel">
             <div className="section-title">
               <strong>Backups recentes</strong>

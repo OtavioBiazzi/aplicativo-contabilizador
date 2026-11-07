@@ -1,4 +1,5 @@
 import type { TableClosedNotice } from "../src/shared/closeReminders.js";
+import { RollingMeter } from "./performanceMeter.js";
 import { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, shell } from "electron";
 import path from "node:path";
 import type { PdvSupplier, PdvFinancialLookup } from "../src/shared/pdvTypes.js";
@@ -49,6 +50,7 @@ let floatingRememberBounds = true;
 let restoringFloatingBounds = false;
 let gracefulQuitStarted = false;
 let gracefulQuitFinished = false;
+const spreadsheetMeter = new RollingMeter();
 const automaticLedgerExport = new DeferredTask(async () => {
   try {
     await logExportStatus("sincronizacao automatica em segundo plano", await exportLedgerIfEnabled());
@@ -580,7 +582,7 @@ async function bootstrap() {
     updateEntry: async (id, patch) => {
       if (id.startsWith("pdv-")) {
         await pdvStore.updateSale(id.slice(4), patch);
-        await exportLedgerIfEnabled();
+        automaticLedgerExport.schedule();
         return (await getIntegratedLedgerEntries()).find((entry) => entry.id === id) || (() => { throw new Error("Venda PDV nao encontrada."); })();
       }
       const entry = await store.updateEntry(id, patch);
@@ -590,7 +592,7 @@ async function bootstrap() {
     cancelEntry: async (id) => {
       if (id.startsWith("pdv-")) {
         await pdvStore.cancelSale(id.slice(4));
-        await exportLedgerIfEnabled();
+        automaticLedgerExport.schedule();
         return (await getIntegratedLedgerEntries()).find((entry) => entry.id === id) || (() => { throw new Error("Venda PDV nao encontrada."); })();
       }
       const entry = await store.cancelEntry(id);
@@ -600,7 +602,7 @@ async function bootstrap() {
     removeEntry: async (id) => {
       if (id.startsWith("pdv-")) {
         await pdvStore.updateSale(id.slice(4), { status: "deleted" });
-        await exportLedgerIfEnabled();
+        automaticLedgerExport.schedule();
         return;
       }
       await store.removeEntry(id);
@@ -609,7 +611,7 @@ async function bootstrap() {
     deleteEntry: async (id) => {
       if (id.startsWith("pdv-")) {
         await pdvStore.deleteSale(id.slice(4));
-        await exportLedgerIfEnabled();
+        automaticLedgerExport.schedule();
         return;
       }
       await store.deleteEntry(id);
@@ -620,7 +622,7 @@ async function bootstrap() {
     getPdvVersion: () => pdvStore.getVersion(),
     savePdvDirectSale: async (items, discount, payments, originDevice, operationId, saleType) => {
       const sale = await pdvStore.saveSale({ type: saleType === "Mesa" ? "Mesa" : saleType === "Onibus" ? "Onibus" : "Venda direta", items, discount, payments, originDevice, operationId });
-      await exportLedgerIfEnabled();
+      automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
     },
@@ -690,7 +692,7 @@ async function bootstrap() {
     },
     updatePdvSalePayments: async (saleId, payments) => {
       const sale = await pdvStore.updateSalePayments(saleId, payments);
-      await exportLedgerIfEnabled();
+      automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
     },
@@ -783,6 +785,11 @@ async function getIntegratedLedgerEntries() {
   ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 }
 
+/** Vendas do PDV confirmam ao gravar o banco; a planilha automatica e atualizada logo em seguida, em segundo plano. */
+function deferredExportStatus(): ExportStatus {
+  return { ok: true, pendingCount: 0, message: "Planilha sendo atualizada em segundo plano." };
+}
+
 async function exportLedgerIfEnabled(settingsOverride?: AppSettings): Promise<ExportStatus> {
   const settings = settingsOverride || await store.getSettings();
   if (!settings.automaticSpreadsheetEnabled) {
@@ -792,7 +799,12 @@ async function exportLedgerIfEnabled(settingsOverride?: AppSettings): Promise<Ex
       message: "Sincronizacao automatica desativada. Use a exportacao manual quando desejar."
     };
   }
-  return exporter.export(await getIntegratedLedgerEntries(), settings);
+  const startedAt = performance.now();
+  try {
+    return await exporter.export(await getIntegratedLedgerEntries(), settings);
+  } finally {
+    spreadsheetMeter.add(performance.now() - startedAt);
+  }
 }
 
 function registerIpc() {
@@ -886,7 +898,7 @@ function registerIpc() {
       payments: input.payments,
       operationId: input.operationId || randomUUID()
     });
-    await exportLedgerIfEnabled();
+    automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -950,14 +962,14 @@ function registerIpc() {
 
   ipcMain.handle("pdv:cancelSale", async (_event, id: string) => {
     await pdvStore.cancelSale(id);
-    await exportLedgerIfEnabled();
+    automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();
   });
 
   ipcMain.handle("pdv:updateSalePayments", async (_event, id: string, payments: PdvPayment[]): Promise<PdvSale> => {
     const sale = await pdvStore.updateSalePayments(id, payments);
-    await exportLedgerIfEnabled();
+    automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();
     return sale;
@@ -1177,8 +1189,8 @@ function registerIpc() {
     if (id.startsWith("pdv-")) {
       const saleId = id.replace("pdv-", "");
       await pdvStore.updateSale(saleId, patch);
-      const exportStatus = await exportLedgerIfEnabled();
-      await logExportStatus("edicao de lancamento pdv", exportStatus);
+      automaticLedgerExport.schedule();
+      const exportStatus = deferredExportStatus();
       sendToAll("entries:changed");
       publishPdvChanged();
       return { entry: null, exportStatus };
@@ -1195,8 +1207,8 @@ function registerIpc() {
     if (id.startsWith("pdv-")) {
       const saleId = id.replace("pdv-", "");
       await pdvStore.updateSale(saleId, { status: "deleted" });
-      const exportStatus = await exportLedgerIfEnabled();
-      await logExportStatus("lixeira pdv", exportStatus);
+      automaticLedgerExport.schedule();
+      const exportStatus = deferredExportStatus();
       sendToAll("entries:changed");
       publishPdvChanged();
       return { exportStatus };
@@ -1213,8 +1225,8 @@ function registerIpc() {
     if (id.startsWith("pdv-")) {
       const saleId = id.replace("pdv-", "");
       await pdvStore.deleteSale(saleId);
-      const exportStatus = await exportLedgerIfEnabled();
-      await logExportStatus("exclusao definitiva pdv", exportStatus);
+      automaticLedgerExport.schedule();
+      const exportStatus = deferredExportStatus();
       sendToAll("entries:changed");
       publishPdvChanged();
       return { exportStatus };
@@ -1243,8 +1255,8 @@ function registerIpc() {
     if (id.startsWith("pdv-")) {
       const saleId = id.replace("pdv-", "");
       await pdvStore.cancelSale(saleId);
-      const exportStatus = await exportLedgerIfEnabled();
-      await logExportStatus("cancelamento pdv", exportStatus);
+      automaticLedgerExport.schedule();
+      const exportStatus = deferredExportStatus();
       sendToAll("entries:changed");
       publishPdvChanged();
       return { entry: null, exportStatus };
@@ -1512,6 +1524,12 @@ function registerIpc() {
       outputDirectory: settings.outputDirectory,
       exportStatus: await exporter.getStatus(),
       entryCount: (await getIntegratedLedgerEntries()).length,
+      performance: {
+        databaseBytes: await pdvStore.getDatabaseBytes(),
+        writes: pdvStore.getWriteStats(),
+        spreadsheet: { count: spreadsheetMeter.count, lastMs: spreadsheetMeter.last, avgMs: spreadsheetMeter.average, maxMs: spreadsheetMeter.max, lastAt: spreadsheetMeter.lastAt },
+        remoteSnapshot: localServer.getSnapshotStats()
+      },
       backupCount: backups.length,
       backups,
       logs: await logger.list()

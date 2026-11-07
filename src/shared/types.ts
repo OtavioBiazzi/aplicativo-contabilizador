@@ -331,7 +331,16 @@ export interface DiagnosticLogItem {
   detail?: string;
 }
 
+/** Medidor de desempenho: numeros desde que o app abriu (as medias sao das ultimas operacoes). */
+export interface PerformanceStats {
+  databaseBytes: number;
+  writes: { count: number; lastMs: number; avgMs: number; maxMs: number; lastBytes: number };
+  spreadsheet: { count: number; lastMs: number; avgMs: number; maxMs: number; lastAt?: string };
+  remoteSnapshot: { count: number; lastBytes: number; avgBytes: number; lastMs: number; lastAt?: string };
+}
+
 export interface DiagnosticsSnapshot {
+  performance?: PerformanceStats;
   dataDirectory: string;
   outputDirectory: string;
   exportStatus: ExportStatus;

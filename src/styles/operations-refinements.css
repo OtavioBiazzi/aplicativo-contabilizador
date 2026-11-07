@@ -68,3 +68,12 @@ body > .pdv-context-menu { z-index: 2000; min-width: 270px; max-width: min(340px
 .pdv-batch-list li:last-child { border-bottom: 0; }
 .pdv-batch-field { display: grid; gap: 6px; margin: 8px 0; }
 .pdv-batch-field small { color: var(--muted); }
+
+/* 0.4.17: medidor de desempenho no Diagnostico. */
+.performance-meter .performance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.performance-meter .performance-card { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid #2e9e5b; border-radius: 3px; background: var(--panel-2); }
+.performance-meter .performance-card.warn { border-left-color: #d9a21b; }
+.performance-meter .performance-card.slow { border-left-color: #d14a3a; }
+.performance-meter .performance-card span { font-size: 12px; font-weight: 800; color: var(--muted); }
+.performance-meter .performance-card strong { font-size: 20px; color: var(--text); }
+.performance-meter .performance-card small { font-size: 11px; line-height: 1.35; color: var(--muted); }

@@ -1,4 +1,5 @@
 import { supplierBalanceKey, financialPaymentTimestamp } from "../src/shared/financialDates.js";
+import { RollingMeter } from "./performanceMeter.js";
 import { joinSaleLabels } from "../src/shared/saleDescription.js";
 import { adaptAutomaticDescription } from "../src/shared/automaticDescription.js";
 import { matchesTableNumberFilter } from "../src/shared/tableNumberFilter.js";
@@ -117,6 +118,9 @@ export class PdvStore {
   private db: Database | null = null;
   private dbFilePath = "";
   private persistQueue: Promise<void> = Promise.resolve();
+  /** Medidor: cada gravacao reescreve o arquivo inteiro do banco. */
+  readonly writeMeter = new RollingMeter();
+  private lastWriteBytes = 0;
   private readonly instanceId = randomUUID();
   private revision = 0;
 
@@ -1008,6 +1012,14 @@ export class PdvStore {
     statement.free();
     await this.persist();
     return next;
+  }
+
+  async getDatabaseBytes(): Promise<number> {
+    try { return (await fs.stat(this.dbFilePath)).size; } catch { return this.lastWriteBytes; }
+  }
+
+  getWriteStats() {
+    return { count: this.writeMeter.count, lastMs: this.writeMeter.last, avgMs: this.writeMeter.average, maxMs: this.writeMeter.max, lastBytes: this.lastWriteBytes };
   }
 
   getVersion(): PdvDataVersion {
@@ -2728,11 +2740,15 @@ export class PdvStore {
     this.revision += 1;
     const write = this.persistQueue.catch(() => undefined).then(async () => {
       const db = this.requireDb();
+      const startedAt = performance.now();
       const tempPath = `${this.dbFilePath}.${process.pid}.${Date.now()}.tmp`;
-      await fs.writeFile(tempPath, Buffer.from(db.export()));
+      const bytes = Buffer.from(db.export());
+      await fs.writeFile(tempPath, bytes);
       for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
           await fs.rename(tempPath, this.dbFilePath);
+          this.lastWriteBytes = bytes.length;
+          this.writeMeter.add(performance.now() - startedAt);
           return;
         } catch (error) {
           const code = (error as NodeJS.ErrnoException).code;
