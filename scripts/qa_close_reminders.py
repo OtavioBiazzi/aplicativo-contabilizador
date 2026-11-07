@@ -45,7 +45,7 @@ with sync_playwright() as p:
  print('PASS defaults off; client local options editable without server customization permission; + rule is shared and read-only without permission')
  # Real client mixed checkout: split amount defaults to 30, cap card to 60, cash allows overpayment.
  card(c,40).click();c.get_by_role('button',name='Fechar conta',exact=True).click()
- close=c.locator('.pdv-close-menu');close.get_by_role('button',name='Fechar total',exact=False).click()
+ close=c.locator('.pdv-close-menu');close.locator('.pdv-inline-stepper input').fill('2');close.get_by_role('button',name='Fechar total',exact=False).click()
  receive=c.locator('.pdv-receive-modal');receive.get_by_role('button',name='Debito',exact=False).click()
  amount=c.locator('.pdv-payment-amount-modal');field=amount.locator('input:not([readonly])')
  expect(field).to_have_value('30');field.fill('9999');expect(field).to_have_value('60');field.fill('30')

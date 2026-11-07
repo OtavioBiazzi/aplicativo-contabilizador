@@ -17,7 +17,7 @@
   background: #dcebf5 !important;
   color: #0b3151 !important;
 }
-#root .pdv-payment-modal.pdv-checkout { width: min(1360px, calc(100vw - 48px)) !important; height: min(880px, calc(100vh - 48px)); max-height: min(880px, calc(100vh - 48px)) !important; }
+#root .pdv-payment-modal.pdv-checkout { width: min(1280px, calc(100vw - 48px)) !important; height: min(820px, calc(100vh - 48px)); max-height: min(820px, calc(100vh - 48px)) !important; }
 #root .pdv-payment-modal.pdv-customer-picker { width: min(1240px, calc(100vw - 72px)) !important; height: min(820px, calc(100vh - 72px)); max-height: min(820px, calc(100vh - 72px)) !important; }
 
 /* Barra de titulo igual a dos outros modais */
@@ -92,7 +92,8 @@
   font-size: 15px;
   font-weight: 700;
 }
-#root .pdv-checkout-customer-actions { display: flex; gap: 6px; align-items: center; }
+#root .pdv-checkout-customer > .pdv-checkout-search,
+#root .pdv-checkout-customer > .pdv-checkout-clear { align-self: end; }
 #root .pdv-checkout-search,
 #root .pdv-checkout-clear,
 #root .pdv-customer-picker-toolbar button {
@@ -113,7 +114,7 @@
 #root .pdv-checkout-search:hover,
 #root .pdv-checkout-clear:hover,
 #root .pdv-customer-picker-toolbar button:not(:disabled):hover { border-color: #ff8b5a; background: linear-gradient(#fff7f2, #ffe2d3); }
-#root .pdv-checkout-clear { width: 38px; padding: 0; color: #9b2118 !important; }
+#root .pdv-checkout-clear { min-height: 34px; padding: 0 10px; font-size: 13px; color: #9b2118 !important; }
 
 /* Formas de pagamento */
 #root .pdv-checkout-methods { display: grid; gap: 10px; padding: 12px 14px; }
@@ -261,3 +262,46 @@
 #root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button:disabled small { background: transparent !important; color: #7d8f9c !important; }
 #root .pdv-modal-backdrop:has(> .pdv-checkout),
 #root .pdv-modal-backdrop:has(> .pdv-customer-picker) { overflow: hidden; }
+
+/* Acrescimo e desconto no topo da coluna direita (antes ficavam no fechar conta e na venda). */
+#root .pdv-checkout-adjustments { display: grid; gap: 8px; padding: 12px 14px; border: 1px solid #a9c8dc; border-radius: 3px; background: #edf6fb; }
+#root .pdv-checkout-adjust-row { display: grid; grid-template-columns: 92px minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; align-items: center; }
+#root .pdv-checkout-adjust-row strong { font-size: 15px; font-weight: 900; color: #1d5278; }
+#root .pdv-checkout-adjust-row label { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; font-weight: 800; color: #426b8a; }
+#root .pdv-checkout-adjust-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 10px;
+  border: 1px solid #9fc4dc;
+  border-radius: 3px;
+  background: #fff !important;
+  color: #0b3151 !important;
+  -webkit-text-fill-color: #0b3151 !important;
+  font-size: 16px;
+  font-weight: 800;
+  text-align: right;
+}
+#root .pdv-checkout-adjust-row input:disabled { background: #e7eef3 !important; color: #7d8f9c !important; -webkit-text-fill-color: #7d8f9c !important; }
+#root .pdv-checkout-adjustments small { font-size: 12px; color: #426b8a; }
+
+/* Padrao de todos os modais: cantos retos como os menus e o X do titulo sem moldura. */
+#root .pdv-modal-backdrop > :is(.pdv-payment-modal, .modal),
+#root .modal { border-radius: 4px !important; }
+#root .pdv-modal-backdrop .pdv-payment-modal :is(button, input, select, textarea, .pdv-metric, .pdv-split-preview, .pdv-close-split, .pdv-payment-list article, .pdv-previous-payment-list) { border-radius: 3px !important; }
+#root :is(.modal > .modal-head .icon-button, .pdv-payment-modal > .pdv-section-head .pdv-icon-button, .pdv-payment-modal > .pdv-window-title .pdv-icon-button, .pdv-checkout-titlebar .pdv-icon-button) {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 3px !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+#root :is(.modal > .modal-head .icon-button, .pdv-payment-modal > .pdv-section-head .pdv-icon-button, .pdv-payment-modal > .pdv-window-title .pdv-icon-button, .pdv-checkout-titlebar .pdv-icon-button):hover { background: rgba(255, 255, 255, 0.18) !important; }
+#root .modal:not(.pdv-navigation-confirm) > .modal-head .icon-button:hover { background: color-mix(in srgb, var(--text) 10%, transparent) !important; }
+#root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button:disabled,
+#root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button:disabled :is(span, svg) { color: #7d8f9c !important; }
+#root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button.active:disabled { border-color: #9fc4dc !important; background: linear-gradient(#f8fbfd, #d3e7f4) !important; }

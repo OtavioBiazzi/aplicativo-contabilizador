@@ -51,7 +51,22 @@ with sync_playwright() as p:
         return modal
 
     reload(s)
-    modal = open_checkout(s, 27)
+    # Fechar conta: divisao por pessoas nao altera os clientes da mesa; Fechar parcial escondido; sem desconto aqui.
+    s.locator('.pdv-table-card').filter(has=s.get_by_text('027', exact=True)).click()
+    s.get_by_role('button', name='Fechar conta', exact=True).click()
+    close = s.locator('.pdv-close-menu')
+    expect(close.get_by_role('button', name='Fechar parcial', exact=False)).to_have_count(0)
+    expect(close.get_by_text('Desconto em R$', exact=True)).to_have_count(0)
+    close.locator('.pdv-inline-stepper input').fill('3')
+    expect(close).to_contain_text('R$ 20,00')
+    s.get_by_role('button', name='Voltar', exact=False).last.click()
+    people = s.evaluate("async()=>(await window.caixa.getPdvSnapshot()).tables.find(t=>t.number===27).people")
+    assert people == 1, people
+    print('PASS close menu: split people independent from table guests; partial close hidden; no discount fields')
+    s.get_by_role('button', name='Fechar conta', exact=True).click()
+    s.locator('.pdv-close-menu').get_by_role('button', name='Fechar total', exact=False).click()
+    modal = s.locator('.pdv-checkout')
+    expect(modal).to_be_visible()
     expect(modal.get_by_role('textbox').first).to_have_value('CONSUMIDOR NÃO IDENTIFICADO')
     expect(modal.locator('.pdv-checkout-payments article.remaining')).to_contain_text('60,00')
     s.screenshot(path=str(out / 'checkout-1280.png'))
@@ -93,7 +108,11 @@ with sync_playwright() as p:
     assert modal.locator('.pdv-checkout-customer input').nth(2).input_value() == 'maria@qa.test'
     print('PASS customer picker: F-keys blocked, search by CPF digits and name, Enter selects')
 
-    # Conta a receber ja vem com Maria; 20 a receber + 40 em dinheiro com 50 entregues (troco 10).
+    # Desconto de 10% na tela de pagamento: total 54. Depois de lancar pagamento, fica travado.
+    modal.get_by_label('Desconto em %', exact=True).fill('10')
+    expect(modal.locator('.pdv-checkout-figure.total')).to_contain_text('54,00')
+    expect(modal.locator('.pdv-checkout-payments article.remaining')).to_contain_text('54,00')
+    # Conta a receber ja vem com Maria; 20 a receber + 34 em dinheiro com 50 entregues (troco 16).
     modal.get_by_role('button', name='Conta a receber', exact=False).click()
     rec = s.locator('.pdv-receivable-entry-modal')
     expect(rec.locator('.pdv-receivable-locked-customer')).to_contain_text('MARIA QA ' + tag)
@@ -103,10 +122,11 @@ with sync_playwright() as p:
     modal.get_by_role('button', name='Dinheiro', exact=False).click()
     amount = s.locator('.pdv-payment-amount-modal')
     fields = amount.locator('input:not([readonly])')
-    expect(fields.first).to_have_value('40')
+    expect(fields.first).to_have_value('34')
     fields.first.fill('50')  # dinheiro aceita valor maior: a diferenca vira troco
     amount.get_by_role('button', name='OK', exact=True).click()
-    expect(modal.locator('.pdv-checkout-figure.change')).to_contain_text('10,00')
+    expect(modal.locator('.pdv-checkout-figure.change')).to_contain_text('16,00')
+    expect(modal.get_by_label('Desconto em %', exact=True)).to_be_disabled()
     expect(modal.locator('.pdv-checkout-payments article.remaining')).to_have_count(0)
     s.screenshot(path=str(out / 'checkout-paid.png'))
     modal.get_by_role('button', name='Finalizar conta', exact=False).click()
@@ -117,9 +137,31 @@ with sync_playwright() as p:
         s.locator('.pdv-receipt-preview').get_by_role('button', name='Fechar', exact=True).click()
     sale = s.evaluate("async()=>(await window.caixa.getPdvSnapshot()).recentSales.find(x=>x.tableNumber===27)")
     methods = sorted((pmt['method'], pmt['amount']) for pmt in sale['payments'])
-    assert methods == [('Conta a receber', 20), ('Dinheiro', 40)], methods
+    assert methods == [('Conta a receber', 20), ('Dinheiro', 34)], methods
+    assert abs(sale['discount'] - 6) < 0.001 and abs(sale['total'] - 54) < 0.001, (sale['discount'], sale['total'])
     assert any(pmt.get('customerName') == 'MARIA QA ' + tag for pmt in sale['payments'])
-    print('PASS receivable defaults to the chosen customer; cash change shown; sale saved with both payments')
+    print('PASS 10% discount in checkout (saved as 6.00), locked after payments; receivable uses chosen customer; cash change')
+
+    # Venda direta: sem botao de desconto no carrinho; acrescimo na tela de pagamento grava desconto negativo.
+    if s.locator('.pdv-checkout, .pdv-confirm-modal, .pdv-receipt-preview').count():
+        s.keyboard.press('Escape')
+    s.get_by_role('button', name='Venda', exact=True).click()
+    expect(s.get_by_role('button', name='Desconto da venda', exact=False)).to_have_count(0)
+    s.get_by_role('button', name='CAFE QA', exact=False).first.click()
+    s.get_by_role('button', name='Receber e finalizar', exact=True).click()
+    modal = s.locator('.pdv-checkout')
+    expect(modal).to_be_visible()
+    modal.get_by_label('Acréscimo em R$', exact=True).fill('5')
+    expect(modal.locator('.pdv-checkout-figure.total')).to_contain_text('35,00')
+    modal.get_by_role('button', name='Pix', exact=False).click()
+    s.locator('.pdv-payment-amount-modal').get_by_role('button', name='OK', exact=True).click()
+    modal.get_by_role('button', name='Finalizar conta', exact=False).click()
+    if s.locator('.pdv-confirm-modal').count():
+        s.locator('.pdv-confirm-modal').get_by_role('button', name='Confirmar', exact=False).click()
+    expect(modal).to_have_count(0)
+    direct = s.evaluate("async()=>(await window.caixa.getPdvSnapshot()).recentSales.find(x=>x.type!=='Mesa')")
+    assert abs(direct['discount'] + 5) < 0.001 and abs(direct['total'] - 35) < 0.001, (direct['discount'], direct['total'])
+    print('PASS direct sale: no cart discount button; surcharge in checkout saved as -5.00')
 
     # Cliente remoto: cadastro rapido pela pesquisa e selecao.
     reload(c)

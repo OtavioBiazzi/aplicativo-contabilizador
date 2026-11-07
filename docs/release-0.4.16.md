@@ -11,6 +11,10 @@
   - lista Pagamento/Valor com o valor restante no mesmo padrão das linhas;
   - Valor Total, Recebido e Troco em destaque à direita.
 - **Contas a receber** só libera depois de escolher o cliente no topo, e a janela de conta a receber usa esse cliente sem pedir de novo.
+- **Acréscimo e desconto** (em % ou R$) passaram para a tela de pagamento, à direita, para mesas e para a venda. Saíram do Fechar conta e do botão "Desconto da venda". Podem ser alterados até o primeiro pagamento ser lançado.
+- **Dividir por pessoas** no Fechar conta começa em 1 e não altera mais a quantidade de clientes da mesa. Se o desconto mudar no pagamento, o valor por pessoa é recalculado.
+- **Fechar parcial** fica escondido por padrão. Para separar contas, use a transferência para submesa. Quem quiser pode religar em Mesas > Funcionamento.
+- Modais padronizados: cantos retos como os menus e o X do título sem moldura em todos.
 - **Pesquisa de clientes** no estilo cadastro de clientes: busca por nome, CPF/CNPJ, telefone ou e-mail, filtros de tipo e ativo, Enter ou duplo clique seleciona e **Novo (F2)** faz cadastro rápido já selecionando.
 - **Correção:** edições rápidas seguidas numa mesa (por exemplo duplicar, editar e remover) podiam fazer itens removidos voltarem, porque o servidor os tratava como incluídos por outro computador. Agora a lista de itens conhecidos acompanha cada salvamento confirmado.
 - **Mesas em aberto**: com a privacidade ligada, Realizado hoje e Previsão do total aparecem como Privado. O saldo que falta fechar continua visível.

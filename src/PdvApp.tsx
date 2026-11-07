@@ -67,12 +67,24 @@ type AdvancedSplitPart = { id: string; name: string; amount: number; weight: num
 type AdvancedSplitMode = "value" | "products";
 type AdvancedSplitResult = { parts: AdvancedSplitPart[]; assignments: Record<string, string>; roundingStep: number; roundingDirection: RoundDirection; mode: AdvancedSplitMode; equalValues: boolean };
 type CheckoutTarget =
-  | { kind: "direct"; total: number; items?: PdvCartItem[]; manual?: boolean; saleType?: PdvSale["type"]; operationId?: PdvOperationId }
-  | { kind: "table"; table: PdvOpenTable; total: number; discount: number; preferredAmount?: number; initialPayments?: PdvPayment[]; adjustedItems?: PdvCartItem[]; operationId: PdvOperationId }
-  | { kind: "table-scope"; table: PdvOpenTable; scope: Exclude<TableCloseScope, { kind: "all" }>; total: number; discount: number; preferredAmount?: number; initialPayments?: PdvPayment[]; items: PdvCartItem[]; operationId: PdvOperationId }
+  | { kind: "direct"; total: number; subtotal?: number; discount?: number; items?: PdvCartItem[]; manual?: boolean; saleType?: PdvSale["type"]; operationId?: PdvOperationId }
+  | { kind: "table"; table: PdvOpenTable; total: number; subtotal?: number; discount: number; split?: CheckoutSplit; preferredAmount?: number; initialPayments?: PdvPayment[]; adjustedItems?: PdvCartItem[]; operationId: PdvOperationId }
+  | { kind: "table-scope"; table: PdvOpenTable; scope: Exclude<TableCloseScope, { kind: "all" }>; total: number; subtotal?: number; discount: number; split?: CheckoutSplit; preferredAmount?: number; initialPayments?: PdvPayment[]; items: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-subtable"; table: PdvOpenTable; subtableName: string; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-partial-manual"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId };
+
+/** Divisao escolhida no fechar conta: o valor por pessoa e recalculado quando o desconto muda no pagamento. */
+type CheckoutSplit = { people: number; step: number; direction: RoundDirection };
+
+/** Desconto (positivo) ou acrescimo (negativo) aplicado na tela de pagamento. */
+function applyCheckoutDiscount<T extends Extract<CheckoutTarget, { kind: "direct" | "table" | "table-scope" }>>(target: T, discount: number): T {
+  if (target.subtotal === undefined) return target;
+  const total = Math.max(0, roundMoney(target.subtotal - discount));
+  const split = "split" in target ? target.split : undefined;
+  const preferredAmount = split && split.people > 1 ? calculateSplit(total, split.people, split.step, split.direction, false).perPersonRounded : undefined;
+  return { ...target, discount, total, ...(split ? { preferredAmount } : {}) };
+}
 
 const PAYMENT_METHODS: PdvPaymentMethod[] = ["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Nao definido", "Conta a receber"];
 const CHECKOUT_PAYMENT_METHODS: PdvPaymentMethod[] = ["Dinheiro", "Debito", "Credito", "Pix", "Outros", "Conta a receber"];
@@ -1317,7 +1329,7 @@ export function PdvApp({
       setToast("Adicione ao menos um produto.", true);
       return;
     }
-    setCheckoutTarget({ kind: "direct", total: saleFinal, operationId: crypto.randomUUID() });
+    setCheckoutTarget({ kind: "direct", total: saleFinal, subtotal: saleTotal, discount, operationId: crypto.randomUUID() });
   };
 
   const maybePrintSale = async (sale: PdvSale, latestSnapshot?: PdvSnapshot) => {
@@ -1350,10 +1362,10 @@ export function PdvApp({
     }).catch(() => setToast(fallbackMessage, true));
   };
 
-  const confirmDirectSale = async (payments: PdvPayment[], items = cart, saleType: PdvSale["type"] = directSaleMode, operationId: PdvOperationId = crypto.randomUUID()) => {
+  const confirmDirectSale = async (payments: PdvPayment[], items = cart, saleType: PdvSale["type"] = directSaleMode, operationId: PdvOperationId = crypto.randomUUID(), saleDiscount = discount) => {
     setBusy(true);
     try {
-      const sale = await saveDirectPdvSale(items, discount, payments, saleType, operationId);
+      const sale = await saveDirectPdvSale(items, saleDiscount, payments, saleType, operationId);
       setCart([]);
       setSelectedDirectItemIds([]);
       setDiscount(0);
@@ -2240,6 +2252,9 @@ export function PdvApp({
           onSaveCustomer={savePdvCustomer}
           skipConfirmation={Boolean(snapshot.settings.skipPaymentConfirmation)}
           title={checkoutTarget.kind === "direct" && checkoutTarget.manual ? "Receber valor avulso" : "Pagamento"}
+          discountEditor={(checkoutTarget.kind === "direct" || checkoutTarget.kind === "table" || checkoutTarget.kind === "table-scope") && checkoutTarget.subtotal !== undefined && !(checkoutTarget.kind === "direct" && checkoutTarget.manual)
+            ? { subtotal: checkoutTarget.subtotal, discount: checkoutTarget.discount || 0, onChange: (nextDiscount) => setCheckoutTarget((current) => current && (current.kind === "direct" || current.kind === "table" || current.kind === "table-scope") ? applyCheckoutDiscount(current, nextDiscount) : current) }
+            : undefined}
           initialPayments={checkoutTarget.kind === "table" || checkoutTarget.kind === "table-scope" ? checkoutTarget.initialPayments || [] : []}
           previousPayments={checkoutTarget.kind === "direct" ? [] : snapshot.recentSales
             .filter((sale) => sale.type === "Mesa" && sale.status === "Parcial" && (
@@ -2276,7 +2291,7 @@ export function PdvApp({
           onConfirm={async (payments, observations) => {
             const completePayment = async () => {
               if (checkoutTarget.kind === "direct") {
-                await confirmDirectSale(payments, checkoutTarget.items || cart, checkoutTarget.saleType, checkoutTarget.operationId);
+                await confirmDirectSale(payments, checkoutTarget.items || cart, checkoutTarget.saleType, checkoutTarget.operationId, checkoutTarget.manual ? 0 : checkoutTarget.discount ?? discount);
               } else if (checkoutTarget.kind === "table") {
                 await confirmCloseTable(payments);
               } else {
@@ -2303,7 +2318,7 @@ export function PdvApp({
           roundingStep={snapshot.settings.roundingStep ?? remoteSession?.roundingStep ?? roundingStep}
           roundingDirection={snapshot.settings.roundingDirection ?? remoteSession?.roundingDirection ?? roundingDirection}
           suspended={Boolean(advancedSplitRequest)}
-          onPeopleChange={updateLocalTablePeople}
+          partialEnabled={Boolean(snapshot.settings.partialCloseEnabled)}
           onCancel={() => {
             const shouldReleaseTableStatus = tableCloseScope.kind !== "subtable";
             setAdvancedSplitRequest(null);
@@ -2320,17 +2335,19 @@ export function PdvApp({
             setPartialItemsModalOpen(true);
           }}
           onAdvancedSplit={(total, discount) => setAdvancedSplitRequest({ total, discount })}
-          onCloseTotal={(total, discount, initialPayments, preferredAmount) => {
+          onCloseTotal={(total, discount, initialPayments, preferredAmount, split) => {
             setTableCloseMenuOpen(false);
             if (tableCloseScope.kind === "all") {
-              setCheckoutTarget({ kind: "table", table: activeTable, total, discount, initialPayments, preferredAmount, operationId: crypto.randomUUID() });
+              setCheckoutTarget({ kind: "table", table: activeTable, total, subtotal: roundMoney(total + discount), discount, split, initialPayments, preferredAmount, operationId: crypto.randomUUID() });
             } else {
               setCheckoutTarget({
                 kind: "table-scope",
                 table: activeTable,
                 scope: tableCloseScope,
                 total,
+                subtotal: roundMoney(total + discount),
                 discount,
+                split,
                 initialPayments,
                 preferredAmount,
                 items: activeCloseItems,
@@ -3116,9 +3133,7 @@ function PdvSaleScreen(props: {
         )}
         {!props.activeTableNumber && (
           <div className="pdv-direct-utility-actions">
-            <button className="pdv-ghost-button pdv-direct-discount-button" disabled={!props.cart.length} onClick={() => setDirectDiscountOpen(true)}>
-              {props.discount < 0 ? "Acrescimo da venda" : "Desconto da venda"}{props.discount !== 0 ? `: ${money(Math.abs(props.discount))}` : ""}
-            </button>
+            {/* Desconto e acrescimo da venda ficam na tela de pagamento. */}
             <button
               className="pdv-ghost-button"
               disabled={!props.cart.length || !props.appendPdvTableItems}
@@ -4132,6 +4147,7 @@ export function PaymentModal({
   previousPayments = [],
   onEditPreviousPayment,
   showDescription = false,
+  discountEditor,
   title = "Pagamento",
   confirmLabel = "Finalizar conta",
   skipConfirmation = false,
@@ -4147,6 +4163,8 @@ export function PaymentModal({
   previousPayments?: Array<PdvPayment & { saleId?: string; operationLabel?: string }>;
   onEditPreviousPayment?: (payment: PdvPayment & { saleId?: string; operationLabel?: string }) => void;
   showDescription?: boolean;
+  /** Acrescimo/desconto da conta, editavel enquanto nenhum pagamento foi lancado. */
+  discountEditor?: { subtotal: number; discount: number; onChange: (discount: number) => void };
   title?: string;
   confirmLabel?: string;
   skipConfirmation?: boolean;
@@ -4163,6 +4181,11 @@ export function PaymentModal({
   const [preparedPaymentToDefine, setPreparedPaymentToDefine] = useState<PdvPayment | null>(null);
   const [focusedPaymentIndex, setFocusedPaymentIndex] = useState(0);
   const [selectedCustomerId, setSelectedCustomerId] = useState(() => initialPayments.find((payment) => payment.customerId)?.customerId || "");
+  const initialDiscount = discountEditor?.discount || 0;
+  const [adjustments, setAdjustments] = useState(() => ({
+    surchargePercent: "", surchargeValue: initialDiscount < 0 ? String(Math.abs(initialDiscount)).replace(".", ",") : "",
+    discountPercent: "", discountValue: initialDiscount > 0 ? String(initialDiscount).replace(".", ",") : ""
+  }));
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const finishLocked = useRef(false);
   const cancelSafely = () => { if (!busy && !submitting && !finishLocked.current) onCancel(); };
@@ -4288,6 +4311,23 @@ export function PaymentModal({
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
   }, [paymentEntryMethod, confirming, notice, customerPickerOpen, submitting, busy, payments, remaining, observations, focusedPaymentIndex]);
 
+  // Desconto e acrescimo: so podem mudar antes de lancar pagamentos, para nao deixar pagamentos maiores que a conta.
+  const adjustmentsLocked = payments.length > 0;
+  const changeAdjustment = (field: keyof typeof adjustments, value: string) => {
+    if (!discountEditor || adjustmentsLocked) return;
+    const next = { ...adjustments, [field]: value };
+    // R$ e % do mesmo tipo nao se somam: o ultimo preenchido vale.
+    if (field === "discountPercent" && value) next.discountValue = "";
+    if (field === "discountValue" && value) next.discountPercent = "";
+    if (field === "surchargePercent" && value) next.surchargeValue = "";
+    if (field === "surchargeValue" && value) next.surchargePercent = "";
+    setAdjustments(next);
+    const base = discountEditor.subtotal;
+    const amount = (text: string) => Math.max(0, parseBrazilianNumber(text) || 0);
+    const discountAmount = Math.min(base, roundMoney(amount(next.discountValue) + base * amount(next.discountPercent) / 100));
+    const surchargeAmount = roundMoney(amount(next.surchargeValue) + base * amount(next.surchargePercent) / 100);
+    discountEditor.onChange(roundMoney(discountAmount - surchargeAmount));
+  };
   const selectedCustomer = customers.find((item) => item.id === selectedCustomerId) || null;
   const received = roundMoney(payments.reduce((sum, payment) => sum + (payment.received ?? payment.amount), 0));
   const change = roundMoney(payments.reduce((sum, payment) => sum + (payment.change || 0), 0));
@@ -4310,12 +4350,10 @@ export function PaymentModal({
             <section className="pdv-checkout-customer" aria-label="Cliente">
               <label className="pdv-checkout-field wide"><span>Cliente</span><input readOnly value={selectedCustomer?.name || "CONSUMIDOR NÃO IDENTIFICADO"} onDoubleClick={() => setCustomerPickerOpen(true)} /></label>
               <label className="pdv-checkout-field"><span>CPF/CNPJ</span><input readOnly value={selectedCustomer?.document || ""} /></label>
-              <div className="pdv-checkout-customer-actions">
-                <button type="button" className="pdv-checkout-search" onClick={() => setCustomerPickerOpen(true)}><Search size={16} /> Pesquisar</button>
-                {selectedCustomer && <button type="button" className="pdv-checkout-clear" title="Voltar para consumidor não identificado" aria-label="Remover cliente" onClick={() => chooseCustomer(null)}><X size={14} /></button>}
-              </div>
+              <button type="button" className="pdv-checkout-search" onClick={() => setCustomerPickerOpen(true)}><Search size={16} /> Pesquisar</button>
               <label className="pdv-checkout-field wide"><span>E-mail</span><input readOnly value={selectedCustomer?.email || ""} /></label>
               <label className="pdv-checkout-field"><span>Telefone</span><input readOnly value={selectedCustomer?.phone || ""} /></label>
+              <button type="button" className="pdv-checkout-clear" style={{ visibility: selectedCustomer ? "visible" : "hidden" }} tabIndex={selectedCustomer ? 0 : -1} aria-hidden={!selectedCustomer} title="Voltar para consumidor não identificado" aria-label="Remover cliente" onClick={() => chooseCustomer(null)}><X size={14} /> Remover cliente</button>
             </section>
             <section className="pdv-checkout-methods" aria-label="Formas de pagamento">
               <strong>Escolha a forma de pagamento</strong>
@@ -4373,6 +4411,21 @@ export function PaymentModal({
             )}
           </div>
           <aside className="pdv-checkout-right" aria-label="Resumo do pagamento">
+            {discountEditor && (
+              <section className="pdv-checkout-adjustments" aria-label="Acréscimo e desconto" title={adjustmentsLocked ? "Remova os pagamentos lançados para alterar acréscimo ou desconto." : undefined}>
+                <div className="pdv-checkout-adjust-row">
+                  <strong>Acréscimo</strong>
+                  <label><input aria-label="Acréscimo em %" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.surchargePercent} onChange={(event) => changeAdjustment("surchargePercent", event.target.value)} placeholder="0" /><span>%</span></label>
+                  <label><span>R$</span><input aria-label="Acréscimo em R$" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.surchargeValue} onChange={(event) => changeAdjustment("surchargeValue", event.target.value)} placeholder="0,00" /></label>
+                </div>
+                <div className="pdv-checkout-adjust-row">
+                  <strong>Desconto</strong>
+                  <label><input aria-label="Desconto em %" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.discountPercent} onChange={(event) => changeAdjustment("discountPercent", event.target.value)} placeholder="0" /><span>%</span></label>
+                  <label><span>R$</span><input aria-label="Desconto em R$" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.discountValue} onChange={(event) => changeAdjustment("discountValue", event.target.value)} placeholder="0,00" /></label>
+                </div>
+                <small>{adjustmentsLocked ? "Para alterar, remova os pagamentos lançados." : `Subtotal ${money(discountEditor.subtotal)}${Math.abs(discountEditor.discount) > 0.009 ? ` · ${discountEditor.discount > 0 ? "desconto" : "acréscimo"} ${money(Math.abs(discountEditor.discount))}` : ""}`}</small>
+              </section>
+            )}
             <div className="pdv-checkout-figure total"><span>Valor Total</span><strong>{money(total)}</strong></div>
             <div className="pdv-checkout-figure received"><span>Recebido</span><strong>{money(received)}</strong></div>
             <div className="pdv-checkout-figure change"><span>Troco</span><strong>{money(change)}</strong></div>
@@ -6546,6 +6599,7 @@ function TableCloseMenu({
   roundingStep: configuredRoundingStep,
   roundingDirection: configuredRoundingDirection,
   suspended = false,
+  partialEnabled = false,
   onPeopleChange,
   onCancel,
   onPartialItems,
@@ -6558,20 +6612,24 @@ function TableCloseMenu({
   roundingStep?: number;
   roundingDirection?: RoundDirection;
   suspended?: boolean;
+  /** Fechar parcial fica escondido por padrao; o servidor pode religar em Mesas > Funcionamento. */
+  partialEnabled?: boolean;
   onPeopleChange?: (people: number) => void;
   onCancel: () => void;
   onPartialItems: () => void;
   onAdvancedSplit: (total: number, discount: number) => void;
-  onCloseTotal: (total: number, discount: number, initialPayments?: PdvPayment[], preferredAmount?: number) => void;
+  onCloseTotal: (total: number, discount: number, initialPayments?: PdvPayment[], preferredAmount?: number, split?: CheckoutSplit) => void;
 }) {
   const [discountValue, setDiscountValue] = useState("");
   const [discountPercent, setDiscountPercent] = useState("");
-  const [people, setPeople] = useState(Math.max(1, table.people || 1));
+  // A divisao por pessoas e independente da quantidade de clientes da mesa.
+  const [people, setPeople] = useState(1);
   const [roundingStep, setRoundingStep] = useState(configuredRoundingStep || 0.01);
   const [roundingDirection, setRoundingDirection] = useState<RoundDirection>(configuredRoundingDirection || "nearest");
   const [focusedAction, setFocusedAction] = useState(0);
-  const discount = calculateDiscountAdjustment(subtotal, discountValue, discountPercent);
-  const total = Math.max(0, roundMoney(subtotal - discount));
+  // Desconto e acrescimo ficam na tela de pagamento.
+  const discount = 0;
+  const total = Math.max(0, roundMoney(subtotal));
   const split = calculateSplit(total, people, roundingStep, roundingDirection, false);
   const splitPreview = Array.from({ length: Math.max(1, people) }, (_, index) => ({
     id: `person-${index + 1}`,
@@ -6580,8 +6638,9 @@ function TableCloseMenu({
   const changePeople = (next: number) => {
     const normalized = Math.max(1, Math.floor(next || 1));
     setPeople(normalized);
-    onPeopleChange?.(normalized);
   };
+  const closeTotal = () => onCloseTotal(total, discount, undefined, people > 1 ? split.perPersonRounded : undefined, { people, step: roundingStep, direction: roundingDirection });
+  const actions = partialEnabled ? ["total", "partial", "cancel"] as const : ["total", "cancel"] as const;
 
   useEffect(() => {
     if (configuredRoundingStep || configuredRoundingDirection) {
@@ -6596,9 +6655,10 @@ function TableCloseMenu({
   }, [configuredRoundingStep, configuredRoundingDirection]);
 
   const runFocusedAction = () => {
-    if (focusedAction === 0) onCloseTotal(total, discount, undefined, people > 1 ? split.perPersonRounded : undefined);
-    if (focusedAction === 1) onPartialItems();
-    if (focusedAction === 2) onCancel();
+    const action = actions[focusedAction] || "total";
+    if (action === "total") closeTotal();
+    if (action === "partial") onPartialItems();
+    if (action === "cancel") onCancel();
   };
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -6611,10 +6671,10 @@ function TableCloseMenu({
     }
     if (event.key === "F1") {
       event.preventDefault();
-      onCloseTotal(total, discount, undefined, people > 1 ? split.perPersonRounded : undefined);
+      closeTotal();
       return;
     }
-    if (event.key === "F2") {
+    if (event.key === "F2" && partialEnabled) {
       event.preventDefault();
       onPartialItems();
       return;
@@ -6622,13 +6682,13 @@ function TableCloseMenu({
     if (event.key === "ArrowDown" || event.key === "ArrowRight") {
       if (target.tagName === "INPUT") return;
       event.preventDefault();
-      setFocusedAction((current) => (current + 1) % 3);
+      setFocusedAction((current) => (current + 1) % actions.length);
       return;
     }
     if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
       if (target.tagName === "INPUT") return;
       event.preventDefault();
-      setFocusedAction((current) => (current + 2) % 3);
+      setFocusedAction((current) => (current + actions.length - 1) % actions.length);
       return;
     }
     if (event.key === "Enter") {
@@ -6643,7 +6703,7 @@ function TableCloseMenu({
     };
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [focusedAction, total, discount, suspended]);
+  }, [focusedAction, total, discount, suspended, people, partialEnabled]);
 
   return (
     <div className="pdv-modal-backdrop">
@@ -6652,30 +6712,14 @@ function TableCloseMenu({
           <div>
             <span className="pdv-eyebrow">Fechar conta</span>
             <h1>{scopeLabel ? `${scopeLabel} · ` : "Mesa "}{String(table.number).padStart(3, "0")}</h1>
-            <p>Revise desconto ou acrescimo, divisao por pessoas e escolha como fechar.</p>
+            <p>Divida por pessoas se precisar. Desconto e acrescimo ficam na tela de pagamento.</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
         <div className="pdv-payment-summary">
-          <Metric title="Total bruto" value={money(subtotal)} />
-          <Metric title={discount < 0 ? "Acrescimo" : "Desconto"} value={money(Math.abs(discount))} />
-          <Metric title="Total final" value={money(total)} />
-        </div>
-        <div className="pdv-editor-grid pdv-close-discounts">
-          <label>
-            <span>Desconto em R$</span>
-            <input value={discountValue} onChange={(event) => {
-              setDiscountValue(event.target.value);
-              if (event.target.value) setDiscountPercent("");
-            }} placeholder="0,00 ou +10,00" />
-          </label>
-          <label>
-            <span>Desconto em %</span>
-            <input value={discountPercent} onChange={(event) => {
-              setDiscountPercent(event.target.value);
-              if (event.target.value) setDiscountValue("");
-            }} placeholder="0 ou +10" />
-          </label>
+          <Metric title="Total da conta" value={money(total)} />
+          <Metric title="Pessoas na divisao" value={String(people)} />
+          <Metric title="Valor por pessoa" value={money(split.perPersonRounded)} />
         </div>
         <div className="pdv-close-split">
           <div>
@@ -6694,9 +6738,9 @@ function TableCloseMenu({
           </div>
         </div>
         <div className="pdv-action-row">
-          <button className={`pdv-primary-button ${focusedAction === 0 ? "keyboard-focus" : ""}`} onClick={() => onCloseTotal(total, discount, undefined, people > 1 ? split.perPersonRounded : undefined)}>Fechar total <small>F1</small></button>
-          <button className={`pdv-ghost-button ${focusedAction === 1 ? "keyboard-focus" : ""}`} onClick={onPartialItems}>Fechar parcial <small>F2</small></button>
-          <button className={`pdv-danger-button ${focusedAction === 2 ? "keyboard-focus" : ""}`} onClick={onCancel}>Voltar <small>Esc</small></button>
+          <button className={`pdv-primary-button ${actions[focusedAction] === "total" ? "keyboard-focus" : ""}`} onClick={closeTotal}>Fechar total <small>F1</small></button>
+          {partialEnabled && <button className={`pdv-ghost-button ${actions[focusedAction] === "partial" ? "keyboard-focus" : ""}`} onClick={onPartialItems}>Fechar parcial <small>F2</small></button>}
+          <button className={`pdv-danger-button ${actions[focusedAction] === "cancel" ? "keyboard-focus" : ""}`} onClick={onCancel}>Voltar <small>Esc</small></button>
         </div>
       </section>
     </div>
@@ -8648,6 +8692,10 @@ function AdvancedScreen({ snapshot, clientMode = false, readOnly = false, client
           <label className="pdv-switch-line">
             <input type="checkbox" checked={Boolean(draft.allowOfflineTables)} onChange={(event) => changeDraft({ allowOfflineTables: event.target.checked })} />
             Permitir mesas offline no cliente
+          </label>
+          <label className="pdv-switch-line">
+            <input type="checkbox" checked={Boolean(draft.partialCloseEnabled)} onChange={(event) => changeDraft({ partialCloseEnabled: event.target.checked })} />
+            Mostrar Fechar parcial no fechamento da mesa (para separar contas, prefira transferir para uma submesa)
           </label>
         </div>}
 

@@ -389,6 +389,8 @@ export interface PdvSettings {
   allowOfflineTables?: boolean;
   /** Regra do servidor: oculta o botao + da grade de mesas em todos os computadores. */
   hideTableQuickValue?: boolean;
+  /** Mostra o botao Fechar parcial no fechamento da mesa (desligado por padrao). */
+  partialCloseEnabled?: boolean;
   productCardHeight?: number;
   productFontSize?: number;
   categoryCardHeight?: number;
