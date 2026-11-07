@@ -31,7 +31,7 @@ function saveTablePreferences(client: boolean, patch: Partial<LocalTablePreferen
 
 export function LocalQuickValueOption({ client }: { client: boolean }) {
   const preferences = useLocalTablePreferences(client);
-  return <label className="pdv-switch-line"><input type="checkbox" checked={preferences.hideQuickValue} onChange={(event) => saveTablePreferences(client, { hideQuickValue: event.target.checked })} />Ocultar o botão + na grade de mesas</label>;
+  return <label className="pdv-switch-line"><input type="checkbox" checked={preferences.hideQuickValue} onChange={(event) => saveTablePreferences(client, { hideQuickValue: event.target.checked })} />Ocultar o botão + só neste computador</label>;
 }
 
 export function LocalTableOptions({ client }: { client: boolean }) {

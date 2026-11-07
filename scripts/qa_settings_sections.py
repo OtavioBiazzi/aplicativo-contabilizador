@@ -43,11 +43,11 @@ with sync_playwright() as p:
  expect(c.get_by_role('combobox',name='Mesas por linha',exact=True)).to_be_enabled()
  c.get_by_role('combobox',name='Mesas por linha',exact=True).select_option('11')
  c.get_by_label('Altura das mesas',exact=True).fill('78')
- c.get_by_label('Ocultar o botão + na grade de mesas',exact=True).uncheck()
+ c.get_by_label('Ocultar o botão + só neste computador',exact=True).uncheck()
  c.get_by_role('tab',name='Lembretes',exact=True).click()
  expect(c.locator('.local-table-options')).to_be_visible()
  expect(c.get_by_role('combobox',name='Mesas por linha',exact=True)).to_have_count(0)
- expect(c.get_by_label('Ocultar o botão + na grade de mesas',exact=True)).to_have_count(0)
+ expect(c.get_by_label('Ocultar o botão + só neste computador',exact=True)).to_have_count(0)
  saved=c.evaluate("JSON.parse(localStorage.getItem('caixa.pdv.client-visual-settings.client'))")
  assert saved['tableColumns']==11 and saved['tableCardHeight']==78 and saved['gridColumns']==6
  c.get_by_role('tab',name='Visual',exact=True).click();c.get_by_label('Altura das mesas',exact=True).fill('96');c.get_by_role('tab',name='Lembretes',exact=True).click()

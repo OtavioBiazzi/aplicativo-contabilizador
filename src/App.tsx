@@ -3218,7 +3218,7 @@ export function App() {
         )}
       </main>
 
-      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary todayTotal={displaySummary.total} tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} />}
+      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary hideTotals={settings.privacy.hideHeaderTotal} todayTotal={displaySummary.total} tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} />}
 
       {importPreview && (
         <ImportPreviewModal

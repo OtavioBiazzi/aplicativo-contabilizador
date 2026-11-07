@@ -387,6 +387,8 @@ export interface PdvSettings {
   tableColumns?: number;
   productSortDirection?: "az" | "za";
   allowOfflineTables?: boolean;
+  /** Regra do servidor: oculta o botao + da grade de mesas em todos os computadores. */
+  hideTableQuickValue?: boolean;
   productCardHeight?: number;
   productFontSize?: number;
   categoryCardHeight?: number;

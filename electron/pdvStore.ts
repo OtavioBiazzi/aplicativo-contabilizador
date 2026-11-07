@@ -2718,6 +2718,7 @@ export class PdvStore {
       receiptGroupIdenticalItems: parseBooleanSetting(map.get("receipt_group_identical_items"), true),
       receiptUseColor: parseBooleanSetting(map.get("receipt_use_color"), false),
       frequentCategoryEnabled: parseBooleanSetting(map.get("frequent_category_enabled"), false),
+      hideTableQuickValue: parseBooleanSetting(map.get("hide_table_quick_value"), false),
       cashControlMode: map.get("cash_control_mode") === "manual" ? "manual" : "automatic"
     };
   }

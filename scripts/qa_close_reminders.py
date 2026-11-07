@@ -39,7 +39,7 @@ with sync_playwright() as p:
  expect(c.locator('.table-close-reminders')).to_have_count(0)
  module(c,'Mesas');c.get_by_role('tab',name='Lembretes',exact=True).click();options=c.locator('.local-table-options')
  options.locator('select').select_option('always');options.locator('input[placeholder^="Ex."]').fill('47+')
- c.get_by_role('tab',name='Visual',exact=True).click();c.get_by_label('Ocultar o botão + na grade de mesas',exact=True).check()
+ c.get_by_role('tab',name='Visual',exact=True).click();c.get_by_label('Ocultar o botão + só neste computador',exact=True).check()
  close_module(c);expect(c.locator('.pdv-quick-value-card')).to_have_count(0)
  assert s.locator('.pdv-quick-value-card').count()==1
  print('PASS defaults off; client local options editable without server customization permission; hide + is local')
@@ -71,8 +71,8 @@ with sync_playwright() as p:
  c.locator('.professional-shell').wait_for();expect(c.locator('.table-close-reminders article')).to_have_count(2)
  card(c,42).click();expect(c.locator('.table-close-reminders')).to_have_count(0)
  print('PASS exclusion 47+; named subtable; stacked reminders persist across reload and hide inside a table')
- c.locator('.pdv-cart-list').get_by_text('Manga QA',exact=False).click(button='right');c.get_by_role('button',name='Alterar peso',exact=True).click()
- edit=c.locator('.pdv-item-edit-modal');edit.get_by_label('Peso em gramas',exact=True).fill('3000');expect(edit).to_contain_text('30,00');edit.get_by_role('button',name='Confirmar',exact=True).click()
+ c.locator('.pdv-cart-list').get_by_text('Manga QA',exact=False).click(button='right');c.get_by_role('button',name='Alterar valor (peso)',exact=True).click()
+ edit=c.locator('.pdv-item-edit-modal');edit.get_by_label('Valor do item (R$)',exact=True).fill('30,00');expect(edit).to_contain_text('3000 g');edit.get_by_role('button',name='Confirmar',exact=True).click()
  c.locator('.pdv-cart-list').get_by_text('Manga QA',exact=False).click(button='right');c.get_by_role('button',name='Duplicar produto',exact=True).click()
  c.wait_for_function("document.querySelector('.pdv-cart-head')?.innerText.includes('7 item(ns)')")
  c.wait_for_timeout(300)
@@ -80,7 +80,7 @@ with sync_playwright() as p:
  assert len(items)==3 and len(set(i['id'] for i in items))==3
  assert sum(i['total'] for i in items)==90
  c.screenshot(path=str(out/'cart-weight-duplicate.png'))
- print('PASS change weight over 1kg recalculates; context duplication has distinct IDs; compact integer count')
+ print('PASS change value of weighed item recalculates weight over 1kg; context duplication has distinct IDs; compact integer count')
  # Cash-opening cancellation must release payment lock without losing drafted payments.
  s.evaluate("""async()=>{const {coffee}=JSON.parse(localStorage.getItem('qa.reminder.products'));await window.caixa.openPdvTable(43,1);await window.caixa.savePdvTableItems(43,[{id:crypto.randomUUID(),productId:coffee.id,productName:coffee.name,categoryName:'QA',quantity:1,unitPrice:30,discount:0,total:30}],[],[]);await window.caixa.savePdvSettings({cashControlMode:'manual'});} """)
  c.reload()

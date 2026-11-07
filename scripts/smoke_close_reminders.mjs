@@ -29,4 +29,8 @@ assert.equal((await table(4)).total+(await table(5)).total,24.3);
 await store.closeTable(3,[{id:crypto.randomUUID(),method:'Pix',amount:11.35}],0,'QA','close-adjusted');
 assert.equal((await table(3)).status,'Livre');
 assert.equal((await store.closeTable(3,[{id:crypto.randomUUID(),method:'Pix',amount:11.35}],0,'QA','close-adjusted')).total,11.35);
+await store.saveSettings({hideTableQuickValue:true});
+const reloaded=new PdvStore(directory);await reloaded.initialize();
+assert.equal(reloaded.getSettings().hideTableQuickValue,true,'Server rule for the + button must persist');
+assert.equal(store.getSettings().allowOfflineTables===undefined||typeof store.getSettings().allowOfflineTables==='boolean',true);
 console.log('PASS local reminder defaults/schedules/exceptions; transfer adjusted totals/weight/cents/stale save; durable idempotent close');

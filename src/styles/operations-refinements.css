@@ -37,3 +37,18 @@
   .history-payment-totals strong { font-size:14px; }
   .customer-catalog-filters { grid-template-columns:1fr 1fr; }
 }
+
+/* 0.4.16: campos com botões − e + próprios não mostram as setinhas nativas,
+   que ficavam por cima do texto e atrapalhavam o clique para digitar. */
+.pdv-cart-add-quantity input[type="number"],
+.pdv-inline-stepper input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.pdv-cart-add-quantity input[type="number"]::-webkit-inner-spin-button,
+.pdv-cart-add-quantity input[type="number"]::-webkit-outer-spin-button,
+.pdv-inline-stepper input[type="number"]::-webkit-inner-spin-button,
+.pdv-inline-stepper input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

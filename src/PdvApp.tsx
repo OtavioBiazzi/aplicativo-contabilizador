@@ -2122,7 +2122,7 @@ export function PdvApp({
                   <span>Tente outro número, nome de submesa ou filtro.</span>
                 </div>
               )}
-              {!tableSearch.trim() && !localTablePreferences.hideQuickValue && (
+              {!tableSearch.trim() && !localTablePreferences.hideQuickValue && !snapshot?.settings.hideTableQuickValue && (
                 <button className="pdv-table-card pdv-quick-value-card" type="button" onClick={() => setQuickValueModalOpen(true)}>
                   <strong>+</strong>
                 </button>
@@ -2992,7 +2992,7 @@ function PdvSaleScreen(props: {
               ? <button onClick={() => runItemAction("decompress", itemMenu.item)}>Descomprimir carrinho</button>
               : <button disabled={!canCompressCart} onClick={() => runItemAction("compress", itemMenu.item)}>Comprimir produtos repetidos</button>}
             <button onClick={() => runItemAction("duplicate", itemMenu.item)}>Duplicar produto</button>
-            <button disabled={Boolean(itemMenu.item.paidQuantity)} onClick={() => runItemAction("quantity", itemMenu.item)}>{isMeasuredCartItem(itemMenu.item) ? "Alterar peso" : "Alterar quantidade"}</button>
+            <button disabled={Boolean(itemMenu.item.paidQuantity)} onClick={() => runItemAction("quantity", itemMenu.item)}>{isMeasuredCartItem(itemMenu.item) ? "Alterar valor (peso)" : "Alterar quantidade"}</button>
             <button onClick={() => runItemAction("discount-value", itemMenu.item)}>Desconto em R$</button>
             <button onClick={() => runItemAction("discount-percent", itemMenu.item)}>Desconto em %</button>
             <button onClick={() => runItemAction("price", itemMenu.item)}>Alterar preco neste lancamento</button>
@@ -4915,12 +4915,24 @@ function ItemEditModal({
   const previewDiscount = calculateDiscountAdjustment(gross, discountValueText, discountPercentText);
   const previewTotal = Math.max(0, roundMoney(gross - previewDiscount));
 
-  const previewGrams = Math.max(0.01, parseBrazilianNumber(quantityText));
-  const quantityTotal = isMeasured ? Math.max(0, roundMoney(previewGrams * quantityPerGram * item.unitPrice - item.discount)) : item.total;
+  // Itens pesados sao alterados pelo valor final: o peso e calculado a partir dele.
+  const pricePerGram = quantityPerGram * item.unitPrice;
+  const editByValue = isMeasured && pricePerGram > 0;
+  const [valueText, setValueText] = useState(String(item.total.toFixed(2)).replace(".", ","));
+  const typedValue = Math.max(0.01, roundMoney(parseBrazilianNumber(valueText)));
+  const valueGrams = editByValue ? Math.max(1, Math.round((typedValue + (item.discount || 0)) / pricePerGram)) : 0;
+  const previewGrams = editByValue ? valueGrams : Math.max(0.01, parseBrazilianNumber(quantityText));
+  const quantityTotal = editByValue ? typedValue : isMeasured ? Math.max(0, roundMoney(previewGrams * quantityPerGram * item.unitPrice - item.discount)) : item.total;
   const confirm = () => {
     if (mode === "quantity") {
       const typedQuantity = Math.max(0.01, parseBrazilianNumber(quantityText));
-      if (isMeasured) {
+      if (editByValue) {
+        onConfirm({
+          quantity: roundQuantity(valueGrams * quantityPerGram),
+          measureLabel: `${valueGrams} g`,
+          total: typedValue
+        });
+      } else if (isMeasured) {
         onConfirm({
           quantity: roundQuantity(typedQuantity * quantityPerGram),
           measureLabel: `${typedQuantity} g`,
@@ -4950,7 +4962,7 @@ function ItemEditModal({
   };
 
   const title = mode === "quantity"
-    ? isMeasured ? "Alterar peso (g)" : "Alterar quantidade"
+    ? editByValue ? "Alterar valor do item pesado" : isMeasured ? "Alterar peso (g)" : "Alterar quantidade"
     : mode === "discount"
       ? "Desconto ou acrescimo do item"
       : mode === "price"
@@ -4970,7 +4982,14 @@ function ItemEditModal({
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
         <div className="pdv-editor-grid">
-          {mode === "quantity" && (
+          {mode === "quantity" && editByValue && (
+            <label>
+              <span>Valor do item (R$)</span>
+              <input autoFocus aria-label="Valor do item (R$)" inputMode="decimal" value={valueText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setValueText(event.target.value)} />
+              <small>Peso calculado: aproximadamente {valueGrams} g</small>
+            </label>
+          )}
+          {mode === "quantity" && !editByValue && (
             <label>
               <span>{isMeasured ? "Peso em gramas" : "Quantidade"}</span>
               <input autoFocus inputMode="decimal" value={quantityText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setQuantityText(event.target.value)} />
@@ -8253,6 +8272,10 @@ function AdvancedScreen({ snapshot, clientMode = false, readOnly = false, client
           <label className="pdv-switch-line">
             <input type="checkbox" checked={Boolean(draft.allowOfflineTables)} onChange={(event) => changeDraft({ allowOfflineTables: event.target.checked })} />
             Permitir mesas offline no cliente
+          </label>
+          <label className="pdv-switch-line">
+            <input type="checkbox" checked={Boolean(draft.hideTableQuickValue)} onChange={(event) => changeDraft({ hideTableQuickValue: event.target.checked })} />
+            Ocultar o botao + da grade de mesas em todos os computadores
           </label>
         </div>}
 
