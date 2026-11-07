@@ -62,7 +62,24 @@ with sync_playwright() as p:
     expect(s.locator('.pdv-cart-list article.multi-selected')).to_have_count(2)
     s.locator('.pdv-cart-list').press('Escape')
     expect(s.locator('.pdv-cart-list article.multi-selected')).to_have_count(0)
-    print('PASS ctrl toggles; Esc collapses the selection')
+    # Com varios selecionados, botao direito em item de fora tambem abre o menu de varios; Esc fecha menu e selecao.
+    row('Item A').first.click()
+    row('Item B').first.click(modifiers=['Shift'])
+    row('Item E').first.click(button='right')
+    expect(s.locator('.pdv-context-menu')).to_contain_text('2 itens selecionados')
+    s.keyboard.press('Escape')
+    expect(s.locator('.pdv-context-menu')).to_have_count(0)
+    expect(s.locator('.pdv-cart-list article.multi-selected')).to_have_count(0)
+    # Menu de um item: sem opcoes repetidas.
+    row('Item C').first.click(button='right')
+    single = s.locator('.pdv-context-menu')
+    expect(single.get_by_role('button', name='Desconto ou acréscimo', exact=True)).to_have_count(1)
+    expect(single.get_by_role('button', name='Desconto em R$', exact=True)).to_have_count(0)
+    expect(single.get_by_role('button', name='Colocar depois de outro item', exact=True)).to_have_count(0)
+    s.screenshot(path=str(out / 'phase4-single-menu.png'))
+    s.keyboard.press('Escape')
+    expect(single).to_have_count(0)
+    print('PASS ctrl toggles; Esc collapses selection and closes the menu; right-click anywhere opens the multi menu; single menu without duplicates')
 
     # Ctrl: A e C -> desconto 10% em cada.
     row('Item A').first.click()

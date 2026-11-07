@@ -349,3 +349,7 @@ body > .pdv-context-menu .pdv-batch-menu-hint { margin: 0; padding: 8px 12px 10p
 #root .pdv-batch-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px 14px; border-top: 1px solid #a9c8dc; background: #e6f1f8; }
 #root .pdv-batch-actions button { min-height: 46px; font-size: 15px; font-weight: 900; }
 #root .pdv-batch-row > :first-child { text-align: left; }
+body > .pdv-context-menu .pdv-batch-menu-title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body > .pdv-context-menu .pdv-batch-menu-item:disabled svg { opacity: 0.5; }
+body > .pdv-context-menu:has(.pdv-batch-menu-item) { min-width: 300px; }
+body > .pdv-context-menu .pdv-batch-menu-item { white-space: nowrap; }

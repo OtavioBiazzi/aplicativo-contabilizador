@@ -15,6 +15,12 @@ import {
   CheckCircle2,
   ClipboardList,
   Copy,
+  ArrowDown,
+  ArrowUp,
+  Hash,
+  MoveVertical,
+  Split,
+  Tag,
   ArrowRightLeft,
   MessageSquareText,
   Percent,
@@ -2689,7 +2695,7 @@ function PdvSaleScreen(props: {
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (itemMenu) { event.preventDefault(); setItemMenu(null); return; }
+      if (itemMenu) { event.preventDefault(); setItemMenu(null); if (itemMenu.multi) collapseSelection(); return; }
       if (transferItem) { event.preventDefault(); setTransferItem(null); return; }
       if (transferListMode) { event.preventDefault(); setTransferListMode(null); return; }
       if (editingItem) { event.preventDefault(); setEditingItem(null); return; }
@@ -2697,11 +2703,12 @@ function PdvSaleScreen(props: {
       if (movingItem) { event.preventDefault(); setMovingItem(null); return; }
       if (directDiscountOpen) { event.preventDefault(); setDirectDiscountOpen(false); return; }
       if (productLookupOpen) { event.preventDefault(); setProductLookupOpen(false); return; }
-      if (subtableManagerOpen) { event.preventDefault(); setSubtableManagerOpen(false); }
+      if (subtableManagerOpen) { event.preventDefault(); setSubtableManagerOpen(false); return; }
+      if (multiSelectedItems.length && !document.querySelector(".pdv-modal-backdrop")) { event.preventDefault(); collapseSelection(); }
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [itemMenu, transferItem, transferListMode, editingItem, splitItem, movingItem, directDiscountOpen, productLookupOpen, subtableManagerOpen]);
+  }, [itemMenu, transferItem, transferListMode, editingItem, splitItem, movingItem, directDiscountOpen, productLookupOpen, subtableManagerOpen, props.selectedItemIds, activeItemId]);
 
   useEffect(() => {
     window.localStorage.setItem("caixa.pdv.cart-density-v2", cartDensity);
@@ -3036,7 +3043,7 @@ function PdvSaleScreen(props: {
               return;
             }
             event.preventDefault();
-            setItemMenu({ x: event.clientX, y: event.clientY, item: activeItem });
+            setItemMenu({ x: event.clientX, y: event.clientY, item: activeItem, multi: multiSelectedItems.length > 1 });
           }}
           onDoubleClick={(event) => {
             if (event.target === event.currentTarget && activeItem) {
@@ -3047,6 +3054,7 @@ function PdvSaleScreen(props: {
             if (event.key === "Escape" && multiSelectedItems.length) {
               event.preventDefault();
               event.stopPropagation();
+              setItemMenu(null);
               collapseSelection();
               return;
             }
@@ -3074,7 +3082,7 @@ function PdvSaleScreen(props: {
               onClick={(event) => clickCartItem(event, item)}
               onContextMenu={(event) => {
                 event.preventDefault();
-                if (multiSelectedItems.length > 1 && selectedIdSet.has(item.id)) {
+                if (multiSelectedItems.length > 1) {
                   setItemMenu({ x: event.clientX, y: event.clientY, item, multi: true });
                   return;
                 }
@@ -3109,25 +3117,27 @@ function PdvSaleScreen(props: {
           </ContextMenu>
         )}
         {itemMenu && !itemMenu.multi && (
-          <ContextMenu x={itemMenu.x} y={itemMenu.y} onClose={() => setItemMenu(null)}>
+          <ContextMenu x={itemMenu.x} y={itemMenu.y} label="Ações do produto" onClose={() => setItemMenu(null)}>
+            <div className="pdv-context-menu-title pdv-batch-menu-title"><strong>{itemMenu.item.productName}</strong><span>{money(props.activeTableNumber ? unpaidItemTotal(itemMenu.item) : itemMenu.item.total)}</span></div>
+            <button className="pdv-batch-menu-item" disabled={Boolean(itemMenu.item.paidQuantity)} onClick={() => runItemAction("quantity", itemMenu.item)}><Hash size={15} /> {isMeasuredCartItem(itemMenu.item) ? "Alterar valor (peso)" : "Alterar quantidade"}</button>
+            <button className="pdv-batch-menu-item" onClick={() => runItemAction("discount-value", itemMenu.item)}><Percent size={15} /> Desconto ou acréscimo</button>
+            <button className="pdv-batch-menu-item" onClick={() => runItemAction("price", itemMenu.item)}><Tag size={15} /> Alterar preço neste lançamento</button>
+            <div className="pdv-context-menu-separator" role="separator" />
+            <button className="pdv-batch-menu-item" onClick={() => runItemAction("duplicate", itemMenu.item)}><Copy size={15} /> Duplicar produto</button>
+            <button className="pdv-batch-menu-item" onClick={() => runItemAction("note", itemMenu.item)}><MessageSquareText size={15} /> Adicionar observação</button>
+            <button className="pdv-batch-menu-item" disabled={Boolean(itemMenu.item.paidQuantity)} onClick={() => runItemAction("split", itemMenu.item)}><Split size={15} /> Dividir item entre pessoas</button>
+            {props.setCurrentSubtable && <button className="pdv-batch-menu-item" onClick={() => runItemAction("transfer-table", itemMenu.item)}><ArrowRightLeft size={15} /> Transferir para outra mesa ou submesa</button>}
+            <div className="pdv-context-menu-separator" role="separator" />
+            <button className="pdv-batch-menu-item" onClick={() => runItemAction("up", itemMenu.item)}><ArrowUp size={15} /> Mover para cima</button>
+            <button className="pdv-batch-menu-item" onClick={() => runItemAction("down", itemMenu.item)}><ArrowDown size={15} /> Mover para baixo</button>
+            <button className="pdv-batch-menu-item" onClick={() => runItemAction("before", itemMenu.item)}><MoveVertical size={15} /> Mover para outra posição</button>
             {cartCompressed
-              ? <button onClick={() => runItemAction("decompress", itemMenu.item)}>Descomprimir carrinho</button>
-              : <button disabled={!canCompressCart} onClick={() => runItemAction("compress", itemMenu.item)}>Comprimir produtos repetidos</button>}
-            <button onClick={() => runItemAction("duplicate", itemMenu.item)}>Duplicar produto</button>
-            <button disabled={Boolean(itemMenu.item.paidQuantity)} onClick={() => runItemAction("quantity", itemMenu.item)}>{isMeasuredCartItem(itemMenu.item) ? "Alterar valor (peso)" : "Alterar quantidade"}</button>
-            <button onClick={() => runItemAction("discount-value", itemMenu.item)}>Desconto em R$</button>
-            <button onClick={() => runItemAction("discount-percent", itemMenu.item)}>Desconto em %</button>
-            <button onClick={() => runItemAction("price", itemMenu.item)}>Alterar preco neste lancamento</button>
-            <button onClick={() => runItemAction("note", itemMenu.item)}>Adicionar observacao</button>
-            <button disabled={Boolean(itemMenu.item.paidQuantity)} onClick={() => runItemAction("split", itemMenu.item)}>Dividir item entre pessoas</button>
-            {props.setCurrentSubtable && <button onClick={() => runItemAction("transfer-table", itemMenu.item)}>Transferir para outra mesa</button>}
-            {props.setCurrentSubtable && <button onClick={() => runItemAction("transfer-subtable", itemMenu.item)}>Transferir para submesa</button>}
-            <button onClick={() => runItemAction("up", itemMenu.item)}>Mover para cima</button>
-            <button onClick={() => runItemAction("down", itemMenu.item)}>Mover para baixo</button>
-            <button onClick={() => runItemAction("before", itemMenu.item)}>Colocar antes de outro item</button>
-            <button onClick={() => runItemAction("after", itemMenu.item)}>Colocar depois de outro item</button>
-            <button disabled={!visibleCart.length} onClick={() => runItemAction("receipt", itemMenu.item)}><ReceiptText size={14} /> Exibir recibo da conta</button>
-            <button className="danger" onClick={() => runItemAction("remove", itemMenu.item)}>Remover/cancelar produto</button>
+              ? <button className="pdv-batch-menu-item" onClick={() => runItemAction("decompress", itemMenu.item)}><Layers3 size={15} /> Descomprimir carrinho</button>
+              : <button className="pdv-batch-menu-item" disabled={!canCompressCart} onClick={() => runItemAction("compress", itemMenu.item)}><Layers3 size={15} /> Juntar produtos repetidos</button>}
+            <button className="pdv-batch-menu-item" disabled={!visibleCart.length} onClick={() => runItemAction("receipt", itemMenu.item)}><ReceiptText size={15} /> Exibir recibo da conta</button>
+            <div className="pdv-context-menu-separator" role="separator" />
+            <button className="pdv-batch-menu-item danger" onClick={() => runItemAction("remove", itemMenu.item)}><Trash2 size={15} /> Remover/cancelar produto</button>
+            {canMultiSelect && <p className="pdv-batch-menu-hint">Shift ou Ctrl + clique seleciona vários itens.</p>}
           </ContextMenu>
         )}
         {!props.activeTableNumber && (
@@ -3459,8 +3469,8 @@ function PdvSaleScreen(props: {
             after={movingItem.after}
             cart={props.cart}
             onCancel={() => setMovingItem(null)}
-            onConfirm={(referenceIndex) => {
-              updateVisibleCart((current) => moveCartItemNear(current, movingItem.item.id, referenceIndex, movingItem.after));
+            onConfirm={(referenceIndex, after) => {
+              updateVisibleCart((current) => moveCartItemNear(current, movingItem.item.id, referenceIndex, after));
               setMovingItem(null);
             }}
           />
@@ -5181,7 +5191,7 @@ function MoveItemModal({
   cart: PdvCartItem[];
   after: boolean;
   onCancel: () => void;
-  onConfirm: (referenceIndex: number) => void;
+  onConfirm: (referenceIndex: number, after: boolean) => void;
 }) {
   const currentIndex = cart.findIndex((row) => row.id === item.id);
   const candidates = cart
@@ -5189,13 +5199,14 @@ function MoveItemModal({
     .filter((entry) => entry.row.id !== item.id);
   const [referenceId, setReferenceId] = useState(candidates[0]?.row.id || "");
   const [notice, setNotice] = useState("");
+  const [placeAfter, setPlaceAfter] = useState(after);
   const confirm = () => {
     const referenceIndex = cart.findIndex((row) => row.id === referenceId);
     if (referenceIndex < 0) {
       setNotice("Escolha um item de referencia.");
       return;
     }
-    onConfirm(referenceIndex);
+    onConfirm(referenceIndex, placeAfter);
   };
   useModalConfirmShortcut(confirm, onCancel, !notice);
 
@@ -5205,12 +5216,19 @@ function MoveItemModal({
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Organizar conta</span>
-            <h1>{after ? "Colocar depois" : "Colocar antes"}</h1>
+            <h1>Mover para outra posição</h1>
             <p>{currentIndex >= 0 ? `${currentIndex + 1}. ` : ""}{item.productName}</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
         </div>
         <div className="pdv-editor-grid">
+          <label>
+            <span>Posição</span>
+            <select aria-label="Posição" value={placeAfter ? "after" : "before"} onChange={(event) => setPlaceAfter(event.target.value === "after")}>
+              <option value="before">Antes de</option>
+              <option value="after">Depois de</option>
+            </select>
+          </label>
           <label className="pdv-wide-field">
             <span>Item de referencia</span>
             <select value={referenceId} onChange={(event) => setReferenceId(event.target.value)}>
