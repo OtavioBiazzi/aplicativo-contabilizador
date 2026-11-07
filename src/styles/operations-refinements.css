@@ -54,7 +54,17 @@
 }
 
 /* 0.4.16: o menu do botao direito e renderizado no body e precisa ficar acima das janelas internas. */
-body > .pdv-context-menu { z-index: 2000; }
+body > .pdv-context-menu { z-index: 2000; min-width: 270px; max-width: min(340px, calc(100vw - 16px)); }
 .pdv-context-menu button:disabled { opacity: 0.45; cursor: not-allowed; }
 .pdv-context-menu button:disabled:hover { background: transparent; }
 .pdv-context-menu .pdv-context-menu-title { padding: 8px 12px; border-bottom: 1px solid #d8e8f2; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #4d6a80; }
+
+/* 0.4.16: selecao multipla no carrinho. */
+.pdv-cart-list article { user-select: none; }
+.pdv-cart-list article.multi-selected { box-shadow: inset 3px 0 0 var(--accent, #0565b7); }
+.pdv-batch-modal { width: min(520px, calc(100vw - 28px)); }
+.pdv-batch-list { margin: 8px 0; padding: 0; list-style: none; max-height: 220px; overflow-y: auto; border: 1px solid var(--line); }
+.pdv-batch-list li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.pdv-batch-list li:last-child { border-bottom: 0; }
+.pdv-batch-field { display: grid; gap: 6px; margin: 8px 0; }
+.pdv-batch-field small { color: var(--muted); }

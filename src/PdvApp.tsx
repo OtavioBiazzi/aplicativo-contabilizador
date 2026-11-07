@@ -2598,7 +2598,11 @@ function PdvSaleScreen(props: {
     ? compressedCart
     : visibleCart.map((item) => ({ ...item, compressedMemberIds: [item.id], compressedLineCount: 1 }));
   const canCompressCart = compressedCart.length < visibleCart.length;
-  const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: CartDisplayItem } | null>(null);
+  const [itemMenu, setItemMenu] = useState<{ x: number; y: number; item: CartDisplayItem; multi?: boolean } | null>(null);
+  // Selecao multipla (Shift = intervalo, Ctrl = adicionar/remover). O primeiro id continua sendo o item ativo.
+  const selectionAnchor = useRef("");
+  const [batchRequest, setBatchRequest] = useState<{ kind: "remove" | "discount" | "note"; items: PdvCartItem[] } | null>(null);
+  const [transferBatchIds, setTransferBatchIds] = useState<string[]>([]);
   const [transferItem, setTransferItem] = useState<PdvCartItem | null>(null);
   const [transferListMode, setTransferListMode] = useState<"items" | "accounts" | null>(null);
   const [transferAllOnOpen, setTransferAllOnOpen] = useState(false);
@@ -2730,6 +2734,15 @@ function PdvSaleScreen(props: {
       return;
     }
     const addedId = nextIds.find((id) => !previousIds.includes(id));
+    const currentIds = props.selectedItemIds || [];
+    if (currentIds.length > 1 && !addedId) {
+      const valid = currentIds.filter((id) => nextIds.includes(id));
+      if (valid.length > 1) {
+        if (valid.length !== currentIds.length) props.setSelectedItemIds(valid);
+        previousVisibleItemIds.current = nextIds;
+        return;
+      }
+    }
     if (!selectedId) {
       props.setSelectedItemIds([addedId || visibleCart[visibleCart.length - 1].id]);
     } else if (!nextIds.includes(selectedId)) {
@@ -2768,6 +2781,59 @@ function PdvSaleScreen(props: {
     props.setSelectedItemIds(fallback ? [fallback.id] : []);
   };
 
+  const selectedIdSet = new Set(props.selectedItemIds || []);
+  const multiSelectedItems = (props.selectedItemIds?.length || 0) > 1 ? visibleCart.filter((item) => selectedIdSet.has(item.id)) : [];
+  const canMultiSelect = Boolean(props.setSelectedItemIds) && !cartCompressed;
+  // Itens ja pagos nao entram em acoes em lote.
+  const selectableForBatch = (item: PdvCartItem) => !props.activeTableNumber || unpaidQuantity(item) > 0.009;
+  const clickCartItem = (event: React.MouseEvent, item: CartDisplayItem) => {
+    if (!props.setSelectedItemIds) return;
+    if (canMultiSelect && event.shiftKey && selectionAnchor.current) {
+      const ids = displayedCart.map((row) => row.id);
+      const start = ids.indexOf(selectionAnchor.current);
+      const end = ids.indexOf(item.id);
+      if (start >= 0 && end >= 0) {
+        const [first, last] = start <= end ? [start, end] : [end, start];
+        const range = displayedCart.slice(first, last + 1).filter(selectableForBatch).map((row) => row.id);
+        props.setSelectedItemIds([item.id, ...range.filter((id) => id !== item.id)]);
+        return;
+      }
+    }
+    if (canMultiSelect && (event.ctrlKey || event.metaKey)) {
+      const current = (props.selectedItemIds || []).filter((id) => visibleCart.some((row) => row.id === id && selectableForBatch(row)));
+      selectionAnchor.current = item.id;
+      if (current.includes(item.id)) {
+        const next = current.filter((id) => id !== item.id);
+        props.setSelectedItemIds(next.length ? next : [item.id]);
+      } else if (selectableForBatch(item)) {
+        props.setSelectedItemIds([item.id, ...current]);
+      }
+      return;
+    }
+    selectionAnchor.current = item.id;
+    props.setSelectedItemIds([item.id]);
+  };
+  const collapseSelection = () => {
+    if (multiSelectedItems.length && props.setSelectedItemIds) props.setSelectedItemIds([activeItemId || multiSelectedItems[0].id]);
+  };
+  const runBatchAction = (action: "duplicate" | "remove" | "discount" | "note" | "transfer") => {
+    setItemMenu(null);
+    const items = multiSelectedItems.filter(selectableForBatch);
+    if (!items.length) return;
+    if (action === "duplicate") {
+      const copies = items.map((source) => ({ ...source, id: crypto.randomUUID(), paidQuantity: 0, complements: source.complements?.map((complement) => ({ ...complement })) }));
+      updateVisibleCart((current) => [...current, ...copies]);
+      return;
+    }
+    if (action === "transfer") {
+      setTransferBatchIds(items.map((item) => item.id));
+      setTransferAllOnOpen(false);
+      setTransferListMode("items");
+      return;
+    }
+    setBatchRequest({ kind: action, items });
+  };
+
   const repeatLastItem = () => {
     const last = visibleCart[visibleCart.length - 1];
     if (!last) {
@@ -2778,6 +2844,7 @@ function PdvSaleScreen(props: {
   const runItemAction = async (action: string, item: PdvCartItem) => {
     setItemMenu(null);
     if (action === "compress") {
+      collapseSelection();
       setCartCompressed(true);
       props.onCompressionChange?.(true);
       return;
@@ -2948,7 +3015,16 @@ function PdvSaleScreen(props: {
               runItemAction("remove", activeItem);
             }
           }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) collapseSelection();
+          }}
           onKeyDown={(event) => {
+            if (event.key === "Escape" && multiSelectedItems.length) {
+              event.preventDefault();
+              event.stopPropagation();
+              collapseSelection();
+              return;
+            }
             if (event.key === "ArrowUp") {
               event.preventDefault();
               selectCartItemByDirection(-1);
@@ -2967,10 +3043,17 @@ function PdvSaleScreen(props: {
               key={item.id}
               data-cart-item-id={item.id}
               title={[item.productName, item.subtableName, item.note, unpaidQuantity(item) <= 0.009 ? "Pago" : item.paidQuantity ? `Restam ${formatQuantity(unpaidQuantity(item))}` : "", adjustedItemOriginalTotal(item) !== null ? `Original ${money(adjustedItemOriginalTotal(item)!)}; final ${money(item.total)}` : ""].filter(Boolean).join(" | ")}
-              className={`${activeItemId === item.id ? "selected" : ""} ${unpaidQuantity(item) <= 0.009 ? "paid" : ""} ${item.compressedLineCount > 1 ? "compressed" : ""}`.trim()}
-              onClick={() => props.setSelectedItemIds?.([item.id])}
+              className={`${activeItemId === item.id || (multiSelectedItems.length > 0 && selectedIdSet.has(item.id)) ? "selected" : ""} ${multiSelectedItems.length > 0 && selectedIdSet.has(item.id) ? "multi-selected" : ""} ${unpaidQuantity(item) <= 0.009 ? "paid" : ""} ${item.compressedLineCount > 1 ? "compressed" : ""}`.trim()}
+              aria-selected={selectedIdSet.has(item.id) || activeItemId === item.id}
+              onMouseDown={(event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) event.preventDefault(); }}
+              onClick={(event) => clickCartItem(event, item)}
               onContextMenu={(event) => {
                 event.preventDefault();
+                if (multiSelectedItems.length > 1 && selectedIdSet.has(item.id)) {
+                  setItemMenu({ x: event.clientX, y: event.clientY, item, multi: true });
+                  return;
+                }
+                selectionAnchor.current = item.id;
                 props.setSelectedItemIds?.([item.id]);
                 setItemMenu({ x: event.clientX, y: event.clientY, item });
               }}
@@ -2987,7 +3070,21 @@ function PdvSaleScreen(props: {
           {!visibleCart.length && <div className="pdv-empty">Nenhum produto lancado nesta conta.</div>}
         </div>
         <div className="pdv-resize-handle pdv-resize-cart-height" role="separator" aria-label="Redimensionar altura da lista do carrinho" title="Arraste para aumentar ou diminuir a lista do carrinho" onPointerDown={(event) => startResize("cart-height", event)} />
-        {itemMenu && (
+        {itemMenu?.multi && (
+          <ContextMenu x={itemMenu.x} y={itemMenu.y} label="Ações dos itens selecionados" onClose={() => setItemMenu(null)}>
+            <div className="pdv-context-menu-title">{multiSelectedItems.length} itens selecionados</div>
+            <button onClick={() => runBatchAction("duplicate")}>Duplicar os {multiSelectedItems.length} produtos</button>
+            <button onClick={() => runBatchAction("discount")}>Desconto em % em cada item</button>
+            <button onClick={() => runBatchAction("note")}>Adicionar observacao em todos</button>
+            {props.activeTableNumber && props.transferPdvTableItems && <button onClick={() => runBatchAction("transfer")}>Transferir para outra mesa ou submesa</button>}
+            <button disabled={!visibleCart.length} onClick={() => runItemAction("receipt", itemMenu.item)}><ReceiptText size={14} /> Exibir recibo da conta</button>
+            {["Alterar quantidade ou valor", "Desconto em R$", "Alterar preco neste lancamento", "Dividir item entre pessoas", "Mover / reordenar"].map((label) => (
+              <button key={label} disabled title="Disponível para um item por vez. Clique em um item só para usar.">{label}</button>
+            ))}
+            <button className="danger" onClick={() => runBatchAction("remove")}>Remover/cancelar os {multiSelectedItems.length} produtos</button>
+          </ContextMenu>
+        )}
+        {itemMenu && !itemMenu.multi && (
           <ContextMenu x={itemMenu.x} y={itemMenu.y} onClose={() => setItemMenu(null)}>
             {cartCompressed
               ? <button onClick={() => runItemAction("decompress", itemMenu.item)}>Descomprimir carrinho</button>
@@ -3099,11 +3196,13 @@ function PdvSaleScreen(props: {
             savePdvTableItems={props.savePdvTableItems}
             transferPdvTableItems={props.transferPdvTableItems}
             selectAllInitially={transferAllOnOpen}
+            initialSelectedIds={transferBatchIds}
             preferredTargetSubtable={transferPreferredSubtable}
             onCancel={() => {
               setTransferListMode(null);
               setTransferAllOnOpen(false);
               setTransferPreferredSubtable("");
+              setTransferBatchIds([]);
             }}
             onTransferred={(nextSource, targetTableNumber, targetSubtable, emptiedSourceSubtables) => {
               props.setCart(nextSource);
@@ -3114,6 +3213,7 @@ function PdvSaleScreen(props: {
               setTransferListMode(null);
               setTransferAllOnOpen(false);
               setTransferPreferredSubtable("");
+              setTransferBatchIds([]);
               void props.onOpenTransferredTable?.(targetTableNumber, targetSubtable);
             }}
           />
@@ -3261,6 +3361,25 @@ function PdvSaleScreen(props: {
               updateVisibleCart((current) => current.flatMap((item) => item.id === splitItem.id ? insertedParts : [item]));
               props.setSelectedItemIds?.([parts[0].id]);
               setSplitItem(null);
+            }}
+          />
+        )}
+        {batchRequest && (
+          <BatchItemsModal
+            kind={batchRequest.kind}
+            items={batchRequest.items}
+            onCancel={() => setBatchRequest(null)}
+            onConfirm={(text) => {
+              const ids = new Set(batchRequest.items.map((item) => item.id));
+              if (batchRequest.kind === "remove") {
+                props.setSelectedItemIds?.([]);
+                props.setCart((current) => current.filter((row) => !ids.has(row.id)));
+              } else if (batchRequest.kind === "discount") {
+                updateVisibleCart((current) => batchRequest.items.reduce((rows, item) => updateCartItem(rows, item.id, percentDiscountPatch(item, text)), current));
+              } else {
+                updateVisibleCart((current) => current.map((row) => ids.has(row.id) ? { ...row, note: row.note ? `${row.note} | ${text}` : text } : row));
+              }
+              setBatchRequest(null);
             }}
           />
         )}
@@ -4887,6 +5006,61 @@ function RenameSubtableModal({
   );
 }
 
+/** Desconto em % igual ao da edicao individual do item. */
+function percentDiscountPatch(item: PdvCartItem, percentText: string): Partial<Pick<PdvCartItem, "discount" | "total">> {
+  const isMeasured = /\bg\s*$/i.test(item.measureLabel || "");
+  const gross = isMeasured ? roundMoney(item.total + (item.discount || 0)) : roundMoney(item.quantity * item.unitPrice);
+  const discount = calculateDiscountAdjustment(gross, "", percentText);
+  const total = Math.max(0, roundMoney(gross - discount));
+  return discount < 0 ? { discount: 0, total } : isMeasured ? { discount, total } : { discount };
+}
+
+function BatchItemsModal({ kind, items, onCancel, onConfirm }: { kind: "remove" | "discount" | "note"; items: PdvCartItem[]; onCancel: () => void; onConfirm: (text: string) => void }) {
+  const [text, setText] = useState("");
+  const valid = kind === "remove" || (kind === "discount" ? parseBrazilianNumber(text) !== 0 && Number.isFinite(parseBrazilianNumber(text)) : text.trim().length > 0);
+  const confirm = () => { if (valid) onConfirm(kind === "note" ? text.trim() : text); };
+  useModalConfirmShortcut(confirm, onCancel);
+  const before = roundMoney(items.reduce((sum, item) => sum + item.total, 0));
+  const after = kind === "discount" && valid ? roundMoney(items.reduce((sum, item) => {
+    const patch = percentDiscountPatch(item, text);
+    return sum + (patch.total ?? Math.max(0, roundMoney(item.quantity * item.unitPrice - (patch.discount || 0))));
+  }, 0)) : before;
+  const title = kind === "remove" ? `Remover ${items.length} produtos da conta?` : kind === "discount" ? `Desconto em % em ${items.length} itens` : `Observacao em ${items.length} itens`;
+  return (
+    <div className="pdv-modal-backdrop">
+      <section className="pdv-payment-modal pdv-item-edit-modal pdv-batch-modal" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="pdv-section-head">
+          <div>
+            <span className="pdv-eyebrow">Itens selecionados</span>
+            <h1>{title}</h1>
+          </div>
+          <button className="pdv-icon-button" aria-label="Fechar" onClick={onCancel}><X size={18} /></button>
+        </div>
+        <ul className="pdv-batch-list">
+          {items.map((item) => <li key={item.id}><span>{item.productName}{item.subtableName ? ` · ${item.subtableName}` : ""}</span><b>{money(item.total)}</b></li>)}
+        </ul>
+        {kind === "discount" && (
+          <label className="pdv-batch-field">
+            <span>Desconto em % (use + para acrescimo)</span>
+            <input autoFocus aria-label="Desconto em %" inputMode="decimal" value={text} onChange={(event) => setText(event.target.value)} placeholder="Ex.: 10" />
+            <small>Total dos itens: {money(before)} → {money(after)}</small>
+          </label>
+        )}
+        {kind === "note" && (
+          <label className="pdv-batch-field">
+            <span>Observacao (somada as que ja existem)</span>
+            <input autoFocus aria-label="Observacao dos itens" value={text} onChange={(event) => setText(event.target.value)} placeholder="Ex.: sem cebola" />
+          </label>
+        )}
+        <div className="pdv-action-row">
+          <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
+          <button className={kind === "remove" ? "pdv-danger-button" : "pdv-primary-button"} disabled={!valid} onClick={confirm}>{kind === "remove" ? "Remover todos" : "Aplicar em todos"}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function ItemEditModal({
   item,
   mode,
@@ -5067,10 +5241,12 @@ function TransferListModal({
   savePdvTableItems,
   transferPdvTableItems,
   selectAllInitially = false,
+  initialSelectedIds = [],
   preferredTargetSubtable = "",
   onCancel,
   onTransferred
 }: {
+  initialSelectedIds?: string[];
   cart: PdvCartItem[];
   tables: PdvOpenTable[];
   sourceTableNumber: number;
@@ -5091,7 +5267,7 @@ function TransferListModal({
   const initialTargetSubtables = [...new Set([...(initialTargetTable?.subtables || []), ...(initialTargetTable?.items.map((row) => row.subtableName || "").filter(Boolean) || [])])];
   const startsWithTemporarySubtable = sourceTableNumber > 0 && initialTargetTableNumber === sourceTableNumber && !preferredTargetSubtable;
   const initialTargetSubtable = preferredTargetSubtable || (startsWithTemporarySubtable ? temporarySubtableName(initialTargetSubtables) : "");
-  const [selectedIds, setSelectedIds] = useState<string[]>(() => selectAllInitially ? transferableCart.map((item) => item.id) : []);
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => selectAllInitially ? transferableCart.map((item) => item.id) : transferableCart.filter((item) => initialSelectedIds.includes(item.id)).map((item) => item.id));
   const [quantities, setQuantities] = useState<Record<string, string>>(() => Object.fromEntries(transferableCart.map((item) => [item.id, String(unpaidQuantity(item)).replace(".", ",")])));
   const [targetTableNumber, setTargetTableNumber] = useState(initialTargetTableNumber);
   const [targetSubtable, setTargetSubtable] = useState(initialTargetSubtable);
