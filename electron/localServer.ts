@@ -14,6 +14,8 @@ import type { PdvSupplier, PdvFinancialLookup } from "../src/shared/pdvTypes.js"
 
 interface LocalServerOptions {
   appVersion: string;
+  /** Um computador confirmou a retirada da comanda; repassar para todos. */
+  acknowledgeCloseNotice: (id: string) => void;
   permissions: ServerPermissions;
   getSettings: () => Promise<AppSettings>;
   saveSettings: (settings: AppSettings) => Promise<AppSettings>;
@@ -228,6 +230,13 @@ export class LocalServer {
 
     app.get("/api/pdv/snapshot", this.authorize("view"), async (request, response) => {
       response.json(await this.options.getPdvSnapshot(normalizeEntryLimit(request.query.salesLimit)));
+    });
+
+    app.post("/api/pdv/close-notices/:id/ack", this.authorize("view"), (request, response) => {
+      const id = String(request.params.id || "");
+      if (!id || id.length > 200) { response.status(400).json({ error: "Lembrete invalido." }); return; }
+      this.options.acknowledgeCloseNotice(id);
+      response.json({ ok: true });
     });
 
     app.post("/api/pdv/cash-shift/open", this.authorize("create"), async (request, response) => {

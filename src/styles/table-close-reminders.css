@@ -1,15 +1,78 @@
-.table-close-reminders {
+/* 0.4.16: dock unico no canto inferior direito. Avisos temporarios ficam em cima,
+   lembretes de comanda embaixo; os dois usam o mesmo cartao e nunca se sobrepoem. */
+.notification-dock {
   position: fixed;
   right: 8px;
   bottom: 8px;
   z-index: 300;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 110px);
+  pointer-events: none;
+}
+.notification-dock > * { pointer-events: auto; }
+.notification-dock .toast {
+  position: static;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  width: min(300px, calc(100vw - 16px));
+  min-height: 40px;
+  padding: 6px 8px;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--muted);
+  border-radius: 0;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 2px 6px #0004;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.notification-dock .toast.success { border-left-color: var(--accent); }
+.notification-dock .toast.error { border-left-color: var(--danger); }
+.notification-dock .toast svg { flex: 0 0 auto; }
+.table-close-reminders {
+  display: flex;
+  flex-direction: column;
   gap: 4px;
   width: min(210px, calc(100vw - 16px));
-  max-height: calc(100dvh - 110px);
+  min-height: 0;
+}
+.table-close-reminders .table-close-reminders-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.table-close-reminders.is-collapsed .table-close-reminders-head { color: var(--text); border-left: 2px solid var(--text); box-shadow: 0 2px 6px #0004; min-height: 30px; }
+.table-close-reminders .table-close-reminders-head.has-news { animation: reminder-news 0.9s ease-out 1; }
+@keyframes reminder-news { 0% { background: color-mix(in srgb, var(--accent) 45%, var(--panel-2)); } 100% { background: var(--panel-2); } }
+.table-close-reminders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Limite configuravel: depois dele a pilha para de crescer e rola. */
+  max-height: calc(var(--reminder-limit, 4) * 52px - 4px);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+@media (max-height: 700px) {
+  .table-close-reminders-list { max-height: calc(min(var(--reminder-limit, 4), 3) * 52px - 4px); }
 }
 .table-close-reminders article {
   display: flex;
@@ -29,7 +92,7 @@
 .table-close-reminders small { font-size: 10px; color: var(--muted); }
 .table-close-reminders strong { font-size: 14px; line-height: 1.15; }
 .table-close-reminders span { font-size: 11px; overflow-wrap: anywhere; }
-.table-close-reminders button { flex: 0 0 32px; min-height: 26px; padding: 3px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-weight: 800; border-radius: 0; cursor: pointer; }
+.table-close-reminders article button { flex: 0 0 32px; min-height: 26px; padding: 3px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-weight: 800; border-radius: 0; cursor: pointer; }
 .table-close-reminders button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 /* A modal or context menu must always have the available interaction area. */
 body:has(.pdv-modal-backdrop, .module-window, .managerial-menu, .open-tables-backdrop, .pdv-context-menu) .table-close-reminders { visibility: hidden; }

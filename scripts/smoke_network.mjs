@@ -34,8 +34,10 @@ let serverStateChanges = 0;
 let resolveNextServerStateChange = null;
 
 const integratedEntries = async () => pdvSalesToLedgerEntries((await pdvStore.getSnapshot()).recentSales);
+const acknowledgedNotices = [];
 const server = new LocalServer({
   appVersion,
+  acknowledgeCloseNotice: (id) => acknowledgedNotices.push(id),
   permissions: settings.server.permissions,
   getSettings: async () => settings,
   saveSettings: async (next) => {
@@ -124,6 +126,10 @@ if (!printClient || serverStateChanges < 1) {
   throw new Error("Servidor nao identificou o cliente imediatamente ao conectar.");
 }
 const headers = { "content-type": "application/json", "x-caixa-password": "smoke-password", "x-device-name": "Cliente smoke", "x-caixa-version": appVersion };
+const ackResponse = await fetch('http://127.0.0.1:43991/api/pdv/close-notices/sale-ack-1/ack',{method:'POST',headers,body:'{}'});
+if (ackResponse.status !== 200 || acknowledgedNotices[0] !== 'sale-ack-1') throw new Error('Confirmacao de lembrete nao foi repassada pelo servidor.');
+const deniedAck = await fetch('http://127.0.0.1:43991/api/pdv/close-notices/sale-ack-2/ack',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+if (deniedAck.status < 400 || acknowledgedNotices.length !== 1) throw new Error('Confirmacao de lembrete sem senha deveria ser recusada.');
 const lookupResponse = await fetch('http://127.0.0.1:43991/api/pdv/financial-lookups',{method:'POST',headers,body:JSON.stringify({id:crypto.randomUUID(),kind:'category',name:'Categoria financeira remota'})});
 if (!lookupResponse.ok) throw new Error('Cliente não cadastrou categoria financeira.');
 const remoteLookup = (await lookupResponse.json()).lookup;

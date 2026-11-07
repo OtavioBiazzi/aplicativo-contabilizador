@@ -670,7 +670,7 @@ async function bootstrap() {
     removePdvPreset: () => pdvStore.removeImportedProducts("Cose Dell Abadia"),
     closePdvTable: async (tableNumber, payments, discount, originDevice, operationId) => {
       const sale = await pdvStore.closeTable(tableNumber, payments, discount, originDevice, operationId);
-      publishTableClosed(sale);
+      publishTableClosed(sale, undefined, "client");
       automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
@@ -683,7 +683,7 @@ async function bootstrap() {
     },
     savePdvTablePartial: async (tableNumber, items, payments, discount, originDevice, operationId, observations, closeScope) => {
       const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, originDevice, operationId, observations, closeScope);
-      if (closeScope) publishTableClosed(sale, closeScope.kind === "subtable" ? closeScope.subtableName : undefined);
+      if (closeScope) publishTableClosed(sale, closeScope.kind === "subtable" ? closeScope.subtableName : undefined, "client");
       automaticLedgerExport.schedule();
       sendToAll("entries:changed");
       return sale;
@@ -698,6 +698,7 @@ async function bootstrap() {
       sendToAll("entries:changed");
       sendToAll("server:changed", localServer.getState());
     },
+    acknowledgeCloseNotice: (id) => publishCloseNoticeAck(id),
     onRemoteSettingsChange: () => {
       sendToAll("settings:changed");
     },
@@ -746,11 +747,18 @@ function sendToAll(channel: string, ...args: unknown[]) {
   }
 }
 
-function publishTableClosed(sale: PdvSale, subtableName?: string) {
+function publishTableClosed(sale: PdvSale, subtableName: string | undefined, originKind: "server" | "client") {
   if (!sale.tableNumber) return;
-  const notice: TableClosedNotice = { id: sale.id, tableNumber: sale.tableNumber, subtableName, createdAt: sale.createdAt };
+  const notice: TableClosedNotice = { id: sale.id, tableNumber: sale.tableNumber, subtableName, createdAt: sale.createdAt, originKind, originDevice: sale.originDevice || (originKind === "server" ? "Servidor" : "Cliente") };
   sendToAll("pdv:table-closed", notice);
   localServer.broadcast({ type: "table-closed", closeNotice: notice });
+}
+
+/** Confirmacao de retirada da comanda: remove o lembrete no servidor e em todos os clientes conectados. */
+function publishCloseNoticeAck(id: string) {
+  if (!id || typeof id !== "string" || id.length > 200) return;
+  sendToAll("pdv:table-close-ack", id);
+  localServer.broadcast({ type: "close-notice-ack", id });
 }
 
 function publishPdvChanged() {
@@ -899,6 +907,10 @@ function registerIpc() {
     publishPdvChanged();
   });
 
+  ipcMain.handle("pdv:ackTableClosed", async (_event, id: string) => {
+    publishCloseNoticeAck(String(id || ""));
+  });
+
   ipcMain.handle("pdv:transferTableItems", async (_event, sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string): Promise<PdvCartItem[]> => {
     const items = await pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId || randomUUID());
     publishPdvChanged();
@@ -907,7 +919,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:closeTable", async (_event, tableNumber: number, payments: PdvPayment[], discount?: number, operationId?: string): Promise<PdvSale> => {
     const sale = await pdvStore.closeTable(tableNumber, payments, discount, "Servidor", operationId || randomUUID());
-    publishTableClosed(sale);
+    publishTableClosed(sale, undefined, "server");
     automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();
@@ -929,7 +941,7 @@ function registerIpc() {
 
   ipcMain.handle("pdv:saveTablePartial", async (_event, tableNumber: number, items: PdvCartItem[], payments: PdvPayment[], discount?: number, operationId?: string, observations?: string, closeScope?: PdvCloseScope): Promise<PdvSale> => {
     const sale = await pdvStore.closeTablePartial(tableNumber, items, payments, discount || 0, "Servidor", operationId || randomUUID(), observations, closeScope);
-    if (closeScope) publishTableClosed(sale, closeScope.kind === "subtable" ? closeScope.subtableName : undefined);
+    if (closeScope) publishTableClosed(sale, closeScope.kind === "subtable" ? closeScope.subtableName : undefined, "server");
     automaticLedgerExport.schedule();
     sendToAll("entries:changed");
     publishPdvChanged();

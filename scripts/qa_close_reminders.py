@@ -38,7 +38,7 @@ with sync_playwright() as p:
  s.evaluate("async()=>await window.caixa.closePdvTable(39,[{id:crypto.randomUUID(),method:'Pix',amount:60}],0,crypto.randomUUID())")
  expect(c.locator('.table-close-reminders')).to_have_count(0)
  module(c,'Mesas');c.get_by_role('tab',name='Lembretes',exact=True).click();options=c.locator('.local-table-options')
- options.locator('select').select_option('always');options.locator('input[placeholder^="Ex."]').fill('47+')
+ options.locator('select').first.select_option('always');options.get_by_label('Avisar fechamentos feitos',exact=True).select_option('all');options.locator('input[placeholder^="Ex."]').fill('47+')
  c.get_by_role('tab',name='Visual',exact=True).click();c.get_by_label('Ocultar o botão + só neste computador',exact=True).check()
  close_module(c);expect(c.locator('.pdv-quick-value-card')).to_have_count(0)
  assert s.locator('.pdv-quick-value-card').count()==1
@@ -97,7 +97,7 @@ with sync_playwright() as p:
  assert boxes[0]['width']==boxes[1]['width']==boxes[2]['width']
  assert boxes[0]['height']==boxes[2]['height']
  c.screenshot(path=str(out/'reminder-stack.png'))
- c.locator('.table-close-reminders button').first.click();expect(rows).to_have_count(2)
+ c.locator('.table-close-reminders article button').first.click();expect(rows).to_have_count(2)
  # Re-delivering the same acknowledged event must not re-create a notice.
  s.evaluate("""async()=>{const sale=(await window.caixa.getPdvSnapshot()).recentSales.find(s=>s.tableNumber===40);await window.caixa.closePdvTable(40,sale.payments,0,sale.operationId)}""")
  expect(rows).to_have_count(2)
@@ -131,9 +131,9 @@ with sync_playwright() as p:
  receive.get_by_role('button',name='Finalizar conta',exact=True).click();expect(receive).to_have_count(0)
  assert s.evaluate('async()=>(await window.caixa.getPdvSnapshot()).recentSales.filter(s=>s.tableNumber===45).length')==1
  print('PASS lost response after server commit: retry unlocks, exactly one sale and no vanished item')
- module(c,'Mesas');c.get_by_role('tab',name='Lembretes',exact=True).click();options=c.locator('.local-table-options');options.locator('select').select_option('off');close_module(c);expect(c.locator('.table-close-reminders')).to_have_count(0)
- module(c,'Mesas');c.get_by_role('tab',name='Lembretes',exact=True).click();options=c.locator('.local-table-options');options.locator('select').select_option('weekdays')
- c.screenshot(path=str(out/'local-options.png'));options.locator('select').select_option('always');close_module(c)
+ module(c,'Mesas');c.get_by_role('tab',name='Lembretes',exact=True).click();options=c.locator('.local-table-options');options.locator('select').first.select_option('off');close_module(c);expect(c.locator('.table-close-reminders')).to_have_count(0)
+ module(c,'Mesas');c.get_by_role('tab',name='Lembretes',exact=True).click();options=c.locator('.local-table-options');options.locator('select').first.select_option('weekdays')
+ c.screenshot(path=str(out/'local-options.png'));options.locator('select').first.select_option('always');close_module(c)
  expect(c.locator('.table-close-reminders article')).to_have_count(3)
  assert s.evaluate("JSON.parse(localStorage.getItem('caixa.local-tables.server')||'{}').reminders||'off'")=='off'
  print('PASS disable/re-enable keeps pending reminders; server preferences remain unchanged')

@@ -1,4 +1,4 @@
-import { dispatchTableClosed, LocalTableOptions, TableCloseReminders } from "./components/TableCloseReminders";
+import { dispatchTableClosed, dispatchTableCloseAck, LocalTableOptions, TABLE_CLOSE_ACK_REQUEST, TableCloseReminders } from "./components/TableCloseReminders";
 import type { TableClosedNotice } from "./shared/closeReminders";
 import { duplicatePayableDraft, buildPayableReceipt } from "./shared/financialAccountActions";
 import { PrivacyProfiles } from "./components/PrivacyProfiles";
@@ -352,6 +352,7 @@ interface StoredHistoryFilters {
 
 interface RemoteSocketMessage {
   closeNotice?: TableClosedNotice;
+  id?: string;
   type?: string;
   table?: PdvOpenTable;
   version?: PdvDataVersion;
@@ -1780,6 +1781,21 @@ export function App() {
     return (text ? JSON.parse(text) : {}) as T;
   };
 
+  // Lembretes de comanda: OK em um computador remove dos outros (servidor por IPC, cliente pela rede).
+  useEffect(() => {
+    const send = (event: Event) => {
+      const id = String((event as CustomEvent<string>).detail || "");
+      if (!id) return;
+      if (remoteSession) {
+        void remoteRequest(remoteSession, `/api/pdv/close-notices/${encodeURIComponent(id)}/ack`, { method: "POST", body: "{}" }).catch(() => undefined);
+      } else {
+        void window.caixa.ackTableClosed(id).catch(() => undefined);
+      }
+    };
+    window.addEventListener(TABLE_CLOSE_ACK_REQUEST, send);
+    return () => window.removeEventListener(TABLE_CLOSE_ACK_REQUEST, send);
+  }, [remoteSession]);
+
   const scheduleRemoteReconnect = () => {
     if (remoteReconnectTimer.current !== null || remoteManualDisconnect.current) {
       return;
@@ -1835,7 +1851,11 @@ export function App() {
       try {
         const message = JSON.parse(String(event.data || "{}")) as RemoteSocketMessage;
         if (message.type === "table-closed" && message.closeNotice) {
-          dispatchTableClosed(message.closeNotice);
+          dispatchTableClosed(message.closeNotice, "network");
+          return;
+        }
+        if (message.type === "close-notice-ack" && message.id) {
+          dispatchTableCloseAck(message.id);
           return;
         }
         if (message.type === "pdv-changed") {
@@ -2810,7 +2830,9 @@ export function App() {
         </div>
       )}
 
-      <TableCloseReminders client={Boolean(remoteSession)} hidden={insideOperationalTable || activeTab !== "tables" || modulesMenuOpen} />
+      <TableCloseReminders client={Boolean(remoteSession)} hidden={insideOperationalTable || activeTab !== "tables" || modulesMenuOpen}>
+        {toast && <Toast toast={toast} />}
+      </TableCloseReminders>
       <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>
         {!pdvMainTab && (
           <header className="workspace-header">
@@ -3228,7 +3250,6 @@ export function App() {
           onConfirm={confirmLedgerImport}
         />
       )}
-      {toast && <Toast toast={toast} />}
       {pdvNavigationRequest && (
         <SettingsConfirmModal
           title="Cancelar venda em andamento?"

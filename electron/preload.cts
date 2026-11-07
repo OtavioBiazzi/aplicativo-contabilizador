@@ -130,6 +130,12 @@ contextBridge.exposeInMainWorld("caixa", {
     ipcRenderer.on("settings:changed", handler);
     return () => ipcRenderer.removeListener("settings:changed", handler);
   },
+  ackTableClosed: (id: string) => ipcRenderer.invoke("pdv:ackTableClosed", id),
+  onTableCloseAck: (callback: (id: string) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, id: string) => callback(id);
+    ipcRenderer.on("pdv:table-close-ack", handler);
+    return () => ipcRenderer.removeListener("pdv:table-close-ack", handler);
+  },
   onTableClosed: (callback: (notice: TableClosedNotice) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, notice: TableClosedNotice) => callback(notice);
     ipcRenderer.on("pdv:table-closed", handler);
