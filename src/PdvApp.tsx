@@ -4173,6 +4173,10 @@ export function PaymentModal({
     if (remaining <= 0.009) {
       return;
     }
+    if (selectedMethod === "Conta a receber" && !selectedCustomerId) {
+      setNotice("Para lançar em Contas a receber, escolha primeiro o cliente em Pesquisar.");
+      return;
+    }
     setEditingPayment(null);
     setPaymentEntryMethod(selectedMethod);
   };
@@ -4317,7 +4321,7 @@ export function PaymentModal({
               <strong>Escolha a forma de pagamento</strong>
               <div className="pdv-payment-methods">
                 {CHECKOUT_PAYMENT_METHODS.map((item, index) => (
-                  <button key={item} aria-label={`${checkoutMethodLabel(item) === item ? item : `${item} - ${checkoutMethodLabel(item)}`} (F${index + 1})`} className={focusedPaymentIndex === index ? "active" : ""} aria-selected={focusedPaymentIndex === index} disabled={remaining <= 0.009} onClick={() => { setFocusedPaymentIndex(index); openPaymentMethod(item); }}>
+                  <button key={item} aria-label={`${checkoutMethodLabel(item) === item ? item : `${item} - ${checkoutMethodLabel(item)}`} (F${index + 1})`} title={item === "Conta a receber" && !selectedCustomerId ? "Escolha o cliente em Pesquisar para liberar" : undefined} className={`${focusedPaymentIndex === index ? "active" : ""} ${item === "Conta a receber" && !selectedCustomerId ? "needs-customer" : ""}`.trim()} aria-selected={focusedPaymentIndex === index} disabled={remaining <= 0.009 || (item === "Conta a receber" && !selectedCustomerId)} onClick={() => { setFocusedPaymentIndex(index); openPaymentMethod(item); }}>
                     {checkoutMethodIcon(item)}
                     <span>{checkoutMethodLabel(item)}</span>
                     <small>F{index + 1}</small>
@@ -4372,7 +4376,6 @@ export function PaymentModal({
             <div className="pdv-checkout-figure total"><span>Valor Total</span><strong>{money(total)}</strong></div>
             <div className="pdv-checkout-figure received"><span>Recebido</span><strong>{money(received)}</strong></div>
             <div className="pdv-checkout-figure change"><span>Troco</span><strong>{money(change)}</strong></div>
-            <div className="pdv-checkout-figure small"><span>Total pago</span><strong>{money(paid)}</strong></div>
             <div className="pdv-checkout-actions">
               <button className="pdv-primary-button" disabled={busy || submitting || (payments.length > 0 && remaining > 0.009)} onClick={finish}>
                 <Check size={18} /> {busy || submitting ? "Salvando..." : confirmLabel}
@@ -4574,9 +4577,8 @@ function CustomerPickerModal({ customers, selectedId, onSaveCustomer, onCancel, 
       <section className="pdv-payment-modal pdv-customer-picker" role="dialog" aria-modal="true" aria-label="Cadastro de clientes">
         <header className="pdv-checkout-titlebar"><h1>Cadastro de Clientes</h1><button className="pdv-icon-button" aria-label="Fechar pesquisa de clientes" onClick={onCancel}><X size={18} /></button></header>
         <div className="pdv-customer-picker-toolbar">
-          <button type="button" onClick={() => { setCreating(true); setDraft((current) => ({ ...current, name: query.trim() })); }}><UserPlus size={18} /><span>Novo</span><small>F2</small></button>
-          <button type="button" disabled={!highlightedRow} onClick={() => choose(highlightedRow)}><Check size={18} /><span>Selecionar</span><small>Enter</small></button>
-          <button type="button" className="close" onClick={onCancel}><X size={18} /><span>Fechar</span><small>Esc</small></button>
+          <button type="button" onClick={() => { setCreating(true); setDraft((current) => ({ ...current, name: query.trim() })); }}><UserPlus size={15} /><span>Novo</span><small>F2</small></button>
+          <button type="button" disabled={!highlightedRow} onClick={() => choose(highlightedRow)}><Check size={15} /><span>Selecionar</span><small>Enter</small></button>
         </div>
         {creating ? (
           <div className="pdv-customer-picker-create" aria-label="Cadastro rápido">
@@ -4635,6 +4637,8 @@ function ReceivablePaymentModal({
   onConfirm: (payment: PdvPayment) => void;
 }) {
   const [customerId, setCustomerId] = useState(initialPayment?.customerId || initialCustomerId);
+  // Cliente definido na tela de pagamento (ou no pagamento sendo editado): nao ha segunda selecao aqui.
+  const customerLocked = Boolean(initialPayment?.customerId || initialCustomerId);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [amountText, setAmountText] = useState(String(initialPayment?.amount ?? Math.min(remaining, preferredAmount || remaining)).replace(".", ","));
   const [dueDate, setDueDate] = useState(initialPayment?.dueDate || "");
@@ -4710,26 +4714,28 @@ function ReceivablePaymentModal({
           <Metric title="Recebido agora" value={money(0)} />
         </div>
         <div className="pdv-editor-grid">
-          <label className="pdv-wide-field">
+          {customerLocked ? (
+            <div className="pdv-wide-field pdv-receivable-locked-customer"><span>Cliente responsavel</span><strong>{localCustomers.find((item) => item.id === customerId)?.name || initialPayment?.customerName || "Cliente"}</strong></div>
+          ) : <label className="pdv-wide-field">
             <span>Cliente responsavel</span>
             <div className="pdv-receivable-customer-row">
-              <select autoFocus value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
+              <select autoFocus={!customerLocked} value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
                 <option value="">Selecione um cliente</option>
                 {activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? ` - ${customer.phone}` : ""}</option>)}
               </select>
               <button type="button" className="pdv-checkout-search" onClick={() => setPickerOpen(true)}><Search size={16} /> Pesquisar</button>
             </div>
-          </label>
+          </label>}
           <label><span>Valor a receber</span><input inputMode="decimal" value={amountText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setAmountText(parseBrazilianNumber(event.target.value) > remaining ? String(remaining).replace(".", ",") : event.target.value)} /></label>
           <label><span>Vencimento opcional</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
           <label className="pdv-wide-field"><span>Observacao opcional</span><input value={description} maxLength={120} onChange={(event) => setDescription(event.target.value)} placeholder="Ex.: pagar sexta-feira" /></label>
         </div>
-        <div className="pdv-inline-customer-create">
+        {!customerLocked && <div className="pdv-inline-customer-create">
           <input value={newCustomerName} onChange={(event) => setNewCustomerName(event.target.value)} placeholder="Cadastro rapido: nome do novo cliente" />
           <button className="pdv-ghost-button" disabled={!newCustomerName.trim() || savingCustomer} onClick={() => void createCustomer()}>
             <ContactRound size={16} /> {savingCustomer ? "Cadastrando..." : "Cadastrar cliente"}
           </button>
-        </div>
+        </div>}
         <div className="pdv-action-row">
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" disabled={!customerId || amount <= 0 || amount - remaining > 0.009} onClick={confirm}>Adicionar a conta</button>

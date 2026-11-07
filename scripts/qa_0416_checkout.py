@@ -66,6 +66,14 @@ with sync_playwright() as p:
     s.set_viewport_size({'width': 1280, 'height': 720})
     print('PASS checkout layout: customer block, methods, remaining row and totals fit 1280x720 and 1024x600')
 
+    # Sem cliente escolhido, Contas a receber fica bloqueado (botao e atalho F6).
+    expect(modal.get_by_role('button', name='Conta a receber', exact=False)).to_be_disabled()
+    s.keyboard.press('F6')
+    expect(s.locator('.pdv-receivable-entry-modal')).to_have_count(0)
+    notice = s.locator('.pdv-confirm-modal').filter(has_text='escolha primeiro o cliente')
+    expect(notice).to_have_count(1)
+    notice.get_by_role('button', name='Entendi', exact=True).click()
+    expect(modal).to_be_visible()
     # Pesquisa: F4 nao abre Pix por baixo; busca por CPF; Enter seleciona.
     modal.get_by_role('button', name='Pesquisar', exact=True).click()
     picker = s.locator('.pdv-customer-picker')
@@ -88,7 +96,8 @@ with sync_playwright() as p:
     # Conta a receber ja vem com Maria; 20 a receber + 40 em dinheiro com 50 entregues (troco 10).
     modal.get_by_role('button', name='Conta a receber', exact=False).click()
     rec = s.locator('.pdv-receivable-entry-modal')
-    expect(rec.locator('select')).to_have_value(s.evaluate("(tag)=>window.caixa.getPdvSnapshot().then(x=>x.customers.find(c=>c.name==='MARIA QA '+tag).id)", tag))
+    expect(rec.locator('.pdv-receivable-locked-customer')).to_contain_text('MARIA QA ' + tag)
+    expect(rec.locator('select')).to_have_count(0)
     rec.locator('input[inputmode=decimal]').fill('20')
     rec.get_by_role('button', name='Adicionar a conta', exact=True).click()
     modal.get_by_role('button', name='Dinheiro', exact=False).click()

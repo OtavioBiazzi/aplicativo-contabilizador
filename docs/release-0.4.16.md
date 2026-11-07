@@ -4,7 +4,15 @@
 - Confirmar em **OK** remove o mesmo lembrete nos outros computadores conectados. A opção fica ligada por padrão e pode ser desligada em cada computador.
 - A pilha de lembretes ganhou um título **Comandas (N)** para minimizar ou abrir, com o estado lembrado por computador. Há um limite configurável de lembretes visíveis (padrão 4); depois dele, a lista para de crescer e passa a rolar, com uma barra fina e discreta. Em telas baixas, o limite fica em no máximo 3.
 - Avisos do aplicativo e lembretes ficam no mesmo canto, com a mesma aparência, sem se sobrepor.
-- Botão **+** da grade de mesas: nova regra do servidor em **Mesas > Funcionamento** para ocultar em todos os computadores. A opção local continua em **Mesas > Visual**, como "só neste computador".
+- Botão **+** da grade de mesas: uma opção só, em **Mesas > Visual**, que vale para todos os computadores. No cliente sem permissão para editar configurações, ela aparece somente leitura.
+- **Nova tela de pagamento** com a disposição de "Receber" e o visual dos outros modais:
+  - cliente no topo (consumidor não identificado por padrão) com **Pesquisar**;
+  - formas de pagamento com ícones e atalhos F1–F6;
+  - lista Pagamento/Valor com o valor restante no mesmo padrão das linhas;
+  - Valor Total, Recebido e Troco em destaque à direita.
+- **Contas a receber** só libera depois de escolher o cliente no topo, e a janela de conta a receber usa esse cliente sem pedir de novo.
+- **Pesquisa de clientes** no estilo cadastro de clientes: busca por nome, CPF/CNPJ, telefone ou e-mail, filtros de tipo e ativo, Enter ou duplo clique seleciona e **Novo (F2)** faz cadastro rápido já selecionando.
+- **Correção:** edições rápidas seguidas numa mesa (por exemplo duplicar, editar e remover) podiam fazer itens removidos voltarem, porque o servidor os tratava como incluídos por outro computador. Agora a lista de itens conhecidos acompanha cada salvamento confirmado.
 - **Mesas em aberto**: com a privacidade ligada, Realizado hoje e Previsão do total aparecem como Privado. O saldo que falta fechar continua visível.
 - **Alterar valor (peso)**: itens pesados passam a ser alterados pelo valor em R$, e o peso é calculado e exibido.
 - A caixa de quantidade do carrinho não mostra mais as setinhas nativas; os botões − e + continuam.
