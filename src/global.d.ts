@@ -85,6 +85,7 @@ export interface CaixaApi {
   importLedgerFile: (filePath?: string) => Promise<LedgerImportResult | null>;
   importLedgerFolder: (folderPath?: string) => Promise<LedgerFolderImportResult | null>;
   exportNow: () => Promise<ExportStatus>;
+  exportTableXlsx: (fileName: string, sheetName: string, headers: string[], rows: unknown[][]) => Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>;
   exportTodayRecovery: () => Promise<ExportStatus>;
   exportFilteredReport: (ids: string[], label: string) => Promise<ExportStatus>;
   getDiagnostics: () => Promise<DiagnosticsSnapshot>;

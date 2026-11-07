@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { autoColumnWidth } from "./sheetColumnWidth.js";
 import path from "node:path";
 import JSZip from "jszip";
 import { DEFAULT_COLUMNS, SIMPLE_COLUMNS } from "../src/shared/defaults.js";
@@ -562,7 +563,7 @@ function worksheetXml(rows: Record<string, unknown>[]): string {
   const cols = columns
     .map((column, index) => {
       const position = index + 1;
-      return `<col min="${position}" max="${position}" width="${columnWidthFor(column)}" customWidth="1"/>`;
+      return `<col min="${position}" max="${position}" width="${Math.max(columnWidthFor(column), autoColumnWidth(column, rows, styleForColumn(column) === 2))}" customWidth="1"/>`;
     })
     .join("");
   const headerRow = `<row r="1" ht="23" customHeight="1">${columns

@@ -13,7 +13,7 @@ import { DeferredTask } from "./deferredTask.js";
 import { LedgerExporter } from "./exporter.js";
 import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
-import { PdvExporter } from "./pdvExporter.js";
+import { PdvExporter, writeTableXlsx } from "./pdvExporter.js";
 import { buildPdvReceiptHtml, printPdvReceipt, printPdvReceiptDirect } from "./pdvReceipt.js";
 import { configureCoseDellAbadiaComplements, normalizeImportedProducts, readPdvProductsFromXlsx } from "./productImporter.js";
 import { PdvStore } from "./pdvStore.js";
@@ -1343,6 +1343,21 @@ function registerIpc() {
       shell.showItemInFolder(status.filePath);
     }
     return status;
+  });
+
+  // Listas e relatorios das telas: planilha .xlsx com largura das colunas pelo conteudo (o CSV nao guarda largura).
+  ipcMain.handle("export:table", async (_event, fileName: string, sheetName: string, headers: unknown, rows: unknown) => {
+    if (!Array.isArray(headers) || !Array.isArray(rows) || headers.length > 200 || rows.length > 200000) throw new Error("Planilha invalida.");
+    const safeFile = String(fileName || "planilha.xlsx").replace(/[<>:"/\\|?*]/g, "-").replace(/\.csv$/i, ".xlsx");
+    const saveOptions = {
+      title: "Salvar planilha",
+      defaultPath: path.join(app.getPath("downloads"), /\.xlsx$/i.test(safeFile) ? safeFile : `${safeFile}.xlsx`),
+      filters: [{ name: "Planilha do Excel", extensions: ["xlsx"] }]
+    };
+    const target = mainWindow ? await dialog.showSaveDialog(mainWindow, saveOptions) : await dialog.showSaveDialog(saveOptions);
+    if (target.canceled || !target.filePath) return { ok: false, canceled: true };
+    await writeTableXlsx(target.filePath, String(sheetName || "Planilha"), headers.map(String), rows.map((row) => Array.isArray(row) ? row : []));
+    return { ok: true, filePath: target.filePath };
   });
 
   ipcMain.handle("export:today", async () => {

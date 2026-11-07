@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { autoColumnWidth } from "./sheetColumnWidth.js";
 import { scopePaymentAmounts } from "../src/shared/paymentScope.js";
 import path from "node:path";
 import JSZip from "jszip";
@@ -28,7 +29,14 @@ const MONEY_COLUMNS = new Set([
   "Troco",
   "Faturamento",
   "Preco medio",
-  "Total vendido"
+  "Total vendido",
+  "Valor medio",
+  "Valor pago",
+  "Valor final",
+  "Pago",
+  "Falta pagar",
+  "Falta receber",
+  "Recebido agora"
 ]);
 
 export class PdvExporter {
@@ -340,7 +348,7 @@ function worksheetXml(rows: Record<string, unknown>[]): string {
   const columns = rows.length ? Object.keys(rows[0]) : ["Sem dados"];
   const lastColumn = columnName(columns.length);
   const lastRow = Math.max(1, rows.length + 1);
-  const cols = columns.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${columnWidthFor(column)}" customWidth="1"/>`).join("");
+  const cols = columns.map((column, index) => `<col min="${index + 1}" max="${index + 1}" width="${Math.max(columnWidthFor(column, false), autoColumnWidth(column, rows, MONEY_COLUMNS.has(column)))}" customWidth="1"/>`).join("");
   const header = `<row r="1" ht="24" customHeight="1">${columns.map((column, index) => cellXml(column, `${columnName(index + 1)}1`, 1)).join("")}</row>`;
   const data = rows.map((row, rowIndex) => {
     const rowNumber = rowIndex + 2;
@@ -398,7 +406,7 @@ function styleForColumn(column: string): number {
   return MONEY_COLUMNS.has(column) ? 2 : 0;
 }
 
-function columnWidthFor(column: string): number {
+function columnWidthFor(column: string, fallback = true): number {
   const widths: Record<string, number> = {
     "ID venda": 38,
     Data: 13,
@@ -409,7 +417,14 @@ function columnWidthFor(column: string): number {
     Adicionais: 36,
     Observacao: 30
   };
-  return widths[column] || Math.max(12, Math.min(24, column.length + 4));
+  return widths[column] || (fallback ? Math.max(12, Math.min(24, column.length + 4)) : 0);
+}
+
+/** Planilha simples de uma aba (relatorios e listas das telas), com larguras pelo conteudo. */
+export async function writeTableXlsx(filePath: string, sheetName: string, headers: string[], rows: unknown[][]): Promise<void> {
+  const records = rows.map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""])));
+  const safeName = sheetName.replace(/[\\/?*:\[\]]/g, " ").trim().slice(0, 31) || "Planilha";
+  await writeXlsx(filePath, [{ name: safeName, rows: records.length ? records : [Object.fromEntries(headers.map((header) => [header, ""]))] }]);
 }
 
 async function writeFileAtomic(filePath: string, data: Buffer) {
