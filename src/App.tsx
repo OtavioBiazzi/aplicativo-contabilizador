@@ -3376,9 +3376,12 @@ function PayablesPanel({
     onCreateRequestConsumed?.();
   }, [createRequest?.nonce]);
 
+  const pendingShown = status === "Em aberto" || status === "Operacionais" || status === "Vencidas";
+  // Vencidas com saldo aparecem mesmo fora do periodo, para nao serem esquecidas.
+  const overdueOutsidePeriod = (payable: PdvPayable) => pendingShown && payable.status === "Vencida" && payable.balance > 0.009 && !inFinancialPeriod(payable, from, to, dateField);
   const visible = payables.filter((payable) => {
     if (status === "Nenhuma" || (status === "Operacionais" && ["Cancelada", "Excluida"].includes(payable.status))) return false;
-    const inPeriod = inFinancialPeriod(payable, from, to, dateField);
+    const inPeriod = inFinancialPeriod(payable, from, to, dateField) || overdueOutsidePeriod(payable);
     const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
     const queryMatch = !normalizedQuery || [
       payable.description,
@@ -3407,6 +3410,7 @@ function PayablesPanel({
   const canPay = canChange && (validSelection?.balance || 0) > 0.009;
   const active = visible.filter((payable) => !["Cancelada", "Excluida"].includes(payable.status));
   const openBalance = roundMoney(active.reduce((sum, payable) => sum + payable.balance, 0));
+  const overdueOutsideBalance = roundMoney(active.filter(overdueOutsidePeriod).reduce((sum, payable) => sum + payable.balance, 0));
   const hiddenOpenCount = payables.filter((payable) => payable.balance > 0.009 && !["Cancelada", "Excluida"].includes(payable.status) && !visible.some((item) => item.id === payable.id)).length;
   const paidInPeriod = roundMoney(active.reduce((sum, payable) => sum + payable.paidAmount, 0));
   const syncSelection = (next: PdvPayable) => {
@@ -3459,7 +3463,11 @@ function PayablesPanel({
 </fieldset>
       <SimpleFinancialFilters settlement={{ pendingStatus: "Em aberto", paidStatus: "Pagas", pendingLabel: "A pagar", paidLabel: "Pagas" }} grouped={supplierView} pendingNotice={{ count: hiddenOpenCount, onShowAll: () => { setFrom(""); setTo(""); setStatus("Em aberto"); setQuery(""); } }} query={query} onQuery={setQuery} placeholder={supplierView ? "Nome do fornecedor" : "Descrição ou fornecedor"} from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next as typeof status); if (next === "Excluidas") { setFrom(""); setTo(""); } }} statuses={["Em aberto", "Vencidas", "Pagas", "Canceladas", "Excluidas", "Historico", "Todos"]} />
       {supplierView ? <>
-        <FinancialGrid id="supplier-balances" rows={visibleSupplierRows} selectedId={supplierSelection} onSelect={(row) => setSupplierSelection(row.id)} onOpen={(row) => { if (!readOnly) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...row.representative, description: row.name, balance: row.balance }); } }} columns={[
+        <FinancialGrid id="supplier-balances" rows={visibleSupplierRows} selectedId={supplierSelection} onSelect={(row) => setSupplierSelection(row.id)}
+          contextActions={(row) => [
+            { label: "Ver contas deste fornecedor", onSelect: () => { setSupplierView(false); setRecordView(false); setQuery(row.name); setStatus("Em aberto"); setFrom(""); setTo(""); } },
+            { label: "Pagar", disabled: readOnly || row.balance <= 0.009, reason: "Nada a pagar.", onSelect: () => { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...row.representative, description: row.name, balance: row.balance }); } }
+          ]} onOpen={(row) => { if (!readOnly) { supplierOperationId.current = crypto.randomUUID(); setPayingAccountIds(undefined); setSupplierPaying({ ...row.representative, description: row.name, balance: row.balance }); } }} columns={[
           { key: "name", label: "Fornecedor", required: true, value: (row) => row.name },
           { key: "count", label: "Contas pendentes", numeric: true, value: (row) => row.count },
           { key: "balance", label: "Total a pagar", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{formatCurrency(row.balance)}</strong> }
@@ -3467,7 +3475,19 @@ function PayablesPanel({
       </> : <>
 
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
-        <FinancialGrid id="payables" defaultHidden={["category", "paid"]} rows={visible} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); if (!readOnly && !["Cancelada", "Excluida"].includes(item.status)) setEditing(item); else setRecordView(true); }} columns={[
+        <FinancialGrid id="payables" defaultHidden={["category", "paid"]} rows={[...visible].sort((a, b) => Number(overdueOutsidePeriod(b)) - Number(overdueOutsidePeriod(a)))} selectedId={validSelection?.id} onSelect={setSelected}
+          rowClassName={(item) => overdueOutsidePeriod(item) ? "finance-overdue-outside" : ""}
+          contextActions={(item) => {
+            const closed = ["Cancelada", "Excluida"].includes(item.status);
+            return [
+              { label: "Ver detalhes", onSelect: () => { setSupplierView(false); setSelected(item); setRecordView(true); } },
+              { label: "Alterar", disabled: readOnly || closed, reason: readOnly ? "Sem permissão para alterar." : "Conta cancelada ou excluída.", onSelect: () => setEditing(item) },
+              { label: "Registrar pagamento", disabled: readOnly || closed || item.balance <= 0.009, reason: item.balance <= 0.009 ? "Conta já paga." : "Indisponível para esta conta.", onSelect: () => { setSelected(item); setPaying(item); } },
+              { label: selectedAccountIds.includes(item.id) ? "Desmarcar do pagamento agrupado" : "Marcar para pagamento agrupado", disabled: readOnly || closed || item.balance <= 0.009, reason: "Somente contas com saldo a pagar.", onSelect: () => setSelectedAccountIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]) },
+              { label: "Duplicar", disabled: readOnly, reason: "Sem permissão para criar contas.", onSelect: () => { setInitialDraft(duplicatePayableDraft(item)); setEditing("new"); } },
+              { label: "Recibo", disabled: !receiptOptions, reason: "Recibo indisponível neste computador.", onSelect: () => setReceiptPayable(item) }
+            ];
+          }} onOpen={(item) => { setSelected(item); if (!readOnly && !["Cancelada", "Excluida"].includes(item.status)) setEditing(item); else setRecordView(true); }} columns={[
           { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${payableLabel(item)}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
           { key: "issue", label: "Emissão", value: (item) => item.issueDate, render: (item) => item.issueDate ? new Date(`${item.issueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
           { key: "document", label: "Documento", value: (item) => item.documentNumber || "—" },
@@ -3476,11 +3496,11 @@ function PayablesPanel({
           { key: "category", label: "Categoria", value: (item) => item.category || "—" },
           { key: "due", label: "Vencimento", value: (item) => item.dueDate, render: (item) => item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "—" },
           { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || item.preferredPaymentMethod || "Não definida" },
-          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <FinancialStatus value={item.status} /> },
+          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <><FinancialStatus value={item.status} />{overdueOutsidePeriod(item) && <small className="finance-out-of-period">fora do período</small>}</> },
           { key: "amount", label: "Valor", numeric: true, value: (item) => item.amount, render: (item) => formatCurrency(item.amount) },
           { key: "paid", label: "Pago", numeric: true, value: (item) => item.paidAmount, render: (item) => formatCurrency(item.paidAmount) },
           { key: "balance", label: "Falta pagar", numeric: true, required: true, value: (item) => item.balance, render: (item) => <strong className="finance-balance-value">{formatCurrency(item.balance)}</strong> },
-        ]} totals={<><span>Já pago <strong>{formatCurrency(paidInPeriod)}</strong></span><span className="finance-outstanding-total">Falta pagar <strong>{formatCurrency(openBalance)}</strong></span></>} />
+        ]} totals={<><span>Já pago <strong>{formatCurrency(paidInPeriod)}</strong></span><span className="finance-outstanding-total">Falta pagar <strong>{formatCurrency(openBalance)}</strong></span>{overdueOutsideBalance > 0.009 && <span className="finance-overdue-note">das quais vencidas fora do período <strong>{formatCurrency(overdueOutsideBalance)}</strong></span>}</>} />
 
         <aside className="financial-account-detail">
           {selected ? (

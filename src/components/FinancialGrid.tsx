@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, Columns3, ArrowUpDown } from "lucide-react";
+import { ContextMenu, type ContextAction } from "./ContextMenu";
 
 export type FinancialColumn<T> = {
   key: string;
@@ -11,11 +12,15 @@ export type FinancialColumn<T> = {
 };
 
 /** Shared, keyboard accessible ledger. Preferences belong to this terminal only. */
-export function FinancialGrid<T extends { id: string }>({ id, rows, columns, selectedId, onSelect, onOpen, totals, defaultHidden = [] }: {
+export function FinancialGrid<T extends { id: string }>({ id, rows, columns, selectedId, onSelect, onOpen, totals, defaultHidden = [], contextActions, rowClassName }: {
   id: string; rows: T[]; columns: FinancialColumn<T>[]; selectedId?: string;
   onSelect: (row: T) => void; onOpen: (row: T) => void; totals: ReactNode;
   defaultHidden?: string[];
+  /** Acoes do botao direito; somente acoes que a tela ja oferece. */
+  contextActions?: (row: T) => ContextAction[];
+  rowClassName?: (row: T) => string;
 }) {
+  const [menu, setMenu] = useState<{ x: number; y: number; row: T } | null>(null);
   const [preferences, setPreferences] = useState<{ hidden: string[]; compact: boolean; simpleDefaultsApplied: boolean }>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(`caixa.financeiro.${id}`) || "{}");
@@ -57,7 +62,8 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
       </div>
     </div>
     <div className="finance-grid-scroll"><table><thead><tr>{visibleColumns.map((column) => <th key={column.key} data-column={column.key} className={column.numeric ? "number" : ""} aria-sort={sort.key === column.key ? sort.descending ? "descending" : "ascending" : "none"}><button onClick={() => setSort({ key: column.key, descending: sort.key === column.key && !sort.descending })}>{column.label}<ArrowUpDown size={12} /></button></th>)}</tr></thead>
-      <tbody>{shown.map((row) => <tr key={row.id} tabIndex={0} aria-selected={selectedId === row.id} className={selectedId === row.id ? "selected" : ""} onClick={() => onSelect(row)} onDoubleClick={() => onOpen(row)} onKeyDown={(event) => {
+      <tbody>{shown.map((row) => <tr key={row.id} tabIndex={0} aria-selected={selectedId === row.id} className={[selectedId === row.id ? "selected" : "", rowClassName?.(row) || ""].filter(Boolean).join(" ")} onClick={() => onSelect(row)} onDoubleClick={() => onOpen(row)} onContextMenu={contextActions ? (event) => { event.preventDefault(); onSelect(row); setMenu({ x: event.clientX, y: event.clientY, row }); } : undefined} onKeyDown={(event) => {
+        if (contextActions && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) { event.preventDefault(); const box = event.currentTarget.getBoundingClientRect(); onSelect(row); setMenu({ x: box.left + 24, y: box.bottom, row }); return; }
         if (event.key === "Enter") { event.preventDefault(); onOpen(row); }
         if (event.key === " ") { event.preventDefault(); onSelect(row); }
         if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -67,6 +73,9 @@ export function FinancialGrid<T extends { id: string }>({ id, rows, columns, sel
       }}>{visibleColumns.map((column) => <td key={column.key} data-column={column.key} className={column.numeric ? "number" : ""}>{column.render ? column.render(row) : column.value(row)}</td>)}</tr>)}</tbody>
     </table>{!rows.length && <div className="finance-grid-empty"><strong>Nenhum registro encontrado</strong><span>Altere a pesquisa ou os filtros.</span></div>}</div>
     <div className="finance-grid-footer"><span className="finance-record-count">Registros: {rows.length}</span>{pages > 1 && <nav className="finance-pagination" aria-label="Páginas das contas"><button aria-label="Página anterior" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage + 1} / {pages}</span><button aria-label="Próxima página" disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></nav>}<div className="finance-grid-totals">{totals}</div></div>
+    {menu && contextActions && <ContextMenu x={menu.x} y={menu.y} label="Ações da linha" onClose={() => setMenu(null)}>
+      {contextActions(menu.row).map((action) => <button key={action.label} type="button" role="menuitem" className={action.danger ? "danger" : undefined} disabled={action.disabled} title={action.disabled ? action.reason : undefined} onClick={() => { setMenu(null); action.onSelect(); }}>{action.label}</button>)}
+    </ContextMenu>}
   </div>;
 }
 

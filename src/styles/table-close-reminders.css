@@ -123,3 +123,11 @@ body:has(.pdv-modal-backdrop, .module-window, .managerial-menu, .open-tables-bac
 #root .module-window-body .local-visual-settings .pdv-setting-line :is(input:not([type="range"]), select) { height: 32px; min-height: 32px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 0; background: var(--panel-2) !important; color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; font-size: 12px; }
 #root .local-visual-settings .pdv-visual-presets { padding: 6px 8px; gap: 5px; }
 #root .local-visual-settings .pdv-visual-presets button { min-height: 28px; height: 28px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 0; background: var(--panel-2); color: var(--text); font-size: 12px; }
+/* Barra de rolagem discreta: fina, sem setas, visivel so ao passar o mouse. */
+/* No Electron (Chromium) as propriedades padrao scrollbar-width/color anulariam as abaixo; por isso nao sao usadas. */
+.table-close-reminders-list::-webkit-scrollbar { width: 4px; height: 4px; }
+.table-close-reminders-list::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+.table-close-reminders-list::-webkit-scrollbar-track { background: transparent; }
+.table-close-reminders-list::-webkit-scrollbar-thumb { background: rgba(150, 170, 190, 0.35); border-radius: 4px; }
+.table-close-reminders-list:hover::-webkit-scrollbar-thumb { background: rgba(150, 170, 190, 0.75); }
+.table-close-reminders-list { scrollbar-width: auto; scrollbar-color: auto; }

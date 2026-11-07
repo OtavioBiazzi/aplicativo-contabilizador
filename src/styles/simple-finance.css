@@ -224,3 +224,9 @@
 @container finance-filters (max-width: 830px) {
   #root .simple-financial-filter-row { grid-template-columns: 100px minmax(126px, 1fr) minmax(266px, 1fr); grid-template-areas: "field from to" "search search settlement"; }
 }
+
+/* 0.4.16: contas vencidas fora do periodo continuam visiveis, com etiqueta discreta. */
+#root .finance-grid tr.finance-overdue-outside td { background: color-mix(in srgb, var(--danger, #d14a3a) 7%, transparent); }
+#root .finance-grid .finance-out-of-period { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 700; color: var(--danger, #d14a3a); white-space: nowrap; }
+#root .finance-overdue-note { font-size: 11px; color: var(--muted); }
+#root .finance-overdue-note strong { color: var(--danger, #d14a3a); }

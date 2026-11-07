@@ -3,6 +3,7 @@ import { KeyboardSelect } from "./components/KeyboardSelect";
 import { createPortal } from "react-dom";
 import { duplicateReceivableDraft, buildReceivableAccountReceipt } from "./shared/financialAccountActions";
 import { FinancialGrid, FinancialStatus } from "./components/FinancialGrid";
+import { ContextMenu } from "./components/ContextMenu";
 import { SimpleFinancialFilters, SimpleCollectionModal } from "./components/SimpleFinancialControls";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
@@ -6787,41 +6788,6 @@ function CategoryEditorModal({ inline = false, category, onCancel, onSave }: { i
   );
 }
 
-function ContextMenu({ x, y, children, onClose }: { x: number; y: number; children: React.ReactNode; onClose: () => void }) {
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = useState({ left: Math.max(8, x), top: Math.max(8, y) });
-  useEffect(() => {
-    const close = () => onClose();
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", close);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("keydown", close);
-    };
-  }, [onClose]);
-
-  useLayoutEffect(() => {
-    const reposition = () => {
-      const bounds = menuRef.current?.getBoundingClientRect();
-      const width = bounds?.width || 260;
-      const height = bounds?.height || 380;
-      setPosition({
-        left: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
-        top: Math.max(8, Math.min(y, window.innerHeight - height - 8))
-      });
-    };
-    reposition();
-    window.addEventListener("resize", reposition);
-    return () => window.removeEventListener("resize", reposition);
-  }, [x, y]);
-
-  return (
-    <div ref={menuRef} className="pdv-context-menu" style={position} onClick={(event) => event.stopPropagation()}>
-      {children}
-    </div>
-  );
-}
-
 function CancelItemsModal({
   isTable,
   cart,
@@ -7036,8 +7002,11 @@ function ReceivablesScreen({
   const customerReceiptSale = useMemo(() => customerReceiptTarget ? buildCustomerBalanceReceipt(snapshot.receivables, customerReceiptTarget) : null, [snapshot.receivables, customerReceiptTarget]);
   const [notice, setNotice] = useState("");
   const normalized = query.trim().toLocaleLowerCase("pt-BR");
+  const pendingShown = status === "Pendentes" || status === "Operacionais" || status === "Vencida" || status === "Em aberto";
+  // Vencidas com saldo aparecem mesmo fora do periodo, para nao serem esquecidas.
+  const overdueOutsidePeriod = (item: PdvReceivable) => pendingShown && item.status === "Vencida" && item.balance > 0.009 && !inFinancialPeriod(item, from, to, dateField);
   const receivables = snapshot.receivables.filter((item) => {
-    if (!inFinancialPeriod(item, from, to, dateField)) return false;
+    if (!inFinancialPeriod(item, from, to, dateField) && !overdueOutsidePeriod(item)) return false;
     if (status === "Nenhuma" || (status === "Operacionais" && ["Cancelada", "Excluida"].includes(item.status))) return false;
     if (status === "Pendentes" && !["Em aberto", "Parcialmente recebida", "Vencida"].includes(item.status)) return false;
     if (status === "Historico" && !["Recebida", "Cancelada", "Excluida"].includes(item.status)) return false;
@@ -7061,6 +7030,7 @@ function ReceivablesScreen({
   });
   const active = receivables.filter((item) => !["Cancelada", "Excluida"].includes(item.status));
   const outstanding = roundMoney(active.reduce((sum, item) => sum + item.balance, 0));
+  const overdueOutsideBalance = roundMoney(active.filter(overdueOutsidePeriod).reduce((sum, item) => sum + item.balance, 0));
   const received = roundMoney(active.reduce((sum, item) => sum + item.receivedAmount, 0));
   const hiddenPendingCount = snapshot.receivables.filter((item) => item.balance > 0.009 && !["Cancelada", "Excluida"].includes(item.status) && !receivables.some((visible) => visible.id === item.id)).length;
   useEffect(() => {
@@ -7142,14 +7112,29 @@ function ReceivablesScreen({
 </fieldset>
       <SimpleFinancialFilters settlement={{ pendingStatus: "Pendentes", paidStatus: "Recebida", pendingLabel: "A receber", paidLabel: "Recebidas" }} grouped={customerView} pendingNotice={{ count: hiddenPendingCount, onShowAll: () => { setFrom(""); setTo(""); setStatus("Pendentes"); setQuery(""); } }} query={query} onQuery={setQuery} placeholder={customerView ? "Nome do cliente" : "Cliente, descrição ou produto"} from={from} to={to} onPeriod={(start, end) => { setFrom(start); setTo(end); }} dateField={dateField} onDateField={setDateField} status={status} onStatus={(next) => { setStatus(next); if (next === "Excluida") { setFrom(""); setTo(""); } }} statuses={["Pendentes", "Recebida", "Vencida", "Cancelada", "Excluida", "Historico", "Em aberto", "Parcialmente recebida", "Todos"]} />
       {customerView ? <>
-        <FinancialGrid id="customer-balances" totals={<><span>Falta receber<strong>{money(visibleCustomerRows.reduce((sum, row) => sum + row.balance, 0))}</strong></span></>} rows={visibleCustomerRows} selectedId={customerSelection} onSelect={(row) => setCustomerSelection(row.id)} onOpen={(row) => { if (!readOnly) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...row.representative, balance: row.balance }); } }} columns={[
+        <FinancialGrid id="customer-balances" contextActions={(row) => [
+          { label: "Ver contas deste cliente", onSelect: () => { setCustomerView(false); setRecordView(false); setQuery(row.name); setStatus("Pendentes"); setFrom(""); setTo(""); } },
+          { label: "Receber", disabled: readOnly || row.balance <= 0.009, reason: "Nada a receber.", onSelect: () => { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...row.representative, balance: row.balance }); } }
+        ]} totals={<><span>Falta receber<strong>{money(visibleCustomerRows.reduce((sum, row) => sum + row.balance, 0))}</strong></span></>} rows={visibleCustomerRows} selectedId={customerSelection} onSelect={(row) => setCustomerSelection(row.id)} onOpen={(row) => { if (!readOnly) { customerOperationId.current = crypto.randomUUID(); setReceivingAccountIds(undefined); setCustomerReceiving({ ...row.representative, balance: row.balance }); } }} columns={[
           { key: "name", label: "Cliente", required: true, value: (row) => row.name },
           { key: "count", label: "Contas pendentes", numeric: true, value: (row) => row.count },
           { key: "balance", label: "Total a receber", numeric: true, required: true, value: (row) => row.balance, render: (row) => <strong>{money(row.balance)}</strong> }
         ]} />
       </> : <>
       <div className={`finance-workspace ${recordView && validSelection ? "show-record" : "show-search"}`}>
-        <FinancialGrid id="receivables" defaultHidden={["received"]} rows={receivables} selectedId={validSelection?.id} onSelect={setSelected} onOpen={(item) => { setSelected(item); if (!readOnly && !["Cancelada", "Excluida"].includes(item.status)) setEditing(item); else setRecordView(true); }} columns={[
+        <FinancialGrid id="receivables" defaultHidden={["received"]} rows={[...receivables].sort((a, b) => Number(overdueOutsidePeriod(b)) - Number(overdueOutsidePeriod(a)))} selectedId={validSelection?.id} onSelect={setSelected}
+          rowClassName={(item) => overdueOutsidePeriod(item) ? "finance-overdue-outside" : ""}
+          contextActions={(item) => {
+            const closed = ["Cancelada", "Excluida"].includes(item.status);
+            return [
+              { label: "Ver detalhes", onSelect: () => { setCustomerView(false); setSelected(item); setRecordView(true); } },
+              { label: "Alterar", disabled: readOnly || closed, reason: readOnly ? "Sem permissão para alterar." : "Conta cancelada ou excluída.", onSelect: () => setEditing(item) },
+              { label: "Registrar recebimento", disabled: readOnly || closed || item.balance <= 0.009, reason: item.balance <= 0.009 ? "Conta já recebida." : "Indisponível para esta conta.", onSelect: () => { setSelected(item); setReceiving(item); } },
+              { label: selectedAccountIds.includes(item.id) ? "Desmarcar do recebimento agrupado" : "Marcar para recebimento agrupado", disabled: readOnly || closed || item.balance <= 0.009, reason: "Somente contas com saldo a receber.", onSelect: () => setSelectedAccountIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id]) },
+              { label: "Duplicar", disabled: readOnly, reason: "Sem permissão para criar contas.", onSelect: () => { setInitialDraft(duplicateReceivableDraft(item)); setCreating(true); } },
+              { label: "Recibo", onSelect: () => openReceipt(item) }
+            ];
+          }} onOpen={(item) => { setSelected(item); if (!readOnly && !["Cancelada", "Excluida"].includes(item.status)) setEditing(item); else setRecordView(true); }} columns={[
           { key: "select", label: "Selecionar", required: true, value: (item) => selectedAccountIds.includes(item.id) ? 1 : 0, render: (item) => <input type="checkbox" aria-label={`Selecionar conta ${item.description || item.id}`} disabled={readOnly || item.balance <= 0.009 || ["Cancelada", "Excluida"].includes(item.status)} checked={selectedAccountIds.includes(item.id)} onClick={(event) => event.stopPropagation()} onChange={(event) => setSelectedAccountIds((current) => event.target.checked ? [...current.filter((id) => id !== item.id), item.id] : current.filter((id) => id !== item.id))} /> },
           { key: "created", label: "Emissão", value: (item) => item.createdAt, render: (item) => new Date(item.createdAt).toLocaleDateString("pt-BR") },
           { key: "document", label: "Documento", value: (item) => item.documentNumber || "—" },
@@ -7157,11 +7142,11 @@ function ReceivablesScreen({
           { key: "customer", label: "Cliente", required: true, value: (item) => item.customerName },
           { key: "due", label: "Vencimento", value: (item) => item.dueDate || "", render: (item) => item.dueDate ? new Date(`${item.dueDate}T12:00:00`).toLocaleDateString("pt-BR") : "Sem data" },
           { key: "method", label: "Forma pgto.", value: (item) => [...new Set(item.payments.map((payment) => payment.method))].join(", ") || "—" },
-          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <FinancialStatus value={item.status} /> },
+          { key: "status", label: "Situação", value: (item) => item.status, render: (item) => <><FinancialStatus value={item.status} />{overdueOutsidePeriod(item) && <small className="finance-out-of-period">fora do período</small>}</> },
           { key: "amount", label: "Valor", numeric: true, value: (item) => item.originalAmount, render: (item) => money(item.originalAmount) },
           { key: "received", label: "Recebido", numeric: true, value: (item) => item.receivedAmount, render: (item) => money(item.receivedAmount) },
           { key: "balance", label: "Saldo", numeric: true, required: true, value: (item) => item.balance, render: (item) => <strong>{money(item.balance)}</strong> },
-        ]} totals={<><span>Recebido <strong>{money(received)}</strong></span><span className="finance-outstanding-total">Falta receber <strong>{money(outstanding)}</strong></span></>} />
+        ]} totals={<><span>Recebido <strong>{money(received)}</strong></span><span className="finance-outstanding-total">Falta receber <strong>{money(outstanding)}</strong></span>{overdueOutsideBalance > 0.009 && <span className="finance-overdue-note">das quais vencidas fora do período <strong>{money(overdueOutsideBalance)}</strong></span>}</>} />
 
         <aside className="financial-account-detail">
           {selected ? <>
@@ -7343,7 +7328,11 @@ function CustomersScreen({
           <label><span>Situação</span><select value={customerStatus} onChange={(event) => setCustomerStatus(event.target.value as typeof customerStatus)}><option>Todos</option><option>Ativos</option><option>Inativos</option><option>Com saldo</option></select></label>
           <button onClick={() => { setQuery(""); setCustomerStatus("Todos"); setRoleFilter("all"); }}><RotateCcw size={14} /> Limpar</button>
         </div>
-        <FinancialGrid id="customer-catalog" rows={customers} selectedId={selected?.id} defaultHidden={["address", "note", "count", "email"]} onSelect={setSelectedCustomer} onOpen={(customer) => { setDetailSection("summary"); setDetailCustomer(customer); }} columns={[
+        <FinancialGrid id="customer-catalog" rows={customers} selectedId={selected?.id} defaultHidden={["address", "note", "count", "email"]} onSelect={setSelectedCustomer} contextActions={(customer) => [
+          { label: "Ficha completa", onSelect: () => { setDetailSection("summary"); setDetailCustomer(customer); } },
+          { label: `Contas pendentes (${accountTotals.get(customer.id)?.pending || 0})`, onSelect: () => { setDetailSection("pending"); setDetailCustomer(customer); } },
+          { label: "Alterar cadastro", disabled: readOnly, reason: "Sem permissão para alterar cadastros.", onSelect: () => setEditing(customer) }
+        ]} onOpen={(customer) => { setDetailSection("summary"); setDetailCustomer(customer); }} columns={[
           { key: "name", label: "Cliente", required: true, value: (customer) => customer.name },
           { key: "role", label:"Tipo", value:(customer)=>customer.role==="supplier"?"Fornecedor":customer.role==="both"?"Cliente e fornecedor":"Cliente" },
           { key: "document", label: "CPF/CNPJ", value: (customer) => customer.document || "—" },
