@@ -42,6 +42,6 @@ Validação: typecheck e build de produção. Smokes de PDV, rede (inclui a nova
 - menus do financeiro;
 - seleção múltipla com dados conferidos no servidor.
 
-Ainda não testado: o instalador empacotado.
+O executável empacotado 0.4.16 passou em todo esse QA como servidor e como cliente. O portátil também foi aberto e teve a versão conferida, com dados isolados.
 
 Atualize servidor e clientes para a mesma versão: a confirmação de lembretes usa uma rota nova do servidor.

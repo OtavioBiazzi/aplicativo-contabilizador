@@ -116,8 +116,12 @@ with sync_playwright() as p:
     c.evaluate("""async()=>{const snap=await window.caixa.getSnapshot();await window.caixa.saveSettings({...snap.settings,notificationsEnabled:true});}""")
     reload(c)
     profile = os.environ.get('QA_CLIENT_PROFILE', str(out / 'run-0416' / 'client' / 'profile'))
-    electron = str(Path.cwd() / 'node_modules' / 'electron' / 'dist' / 'electron.exe')
-    subprocess.run([electron, str(Path.cwd()), f'--user-data-dir={profile}'], timeout=30)
+    electron = os.environ.get('QA_ELECTRON')
+    if electron:
+        subprocess.run([electron, f'--user-data-dir={profile}'], timeout=30)
+    else:
+        electron = str(Path.cwd() / 'node_modules' / 'electron' / 'dist' / 'electron.exe')
+        subprocess.run([electron, str(Path.cwd()), f'--user-data-dir={profile}'], timeout=30)
     toast = c.locator('.notification-dock .toast')
     toast.wait_for(timeout=8000)
     t = toast.bounding_box(); r = c.locator('.table-close-reminders').bounding_box()
