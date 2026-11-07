@@ -2,7 +2,7 @@
 
 Aplicativo desktop para Windows de caixa/PDV local, feito para bares, restaurantes e pequenos comércios que trabalham com **mesas, comandas e vários computadores na mesma rede**. Tudo funciona offline, sem mensalidade e sem depender de nuvem.
 
-> Versão atual: **0.4.19** · [Baixar na página de Releases](https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases)
+> Versão atual: **0.4.20** · [Baixar na página de Releases](https://github.com/OtavioBiazzi/aplicativo-contabilizador/releases)
 >
 > O projeto começou como "Contabilizador Caixa" (uma calculadora de caixa com exportação para Excel) e evoluiu para um PDV completo. O histórico de cada versão está nas notas das releases e em [`docs/`](docs/).
 
