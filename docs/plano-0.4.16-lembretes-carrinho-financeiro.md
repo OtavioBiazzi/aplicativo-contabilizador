@@ -2,6 +2,13 @@
 
 Base: 0.4.15 (`49d2a8a`), branch `melhorias-0.4.16`. Nada foi implementado ainda: este documento organiza os pedidos, mostra onde cada coisa fica no código e define a ordem para não quebrar o que já funciona.
 
+> **Situação (07/11/2026):** Fases 1 a 4 implementadas e testadas na branch `melhorias-0.4.16` com os padrões da tabela final. Resumo em `docs/release-0.4.16.md`. A Fase 5 continua bloqueada até chegar a imagem de referência.
+>
+> Ajustes feitos durante a implementação:
+> - A barra de rolagem dos lembretes ficou fina, sem setas e discreta, a pedido.
+> - O menu do botão direito passou a ser renderizado no `body`, para abrir no cursor dentro das janelas internas.
+> - A transferência em lote reaproveita a transferência em lista que já existia e já envia tudo numa única operação, então não foi preciso usar o plano B.
+
 Legenda: **[pronto p/ fazer]** entendido e localizado · **[decidir]** tem uma escolha marcada como padrão; confirme ou troque · **[bloqueado]** depende de algo que ainda não tenho.
 
 ---

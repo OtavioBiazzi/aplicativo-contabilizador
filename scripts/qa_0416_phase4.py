@@ -91,13 +91,19 @@ with sync_playwright() as p:
     s.locator('.pdv-context-menu').get_by_role('button', name='Remover/cancelar os 4 produtos', exact=True).click()
     s.locator('.pdv-batch-modal').get_by_role('button', name='Remover todos', exact=True).click()
     expect(rows).to_have_count(5)
-    s.wait_for_timeout(2500)
+    def converged(items):
+        notes = {i['productName']: i.get('note') or '' for i in items}
+        totals = {i['productName']: i['total'] for i in items}
+        return (len(items) == 5 and 'sem gelo' in notes.get('Item A', '') and 'sem gelo' in notes.get('Item B', '')
+                and 'sem gelo' not in notes.get('Item C', '') and totals.get('Item A') == 9 and totals.get('Item C') == 9 and totals.get('Item B') == 10)
     items = server_items()
-    assert len(items) == 5, len(items)
-    notes = {i['productName']: i.get('note', '') for i in items}
-    assert 'sem gelo' in notes['Item A'] and 'sem gelo' in notes['Item B'] and 'sem gelo' not in (notes['Item C'] or ''), notes
-    totals = {i['productName']: i['total'] for i in items}
-    assert totals['Item A'] == 9 and totals['Item C'] == 9 and totals['Item B'] == 10, totals
+    waited = 0
+    while not converged(items) and waited < 20000:
+        s.wait_for_timeout(500)
+        waited += 500
+        items = server_items()
+    print('server synced after', waited, 'ms')
+    assert converged(items), [(i['productName'], i.get('note'), i['total']) for i in items]
     print('PASS note on A+B, remove 4 copies, server saved 5 items with discount and notes')
 
     # Transferir: D e E pre-selecionados na janela de transferencia.
