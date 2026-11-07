@@ -3119,6 +3119,10 @@ function PdvSaleScreen(props: {
         {itemMenu && !itemMenu.multi && (
           <ContextMenu x={itemMenu.x} y={itemMenu.y} label="Ações do produto" onClose={() => setItemMenu(null)}>
             <div className="pdv-context-menu-title pdv-batch-menu-title"><strong>{itemMenu.item.productName}</strong><span>{money(props.activeTableNumber ? unpaidItemTotal(itemMenu.item) : itemMenu.item.total)}</span></div>
+            {cartCompressed
+              ? <button className="pdv-batch-menu-item" onClick={() => runItemAction("decompress", itemMenu.item)}><Layers3 size={15} /> Descomprimir carrinho</button>
+              : <button className="pdv-batch-menu-item" disabled={!canCompressCart} onClick={() => runItemAction("compress", itemMenu.item)}><Layers3 size={15} /> Juntar produtos repetidos</button>}
+            <div className="pdv-context-menu-separator" role="separator" />
             <button className="pdv-batch-menu-item" disabled={Boolean(itemMenu.item.paidQuantity)} onClick={() => runItemAction("quantity", itemMenu.item)}><Hash size={15} /> {isMeasuredCartItem(itemMenu.item) ? "Alterar valor (peso)" : "Alterar quantidade"}</button>
             <button className="pdv-batch-menu-item" onClick={() => runItemAction("discount-value", itemMenu.item)}><Percent size={15} /> Desconto ou acréscimo</button>
             <button className="pdv-batch-menu-item" onClick={() => runItemAction("price", itemMenu.item)}><Tag size={15} /> Alterar preço neste lançamento</button>
@@ -3131,9 +3135,6 @@ function PdvSaleScreen(props: {
             <button className="pdv-batch-menu-item" onClick={() => runItemAction("up", itemMenu.item)}><ArrowUp size={15} /> Mover para cima</button>
             <button className="pdv-batch-menu-item" onClick={() => runItemAction("down", itemMenu.item)}><ArrowDown size={15} /> Mover para baixo</button>
             <button className="pdv-batch-menu-item" onClick={() => runItemAction("before", itemMenu.item)}><MoveVertical size={15} /> Mover para outra posição</button>
-            {cartCompressed
-              ? <button className="pdv-batch-menu-item" onClick={() => runItemAction("decompress", itemMenu.item)}><Layers3 size={15} /> Descomprimir carrinho</button>
-              : <button className="pdv-batch-menu-item" disabled={!canCompressCart} onClick={() => runItemAction("compress", itemMenu.item)}><Layers3 size={15} /> Juntar produtos repetidos</button>}
             <button className="pdv-batch-menu-item" disabled={!visibleCart.length} onClick={() => runItemAction("receipt", itemMenu.item)}><ReceiptText size={15} /> Exibir recibo da conta</button>
             <div className="pdv-context-menu-separator" role="separator" />
             <button className="pdv-batch-menu-item danger" onClick={() => runItemAction("remove", itemMenu.item)}><Trash2 size={15} /> Remover/cancelar produto</button>
