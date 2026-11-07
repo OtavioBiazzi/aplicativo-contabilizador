@@ -53,9 +53,13 @@ export class LedgerStore {
     const done = await readJson<string[]>(file, []);
     const applied = Array.isArray(done) ? [...done] : [];
     // 0.4.18: planilha automatica passa a ser desligada (gera so quando pedir). O banco nao muda.
-    if (!applied.includes("0.4.18-planilha-manual")) {
-      saved.automaticSpreadsheetEnabled = false;
-      applied.push("0.4.18-planilha-manual");
+    // 0.4.22: desliga mais uma vez ao atualizar para esta versao (inclusive quem ja tinha passado pela 0.4.18);
+    // depois disso, a escolha do usuario volta a valer.
+    for (const marker of ["0.4.18-planilha-manual", "0.4.22-planilha-manual"]) {
+      if (!applied.includes(marker)) {
+        saved.automaticSpreadsheetEnabled = false;
+        applied.push(marker);
+      }
     }
     const changed = applied.length !== (Array.isArray(done) ? done.length : 0);
     return async () => { if (changed) await writeJsonAtomic(file, applied); };

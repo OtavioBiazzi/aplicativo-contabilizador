@@ -682,11 +682,26 @@ export class LocalServer {
     this.server = http.createServer(app);
     this.wsServer = new WebSocketServer({ server: this.server, path: "/sync" });
     this.wsServer.on("connection", (socket, request) => this.handleSocket(socket, request));
+    // O WebSocketServer repassa os erros do servidor http; sem este ouvinte, "porta em uso" virava
+    // a janela "A JavaScript error occurred in the main process". O erro ja e tratado no listen abaixo.
+    this.wsServer.on("error", () => undefined);
 
-    await new Promise<void>((resolve, reject) => {
-      this.server?.once("error", reject);
-      this.server?.listen(port, "0.0.0.0", () => resolve());
-    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.server?.once("error", reject);
+        this.server?.listen(port, "0.0.0.0", () => resolve());
+      });
+    } catch (error) {
+      // Libera tudo para poder tentar de novo depois.
+      this.wsServer?.close();
+      this.server?.close();
+      this.wsServer = null;
+      this.server = null;
+      if ((error as NodeJS.ErrnoException)?.code === "EADDRINUSE") {
+        throw new Error(`A porta ${port} ja esta em uso neste computador. Feche o outro Caixa PDV aberto (ou outro programa usando a porta) e tente de novo.`);
+      }
+      throw error;
+    }
 
     return this.getState();
   }

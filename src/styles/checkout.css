@@ -405,3 +405,16 @@ body > .pdv-context-menu .pdv-batch-menu-item { white-space: nowrap; }
   #root .pdv-checkout-right .pdv-checkout-figure > span { font-size: 16px; }
   #root .pdv-checkout-right .pdv-checkout-figure strong { font-size: 26px; padding: 4px 12px; }
 }
+
+/* 0.4.22: em tela cheia as caixas de valor crescem para ocupar a coluna, em vez de sobrar espaco
+   vazio entre elas; o titulo fica colado na caixa e o numero centralizado na altura. */
+#root .pdv-checkout-right .pdv-checkout-figure { justify-content: flex-start; gap: 4px; }
+#root .pdv-checkout-right .pdv-checkout-figure strong {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 52px;
+  max-height: 150px;
+  font-size: clamp(30px, 5.2vh, 56px);
+}
