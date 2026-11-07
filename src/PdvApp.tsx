@@ -76,7 +76,7 @@ type AdvancedSplitPart = { id: string; name: string; amount: number; weight: num
 type AdvancedSplitMode = "value" | "products";
 type AdvancedSplitResult = { parts: AdvancedSplitPart[]; assignments: Record<string, string>; roundingStep: number; roundingDirection: RoundDirection; mode: AdvancedSplitMode; equalValues: boolean };
 type CheckoutTarget =
-  | { kind: "direct"; total: number; subtotal?: number; discount?: number; items?: PdvCartItem[]; manual?: boolean; saleType?: PdvSale["type"]; operationId?: PdvOperationId }
+  | { kind: "direct"; total: number; subtotal?: number; discount?: number; split?: CheckoutSplit; preferredAmount?: number; items?: PdvCartItem[]; manual?: boolean; saleType?: PdvSale["type"]; operationId?: PdvOperationId }
   | { kind: "table"; table: PdvOpenTable; total: number; subtotal?: number; discount: number; split?: CheckoutSplit; preferredAmount?: number; initialPayments?: PdvPayment[]; adjustedItems?: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-scope"; table: PdvOpenTable; scope: Exclude<TableCloseScope, { kind: "all" }>; total: number; subtotal?: number; discount: number; split?: CheckoutSplit; preferredAmount?: number; initialPayments?: PdvPayment[]; items: PdvCartItem[]; operationId: PdvOperationId }
   | { kind: "table-partial-items"; table: PdvOpenTable; total: number; items: PdvCartItem[]; operationId: PdvOperationId }
@@ -594,6 +594,7 @@ export function PdvApp({
   const [quantity, setQuantity] = useState(1);
   const [cart, setCart] = useState<PdvCartItem[]>([]);
   const [directSaleMode, setDirectSaleMode] = useState<"Venda direta" | "Onibus">("Venda direta");
+  const [directCloseMenuOpen, setDirectCloseMenuOpen] = useState(false);
   const [selectedDirectItemIds, setSelectedDirectItemIds] = useState<string[]>([]);
   const [discount, setDiscount] = useState(0);
   const [tableFilter, setTableFilter] = useState<PdvTableStatus | "Todas">("Todas");
@@ -1338,7 +1339,8 @@ export function PdvApp({
       setToast("Adicione ao menos um produto.", true);
       return;
     }
-    setCheckoutTarget({ kind: "direct", total: saleFinal, subtotal: saleTotal, discount, operationId: crypto.randomUUID() });
+    // Mesmo menu do fechar conta da mesa (dividir por pessoas), sem o avancado.
+    setDirectCloseMenuOpen(true);
   };
 
   const maybePrintSale = async (sale: PdvSale, latestSnapshot?: PdvSnapshot) => {
@@ -2261,6 +2263,11 @@ export function PdvApp({
           onSaveCustomer={savePdvCustomer}
           skipConfirmation={Boolean(snapshot.settings.skipPaymentConfirmation)}
           title={checkoutTarget.kind === "direct" && checkoutTarget.manual ? "Receber valor avulso" : "Pagamento"}
+          accountLabel={checkoutTarget.kind === "direct"
+            ? checkoutTarget.manual ? undefined : (checkoutTarget.saleType || directSaleMode) === "Onibus" ? "Ônibus" : "Venda"
+            : checkoutTarget.kind === "table-scope" && checkoutTarget.scope.kind === "subtable"
+              ? `Mesa ${String(checkoutTarget.table.number).padStart(3, "0")} · ${checkoutTarget.scope.subtableName}`
+              : `Mesa ${String(checkoutTarget.table.number).padStart(3, "0")}`}
           discountEditor={(checkoutTarget.kind === "direct" || checkoutTarget.kind === "table" || checkoutTarget.kind === "table-scope") && checkoutTarget.subtotal !== undefined && !(checkoutTarget.kind === "direct" && checkoutTarget.manual)
             ? { subtotal: checkoutTarget.subtotal, discount: checkoutTarget.discount || 0, onChange: (nextDiscount) => setCheckoutTarget((current) => current && (current.kind === "direct" || current.kind === "table" || current.kind === "table-scope") ? applyCheckoutDiscount(current, nextDiscount) : current) }
             : undefined}
@@ -2293,6 +2300,9 @@ export function PdvApp({
             } else if (checkoutTarget.kind === "table" || checkoutTarget.kind === "table-scope") {
               setCheckoutTarget(null);
               setTableCloseMenuOpen(true);
+            } else if (checkoutTarget.kind === "direct" && !checkoutTarget.manual) {
+              setCheckoutTarget(null);
+              setDirectCloseMenuOpen(true);
             } else {
               setCheckoutTarget(null);
             }
@@ -2363,6 +2373,22 @@ export function PdvApp({
                 operationId: crypto.randomUUID()
               });
             }
+          }}
+        />
+      )}
+      {!checkoutTarget && directCloseMenuOpen && tab === "sale" && (
+        <TableCloseMenu
+          heading={directSaleMode === "Onibus" ? "Ônibus" : "Venda"}
+          subtotal={saleFinal}
+          roundingStep={snapshot.settings.roundingStep ?? remoteSession?.roundingStep ?? roundingStep}
+          roundingDirection={snapshot.settings.roundingDirection ?? remoteSession?.roundingDirection ?? roundingDirection}
+          showAdvanced={false}
+          onCancel={() => setDirectCloseMenuOpen(false)}
+          onPartialItems={() => undefined}
+          onAdvancedSplit={() => undefined}
+          onCloseTotal={(_total, _discount, _payments, _preferred, split) => {
+            setDirectCloseMenuOpen(false);
+            setCheckoutTarget(applyCheckoutDiscount({ kind: "direct", total: saleTotal, subtotal: saleTotal, discount: 0, split, operationId: crypto.randomUUID() }, discount));
           }}
         />
       )}
@@ -4131,6 +4157,7 @@ export function PaymentModal({
   showDescription = false,
   discountEditor,
   title = "Pagamento",
+  accountLabel,
   confirmLabel = "Finalizar conta",
   skipConfirmation = false,
   onCancel,
@@ -4148,6 +4175,8 @@ export function PaymentModal({
   /** Acrescimo/desconto da conta, editavel enquanto nenhum pagamento foi lancado. */
   discountEditor?: { subtotal: number; discount: number; onChange: (discount: number) => void };
   title?: string;
+  /** Conta que esta sendo paga (Mesa 005, Venda, Onibus), mostrada ao lado do titulo. */
+  accountLabel?: string;
   confirmLabel?: string;
   skipConfirmation?: boolean;
   onCancel: () => void;
@@ -4340,7 +4369,7 @@ export function PaymentModal({
     <div className="pdv-modal-backdrop">
       <section className="pdv-payment-modal pdv-receive-modal pdv-checkout" tabIndex={-1} aria-label={title}>
         <header className="pdv-checkout-titlebar">
-          <h1>{title}</h1>
+          <h1>{accountLabel ? `${title} - ${accountLabel}` : title}</h1>
           <button className="pdv-icon-button" aria-label="Fechar pagamento" disabled={busy || submitting} onClick={cancelSafely}><X size={18} /></button>
         </header>
         <div className="pdv-checkout-body">
@@ -4411,15 +4440,18 @@ export function PaymentModal({
           <aside className="pdv-checkout-right" aria-label="Resumo do pagamento">
             {discountEditor && (
               <section className="pdv-checkout-adjustments" aria-label="Acréscimo e desconto" title={adjustmentsLocked ? "Remova os pagamentos lançados para alterar acréscimo ou desconto." : undefined}>
+                {/* Titulo a direita e caixas brancas: % a esquerda, valor em R$ a direita. */}
                 <div className="pdv-checkout-adjust-row">
+                  <span className="pct-title">%</span>
                   <strong>Acréscimo</strong>
-                  <label><input aria-label="Acréscimo em %" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.surchargePercent} onChange={(event) => changeAdjustment("surchargePercent", event.target.value)} placeholder="0" /><span>%</span></label>
-                  <label><span>R$</span><input aria-label="Acréscimo em R$" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.surchargeValue} onChange={(event) => changeAdjustment("surchargeValue", event.target.value)} placeholder="0,00" /></label>
+                  <label className="pct"><input aria-label="Acréscimo em %" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.surchargePercent} onChange={(event) => changeAdjustment("surchargePercent", event.target.value)} placeholder="0,00" /></label>
+                  <label className="value"><span>R$</span><input aria-label="Acréscimo em R$" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.surchargeValue} onChange={(event) => changeAdjustment("surchargeValue", event.target.value)} placeholder="0,00" /></label>
                 </div>
                 <div className="pdv-checkout-adjust-row">
+                  <span className="pct-title">%</span>
                   <strong>Desconto</strong>
-                  <label><input aria-label="Desconto em %" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.discountPercent} onChange={(event) => changeAdjustment("discountPercent", event.target.value)} placeholder="0" /><span>%</span></label>
-                  <label><span>R$</span><input aria-label="Desconto em R$" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.discountValue} onChange={(event) => changeAdjustment("discountValue", event.target.value)} placeholder="0,00" /></label>
+                  <label className="pct"><input aria-label="Desconto em %" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.discountPercent} onChange={(event) => changeAdjustment("discountPercent", event.target.value)} placeholder="0,00" /></label>
+                  <label className="value"><span>R$</span><input aria-label="Desconto em R$" inputMode="decimal" disabled={adjustmentsLocked} value={adjustments.discountValue} onChange={(event) => changeAdjustment("discountValue", event.target.value)} placeholder="0,00" /></label>
                 </div>
                 <small>{adjustmentsLocked ? "Para alterar, remova os pagamentos lançados." : `Subtotal ${money(discountEditor.subtotal)}${Math.abs(discountEditor.discount) > 0.009 ? ` · ${discountEditor.discount > 0 ? "desconto" : "acréscimo"} ${money(Math.abs(discountEditor.discount))}` : ""}`}</small>
               </section>
@@ -6447,6 +6479,8 @@ function AdvancedAccountSplitModal({
 
 function TableCloseMenu({
   table,
+  heading,
+  showAdvanced = true,
   subtotal,
   scopeLabel,
   roundingStep: configuredRoundingStep,
@@ -6459,7 +6493,11 @@ function TableCloseMenu({
   onAdvancedSplit,
   onCloseTotal
 }: {
-  table: PdvOpenTable;
+  /** Ausente na venda direta: o titulo vem de heading (Venda ou Onibus). */
+  table?: PdvOpenTable;
+  heading?: string;
+  /** A venda direta nao mostra a divisao avancada. */
+  showAdvanced?: boolean;
   subtotal: number;
   scopeLabel?: string;
   roundingStep?: number;
@@ -6564,7 +6602,7 @@ function TableCloseMenu({
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Fechar conta</span>
-            <h1>{scopeLabel ? `${scopeLabel} · ` : "Mesa "}{String(table.number).padStart(3, "0")}</h1>
+            <h1>{heading || `${scopeLabel ? `${scopeLabel} · ` : "Mesa "}${String(table?.number ?? 0).padStart(3, "0")}`}</h1>
             <p>Divida por pessoas se precisar. Desconto e acrescimo ficam na tela de pagamento.</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
@@ -6576,7 +6614,7 @@ function TableCloseMenu({
         </div>
         <div className="pdv-close-split">
           <div>
-            <span className="pdv-close-split-title"><strong>Dividir por pessoas</strong><button type="button" onClick={() => onAdvancedSplit(total, discount)}>Avancado</button></span>
+            <span className="pdv-close-split-title"><strong>Dividir por pessoas</strong>{showAdvanced && <button type="button" onClick={() => onAdvancedSplit(total, discount)}>Avancado</button>}</span>
             <span>Aproximacao: {String(roundingStep).replace(".", ",")} / {roundingDirection}</span>
           </div>
           <div className="pdv-inline-stepper">

@@ -68,6 +68,7 @@ with sync_playwright() as p:
     modal = s.locator('.pdv-checkout')
     expect(modal).to_be_visible()
     expect(modal.get_by_role('textbox').first).to_have_value('CONSUMIDOR NÃO IDENTIFICADO')
+    expect(modal.locator('.pdv-checkout-titlebar h1')).to_have_text('Pagamento - Mesa 027')
     expect(modal.locator('.pdv-checkout-payments article.remaining')).to_contain_text('60,00')
     s.screenshot(path=str(out / 'checkout-1280.png'))
     for size in [{'width': 1024, 'height': 600}]:
@@ -155,8 +156,24 @@ with sync_playwright() as p:
     expect(s.get_by_role('button', name='Desconto da venda', exact=False)).to_have_count(0)
     s.get_by_role('button', name='CAFE QA', exact=False).first.click()
     s.get_by_role('button', name='Receber e finalizar', exact=True).click()
+    # 0.4.21: a venda abre o mesmo menu de fechar conta da mesa, com "Venda" no titulo e sem o Avancado.
+    close = s.locator('.pdv-close-menu')
+    expect(close.locator('h1')).to_have_text('Venda')
+    expect(close.get_by_role('button', name='Avancado', exact=True)).to_have_count(0)
+    close.locator('.pdv-inline-stepper input').fill('2')
+    expect(close).to_contain_text('R$ 15,00')
+    s.screenshot(path=str(out / 'direct-close-menu.png'))
+    close.get_by_role('button', name='Fechar total', exact=False).click()
     modal = s.locator('.pdv-checkout')
     expect(modal).to_be_visible()
+    expect(modal.locator('.pdv-checkout-titlebar h1')).to_have_text('Pagamento - Venda')
+    # Voltar do pagamento retorna ao menu da venda.
+    modal.get_by_role('button', name='Voltar', exact=False).click()
+    expect(close.locator('h1')).to_have_text('Venda')
+    close.get_by_role('button', name='Fechar total', exact=False).click()
+    expect(modal).to_be_visible()
+    s.screenshot(path=str(out / 'direct-checkout.png'))
+    print('PASS direct sale uses the table close menu (Venda, no advanced, split by people) and checkout titled Pagamento - Venda')
     modal.get_by_label('Acréscimo em R$', exact=True).fill('5')
     expect(modal.locator('.pdv-checkout-figure.total')).to_contain_text('35,00')
     modal.get_by_role('button', name='Pix', exact=False).click()
@@ -168,6 +185,26 @@ with sync_playwright() as p:
     direct = s.evaluate("async()=>(await window.caixa.getPdvSnapshot()).recentSales.find(x=>x.type!=='Mesa')")
     assert abs(direct['discount'] + 5) < 0.001 and abs(direct['total'] - 35) < 0.001, (direct['discount'], direct['total'])
     print('PASS direct sale: no cart discount button; surcharge in checkout saved as -5.00')
+
+    # Modo onibus: o menu e o pagamento mostram Onibus.
+    s.locator('.pdv-sale-mode-select').select_option('Onibus')
+    s.get_by_role('button', name='CAFE QA', exact=False).first.click()
+    s.get_by_role('button', name='Receber e finalizar', exact=True).click()
+    expect(close.locator('h1')).to_have_text('Ônibus')
+    close.get_by_role('button', name='Fechar total', exact=False).click()
+    expect(modal.locator('.pdv-checkout-titlebar h1')).to_have_text('Pagamento - Ônibus')
+    modal.get_by_role('button', name='Pix', exact=False).click()
+    s.locator('.pdv-payment-amount-modal').get_by_role('button', name='OK', exact=True).click()
+    modal.get_by_role('button', name='Finalizar conta', exact=False).click()
+    if s.locator('.pdv-confirm-modal').count():
+        s.locator('.pdv-confirm-modal').get_by_role('button', name='Confirmar', exact=False).click()
+    expect(modal).to_have_count(0)
+    bus = s.evaluate("async()=>(await window.caixa.getPdvSnapshot()).recentSales.find(x=>x.type!=='Mesa')")
+    assert bus['type'] == 'Onibus' and abs(bus['total'] - 30) < 0.001, (bus['type'], bus['total'])
+    if s.locator('.pdv-receipt-preview').count():
+        s.locator('.pdv-receipt-preview').get_by_role('button', name='Fechar', exact=True).click()
+    s.locator('.pdv-sale-mode-select').select_option('Venda direta')
+    print('PASS bus mode: close menu and checkout titled Onibus; sale saved as Onibus')
 
     # Cliente remoto: cadastro rapido pela pesquisa e selecao.
     reload(c)

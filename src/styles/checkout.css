@@ -353,3 +353,55 @@ body > .pdv-context-menu .pdv-batch-menu-title strong { min-width: 0; overflow: 
 body > .pdv-context-menu .pdv-batch-menu-item:disabled svg { opacity: 0.5; }
 body > .pdv-context-menu:has(.pdv-batch-menu-item) { min-width: 300px; }
 body > .pdv-context-menu .pdv-batch-menu-item { white-space: nowrap; }
+
+/* 0.4.21: coluna direita do pagamento no estilo do caixa antigo: um painel so, titulo
+   alinhado a direita em azul forte e o valor grande dentro de uma caixa branca. */
+#root .pdv-checkout-right {
+  gap: 6px;
+  padding: 12px 16px 14px;
+  border: 1px solid #a9c8dc;
+  border-radius: 3px;
+  background: #edf6fb;
+}
+#root .pdv-checkout-right .pdv-checkout-adjustments { gap: 4px; padding: 0 0 6px; border: 0; background: transparent; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row {
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  grid-template-areas: "pcth title" "pct value";
+  gap: 2px 10px;
+  align-items: end;
+}
+#root .pdv-checkout-right .pdv-checkout-adjust-row .pct-title { grid-area: pcth; text-align: center; font-size: 17px; font-weight: 900; color: #0b3151; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row strong { grid-area: title; text-align: right; font-size: 19px; font-weight: 900; color: #0b3151; text-decoration: underline; text-underline-offset: 3px; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row label.pct { grid-area: pct; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row label.value { grid-area: value; position: relative; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row label.value span { position: absolute; left: 10px; font-size: 18px; font-weight: 900; color: #0b3151; pointer-events: none; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row input {
+  min-height: 46px;
+  padding: 4px 12px;
+  border: 1px solid #b9cfdf;
+  background: #fff !important;
+  font-size: 22px;
+  font-weight: 900;
+}
+#root .pdv-checkout-right .pdv-checkout-adjust-row label.pct input { text-align: center; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row label.value input { padding-left: 42px; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row input::placeholder { color: #0b3151; opacity: 1; }
+#root .pdv-checkout-right .pdv-checkout-adjust-row input:disabled::placeholder { color: #7d8f9c; }
+#root .pdv-checkout-right .pdv-checkout-adjustments small { text-align: right; }
+
+#root .pdv-checkout-right .pdv-checkout-figure { flex: 1 1 0; justify-content: flex-end; gap: 4px; padding: 0; border: 0; background: transparent; }
+#root .pdv-checkout-right .pdv-checkout-figure > span { align-self: flex-end; font-size: 20px; font-weight: 900; color: #0b3151 !important; }
+#root .pdv-checkout-right .pdv-checkout-figure strong {
+  padding: 6px 14px;
+  border: 1px solid #b9cfdf;
+  background: #fff;
+  font-size: clamp(30px, 3.2vw, 42px);
+}
+#root .pdv-checkout-right .pdv-checkout-figure.received > span { color: #1565c0 !important; }
+#root .pdv-checkout-right .pdv-checkout-figure.change > span { color: #c62828 !important; }
+#root .pdv-checkout-right .pdv-checkout-actions { margin-top: 8px; }
+@media (max-height: 680px) {
+  #root .pdv-checkout-right .pdv-checkout-adjust-row input { min-height: 36px; font-size: 18px; }
+  #root .pdv-checkout-right .pdv-checkout-figure > span { font-size: 16px; }
+  #root .pdv-checkout-right .pdv-checkout-figure strong { font-size: 26px; padding: 4px 12px; }
+}
