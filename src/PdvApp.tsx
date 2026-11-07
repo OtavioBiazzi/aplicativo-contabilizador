@@ -4197,6 +4197,7 @@ export function PaymentModal({
     discountPercent: "", discountValue: initialDiscount > 0 ? String(initialDiscount).replace(".", ",") : ""
   }));
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [chosenCustomer, setChosenCustomer] = useState<PdvCustomer | null>(null);
   const finishLocked = useRef(false);
   const cancelSafely = () => { if (!busy && !submitting && !finishLocked.current) onCancel(); };
   const paid = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
@@ -4351,11 +4352,13 @@ export function PaymentModal({
     const surchargeAmount = roundMoney(amount(next.surchargeValue) + base * amount(next.surchargePercent) / 100);
     discountEditor.onChange(roundMoney(discountAmount - surchargeAmount));
   };
-  const selectedCustomer = customers.find((item) => item.id === selectedCustomerId) || null;
+  const customerList = chosenCustomer ? [...customers.filter((item) => item.id !== chosenCustomer.id), chosenCustomer] : customers;
+  const selectedCustomer = customerList.find((item) => item.id === selectedCustomerId) || null;
   const received = roundMoney(payments.reduce((sum, payment) => sum + (payment.received ?? payment.amount), 0));
   const change = roundMoney(payments.reduce((sum, payment) => sum + (payment.change || 0), 0));
   const chooseCustomer = (customer: PdvCustomer | null) => {
     setSelectedCustomerId(customer?.id || "");
+    setChosenCustomer(customer);
     setCustomerPickerOpen(false);
     // Na identificacao do pagamento, o cliente escolhido entra como nome quando o campo esta vazio.
     if (customer && showDescription && !observations.trim()) setObservations(customer.name);
@@ -4462,7 +4465,7 @@ export function PaymentModal({
         </div>
         {customerPickerOpen && (
           <CustomerPickerModal
-            customers={customers}
+            customers={customerList}
             selectedId={selectedCustomerId}
             onSaveCustomer={onSaveCustomer}
             onCancel={() => setCustomerPickerOpen(false)}
@@ -4475,7 +4478,7 @@ export function PaymentModal({
               key={`receivable-${remaining}`}
               remaining={roundMoney(remaining + (editingPayment?.amount || 0))}
               preferredAmount={preferredAmount}
-              customers={customers}
+              customers={customerList}
               initialPayment={editingPayment || undefined}
               initialCustomerId={selectedCustomerId}
               onSaveCustomer={onSaveCustomer}
@@ -4588,8 +4591,8 @@ function CustomerPickerModal({ customers, selectedId, onSaveCustomer, onCancel, 
   const [onlyCustomers, setOnlyCustomers] = useState(true);
   const [highlighted, setHighlighted] = useState(selectedId || "");
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState<PdvCustomerDraft>({ name: "", document: "", phone: "", email: "", active: true, role: "customer" });
-  const [saving, setSaving] = useState(false);
+  // Cadastro aberto para alterar (id) ou vazio para um cliente novo.
+  const [editingId, setEditingId] = useState("");
   const [notice, setNotice] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
   const tableRef = useRef<HTMLDivElement | null>(null);
@@ -4611,35 +4614,31 @@ function CustomerPickerModal({ customers, selectedId, onSaveCustomer, onCancel, 
     setHighlighted(next.id);
     tableRef.current?.querySelector(`[data-customer-id="${next.id}"]`)?.scrollIntoView({ block: "nearest" });
   };
-  const saveNew = async () => {
-    if (!draft.name.trim() || saving) return;
-    setSaving(true);
-    try {
-      const customer = await onSaveCustomer({ ...draft, name: draft.name.trim(), document: draft.document?.trim(), phone: draft.phone?.trim(), email: draft.email?.trim() });
-      setLocalCustomers((current) => [...current.filter((item) => item.id !== customer.id), customer]);
-      onSelect(customer);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Nao foi possivel cadastrar o cliente.");
-    } finally {
-      setSaving(false);
-    }
+  const startCreate = () => { setEditingId(""); setCreating(true); };
+  const startEdit = (customer: PdvCustomer | null) => {
+    if (!customer) return;
+    setEditingId(customer.id);
+    setCreating(true);
+  };
+  const saveFromEditor = async (draft: PdvCustomerDraft) => {
+    const customer = await onSaveCustomer(draft);
+    setLocalCustomers((current) => [...current.filter((item) => item.id !== customer.id), customer]);
+    setCreating(false);
+    onSelect(customer);
   };
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (notice) return;
+      if (notice || creating) return;
       const handled = () => { event.preventDefault(); event.stopPropagation(); };
       if (event.key === "Escape") {
         handled();
-        if (creating) setCreating(false); else onCancel();
-        return;
-      }
-      if (creating) {
-        if (event.key === "Enter") { handled(); void saveNew(); }
+        onCancel();
         return;
       }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") { handled(); move(event.key === "ArrowDown" ? 1 : -1); return; }
       if (event.key === "Enter") { handled(); choose(highlightedRow || (rows.length === 1 ? rows[0] : null)); return; }
-      if (event.key === "F2") { handled(); setCreating(true); setDraft((current) => ({ ...current, name: query.trim() })); }
+      if (event.key === "F2") { handled(); startCreate(); return; }
+      if (event.key === "F3") { handled(); startEdit(highlightedRow); return; }
       // As teclas F1-F6 nao devem abrir formas de pagamento por baixo desta janela.
       if (/^F\d+$/.test(event.key)) handled();
     };
@@ -4653,22 +4652,10 @@ function CustomerPickerModal({ customers, selectedId, onSaveCustomer, onCancel, 
       <section className="pdv-payment-modal pdv-customer-picker" role="dialog" aria-modal="true" aria-label="Cadastro de clientes">
         <header className="pdv-checkout-titlebar"><h1>Cadastro de Clientes</h1><button className="pdv-icon-button" aria-label="Fechar pesquisa de clientes" onClick={onCancel}><X size={18} /></button></header>
         <div className="pdv-customer-picker-toolbar">
-          <button type="button" onClick={() => { setCreating(true); setDraft((current) => ({ ...current, name: query.trim() })); }}><UserPlus size={15} /><span>Novo</span><small>F2</small></button>
+          <button type="button" onClick={startCreate}><UserPlus size={15} /><span>Novo</span><small>F2</small></button>
+          <button type="button" disabled={!highlightedRow} onClick={() => startEdit(highlightedRow)}><Pencil size={15} /><span>Alterar</span><small>F3</small></button>
           <button type="button" disabled={!highlightedRow} onClick={() => choose(highlightedRow)}><Check size={15} /><span>Selecionar</span><small>Enter</small></button>
         </div>
-        {creating ? (
-          <div className="pdv-customer-picker-create" aria-label="Cadastro rápido">
-            <strong>Cadastro rápido</strong>
-            <label><span>Nome</span><input autoFocus aria-label="Nome do novo cliente" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-            <label><span>CPF/CNPJ</span><input aria-label="CPF/CNPJ do novo cliente" value={draft.document || ""} onChange={(event) => setDraft({ ...draft, document: event.target.value })} /></label>
-            <label><span>Telefone</span><input aria-label="Telefone do novo cliente" value={draft.phone || ""} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} /></label>
-            <label><span>E-mail</span><input aria-label="E-mail do novo cliente" value={draft.email || ""} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label>
-            <div className="pdv-action-row">
-              <button className="pdv-danger-button" onClick={() => setCreating(false)}>Voltar à pesquisa</button>
-              <button className="pdv-primary-button" disabled={!draft.name.trim() || saving} onClick={() => void saveNew()}>{saving ? "Cadastrando..." : "Cadastrar e selecionar"}</button>
-            </div>
-          </div>
-        ) : (
           <>
             <div className="pdv-customer-picker-filters">
               <label className="search"><span>Pesquisar <small>(Nome, CPF/CNPJ, Telefone ou E-mail)</small></span><input ref={searchRef} aria-label="Pesquisar cliente" value={query} onChange={(event) => { setQuery(event.target.value); setHighlighted(""); }} /></label>
@@ -4678,7 +4665,7 @@ function CustomerPickerModal({ customers, selectedId, onSaveCustomer, onCancel, 
             <div className="pdv-customer-picker-table" ref={tableRef} role="listbox" aria-label="Clientes encontrados">
               <div className="head"><span>Nome</span><span>CPF/CNPJ</span><span>Telefone</span><span>Endereço</span><span>E-mail</span></div>
               {rows.map((customer) => (
-                <div key={customer.id} data-customer-id={customer.id} role="option" aria-selected={customer.id === highlighted} className={`row ${customer.id === highlighted ? "selected" : ""} ${customer.active ? "" : "inactive"}`} onClick={() => setHighlighted(customer.id)} onDoubleClick={() => choose(customer)}>
+                <div key={customer.id} data-customer-id={customer.id} role="option" aria-selected={customer.id === highlighted} className={`row ${customer.id === highlighted ? "selected" : ""} ${customer.active ? "" : "inactive"}`} onClick={() => setHighlighted(customer.id)} onDoubleClick={() => choose(customer)} onContextMenu={(event) => { event.preventDefault(); setHighlighted(customer.id); startEdit(customer); }} title="Duplo clique seleciona · botão direito ou F3 altera">
                   <span>{customer.name}</span><span>{customer.document || ""}</span><span>{customer.phone || ""}</span><span>{customer.address || ""}</span><span>{customer.email || ""}</span>
                 </div>
               ))}
@@ -4686,6 +4673,13 @@ function CustomerPickerModal({ customers, selectedId, onSaveCustomer, onCancel, 
             </div>
             <footer className="pdv-customer-picker-footer">Total em exibição: {rows.length}/{localCustomers.length}</footer>
           </>
+        {creating && (
+          <CustomerEditorModal
+            customer={editingId ? localCustomers.find((item) => item.id === editingId) : undefined}
+            initialName={query.trim()}
+            onCancel={() => setCreating(false)}
+            onSave={saveFromEditor}
+          />
         )}
         {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
@@ -8162,8 +8156,8 @@ function ReceivableEditorModal({ inline = false, receivable, sale, onCancel, onS
   );
 }
 
-function CustomerEditorModal({ inline = false, customer, onCancel, onSave }: { inline?: boolean; customer?: PdvCustomer; onCancel: () => void; onSave: (draft: PdvCustomerDraft) => void | Promise<void> }) {
-  const [draft, setDraft] = useState<PdvCustomerDraft>(() => customer || { id: crypto.randomUUID(), name: "", active: true });
+function CustomerEditorModal({ inline = false, customer, initialName = "", onCancel, onSave }: { inline?: boolean; customer?: PdvCustomer; initialName?: string; onCancel: () => void; onSave: (draft: PdvCustomerDraft) => void | Promise<void> }) {
+  const [draft, setDraft] = useState<PdvCustomerDraft>(() => customer || { id: crypto.randomUUID(), name: initialName, active: true, role: "customer" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const confirm = async () => {

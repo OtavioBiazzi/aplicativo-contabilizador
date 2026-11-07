@@ -15,7 +15,7 @@
 - **Dividir por pessoas** no Fechar conta começa em 1 e não altera mais a quantidade de clientes da mesa. Se o desconto mudar no pagamento, o valor por pessoa é recalculado.
 - **Fechar parcial** fica escondido por padrão. Para separar contas, use a transferência para submesa. Quem quiser pode religar em Mesas > Funcionamento.
 - Modais padronizados: cantos retos como os menus e o X do título sem moldura em todos.
-- **Pesquisa de clientes** no estilo cadastro de clientes: busca por nome, CPF/CNPJ, telefone ou e-mail, filtros de tipo e ativo, Enter ou duplo clique seleciona e **Novo (F2)** faz cadastro rápido já selecionando.
+- **Pesquisa de clientes** no estilo cadastro de clientes: busca por nome, CPF/CNPJ, telefone ou e-mail, filtros de tipo e ativo, e Enter ou duplo clique seleciona. **Novo (F2)** e **Alterar (F3 ou botão direito)** abrem o cadastro completo da tela de Clientes (tipo cliente/fornecedor, documento, contato, endereço, observação; só o nome é obrigatório) e selecionam o cliente salvo.
 - **Correção:** edições rápidas seguidas numa mesa (por exemplo duplicar, editar e remover) podiam fazer itens removidos voltarem, porque o servidor os tratava como incluídos por outro computador. Agora a lista de itens conhecidos acompanha cada salvamento confirmado.
 - **Mesas em aberto**: com a privacidade ligada, Realizado hoje e Previsão do total aparecem como Privado. O saldo que falta fechar continua visível.
 - **Alterar valor (peso)**: itens pesados passam a ser alterados pelo valor em R$, e o peso é calculado e exibido.
@@ -27,6 +27,9 @@
   - Clientes: ficha completa, contas pendentes e alterar cadastro.
 - Contas **vencidas com saldo** continuam na lista mesmo fora do período quando A pagar/A receber está marcado. Ficam no topo, com a etiqueta "fora do período", e uma nota no total mostra quanto delas está incluído.
 - Ajuda: novos tutoriais de lembretes e seleção múltipla; tutoriais de período e de mesas em aberto atualizados.
+
+- Menu do botão direito do carrinho reorganizado: **Juntar produtos repetidos** em primeiro, grupos com ícones e sem opções repetidas. Com vários itens selecionados, o botão direito em qualquer ponto do carrinho abre o menu de vários, e o Esc fecha o menu e desfaz a seleção.
+- Na tela de pagamento, as setas do teclado pulam Contas a receber enquanto não há cliente escolhido.
 
 Validação: typecheck e build de produção. Smokes de PDV, rede (inclui a nova confirmação de lembrete com e sem senha), lembretes (origem e padrões), privacidade, concorrência entre mesas, regressões, histórico, refinamentos e contas a pagar opcionais. QA no Electron com servidor e cliente isolados, com o mesmo conjunto anterior de lembretes e configurações e QA novos das fases 1 a 4:
 - lembrete só do cliente e de todos;
