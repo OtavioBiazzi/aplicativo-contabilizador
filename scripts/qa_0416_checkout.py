@@ -81,6 +81,12 @@ with sync_playwright() as p:
     s.set_viewport_size({'width': 1280, 'height': 720})
     print('PASS checkout layout: customer block, methods, remaining row and totals fit 1280x720 and 1024x600')
 
+    # Setas do teclado pulam Contas a receber enquanto nao ha cliente.
+    focused = []
+    for _ in range(8):
+        s.keyboard.press('ArrowRight')
+        focused.append(modal.locator('.pdv-payment-methods button[aria-selected="true"]').inner_text())
+    assert not any('receber' in f.lower() for f in focused), focused
     # Sem cliente escolhido, Contas a receber fica bloqueado (botao e atalho F6).
     expect(modal.get_by_role('button', name='Conta a receber', exact=False)).to_be_disabled()
     s.keyboard.press('F6')

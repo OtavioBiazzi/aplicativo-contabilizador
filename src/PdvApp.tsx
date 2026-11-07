@@ -15,6 +15,9 @@ import {
   CheckCircle2,
   ClipboardList,
   Copy,
+  ArrowRightLeft,
+  MessageSquareText,
+  Percent,
   Clock3,
   ContactRound,
   CreditCard,
@@ -3040,9 +3043,6 @@ function PdvSaleScreen(props: {
               runItemAction("remove", activeItem);
             }
           }}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) collapseSelection();
-          }}
           onKeyDown={(event) => {
             if (event.key === "Escape" && multiSelectedItems.length) {
               event.preventDefault();
@@ -3097,16 +3097,15 @@ function PdvSaleScreen(props: {
         <div className="pdv-resize-handle pdv-resize-cart-height" role="separator" aria-label="Redimensionar altura da lista do carrinho" title="Arraste para aumentar ou diminuir a lista do carrinho" onPointerDown={(event) => startResize("cart-height", event)} />
         {itemMenu?.multi && (
           <ContextMenu x={itemMenu.x} y={itemMenu.y} label="Ações dos itens selecionados" onClose={() => setItemMenu(null)}>
-            <div className="pdv-context-menu-title">{multiSelectedItems.length} itens selecionados</div>
-            <button onClick={() => runBatchAction("duplicate")}>Duplicar os {multiSelectedItems.length} produtos</button>
-            <button onClick={() => runBatchAction("discount")}>Desconto em % em cada item</button>
-            <button onClick={() => runBatchAction("note")}>Adicionar observacao em todos</button>
-            {props.activeTableNumber && props.transferPdvTableItems && <button onClick={() => runBatchAction("transfer")}>Transferir para outra mesa ou submesa</button>}
-            <button disabled={!visibleCart.length} onClick={() => runItemAction("receipt", itemMenu.item)}><ReceiptText size={14} /> Exibir recibo da conta</button>
-            {["Alterar quantidade ou valor", "Desconto em R$", "Alterar preco neste lancamento", "Dividir item entre pessoas", "Mover / reordenar"].map((label) => (
-              <button key={label} disabled title="Disponível para um item por vez. Clique em um item só para usar.">{label}</button>
-            ))}
-            <button className="danger" onClick={() => runBatchAction("remove")}>Remover/cancelar os {multiSelectedItems.length} produtos</button>
+            <div className="pdv-context-menu-title pdv-batch-menu-title"><strong>{multiSelectedItems.length} itens selecionados</strong><span>{money(roundMoney(multiSelectedItems.reduce((sum, item) => sum + (props.activeTableNumber ? unpaidItemTotal(item) : item.total), 0)))}</span></div>
+            <button className="pdv-batch-menu-item" onClick={() => runBatchAction("duplicate")}><Copy size={15} /> Duplicar todos</button>
+            <button className="pdv-batch-menu-item" onClick={() => runBatchAction("discount")}><Percent size={15} /> Desconto em % em cada item</button>
+            <button className="pdv-batch-menu-item" onClick={() => runBatchAction("note")}><MessageSquareText size={15} /> Observacao em todos</button>
+            {props.activeTableNumber && props.transferPdvTableItems && <button className="pdv-batch-menu-item" onClick={() => runBatchAction("transfer")}><ArrowRightLeft size={15} /> Transferir para outra mesa ou submesa</button>}
+            <button className="pdv-batch-menu-item" disabled={!visibleCart.length} onClick={() => runItemAction("receipt", itemMenu.item)}><ReceiptText size={15} /> Exibir recibo da conta</button>
+            <div className="pdv-context-menu-separator" role="separator" />
+            <button className="pdv-batch-menu-item danger" onClick={() => runBatchAction("remove")}><Trash2 size={15} /> Remover os {multiSelectedItems.length} produtos</button>
+            <p className="pdv-batch-menu-hint">Quantidade, preço, desconto em R$, dividir e mover: clique em um item só. Esc desfaz a seleção.</p>
           </ContextMenu>
         )}
         {itemMenu && !itemMenu.multi && (
@@ -4276,7 +4275,17 @@ export function PaymentModal({
           : event.key === "ArrowDown"
             ? 2
             : -2;
-      setFocusedPaymentIndex((current) => (current + direction + CHECKOUT_PAYMENT_METHODS.length) % CHECKOUT_PAYMENT_METHODS.length);
+      // Contas a receber so entra na navegacao depois de escolher o cliente.
+      const available = (index: number) => CHECKOUT_PAYMENT_METHODS[index] !== "Conta a receber" || Boolean(selectedCustomerId);
+      setFocusedPaymentIndex((current) => {
+        const total = CHECKOUT_PAYMENT_METHODS.length;
+        let next = current;
+        for (let step = 0; step < total; step += 1) {
+          next = (next + direction + total) % total;
+          if (available(next)) return next;
+        }
+        return current;
+      });
       return;
     }
     if (event.key === "Escape" && !paymentEntryMethod) {
@@ -4309,7 +4318,10 @@ export function PaymentModal({
     };
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [paymentEntryMethod, confirming, notice, customerPickerOpen, submitting, busy, payments, remaining, observations, focusedPaymentIndex]);
+  }, [paymentEntryMethod, confirming, notice, customerPickerOpen, submitting, busy, payments, remaining, observations, focusedPaymentIndex, selectedCustomerId]);
+  useEffect(() => {
+    if (!selectedCustomerId && CHECKOUT_PAYMENT_METHODS[focusedPaymentIndex] === "Conta a receber") setFocusedPaymentIndex(0);
+  }, [selectedCustomerId, focusedPaymentIndex]);
 
   // Desconto e acrescimo: so podem mudar antes de lancar pagamentos, para nao deixar pagamentos maiores que a conta.
   const adjustmentsLocked = payments.length > 0;
@@ -5281,41 +5293,55 @@ function BatchItemsModal({ kind, items, onCancel, onConfirm }: { kind: "remove" 
   const valid = kind === "remove" || (kind === "discount" ? parseBrazilianNumber(text) !== 0 && Number.isFinite(parseBrazilianNumber(text)) : text.trim().length > 0);
   const confirm = () => { if (valid) onConfirm(kind === "note" ? text.trim() : text); };
   useModalConfirmShortcut(confirm, onCancel);
-  const before = roundMoney(items.reduce((sum, item) => sum + item.total, 0));
-  const after = kind === "discount" && valid ? roundMoney(items.reduce((sum, item) => {
+  const afterTotal = (item: PdvCartItem) => {
+    if (kind !== "discount" || !valid) return item.total;
     const patch = percentDiscountPatch(item, text);
-    return sum + (patch.total ?? Math.max(0, roundMoney(item.quantity * item.unitPrice - (patch.discount || 0))));
-  }, 0)) : before;
-  const title = kind === "remove" ? `Remover ${items.length} produtos da conta?` : kind === "discount" ? `Desconto em % em ${items.length} itens` : `Observacao em ${items.length} itens`;
+    return patch.total ?? Math.max(0, roundMoney(item.quantity * item.unitPrice - (patch.discount || 0)));
+  };
+  const before = roundMoney(items.reduce((sum, item) => sum + item.total, 0));
+  const after = roundMoney(items.reduce((sum, item) => sum + afterTotal(item), 0));
+  const title = kind === "remove" ? "Remover itens" : kind === "discount" ? "Desconto em % nos itens" : "Observação nos itens";
+  const showAfter = kind === "discount";
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-item-edit-modal pdv-batch-modal" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="pdv-section-head">
-          <div>
-            <span className="pdv-eyebrow">Itens selecionados</span>
-            <h1>{title}</h1>
+      <section className="pdv-payment-modal pdv-batch-modal" role="dialog" aria-modal="true" aria-label={title}>
+        <header className="pdv-checkout-titlebar"><h1>{title}</h1><button className="pdv-icon-button" aria-label="Fechar" onClick={onCancel}><X size={18} /></button></header>
+        <div className="pdv-batch-body">
+          <p className={`pdv-batch-lead ${kind === "remove" ? "danger" : ""}`}>
+            {kind === "remove"
+              ? <>Os <strong>{items.length} produtos</strong> abaixo saem desta conta ({money(before)}).</>
+              : kind === "discount"
+                ? <>O mesmo percentual vale para cada um dos <strong>{items.length} produtos</strong>. Use + na frente para acréscimo.</>
+                : <>O texto é somado às observações que cada produto já tem.</>}
+          </p>
+          <div className="pdv-batch-table" role="table" aria-label="Itens selecionados">
+            <div className={`pdv-batch-row head ${showAfter ? "with-after" : ""}`} role="row"><span>Produto</span><span>Qtde</span><span>Valor</span>{showAfter && <span>Com desconto</span>}</div>
+            {items.map((item) => (
+              <div key={item.id} className={`pdv-batch-row ${showAfter ? "with-after" : ""}`} role="row">
+                <span className="name">{item.productName}{item.subtableName ? <small> · {item.subtableName}</small> : null}{item.note ? <small className="note">{item.note}</small> : null}</span>
+                <span>{item.measureLabel || formatQuantity(item.quantity)}</span>
+                <b>{money(item.total)}</b>
+                {showAfter && <b className="after">{money(afterTotal(item))}</b>}
+              </div>
+            ))}
+            <div className={`pdv-batch-row total ${showAfter ? "with-after" : ""}`} role="row"><span>Total</span><span /><b>{money(before)}</b>{showAfter && <b className="after">{money(after)}</b>}</div>
           </div>
-          <button className="pdv-icon-button" aria-label="Fechar" onClick={onCancel}><X size={18} /></button>
+          {kind === "discount" && (
+            <label className="pdv-batch-field">
+              <span>Desconto em %</span>
+              <input autoFocus aria-label="Desconto em %" inputMode="decimal" value={text} onChange={(event) => setText(event.target.value)} placeholder="Ex.: 10 ou +5" />
+            </label>
+          )}
+          {kind === "note" && (
+            <label className="pdv-batch-field">
+              <span>Observação</span>
+              <input autoFocus aria-label="Observacao dos itens" value={text} onChange={(event) => setText(event.target.value)} placeholder="Ex.: sem cebola" />
+            </label>
+          )}
         </div>
-        <ul className="pdv-batch-list">
-          {items.map((item) => <li key={item.id}><span>{item.productName}{item.subtableName ? ` · ${item.subtableName}` : ""}</span><b>{money(item.total)}</b></li>)}
-        </ul>
-        {kind === "discount" && (
-          <label className="pdv-batch-field">
-            <span>Desconto em % (use + para acrescimo)</span>
-            <input autoFocus aria-label="Desconto em %" inputMode="decimal" value={text} onChange={(event) => setText(event.target.value)} placeholder="Ex.: 10" />
-            <small>Total dos itens: {money(before)} → {money(after)}</small>
-          </label>
-        )}
-        {kind === "note" && (
-          <label className="pdv-batch-field">
-            <span>Observacao (somada as que ja existem)</span>
-            <input autoFocus aria-label="Observacao dos itens" value={text} onChange={(event) => setText(event.target.value)} placeholder="Ex.: sem cebola" />
-          </label>
-        )}
-        <div className="pdv-action-row">
-          <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
-          <button className={kind === "remove" ? "pdv-danger-button" : "pdv-primary-button"} disabled={!valid} onClick={confirm}>{kind === "remove" ? "Remover todos" : "Aplicar em todos"}</button>
+        <div className="pdv-batch-actions">
+          <button className="pdv-ghost-button" onClick={onCancel}>Cancelar</button>
+          <button className={kind === "remove" ? "pdv-danger-button" : "pdv-primary-button"} disabled={!valid} onClick={confirm}>{kind === "remove" ? `Remover ${items.length} produtos` : "Aplicar em todos"}</button>
         </div>
       </section>
     </div>

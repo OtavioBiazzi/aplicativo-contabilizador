@@ -305,3 +305,47 @@
 #root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button:disabled,
 #root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button:disabled :is(span, svg) { color: #7d8f9c !important; }
 #root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button.active:disabled { border-color: #9fc4dc !important; background: linear-gradient(#f8fbfd, #d3e7f4) !important; }
+
+/* Menu do botao direito com varios itens */
+body > .pdv-context-menu .pdv-batch-menu-title { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 10px 12px; background: #e6f1f8; text-transform: none; letter-spacing: 0; }
+body > .pdv-context-menu .pdv-batch-menu-title strong { font-size: 13px; color: #0b3151; }
+body > .pdv-context-menu .pdv-batch-menu-title span { font-size: 13px; font-weight: 900; color: #1d5278; }
+body > .pdv-context-menu .pdv-batch-menu-item { display: flex; align-items: center; gap: 10px; }
+body > .pdv-context-menu .pdv-batch-menu-item svg { flex: 0 0 auto; color: #426b8a; }
+body > .pdv-context-menu .pdv-batch-menu-item.danger svg { color: #9b2118; }
+body > .pdv-context-menu .pdv-context-menu-separator { height: 1px; margin: 2px 0; background: #c9dceb; }
+body > .pdv-context-menu .pdv-batch-menu-hint { margin: 0; padding: 8px 12px 10px; font-size: 11px; line-height: 1.35; color: #5c7a90; background: #f2f7fb; }
+
+/* Janela das acoes em lote: mesmo visual da tela de pagamento */
+#root .pdv-payment-modal.pdv-batch-modal {
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch !important;
+  gap: 0;
+  width: min(640px, calc(100vw - 48px)) !important;
+  max-height: min(680px, calc(100vh - 48px)) !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid #7aa8c9 !important;
+  border-radius: 4px !important;
+  background: #dcebf5 !important;
+  color: #0b3151 !important;
+}
+#root .pdv-batch-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; padding: 14px; overflow-y: auto; }
+#root .pdv-batch-lead { margin: 0; font-size: 14px; line-height: 1.4; color: #1d5278; }
+#root .pdv-batch-lead.danger { color: #8a2b20; }
+#root .pdv-batch-table { border: 1px solid #a9c8dc; border-radius: 3px; background: #fff; overflow: hidden; }
+#root .pdv-batch-row { display: grid; grid-template-columns: minmax(0, 1fr) 80px 110px; gap: 10px; align-items: center; min-height: 38px; padding: 4px 12px; border-bottom: 1px solid #e1edf5; font-size: 14px; color: #0b3151; }
+#root .pdv-batch-row.with-after { grid-template-columns: minmax(0, 1fr) 70px 100px 120px; }
+#root .pdv-batch-row > :not(.name) { text-align: right; }
+#root .pdv-batch-row .name { display: grid; min-width: 0; overflow: hidden; font-weight: 700; }
+#root .pdv-batch-row .name small { font-weight: 600; color: #5c7a90; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#root .pdv-batch-row.head { min-height: 34px; background: #edf6fb; border-bottom-color: #a9c8dc; font-size: 13px; font-weight: 800; color: #1d5278; }
+#root .pdv-batch-row.total { border-bottom: 0; background: #edf6fb; font-weight: 900; }
+#root .pdv-batch-row .after { color: #1565c0; }
+#root .pdv-batch-table { max-height: 300px; overflow-y: auto; }
+#root .pdv-batch-field { display: grid; gap: 4px; margin: 0; font-size: 13px; font-weight: 800; color: #1d5278; }
+#root .pdv-batch-field input { min-height: 40px; padding: 6px 10px; border: 1px solid #9fc4dc; border-radius: 3px; background: #fff !important; color: #0b3151 !important; -webkit-text-fill-color: #0b3151 !important; font-size: 16px; font-weight: 700; }
+#root .pdv-batch-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 12px 14px; border-top: 1px solid #a9c8dc; background: #e6f1f8; }
+#root .pdv-batch-actions button { min-height: 46px; font-size: 15px; font-weight: 900; }
+#root .pdv-batch-row > :first-child { text-align: left; }
