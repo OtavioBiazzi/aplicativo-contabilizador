@@ -1,0 +1,249 @@
+/* 0.4.16: tela de pagamento no estilo "Receber" (cliente no topo, formas de pagamento,
+   lista Pagamento/Valor com o valor restante e totais grandes a direita) e pesquisa de clientes. */
+
+.pdv-payment-modal.pdv-checkout,
+.pdv-payment-modal.pdv-customer-picker {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: 6px !important;
+  background: #dcebf5 !important;
+  color: #0b2c47 !important;
+}
+.pdv-payment-modal.pdv-checkout { width: min(1180px, calc(100vw - 24px)) !important; max-height: min(94vh, 820px) !important; }
+.pdv-payment-modal.pdv-customer-picker { width: min(1100px, calc(100vw - 24px)) !important; height: min(88vh, 720px); max-height: min(88vh, 720px) !important; }
+
+.pdv-checkout-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 8px 0 14px;
+  background: linear-gradient(180deg, #17619c, #0d4373);
+  color: #fff;
+}
+.pdv-checkout-titlebar h1 { margin: 0; font-size: 15px; font-weight: 900; letter-spacing: 0.01em; color: #fff !important; }
+.pdv-checkout-titlebar .pdv-icon-button { color: #fff !important; background: transparent !important; border-color: rgba(255, 255, 255, 0.45) !important; }
+
+.pdv-checkout-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 1fr);
+  gap: 12px;
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+}
+.pdv-checkout-left { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; padding-right: 2px; }
+.pdv-checkout-right { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+
+/* Cliente */
+.pdv-checkout-customer {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  align-items: end;
+  padding: 10px 12px;
+  border: 1px solid #a9cbe2;
+  border-radius: 4px;
+  background: #f7fbfe;
+}
+.pdv-checkout-field { display: grid; gap: 3px; min-width: 0; }
+.pdv-checkout-field span { font-size: 12px; font-weight: 800; color: #24506f; }
+.pdv-checkout-field input {
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid #a9c2d4;
+  border-radius: 2px;
+  background: #fff !important;
+  color: #0b2c47 !important;
+  -webkit-text-fill-color: #0b2c47 !important;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.pdv-checkout-customer-actions { display: flex; gap: 4px; align-items: center; }
+.pdv-checkout-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid #5d93bd;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #ffffff, #dcebf5);
+  color: #0d4373;
+  font-weight: 900;
+  cursor: pointer;
+}
+.pdv-checkout-search:hover { background: #cfe4f3; }
+.pdv-checkout-clear { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid #a9c2d4; border-radius: 4px; background: #fff; color: #8a2b20; cursor: pointer; }
+
+/* Formas de pagamento */
+.pdv-checkout-methods { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid #a9cbe2; border-radius: 4px; background: #f7fbfe; }
+.pdv-checkout-methods > strong { font-size: 13px; color: #24506f; }
+.pdv-checkout .pdv-checkout-methods .pdv-payment-methods {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+  min-height: 0 !important;
+  height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+.pdv-checkout .pdv-checkout-methods .pdv-payment-methods button {
+  position: relative;
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 66px !important;
+  padding: 6px !important;
+  border: 1px solid #1d5f93 !important;
+  border-radius: 3px !important;
+  background: linear-gradient(180deg, #4a9ad6, #1f6aa8) !important;
+  color: #fff !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.1;
+}
+.pdv-checkout .pdv-checkout-methods .pdv-payment-methods button svg { opacity: 0.9; }
+.pdv-checkout .pdv-checkout-methods .pdv-payment-methods button small {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  opacity: 0.75 !important;
+  transform: none !important;
+  font-size: 10px;
+  color: #fff;
+}
+.pdv-checkout .pdv-checkout-methods .pdv-payment-methods button.active,
+.pdv-checkout .pdv-checkout-methods .pdv-payment-methods button:hover { background: linear-gradient(180deg, #f39a5c, #e2692c) !important; border-color: #b9501d !important; }
+.pdv-checkout .pdv-checkout-methods .pdv-payment-methods button:disabled { opacity: 0.45 !important; cursor: not-allowed; }
+
+/* Lista Pagamento | Valor */
+.pdv-checkout-payments { display: flex; flex-direction: column; min-height: 110px; border: 1px solid #a9cbe2; border-radius: 4px; background: #fff; overflow: hidden; }
+.pdv-checkout-payments-head,
+.pdv-checkout-payments-rows article { display: grid; grid-template-columns: minmax(0, 1fr) 140px 64px; align-items: center; gap: 8px; }
+.pdv-checkout-payments-head { padding: 6px 10px; border-bottom: 1px solid #c9dceb; font-size: 15px; font-weight: 800; color: #0b2c47; }
+.pdv-checkout-payments-head span:nth-child(2) { text-align: right; }
+.pdv-checkout-payments-rows { overflow-y: auto; max-height: 190px; }
+.pdv-checkout-payments-rows article { min-height: 36px; padding: 2px 10px; border-bottom: 1px solid #e3edf5; font-size: 14px; color: #0b2c47; }
+.pdv-checkout-payments-rows article .method { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdv-checkout-payments-rows article b { text-align: right; font-size: 15px; }
+.pdv-checkout-payments-rows article .actions { display: flex; gap: 4px; justify-content: flex-end; }
+.pdv-checkout-payments-rows article .actions .pdv-icon-button { width: 28px; height: 28px; min-height: 28px; padding: 0; }
+.pdv-checkout-payments-rows article.remaining { background: linear-gradient(90deg, #ef7d3f, #f39a5c); color: #fff; font-size: 17px; }
+.pdv-checkout-payments-rows article.remaining strong { font-weight: 800; letter-spacing: 0.02em; }
+.pdv-checkout-payments-rows article.remaining b { font-size: 17px; }
+
+.pdv-checkout .pdv-previous-payment-list { margin: 0; }
+.pdv-checkout .pdv-payment-description { margin: 0; }
+
+/* Totais a direita */
+.pdv-checkout-figure { display: grid; gap: 4px; }
+.pdv-checkout-figure span { justify-self: end; font-size: 17px; font-weight: 900; color: #24506f; }
+.pdv-checkout-figure strong {
+  display: block;
+  padding: 8px 12px;
+  border: 1px solid #a9cbe2;
+  border-radius: 3px;
+  background: #fff;
+  text-align: right;
+  font-size: clamp(24px, 3.2vw, 36px);
+  font-weight: 900;
+  line-height: 1.1;
+  color: #0b2c47;
+}
+.pdv-checkout-figure.received strong { color: #1565c0; }
+.pdv-checkout-figure.change strong { color: #d32f2f; }
+.pdv-checkout-figure.small span { font-size: 13px; }
+.pdv-checkout-figure.small strong { font-size: 18px; padding: 5px 10px; }
+.pdv-checkout-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: auto; }
+.pdv-checkout-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 52px; font-size: 16px; font-weight: 900; }
+
+@media (max-width: 860px) {
+  .pdv-checkout-body { grid-template-columns: 1fr; overflow-y: auto; }
+  .pdv-checkout-left { overflow: visible; }
+  .pdv-checkout .pdv-checkout-methods .pdv-payment-methods { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+}
+@media (max-height: 660px) {
+  .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button { min-height: 48px !important; }
+  .pdv-checkout-figure strong { font-size: 24px; padding: 5px 10px; }
+  .pdv-checkout-figure span { font-size: 14px; }
+  .pdv-checkout-actions button { min-height: 44px; }
+}
+
+/* Conta a receber: select + Pesquisar */
+.pdv-receivable-customer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+
+/* Pesquisa de clientes */
+.pdv-customer-picker-toolbar { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #a9cbe2; background: #eef5fa; }
+.pdv-customer-picker-toolbar button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 82px;
+  padding: 6px 10px;
+  border: 1px solid #a9c2d4;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #ffffff, #e3eef6);
+  color: #0d4373;
+  font-weight: 800;
+  cursor: pointer;
+}
+.pdv-customer-picker-toolbar button small { font-size: 10px; color: #5c7a90; }
+.pdv-customer-picker-toolbar button:disabled { opacity: 0.45; cursor: not-allowed; }
+.pdv-customer-picker-toolbar button.close { margin-left: auto; }
+.pdv-customer-picker-filters { display: grid; grid-template-columns: minmax(0, 1fr) 150px 110px; gap: 10px; align-items: end; padding: 8px 10px; }
+.pdv-customer-picker-filters label { display: grid; gap: 3px; font-size: 12px; font-weight: 800; color: #24506f; }
+.pdv-customer-picker-filters label small { font-weight: 600; color: #5c7a90; }
+.pdv-customer-picker-filters :is(input, select) { min-height: 32px; padding: 4px 8px; border: 1px solid #a9c2d4; border-radius: 2px; background: #fff !important; color: #0b2c47 !important; -webkit-text-fill-color: #0b2c47 !important; font-size: 13px; }
+.pdv-customer-picker-table { flex: 1 1 auto; min-height: 0; margin: 0 10px; overflow-y: auto; border: 1px solid #a9c2d4; background: #fff; }
+.pdv-customer-picker-table .head,
+.pdv-customer-picker-table .row { display: grid; grid-template-columns: minmax(180px, 2fr) 150px 130px minmax(120px, 1.2fr) minmax(140px, 1.4fr); gap: 8px; align-items: center; padding: 3px 8px; font-size: 13px; }
+.pdv-customer-picker-table .head { position: sticky; top: 0; z-index: 1; background: #eef5fa; border-bottom: 1px solid #a9c2d4; font-weight: 900; color: #0b2c47; }
+.pdv-customer-picker-table .row { min-height: 26px; border-bottom: 1px solid #edf2f6; color: #0b2c47; cursor: pointer; text-transform: uppercase; }
+.pdv-customer-picker-table .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdv-customer-picker-table .row:hover { background: #eaf3fa; }
+.pdv-customer-picker-table .row.selected { background: #ef7d3f; color: #fff; }
+.pdv-customer-picker-table .row.inactive { color: #8796a3; }
+.pdv-customer-picker-table .empty { padding: 18px; text-align: center; color: #5c7a90; }
+.pdv-customer-picker-footer { padding: 6px 12px 8px; text-align: right; font-size: 12px; color: #24506f; }
+.pdv-customer-picker-create { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 14px; }
+.pdv-customer-picker-create > strong,
+.pdv-customer-picker-create > .pdv-action-row { grid-column: 1 / -1; }
+.pdv-customer-picker-create label { display: grid; gap: 3px; font-size: 12px; font-weight: 800; color: #24506f; }
+.pdv-customer-picker-create input { min-height: 34px; padding: 4px 8px; border: 1px solid #a9c2d4; border-radius: 2px; background: #fff !important; color: #0b2c47 !important; -webkit-text-fill-color: #0b2c47 !important; }
+@media (max-width: 860px) {
+  .pdv-customer-picker-filters { grid-template-columns: 1fr 1fr; }
+  .pdv-customer-picker-filters .search { grid-column: 1 / -1; }
+  .pdv-customer-picker-table .head span:nth-child(n + 4),
+  .pdv-customer-picker-table .row span:nth-child(n + 4) { display: none; }
+  .pdv-customer-picker-table .head, .pdv-customer-picker-table .row { grid-template-columns: minmax(0, 2fr) 1fr 1fr; }
+}
+
+/* Regras antigas do modal de pagamento usam !important com seletores fortes; o #root garante o visual novo. */
+#root .pdv-payment-modal.pdv-checkout,
+#root .pdv-payment-modal.pdv-customer-picker { align-items: stretch !important; justify-items: stretch !important; }
+#root .pdv-checkout-titlebar,
+#root .pdv-checkout-titlebar h1 { color: #fff !important; }
+#root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button,
+#root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button :is(span, small, svg) { color: #fff !important; }
+#root .pdv-checkout .pdv-checkout-methods .pdv-payment-methods button small { background: rgba(0, 0, 0, 0.18); padding: 0 4px; border-radius: 3px; }
+#root .pdv-checkout .pdv-checkout-figure.total strong { color: #0b2c47 !important; }
+#root .pdv-checkout .pdv-checkout-figure.received strong { color: #1565c0 !important; }
+#root .pdv-checkout .pdv-checkout-figure.change strong { color: #d32f2f !important; }
+#root .pdv-checkout .pdv-checkout-figure > span { color: #24506f !important; }
+#root .pdv-checkout .pdv-checkout-payments-rows article.remaining,
+#root .pdv-checkout .pdv-checkout-payments-rows article.remaining :is(span, strong, b) { color: #fff !important; }
+#root .pdv-customer-picker .pdv-customer-picker-table .row.selected,
+#root .pdv-customer-picker .pdv-customer-picker-table .row.selected span { color: #fff !important; }
+#root .pdv-checkout .pdv-checkout-actions .pdv-primary-button,
+#root .pdv-checkout .pdv-checkout-actions .pdv-danger-button { color: #fff !important; }

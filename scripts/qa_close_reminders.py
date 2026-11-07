@@ -39,10 +39,10 @@ with sync_playwright() as p:
  expect(c.locator('.table-close-reminders')).to_have_count(0)
  module(c,'Mesas');c.get_by_role('tab',name='Lembretes',exact=True).click();options=c.locator('.local-table-options')
  options.locator('select').first.select_option('always');options.get_by_label('Avisar fechamentos feitos',exact=True).select_option('all');options.locator('input[placeholder^="Ex."]').fill('47+')
- c.get_by_role('tab',name='Visual',exact=True).click();c.get_by_label('Ocultar o botão + só neste computador',exact=True).check()
- close_module(c);expect(c.locator('.pdv-quick-value-card')).to_have_count(0)
+ c.get_by_role('tab',name='Visual',exact=True).click();expect(c.get_by_label('Ocultar o botão + da grade de mesas',exact=True)).to_be_disabled()
+ close_module(c);expect(c.locator('.pdv-quick-value-card')).to_have_count(1)
  assert s.locator('.pdv-quick-value-card').count()==1
- print('PASS defaults off; client local options editable without server customization permission; hide + is local')
+ print('PASS defaults off; client local options editable without server customization permission; + rule is shared and read-only without permission')
  # Real client mixed checkout: split amount defaults to 30, cap card to 60, cash allows overpayment.
  card(c,40).click();c.get_by_role('button',name='Fechar conta',exact=True).click()
  close=c.locator('.pdv-close-menu');close.get_by_role('button',name='Fechar total',exact=False).click()

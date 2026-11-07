@@ -1,4 +1,4 @@
-import { dispatchTableClosed, LocalQuickValueOption, useLocalTablePreferences } from "./components/TableCloseReminders";
+import { dispatchTableClosed } from "./components/TableCloseReminders";
 import { KeyboardSelect } from "./components/KeyboardSelect";
 import { createPortal } from "react-dom";
 import { duplicateReceivableDraft, buildReceivableAccountReceipt } from "./shared/financialAccountActions";
@@ -17,6 +17,7 @@ import {
   Copy,
   Clock3,
   ContactRound,
+  CreditCard,
   Download,
   FileSpreadsheet,
   LayoutGrid,
@@ -26,11 +27,13 @@ import {
   Plus,
   ReceiptText,
   Pencil,
+  QrCode,
   RotateCcw,
   Search,
   Settings,
   ShoppingCart,
   Trash2,
+  UserPlus,
   Utensils,
   Wallet,
   WifiOff,
@@ -563,7 +566,6 @@ export function PdvApp({
   onRemoteTableConfirmed?: (table: PdvOpenTable, version?: PdvDataVersion) => void;
   onRemoteReceivableConfirmed?: (receivable: PdvReceivable, version?: PdvDataVersion) => void;
 }) {
-  const localTablePreferences = useLocalTablePreferences(Boolean(remoteSession));
   const visualSettingsStorageKey = `${CLIENT_VISUAL_SETTINGS_KEY}.${remoteSession ? "client" : "server"}`;
   const [snapshot, setSnapshot] = useState<PdvSnapshot | null>(null);
   const [tab, setTab] = useState<PdvTab>(initialTab);
@@ -989,6 +991,12 @@ export function PdvApp({
     const save = async () => {
       await ensureTableMeta(payload.tableNumber, payload.people, payload.note);
       const confirmedTable = await savePdvTableItems(payload.tableNumber, payload.items, payload.subtables, lastPersistedTableItemIds.current, payload.renamedSubtable);
+      // O servidor ja gravou estes itens como conhecidos por este computador. A base precisa acompanhar
+      // cada salvamento confirmado, mesmo quando a resposta e descartada por haver outro na fila; senao o
+      // proximo salvamento trata itens recem-criados aqui como "de outro terminal" e os ressuscita.
+      if (lastPersistedTableMeta.current?.number === payload.tableNumber) {
+        lastPersistedTableItemIds.current = payload.items.map((item) => item.id);
+      }
       if (revision !== tableSaveRevision.current) return;
       if (refresh && confirmedTable && snapshotOverride !== undefined) {
         setSnapshot((current) => current ? { ...current, tables: current.tables.map((table) => table.number === confirmedTable.number ? confirmedTable : table) } : current);
@@ -2123,7 +2131,7 @@ export function PdvApp({
                   <span>Tente outro número, nome de submesa ou filtro.</span>
                 </div>
               )}
-              {!tableSearch.trim() && !localTablePreferences.hideQuickValue && !snapshot?.settings.hideTableQuickValue && (
+              {!tableSearch.trim() && !snapshot?.settings.hideTableQuickValue && (
                 <button className="pdv-table-card pdv-quick-value-card" type="button" onClick={() => setQuickValueModalOpen(true)}>
                   <strong>+</strong>
                 </button>
@@ -4154,6 +4162,8 @@ export function PaymentModal({
   const [observations, setObservations] = useState("");
   const [preparedPaymentToDefine, setPreparedPaymentToDefine] = useState<PdvPayment | null>(null);
   const [focusedPaymentIndex, setFocusedPaymentIndex] = useState(0);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(() => initialPayments.find((payment) => payment.customerId)?.customerId || "");
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const finishLocked = useRef(false);
   const cancelSafely = () => { if (!busy && !submitting && !finishLocked.current) onCancel(); };
   const paid = roundMoney(payments.reduce((sum, payment) => sum + payment.amount, 0));
@@ -4265,83 +4275,121 @@ export function PaymentModal({
 
   useEffect(() => {
     const handleWindowKeyDown = (event: KeyboardEvent) => {
-      if (paymentEntryMethod || confirming || notice) {
+      if (paymentEntryMethod || confirming || notice || customerPickerOpen) {
         return;
       }
       handleReceiveKeyDown(event as unknown as React.KeyboardEvent);
     };
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
-  }, [paymentEntryMethod, confirming, notice, submitting, busy, payments, remaining, observations, focusedPaymentIndex]);
+  }, [paymentEntryMethod, confirming, notice, customerPickerOpen, submitting, busy, payments, remaining, observations, focusedPaymentIndex]);
+
+  const selectedCustomer = customers.find((item) => item.id === selectedCustomerId) || null;
+  const received = roundMoney(payments.reduce((sum, payment) => sum + (payment.received ?? payment.amount), 0));
+  const change = roundMoney(payments.reduce((sum, payment) => sum + (payment.change || 0), 0));
+  const chooseCustomer = (customer: PdvCustomer | null) => {
+    setSelectedCustomerId(customer?.id || "");
+    setCustomerPickerOpen(false);
+    // Na identificacao do pagamento, o cliente escolhido entra como nome quando o campo esta vazio.
+    if (customer && showDescription && !observations.trim()) setObservations(customer.name);
+  };
 
   return (
     <div className="pdv-modal-backdrop">
-      <section className="pdv-payment-modal pdv-receive-modal" tabIndex={-1}>
-        <div className="pdv-section-head">
-          <div>
-            <span className="pdv-eyebrow">Fechar conta</span>
-            <h1>{title}</h1>
+      <section className="pdv-payment-modal pdv-receive-modal pdv-checkout" tabIndex={-1} aria-label={title}>
+        <header className="pdv-checkout-titlebar">
+          <h1>{title}</h1>
+          <button className="pdv-icon-button" aria-label="Fechar pagamento" disabled={busy || submitting} onClick={cancelSafely}><X size={18} /></button>
+        </header>
+        <div className="pdv-checkout-body">
+          <div className="pdv-checkout-left">
+            <section className="pdv-checkout-customer" aria-label="Cliente">
+              <label className="pdv-checkout-field wide"><span>Cliente</span><input readOnly value={selectedCustomer?.name || "CONSUMIDOR NÃO IDENTIFICADO"} onDoubleClick={() => setCustomerPickerOpen(true)} /></label>
+              <label className="pdv-checkout-field"><span>CPF/CNPJ</span><input readOnly value={selectedCustomer?.document || ""} /></label>
+              <div className="pdv-checkout-customer-actions">
+                <button type="button" className="pdv-checkout-search" onClick={() => setCustomerPickerOpen(true)}><Search size={16} /> Pesquisar</button>
+                {selectedCustomer && <button type="button" className="pdv-checkout-clear" title="Voltar para consumidor não identificado" aria-label="Remover cliente" onClick={() => chooseCustomer(null)}><X size={14} /></button>}
+              </div>
+              <label className="pdv-checkout-field wide"><span>E-mail</span><input readOnly value={selectedCustomer?.email || ""} /></label>
+              <label className="pdv-checkout-field"><span>Telefone</span><input readOnly value={selectedCustomer?.phone || ""} /></label>
+            </section>
+            <section className="pdv-checkout-methods" aria-label="Formas de pagamento">
+              <strong>Escolha a forma de pagamento</strong>
+              <div className="pdv-payment-methods">
+                {CHECKOUT_PAYMENT_METHODS.map((item, index) => (
+                  <button key={item} aria-label={`${checkoutMethodLabel(item) === item ? item : `${item} - ${checkoutMethodLabel(item)}`} (F${index + 1})`} className={focusedPaymentIndex === index ? "active" : ""} aria-selected={focusedPaymentIndex === index} disabled={remaining <= 0.009} onClick={() => { setFocusedPaymentIndex(index); openPaymentMethod(item); }}>
+                    {checkoutMethodIcon(item)}
+                    <span>{checkoutMethodLabel(item)}</span>
+                    <small>F{index + 1}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section className="pdv-checkout-payments" aria-label="Pagamentos lançados">
+              <div className="pdv-checkout-payments-head"><span>Pagamento</span><span>Valor</span><span aria-hidden="true" /></div>
+              <div className="pdv-checkout-payments-rows">
+                {payments.map((payment) => (
+                  <article key={payment.id}>
+                    <span className="method"><strong>{checkoutMethodLabel(payment.method)}</strong>{payment.customerName ? ` · ${payment.customerName}` : ""}{payment.description ? ` · ${payment.description}` : ""}{payment.change ? ` · troco ${money(payment.change)}` : ""}</span>
+                    <b>{money(payment.amount)}</b>
+                    <span className="actions">
+                      {payment.method === "Nao definido"
+                        ? <button className="pdv-icon-button pdv-define-payment-button" title="Definir forma de pagamento" onClick={() => setPreparedPaymentToDefine(payment)}><Wallet size={14} /></button>
+                        : <button className="pdv-icon-button" title="Editar pagamento" aria-label={`Editar pagamento ${payment.method}`} onClick={() => { setEditingPayment(payment); setPaymentEntryMethod(payment.method); }}><Pencil size={14} /></button>}
+                      <button className="pdv-icon-button" title="Remover pagamento" aria-label={`Remover pagamento ${payment.method}`} onClick={() => setPayments((current) => current.filter((item) => item.id !== payment.id))}><Trash2 size={14} /></button>
+                    </span>
+                  </article>
+                ))}
+                {remaining > 0.009 && <article className="remaining"><span className="method"><strong>VALOR RESTANTE</strong></span><b>{money(remaining)}</b><span className="actions" /></article>}
+              </div>
+            </section>
+            {previousPayments.length > 0 && (
+              <section className="pdv-previous-payment-list" aria-label="Pagamentos parciais anteriores">
+                <div>
+                  <strong>Pagamentos ja registrados nesta mesa</strong>
+                  <b>{money(previousPayments.reduce((sum, payment) => sum + payment.amount, 0))}</b>
+                </div>
+                <div className="pdv-previous-payment-scroll">
+                  {previousPayments.map((payment) => (
+                    <article key={payment.id}>
+                      <span>{payment.method}{payment.description ? ` | ${payment.description}` : payment.operationLabel ? ` | ${payment.operationLabel}` : ""}</span>
+                      <b>{money(payment.amount)}</b>
+                      {onEditPreviousPayment && <button className="pdv-icon-button" title="Corrigir forma de pagamento" onClick={() => onEditPreviousPayment(payment)}><Pencil size={14} /></button>}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+            {showDescription && (
+              <label className="pdv-payment-description">
+                <span>Nome da pessoa / identificacao deste pagamento</span>
+                <input autoFocus value={observations} maxLength={120} onChange={(event) => setObservations(event.target.value)} placeholder="Ex.: Joao, Maria ou Pessoa 1" />
+                <small>Este nome ficara no historico e no recibo individual deste fechamento.</small>
+              </label>
+            )}
           </div>
-          <button className="pdv-icon-button" disabled={busy || submitting} onClick={cancelSafely}><X size={18} /></button>
-        </div>
-        <div className="pdv-payment-summary">
-          <Metric title="Total da conta" value={money(total)} />
-          <Metric title="Total pago" value={money(paid)} />
-          <Metric title="Valor restante" value={money(remaining)} />
-        </div>
-        <div className="pdv-payment-methods">
-          {CHECKOUT_PAYMENT_METHODS.map((item, index) => (
-            <button key={item} className={focusedPaymentIndex === index ? "active" : ""} aria-selected={focusedPaymentIndex === index} disabled={remaining <= 0.009} onClick={() => { setFocusedPaymentIndex(index); openPaymentMethod(item); }}>
-              <span>{item}</span>
-              <small>F{index + 1}</small>
-            </button>
-          ))}
-        </div>
-        <div className="pdv-payment-list">
-          {payments.map((payment) => (
-            <article key={payment.id}>
-              <strong>{payment.method}</strong>
-              <span>{money(payment.amount)}{payment.change ? ` | Troco ${money(payment.change)}` : ""}{payment.description ? ` | ${payment.description}` : ""}</span>
-              {payment.method === "Nao definido"
-                ? <button className="pdv-icon-button pdv-define-payment-button" title="Definir forma de pagamento" onClick={() => setPreparedPaymentToDefine(payment)}><Wallet size={15} /></button>
-                : <button className="pdv-icon-button" title="Editar pagamento" onClick={() => { setEditingPayment(payment); setPaymentEntryMethod(payment.method); }}><Pencil size={15} /></button>}
-              <button className="pdv-icon-button" onClick={() => setPayments((current) => current.filter((item) => item.id !== payment.id))}>
-                <Trash2 size={16} />
+          <aside className="pdv-checkout-right" aria-label="Resumo do pagamento">
+            <div className="pdv-checkout-figure total"><span>Valor Total</span><strong>{money(total)}</strong></div>
+            <div className="pdv-checkout-figure received"><span>Recebido</span><strong>{money(received)}</strong></div>
+            <div className="pdv-checkout-figure change"><span>Troco</span><strong>{money(change)}</strong></div>
+            <div className="pdv-checkout-figure small"><span>Total pago</span><strong>{money(paid)}</strong></div>
+            <div className="pdv-checkout-actions">
+              <button className="pdv-primary-button" disabled={busy || submitting || (payments.length > 0 && remaining > 0.009)} onClick={finish}>
+                <Check size={18} /> {busy || submitting ? "Salvando..." : confirmLabel}
               </button>
-            </article>
-          ))}
-          {!payments.length && <p className="pdv-empty">Selecione uma forma de pagamento para continuar.</p>}
-        </div>
-        {previousPayments.length > 0 && (
-          <section className="pdv-previous-payment-list" aria-label="Pagamentos parciais anteriores">
-            <div>
-              <strong>Pagamentos ja registrados nesta mesa</strong>
-              <b>{money(previousPayments.reduce((sum, payment) => sum + payment.amount, 0))}</b>
+              <button className="pdv-danger-button" disabled={busy || submitting} onClick={cancelSafely}><X size={18} /> Voltar</button>
             </div>
-            <div className="pdv-previous-payment-scroll">
-              {previousPayments.map((payment) => (
-                <article key={payment.id}>
-                  <span>{payment.method}{payment.description ? ` | ${payment.description}` : payment.operationLabel ? ` | ${payment.operationLabel}` : ""}</span>
-                  <b>{money(payment.amount)}</b>
-                  {onEditPreviousPayment && <button className="pdv-icon-button" title="Corrigir forma de pagamento" onClick={() => onEditPreviousPayment(payment)}><Pencil size={14} /></button>}
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
-        {showDescription && (
-          <label className="pdv-payment-description">
-            <span>Nome da pessoa / identificacao deste pagamento</span>
-            <input autoFocus value={observations} maxLength={120} onChange={(event) => setObservations(event.target.value)} placeholder="Ex.: Joao, Maria ou Pessoa 1" />
-            <small>Este nome ficara no historico e no recibo individual deste fechamento.</small>
-          </label>
-        )}
-        <div className="pdv-action-row">
-          <button className="pdv-danger-button" disabled={busy || submitting} onClick={cancelSafely}>Voltar</button>
-          <button className="pdv-primary-button" disabled={busy || submitting || (payments.length > 0 && remaining > 0.009)} onClick={finish}>
-            {busy || submitting ? "Salvando..." : confirmLabel}
-          </button>
+          </aside>
         </div>
+        {customerPickerOpen && (
+          <CustomerPickerModal
+            customers={customers}
+            selectedId={selectedCustomerId}
+            onSaveCustomer={onSaveCustomer}
+            onCancel={() => setCustomerPickerOpen(false)}
+            onSelect={chooseCustomer}
+          />
+        )}
         {paymentEntryMethod && (
           paymentEntryMethod === "Conta a receber" ? (
             <ReceivablePaymentModal
@@ -4350,6 +4398,7 @@ export function PaymentModal({
               preferredAmount={preferredAmount}
               customers={customers}
               initialPayment={editingPayment || undefined}
+              initialCustomerId={selectedCustomerId}
               onSaveCustomer={onSaveCustomer}
               onCancel={() => { setPaymentEntryMethod(null); setEditingPayment(null); }}
               onConfirm={addPayment}
@@ -4432,11 +4481,146 @@ function PaymentMethodCorrectionModal({ payment, onCancel, onConfirm }: { paymen
   );
 }
 
+function checkoutMethodLabel(method: PdvPaymentMethod): string {
+  return ({ Debito: "Cartão débito", Credito: "Cartão crédito", "Conta a receber": "Contas a receber", "Nao definido": "Não definido" } as Record<string, string>)[method] || method;
+}
+
+function checkoutMethodIcon(method: PdvPaymentMethod) {
+  if (method === "Dinheiro") return <Banknote size={22} />;
+  if (method === "Debito" || method === "Credito") return <CreditCard size={22} />;
+  if (method === "Pix") return <QrCode size={22} />;
+  if (method === "Conta a receber") return <ContactRound size={22} />;
+  return <Wallet size={22} />;
+}
+
+const normalizeSearch = (value: string) => value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLocaleLowerCase("pt-BR");
+
+/** Pesquisa de clientes do fechamento (estilo cadastro de clientes): busca, lista e cadastro rapido. */
+function CustomerPickerModal({ customers, selectedId, onSaveCustomer, onCancel, onSelect }: {
+  customers: PdvCustomer[];
+  selectedId?: string;
+  onSaveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
+  onCancel: () => void;
+  onSelect: (customer: PdvCustomer) => void;
+}) {
+  const [localCustomers, setLocalCustomers] = useState(customers);
+  const [query, setQuery] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
+  const [onlyCustomers, setOnlyCustomers] = useState(true);
+  const [highlighted, setHighlighted] = useState(selectedId || "");
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState<PdvCustomerDraft>({ name: "", document: "", phone: "", email: "", active: true, role: "customer" });
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const tableRef = useRef<HTMLDivElement | null>(null);
+  const normalized = normalizeSearch(query.trim());
+  // CPF/CNPJ e telefone so entram na busca quando o texto digitado e numerico (com pontuacao).
+  const digits = /^[\d\s./()+-]+$/.test(query.trim()) ? query.replace(/\D/g, "") : "";
+  const rows = localCustomers
+    .filter((customer) => showInactive || customer.active)
+    .filter((customer) => !onlyCustomers || customer.role !== "supplier")
+    .filter((customer) => !normalized || [customer.name, customer.email, customer.address].some((value) => normalizeSearch(value || "").includes(normalized))
+      || (digits.length >= 2 && [customer.document, customer.phone].some((value) => (value || "").replace(/\D/g, "").includes(digits))))
+    .sort((left, right) => left.name.localeCompare(right.name, "pt-BR"));
+  const highlightedRow = rows.find((row) => row.id === highlighted) || null;
+  const choose = (customer: PdvCustomer | null) => { if (customer) onSelect(customer); };
+  const move = (direction: 1 | -1) => {
+    if (!rows.length) return;
+    const index = rows.findIndex((row) => row.id === highlighted);
+    const next = rows[Math.max(0, Math.min(rows.length - 1, (index < 0 ? (direction > 0 ? -1 : rows.length) : index) + direction))];
+    setHighlighted(next.id);
+    tableRef.current?.querySelector(`[data-customer-id="${next.id}"]`)?.scrollIntoView({ block: "nearest" });
+  };
+  const saveNew = async () => {
+    if (!draft.name.trim() || saving) return;
+    setSaving(true);
+    try {
+      const customer = await onSaveCustomer({ ...draft, name: draft.name.trim(), document: draft.document?.trim(), phone: draft.phone?.trim(), email: draft.email?.trim() });
+      setLocalCustomers((current) => [...current.filter((item) => item.id !== customer.id), customer]);
+      onSelect(customer);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Nao foi possivel cadastrar o cliente.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (notice) return;
+      const handled = () => { event.preventDefault(); event.stopPropagation(); };
+      if (event.key === "Escape") {
+        handled();
+        if (creating) setCreating(false); else onCancel();
+        return;
+      }
+      if (creating) {
+        if (event.key === "Enter") { handled(); void saveNew(); }
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") { handled(); move(event.key === "ArrowDown" ? 1 : -1); return; }
+      if (event.key === "Enter") { handled(); choose(highlightedRow || (rows.length === 1 ? rows[0] : null)); return; }
+      if (event.key === "F2") { handled(); setCreating(true); setDraft((current) => ({ ...current, name: query.trim() })); }
+      // As teclas F1-F6 nao devem abrir formas de pagamento por baixo desta janela.
+      if (/^F\d+$/.test(event.key)) handled();
+    };
+    window.addEventListener("keydown", keydown, true);
+    return () => window.removeEventListener("keydown", keydown, true);
+  });
+  useEffect(() => { searchRef.current?.focus(); }, []);
+
+  return (
+    <div className="pdv-modal-backdrop pdv-nested-backdrop">
+      <section className="pdv-payment-modal pdv-customer-picker" role="dialog" aria-modal="true" aria-label="Cadastro de clientes">
+        <header className="pdv-checkout-titlebar"><h1>Cadastro de Clientes</h1><button className="pdv-icon-button" aria-label="Fechar pesquisa de clientes" onClick={onCancel}><X size={18} /></button></header>
+        <div className="pdv-customer-picker-toolbar">
+          <button type="button" onClick={() => { setCreating(true); setDraft((current) => ({ ...current, name: query.trim() })); }}><UserPlus size={18} /><span>Novo</span><small>F2</small></button>
+          <button type="button" disabled={!highlightedRow} onClick={() => choose(highlightedRow)}><Check size={18} /><span>Selecionar</span><small>Enter</small></button>
+          <button type="button" className="close" onClick={onCancel}><X size={18} /><span>Fechar</span><small>Esc</small></button>
+        </div>
+        {creating ? (
+          <div className="pdv-customer-picker-create" aria-label="Cadastro rápido">
+            <strong>Cadastro rápido</strong>
+            <label><span>Nome</span><input autoFocus aria-label="Nome do novo cliente" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+            <label><span>CPF/CNPJ</span><input aria-label="CPF/CNPJ do novo cliente" value={draft.document || ""} onChange={(event) => setDraft({ ...draft, document: event.target.value })} /></label>
+            <label><span>Telefone</span><input aria-label="Telefone do novo cliente" value={draft.phone || ""} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} /></label>
+            <label><span>E-mail</span><input aria-label="E-mail do novo cliente" value={draft.email || ""} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label>
+            <div className="pdv-action-row">
+              <button className="pdv-danger-button" onClick={() => setCreating(false)}>Voltar à pesquisa</button>
+              <button className="pdv-primary-button" disabled={!draft.name.trim() || saving} onClick={() => void saveNew()}>{saving ? "Cadastrando..." : "Cadastrar e selecionar"}</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="pdv-customer-picker-filters">
+              <label className="search"><span>Pesquisar <small>(Nome, CPF/CNPJ, Telefone ou E-mail)</small></span><input ref={searchRef} aria-label="Pesquisar cliente" value={query} onChange={(event) => { setQuery(event.target.value); setHighlighted(""); }} /></label>
+              <label><span>Tipo</span><select aria-label="Tipo de cadastro" value={onlyCustomers ? "customer" : "all"} onChange={(event) => setOnlyCustomers(event.target.value === "customer")}><option value="customer">Cliente</option><option value="all">Todos</option></select></label>
+              <label><span>Ativo</span><select aria-label="Cadastros ativos" value={showInactive ? "all" : "yes"} onChange={(event) => setShowInactive(event.target.value === "all")}><option value="yes">Sim</option><option value="all">Todos</option></select></label>
+            </div>
+            <div className="pdv-customer-picker-table" ref={tableRef} role="listbox" aria-label="Clientes encontrados">
+              <div className="head"><span>Nome</span><span>CPF/CNPJ</span><span>Telefone</span><span>Endereço</span><span>E-mail</span></div>
+              {rows.map((customer) => (
+                <div key={customer.id} data-customer-id={customer.id} role="option" aria-selected={customer.id === highlighted} className={`row ${customer.id === highlighted ? "selected" : ""} ${customer.active ? "" : "inactive"}`} onClick={() => setHighlighted(customer.id)} onDoubleClick={() => choose(customer)}>
+                  <span>{customer.name}</span><span>{customer.document || ""}</span><span>{customer.phone || ""}</span><span>{customer.address || ""}</span><span>{customer.email || ""}</span>
+                </div>
+              ))}
+              {!rows.length && <div className="empty">Nenhum cliente encontrado. Use Novo (F2) para cadastrar.</div>}
+            </div>
+            <footer className="pdv-customer-picker-footer">Total em exibição: {rows.length}/{localCustomers.length}</footer>
+          </>
+        )}
+        {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
+      </section>
+    </div>
+  );
+}
+
 function ReceivablePaymentModal({
   remaining,
   preferredAmount,
   customers,
   initialPayment,
+  initialCustomerId = "",
   onSaveCustomer,
   onCancel,
   onConfirm
@@ -4445,11 +4629,13 @@ function ReceivablePaymentModal({
   preferredAmount?: number;
   customers: PdvCustomer[];
   initialPayment?: PdvPayment;
+  initialCustomerId?: string;
   onSaveCustomer: (draft: PdvCustomerDraft) => Promise<PdvCustomer>;
   onCancel: () => void;
   onConfirm: (payment: PdvPayment) => void;
 }) {
-  const [customerId, setCustomerId] = useState(initialPayment?.customerId || "");
+  const [customerId, setCustomerId] = useState(initialPayment?.customerId || initialCustomerId);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [amountText, setAmountText] = useState(String(initialPayment?.amount ?? Math.min(remaining, preferredAmount || remaining)).replace(".", ","));
   const [dueDate, setDueDate] = useState(initialPayment?.dueDate || "");
   const [description, setDescription] = useState(initialPayment?.description || "");
@@ -4498,7 +4684,7 @@ function ReceivablePaymentModal({
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (notice) return;
+      if (notice || pickerOpen) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onCancel();
@@ -4509,7 +4695,7 @@ function ReceivablePaymentModal({
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [notice, customerId, amountText, dueDate, description, localCustomers]);
+  }, [notice, pickerOpen, customerId, amountText, dueDate, description, localCustomers]);
 
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
@@ -4526,10 +4712,13 @@ function ReceivablePaymentModal({
         <div className="pdv-editor-grid">
           <label className="pdv-wide-field">
             <span>Cliente responsavel</span>
-            <select autoFocus value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
-              <option value="">Selecione um cliente</option>
-              {activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? ` - ${customer.phone}` : ""}</option>)}
-            </select>
+            <div className="pdv-receivable-customer-row">
+              <select autoFocus value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
+                <option value="">Selecione um cliente</option>
+                {activeCustomers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.phone ? ` - ${customer.phone}` : ""}</option>)}
+              </select>
+              <button type="button" className="pdv-checkout-search" onClick={() => setPickerOpen(true)}><Search size={16} /> Pesquisar</button>
+            </div>
           </label>
           <label><span>Valor a receber</span><input inputMode="decimal" value={amountText} onFocus={(event) => event.currentTarget.select()} onChange={(event) => setAmountText(parseBrazilianNumber(event.target.value) > remaining ? String(remaining).replace(".", ",") : event.target.value)} /></label>
           <label><span>Vencimento opcional</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
@@ -4545,6 +4734,19 @@ function ReceivablePaymentModal({
           <button className="pdv-danger-button" onClick={onCancel}>Cancelar</button>
           <button className="pdv-primary-button" disabled={!customerId || amount <= 0 || amount - remaining > 0.009} onClick={confirm}>Adicionar a conta</button>
         </div>
+        {pickerOpen && (
+          <CustomerPickerModal
+            customers={localCustomers}
+            selectedId={customerId}
+            onSaveCustomer={onSaveCustomer}
+            onCancel={() => setPickerOpen(false)}
+            onSelect={(customer) => {
+              setLocalCustomers((current) => [...current.filter((item) => item.id !== customer.id), customer].sort((left, right) => left.name.localeCompare(right.name, "pt-BR")));
+              setCustomerId(customer.id);
+              setPickerOpen(false);
+            }}
+          />
+        )}
         {notice && <PdvNoticeModal message={notice} onClose={() => setNotice("")} />}
       </section>
     </div>
@@ -8250,11 +8452,14 @@ function ReportsScreen({ snapshot }: { snapshot: PdvSnapshot }) {
   );
 }
 
-function ClientVisualSettingsScreen({ snapshot, settings, onChange, externalActionsRef, onDirtyChange, scope = "products", client = false }: {
+function ClientVisualSettingsScreen({ snapshot, settings, onChange, externalActionsRef, onDirtyChange, scope = "products", client = false, onSharedQuickValue }: {
   snapshot: PdvSnapshot; settings: Partial<PdvClientVisualSettings>; onChange: (patch: Partial<PdvClientVisualSettings>) => void;
   externalActionsRef?: React.MutableRefObject<PdvAdvancedSettingsActions | null>; onDirtyChange?: (dirty: boolean) => void;
   scope?: "tables" | "products"; client?: boolean;
+  /** Botao + e uma regra do servidor: vale para todos os computadores. Sem permissao, fica somente leitura. */
+  onSharedQuickValue?: (hidden: boolean) => Promise<void>;
 }) {
+  const [quickValueSaving, setQuickValueSaving] = useState(false);
   const visible = { ...snapshot.settings, ...settings };
   const [draft, setDraft] = useState<Partial<PdvClientVisualSettings>>(visible);
   const [dirty, setDirty] = useState(false);
@@ -8287,7 +8492,7 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange, externalActi
       <label className="pdv-setting-line"><span>Altura das mesas</span><input type="number" min={58} max={130} value={draft.tableCardHeight || 96} onChange={(event) => changeDraft({ tableCardHeight: Number(event.target.value || 96) })} /></label>
       <label className="pdv-switch-line pdv-local-visual-toggle"><input type="checkbox" checked={Boolean(draft.hideTableStatusDescriptions)} onChange={(event) => changeDraft({ hideTableStatusDescriptions: event.target.checked })} /><span><strong>Mostrar somente indicadores das mesas</strong><small>Oculta os textos de status; o significado continua disponível ao passar o mouse.</small></span></label>
       <label className="pdv-switch-line pdv-local-visual-toggle"><input type="checkbox" checked={Boolean(draft.hideTableStatusLegend)} onChange={(event) => changeDraft({ hideTableStatusLegend: event.target.checked })} /><span><strong>Ocultar legenda de status</strong><small>Remove a barra de legenda abaixo da grade.</small></span></label>
-      <LocalQuickValueOption client={client} />
+      <label className="pdv-switch-line pdv-local-visual-toggle"><input type="checkbox" aria-label="Ocultar o botão + da grade de mesas" disabled={!onSharedQuickValue || quickValueSaving} checked={Boolean(snapshot.settings.hideTableQuickValue)} onChange={async (event) => { if (!onSharedQuickValue) return; setQuickValueSaving(true); try { await onSharedQuickValue(event.target.checked); } finally { setQuickValueSaving(false); } }} /><span><strong>Ocultar o botão + da grade de mesas</strong><small>{onSharedQuickValue ? "Vale para todos os computadores (servidor e clientes) e é salvo na hora." : "Vale para todos os computadores. Somente o servidor, ou um cliente com permissão para editar configurações, pode alterar."}</small></span></label>
     </> : <>
       <label className="pdv-setting-line"><span>Produtos por linha</span><select value={draft.gridColumns || 5} onChange={(event) => changeDraft({ gridColumns: Number(event.target.value) })}>{[4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
       <label className="pdv-setting-line"><span>Categorias por linha</span><select value={draft.categoryColumns || 5} onChange={(event) => changeDraft({ categoryColumns: Number(event.target.value) })}>{[3, 4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
@@ -8353,7 +8558,7 @@ function AdvancedScreen({ snapshot, clientMode = false, readOnly = false, client
     };
   });
   if (localVisual) {
-    return <ClientVisualSettingsScreen scope={effectiveSection === "tableAppearance" ? "tables" : "products"} client={clientMode} snapshot={snapshot} settings={clientVisualSettings} onChange={(patch) => onClientVisualSettingsChange?.(patch)} externalActionsRef={externalActionsRef} onDirtyChange={onDirtyChange} />;
+    return <ClientVisualSettingsScreen onSharedQuickValue={readOnly ? undefined : async (hidden) => { await savePdvSettings({ hideTableQuickValue: hidden }); onSettingsUpdated(); }} scope={effectiveSection === "tableAppearance" ? "tables" : "products"} client={clientMode} snapshot={snapshot} settings={clientVisualSettings} onChange={(patch) => onClientVisualSettingsChange?.(patch)} externalActionsRef={externalActionsRef} onDirtyChange={onDirtyChange} />;
   }
   if (readOnly) return <section className="pdv-panel local-visual-settings"><div className="local-visual-intro"><strong>Configuração controlada pelo servidor</strong><p>Este cliente não tem permissão para alterar estas regras. Em Mesas, as abas Visual e Lembretes continuam disponíveis para ajustes deste computador.</p></div></section>;
   const applyVisualPreset = (preset: "compact" | "normal" | "comfortable") => {
@@ -8437,10 +8642,6 @@ function AdvancedScreen({ snapshot, clientMode = false, readOnly = false, client
           <label className="pdv-switch-line">
             <input type="checkbox" checked={Boolean(draft.allowOfflineTables)} onChange={(event) => changeDraft({ allowOfflineTables: event.target.checked })} />
             Permitir mesas offline no cliente
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.hideTableQuickValue)} onChange={(event) => changeDraft({ hideTableQuickValue: event.target.checked })} />
-            Ocultar o botao + da grade de mesas em todos os computadores
           </label>
         </div>}
 

@@ -103,6 +103,8 @@ with sync_playwright() as p:
         waited += 500
         items = server_items()
     print('server synced after', waited, 'ms')
+    if not converged(items):
+        print('DEBUG toast:', s.locator('.pdv-toast').all_inner_texts(), 'subtitle:', s.locator('.pdv-operational-head p').all_inner_texts(), 'ui rows:', rows.count())
     assert converged(items), [(i['productName'], i.get('note'), i['total']) for i in items]
     print('PASS note on A+B, remove 4 copies, server saved 5 items with discount and notes')
 

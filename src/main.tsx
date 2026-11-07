@@ -10,6 +10,7 @@ import "./styles/catalog-workspace.css";
 import "./styles/privacy-and-overview.css";
 import "./styles/operations-refinements.css";
 import "./styles/table-close-reminders.css";
+import "./styles/checkout.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
