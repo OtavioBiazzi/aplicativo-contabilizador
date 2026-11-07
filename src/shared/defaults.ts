@@ -81,7 +81,7 @@ export function createDefaultSettings(outputDirectory: string): AppSettings {
     currency: "BRL",
     visibleColumns: SIMPLE_COLUMNS,
     backupEnabled: true,
-    automaticSpreadsheetEnabled: true,
+    automaticSpreadsheetEnabled: false,
     automaticClosingReportEnabled: false,
     reportExportSections: ["products", "categories", "tables", "times"],
     rememberHistoryPeriod: true,

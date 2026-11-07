@@ -143,6 +143,26 @@ const supplierResponse = await fetch('http://127.0.0.1:43991/api/pdv/suppliers',
 if (!supplierResponse.ok) throw new Error('Cliente não cadastrou fornecedor.');
 const remoteSupplier = (await supplierResponse.json()).supplier;
 if (!(await (await fetch('http://127.0.0.1:43991/api/pdv/snapshot',{headers})).json()).suppliers.some(item=>item.id===remoteSupplier.id)) throw new Error('Snapshot remoto sem fornecedor.');
+// Pacote do cliente: gzip quando aceito, conteudo identico ao sem compressao.
+{
+  const { request: httpRequest } = await import("node:http");
+  const { gunzipSync } = await import("node:zlib");
+  const rawGet = (route, encoding) => new Promise((resolve, reject) => {
+    httpRequest({ host: "127.0.0.1", port: 43991, path: route, headers: { ...headers, "accept-encoding": encoding } }, (res) => {
+      const chunks = []; res.on("data", (c) => chunks.push(c)); res.on("end", () => resolve({ encoding: res.headers["content-encoding"], body: Buffer.concat(chunks) }));
+    }).on("error", reject).end();
+  });
+  for (const route of ["/api/pdv/snapshot", "/api/entries"]) {
+    const zipped = await rawGet(route, "gzip, deflate");
+    const plain = await rawGet(route, "identity");
+    if (plain.encoding) throw new Error(`${route}: sem gzip aceito nao deveria comprimir.`);
+    const unzipped = zipped.encoding === "gzip" ? gunzipSync(zipped.body) : zipped.body;
+    if (plain.body.length >= 2048 && zipped.encoding !== "gzip") throw new Error(`${route}: deveria vir comprimido.`);
+    const a = JSON.parse(unzipped.toString("utf8")); const b = JSON.parse(plain.body.toString("utf8"));
+    if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${route}: conteudo comprimido diferente.`);
+    console.log(`${route}: ${plain.body.length} bytes -> ${zipped.body.length} bytes (${zipped.encoding || "sem compressao"}), conteudo identico`);
+  }
+}
 server.setPermissions({...settings.server.permissions,manageTables:false});
 const deniedSupplier = await fetch(`http://127.0.0.1:43991/api/pdv/suppliers/${remoteSupplier.id}`,{method:'DELETE',headers});
 if (deniedSupplier.status!==403) throw new Error('Cliente excluiu fornecedor sem permissão.');

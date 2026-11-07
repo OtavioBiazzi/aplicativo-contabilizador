@@ -1,6 +1,8 @@
 import { sharedPrivacyDefinitions } from "../src/shared/privacy.js";
 import { RollingMeter } from "./performanceMeter.js";
 import http from "node:http";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import cors from "cors";
@@ -167,7 +169,7 @@ export class LocalServer {
       const todayEntries = filterEntriesByLocalDate(entries);
       const limit = normalizeEntryLimit(request.query.limit);
       const responseEntries = limit ? entries.slice(0, limit) : entries;
-      response.json({
+      await sendJsonCompressed(request, response, JSON.stringify({
         entries: this.permissions.viewEntryValues ? responseEntries : responseEntries.map(maskMoneyFields),
         summary: this.permissions.viewTotals ? summarizeEntries(todayEntries) : null,
         todayCount: todayEntries.filter((entry) => entry.status === "active").length,
@@ -175,7 +177,7 @@ export class LocalServer {
         limited: Boolean(limit && entries.length > limit),
         permissions: this.permissions,
         clientPolicy: buildClientPolicy(settings)
-      });
+      }));
     });
 
     app.post("/api/entries", this.authorize("create"), async (request, response) => {
@@ -239,9 +241,8 @@ export class LocalServer {
     app.get("/api/pdv/snapshot", this.authorize("view"), async (request, response) => {
       const startedAt = performance.now();
       const body = JSON.stringify(await this.options.getPdvSnapshot(normalizeEntryLimit(request.query.salesLimit)));
-      this.snapshotMeter.add(Buffer.byteLength(body));
+      this.snapshotMeter.add(await sendJsonCompressed(request, response, body));
       this.snapshotMs = performance.now() - startedAt;
-      response.type("application/json").send(body);
     });
 
     app.post("/api/pdv/close-notices/:id/ack", this.authorize("view"), (request, response) => {
@@ -1466,4 +1467,30 @@ function remoteClientHtml(port: number, appVersion: string): string {
   </script>
 </body>
 </html>`;
+}
+
+const gzipAsync = promisify(gzip);
+
+/**
+ * Envia JSON comprimido (gzip) quando o cliente aceita: o conteudo e o mesmo, so trafega menor no Wi-Fi.
+ * O navegador do cliente descomprime sozinho. Devolve os bytes que realmente foram enviados.
+ */
+async function sendJsonCompressed(request: Request, response: Response, body: string): Promise<number> {
+  response.type("application/json");
+  response.setHeader("Vary", "Accept-Encoding");
+  const accepts = String(request.header("accept-encoding") || "").toLowerCase().includes("gzip");
+  if (!accepts || body.length < 2048) {
+    response.send(body);
+    return Buffer.byteLength(body);
+  }
+  let compressed: Buffer;
+  try {
+    compressed = await gzipAsync(Buffer.from(body), { level: 6 });
+  } catch {
+    response.send(body);
+    return Buffer.byteLength(body);
+  }
+  response.setHeader("Content-Encoding", "gzip");
+  response.send(compressed);
+  return compressed.length;
 }

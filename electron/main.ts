@@ -57,7 +57,9 @@ const automaticLedgerExport = new DeferredTask(async () => {
   } catch (error) {
     await logger?.error("Falha na exportacao automatica", error instanceof Error ? error.message : String(error));
   }
-});
+  // Junta as alteracoes de ate 3 s: varios lancamentos seguidos geram uma planilha so.
+  // O banco ja foi gravado antes; a planilha e so uma copia, e e finalizada ao fechar o app.
+}, 3000);
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const RELEASE_API_URL = "https://api.github.com/repos/OtavioBiazzi/aplicativo-contabilizador/releases/latest";

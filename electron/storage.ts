@@ -36,9 +36,29 @@ export class LedgerStore {
 
     const defaults = createDefaultSettings(this.paths.defaultOutputDirectory);
     const saved = await readJson<Partial<AppSettings>>(this.settingsPath(), {});
+    const markMigrations = await this.applyOneTimeMigrations(saved);
     this.settings = mergeSettings(defaults, saved);
     await this.saveSettings(this.settings);
+    // Marca como feito so depois das configuracoes gravadas.
+    await markMigrations();
     return this.settings;
+  }
+
+  /**
+   * Ajustes que rodam uma unica vez por computador, ao atualizar. Ficam registrados em migrations.json,
+   * entao se o usuario mudar a opcao depois, a escolha dele e respeitada.
+   */
+  private async applyOneTimeMigrations(saved: Partial<AppSettings>): Promise<() => Promise<void>> {
+    const file = path.join(this.paths.dataDirectory, "migrations.json");
+    const done = await readJson<string[]>(file, []);
+    const applied = Array.isArray(done) ? [...done] : [];
+    // 0.4.18: planilha automatica passa a ser desligada (gera so quando pedir). O banco nao muda.
+    if (!applied.includes("0.4.18-planilha-manual")) {
+      saved.automaticSpreadsheetEnabled = false;
+      applied.push("0.4.18-planilha-manual");
+    }
+    const changed = applied.length !== (Array.isArray(done) ? done.length : 0);
+    return async () => { if (changed) await writeJsonAtomic(file, applied); };
   }
 
   async saveSettings(settings: AppSettings): Promise<AppSettings> {
