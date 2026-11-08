@@ -30,6 +30,7 @@ export function PrivacyProfiles({ value, onChange, readOnly = false }: { readOnl
       <label><span>Ao desativar privacidade no Total do Dia</span><select value={value.disabledProfileId || "normal"} onChange={(event) => { const next = { ...value, profiles, disabledProfileId: event.target.value }; onChange(!privacyEnabled(value) ? applyPrivacyProfile(next, event.target.value) : next); }}>{options}</select></label>
     </div>
     </fieldset>
+    <label className="privacy-profile-check privacy-total-menu-only"><input type="checkbox" checked={Boolean(value.totalInMenuOnly)} onChange={(event) => onChange({ ...value, totalInMenuOnly: event.target.checked })} /> Sem privacidade, mostrar o valor do Total do Dia só na caixa que abre ao clicar nele (não fica grande no topo da tela). Vale só para este computador.</label>
     <div className="privacy-profile-toolbar"><label><span>Perfil para editar</span><select value={selected.id} onChange={(event) => setSelectedId(event.target.value)}>{options}</select></label><button disabled={readOnly} onClick={() => createProfile(false)}><Plus size={15} /> Novo</button><button disabled={readOnly} onClick={() => createProfile(true)}><Copy size={15} /> Duplicar</button><button disabled={readOnly || profiles.length <= 1} onClick={remove}><Trash2 size={15} /> Excluir</button></div>
     <section className="privacy-profile-editor">
       <label><span>Nome do perfil</span><input disabled={readOnly} value={selected.name} onChange={(event) => patchProfile({ name: event.target.value })} /></label>

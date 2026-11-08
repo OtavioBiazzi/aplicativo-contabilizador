@@ -1,6 +1,7 @@
 import { BrowserWindow } from "electron";
 import type { PdvCustomer, PdvReceivable, PdvSale, PdvSettings } from "../src/shared/pdvTypes.js";
 import { groupPdvReceiptItems } from "../src/shared/pdvReceipt.js";
+import { formatTableNumber } from "../src/shared/tableLabel.js";
 
 export async function printPdvReceipt(
   sale: PdvSale,
@@ -196,7 +197,7 @@ export function buildPdvReceiptHtml(
     </div>
     <div class="status">${receiptStatus}</div>
     <div class="box">
-      <div class="box-title">${payableAccount ? "CONTA A PAGAR" : customerBalance ? "CONTAS A RECEBER DO CLIENTE" : sale.tableNumber ? `MESA: ${String(sale.tableNumber).padStart(3, "0")}` : escapeHtml(sale.type || "VENDA")}</div>
+      <div class="box-title">${payableAccount ? "CONTA A PAGAR" : customerBalance ? "CONTAS A RECEBER DO CLIENTE" : sale.tableNumber ? `MESA: ${formatTableNumber(sale.tableNumber)}` : escapeHtml(sale.type || "VENDA")}</div>
       <div class="section">
         <div class="row"><span>${customerBalance || payableAccount ? "EMITIDO EM" : `PEDIDO: ${escapeHtml(String(orderNumber).slice(0, 12))}`}</span><b>${new Date(sale.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</b></div>
         ${displayCustomerName ? `<div>${payableAccount ? "FORNECEDOR" : "CLIENTE"}: ${escapeHtml(displayCustomerName)}</div>` : ""}

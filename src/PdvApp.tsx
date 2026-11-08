@@ -56,6 +56,7 @@ import { downloadFinancialCsv } from "./shared/financialExport";
 import { buildCustomerBalanceReceipt, customerOutstandingAccounts } from "./shared/customerStatement";
 import { inFinancialPeriod, type FinancialDateField } from "./shared/financialDates";
 import { matchesTableNumberFilter } from "./shared/tableNumberFilter";
+import { formatTableNumber, isLooseTable } from "./shared/tableLabel";
 
 type PdvTab = "sale" | "tables" | "products" | "history" | "reports" | "advanced";
 type CartDisplayItem = PdvCartItem & { compressedMemberIds: string[]; compressedLineCount: number };
@@ -236,7 +237,7 @@ function tableSearchDetails(table: PdvOpenTable, rawQuery: string): { matches: b
   const matchesNote = Boolean(table.note && fuzzySearchMatch(table.note, query));
 
   return {
-    matches: matchesNumber || matchesNote || matchingSubtables.length > 0,
+    matches: matchesNumber || matchesNote || matchingSubtables.length > 0 || (isLooseTable(table.number) && (["s/n", "sn", "s n"].includes(tableNumberQuery) || (tableNumberQuery.length > 1 && "avulsa".startsWith(tableNumberQuery)))),
     subtables: matchingSubtables,
     products: []
   };
@@ -1069,7 +1070,7 @@ export function PdvApp({
       setCurrentSubtable("");
       setSelectedTableItemIds([]);
       setPartialSelectedItemIds([]);
-      setToast(`A Mesa ${String(fresh.number).padStart(3, "0")} foi fechada em outro computador.`, true);
+      setToast(`A Mesa ${formatTableNumber(fresh.number)} foi fechada em outro computador.`, true);
       return;
     }
     setActiveTable((current) => samePdvValue(current, fresh) ? current : fresh);
@@ -1274,7 +1275,7 @@ export function PdvApp({
         subtotal,
         discount: tableNumber ? 0 : discount,
         total: Math.max(0, roundMoney(subtotal - (tableNumber ? 0 : discount))),
-        description: subtableName ? `Submesa ${subtableName}` : tableNumber ? `Mesa ${String(tableNumber).padStart(3, "0")}` : directSaleMode,
+        description: subtableName ? `Submesa ${subtableName}` : tableNumber ? `Mesa ${formatTableNumber(tableNumber)}` : directSaleMode,
         observations: "Pre-visualizacao antes do pagamento.",
         originDevice: remoteSession?.deviceName || "Servidor",
         payments: [],
@@ -1484,7 +1485,7 @@ export function PdvApp({
     }
     if (action === "details") {
       const peopleLine = snapshot?.settings.tablePeopleEnabled ? `\nPessoas: ${table.people || "-"}` : "";
-      setNotice(`Mesa ${String(table.number).padStart(3, "0")}\nStatus: ${table.status}\nAbertura: ${shortTime(table.openedAt) || "-"}${peopleLine}\nTotal: ${money(table.total)}\nObservacao: ${table.note || "-"}`);
+      setNotice(`Mesa ${formatTableNumber(table.number)}\nStatus: ${table.status}\nAbertura: ${shortTime(table.openedAt) || "-"}${peopleLine}\nTotal: ${money(table.total)}\nObservacao: ${table.note || "-"}`);
       return;
     }
     if (action === "history") {
@@ -1497,7 +1498,7 @@ export function PdvApp({
     }
     if (action === "cancel") {
       setConfirmRequest({
-        title: `Cancelar mesa ${String(table.number).padStart(3, "0")}?`,
+        title: `Cancelar mesa ${formatTableNumber(table.number)}?`,
         message: "A mesa sera liberada. Os itens pendentes ficarao registrados como cancelados no Historico, sem entrar no faturamento ou no Excel.",
         action: async () => {
           await cancelPdvTable(table.number);
@@ -1541,7 +1542,7 @@ export function PdvApp({
       }
       throw error;
     }
-    setToast(`Mesa ${String(activeTable.number).padStart(3, "0")} salva.`);
+    setToast(`Mesa ${formatTableNumber(activeTable.number)} salva.`);
     await load();
   };
 
@@ -1577,7 +1578,7 @@ export function PdvApp({
       ? `submesa ${tableCloseScope.subtableName}`
       : tableCloseScope.kind === "main" ? "mesa principal" : "mesa";
     setConfirmRequest({
-      title: `Concluir ${scopeLabel} ${String(activeTable.number).padStart(3, "0")}?`,
+      title: `Concluir ${scopeLabel} ${formatTableNumber(activeTable.number)}?`,
       message: `Todos os itens deste escopo foram pagos em fechamentos parciais. A ${scopeLabel} sera concluida e os pagamentos permanecerao no historico.`,
       action: async () => {
         const scopedIds = new Set(scopedItems.map((item) => item.id));
@@ -1781,7 +1782,7 @@ export function PdvApp({
     const manualItem: PdvCartItem = {
       id: crypto.randomUUID(),
       productId: "manual-partial",
-      productName: `Fechamento parcial manual mesa ${String(activeTable.number).padStart(3, "0")}`,
+      productName: `Fechamento parcial manual mesa ${formatTableNumber(activeTable.number)}`,
       categoryName: "Fechamento parcial",
       quantity: 1,
       unitPrice: roundMoney(value),
@@ -1809,7 +1810,7 @@ export function PdvApp({
       }
       const tableDiscount = checkoutTarget?.kind === "table" ? checkoutTarget.discount : 0;
       const sale = await closePdvTable(activeTable.number, payments, tableDiscount, checkoutTarget?.kind === "table" ? checkoutTarget.operationId : undefined);
-      setToast(`Mesa ${String(activeTable.number).padStart(3, "0")} fechada.`);
+      setToast(`Mesa ${formatTableNumber(activeTable.number)} fechada.`);
       setActiveTable(null);
       setTableCart([]);
       setCheckoutTarget(null);
@@ -2098,7 +2099,7 @@ export function PdvApp({
                               : { label: table.status, className: "occupied", Icon: Utensils };
                 return (
                   <article
-                    className={`pdv-table-card ${table.status.toLowerCase()} ${hasSubtableDefinitions ? "has-subtables" : ""} ${hasSubtableItems && hasMainItems ? "mixed-subtables" : ""} ${hasSubtableDefinitions && !table.items.length ? "empty-subtables" : ""} ${waitingPayment ? "waiting-payment" : ""} ${pendingSync ? "pending-sync" : ""} ${offlineChange ? "offline-change" : ""} ${syncError ? "sync-error" : ""}`}
+                    className={`pdv-table-card ${isLooseTable(table.number) ? "loose-table" : ""} ${table.status.toLowerCase()} ${hasSubtableDefinitions ? "has-subtables" : ""} ${hasSubtableItems && hasMainItems ? "mixed-subtables" : ""} ${hasSubtableDefinitions && !table.items.length ? "empty-subtables" : ""} ${waitingPayment ? "waiting-payment" : ""} ${pendingSync ? "pending-sync" : ""} ${offlineChange ? "offline-change" : ""} ${syncError ? "sync-error" : ""}`}
                     key={table.id}
                     role="button"
                     tabIndex={0}
@@ -2114,7 +2115,7 @@ export function PdvApp({
                       }
                     }}
                   >
-                    <strong>{String(table.number).padStart(3, "0")}</strong>
+                    <strong>{formatTableNumber(table.number)}</strong>
                     <span className={`pdv-table-state ${visualState.className}`} title={pendingRecord?.lastError || visualState.label} aria-label={visualState.label}><visualState.Icon size={12} /><span className="pdv-status-label-copy">{visualState.label}</span></span>
                     <small>Abertura: {shortTime(table.openedAt) || "-"}</small>
                     <small>Qnt. clientes: {Math.max(0, table.people || 0)}</small>
@@ -2190,7 +2191,7 @@ export function PdvApp({
 
         {tab === "tables" && activeTable && (
           <PdvSaleScreen
-            title={`Mesa ${String(activeTable.number).padStart(3, "0")}`}
+            title={`Mesa ${formatTableNumber(activeTable.number)}`}
             subtitle={`Aberta ${shortTime(activeTable.openedAt) || "agora"}${snapshot.settings.tablePeopleEnabled ? ` | ${activeTable.people || 1} pessoa(s)` : ""}${tableSaveState === "error" ? " | erro ao salvar" : ""}`}
             snapshot={snapshot}
             products={products}
@@ -2269,8 +2270,8 @@ export function PdvApp({
           accountLabel={checkoutTarget.kind === "direct"
             ? checkoutTarget.manual ? undefined : (checkoutTarget.saleType || directSaleMode) === "Onibus" ? "Ônibus" : "Venda"
             : checkoutTarget.kind === "table-scope" && checkoutTarget.scope.kind === "subtable"
-              ? `Mesa ${String(checkoutTarget.table.number).padStart(3, "0")} · ${checkoutTarget.scope.subtableName}`
-              : `Mesa ${String(checkoutTarget.table.number).padStart(3, "0")}`}
+              ? `Mesa ${formatTableNumber(checkoutTarget.table.number)} · ${checkoutTarget.scope.subtableName}`
+              : `Mesa ${formatTableNumber(checkoutTarget.table.number)}`}
           discountEditor={(checkoutTarget.kind === "direct" || checkoutTarget.kind === "table" || checkoutTarget.kind === "table-scope") && checkoutTarget.subtotal !== undefined && !(checkoutTarget.kind === "direct" && checkoutTarget.manual)
             ? { subtotal: checkoutTarget.subtotal, discount: checkoutTarget.discount || 0, onChange: (nextDiscount) => setCheckoutTarget((current) => current && (current.kind === "direct" || current.kind === "table" || current.kind === "table-scope") ? applyCheckoutDiscount(current, nextDiscount) : current) }
             : undefined}
@@ -2850,6 +2851,7 @@ function PdvSaleScreen(props: {
   const canMultiSelect = Boolean(props.setSelectedItemIds) && !cartCompressed;
   // Itens ja pagos nao entram em acoes em lote.
   const selectableForBatch = (item: PdvCartItem) => !props.activeTableNumber || unpaidQuantity(item) > 0.009;
+  const multiBeforeClick = useRef<string[]>([]);
   const clickCartItem = (event: React.MouseEvent, item: CartDisplayItem) => {
     if (!props.setSelectedItemIds) return;
     if (canMultiSelect && event.shiftKey && selectionAnchor.current) {
@@ -3107,7 +3109,11 @@ function PdvSaleScreen(props: {
               title={[item.productName, item.subtableName, item.note, unpaidQuantity(item) <= 0.009 ? "Pago" : item.paidQuantity ? `Restam ${formatQuantity(unpaidQuantity(item))}` : "", adjustedItemOriginalTotal(item) !== null ? `Original ${money(adjustedItemOriginalTotal(item)!)}; final ${money(item.total)}` : ""].filter(Boolean).join(" | ")}
               className={`${activeItemId === item.id || (multiSelectedItems.length > 0 && selectedIdSet.has(item.id)) ? "selected" : ""} ${multiSelectedItems.length > 0 && selectedIdSet.has(item.id) ? "multi-selected" : ""} ${unpaidQuantity(item) <= 0.009 ? "paid" : ""} ${item.compressedLineCount > 1 ? "compressed" : ""}`.trim()}
               aria-selected={selectedIdSet.has(item.id) || activeItemId === item.id}
-              onMouseDown={(event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) event.preventDefault(); }}
+              onMouseDown={(event) => {
+                if (event.shiftKey || event.ctrlKey || event.metaKey) { event.preventDefault(); return; }
+                // Guarda a selecao multipla antes do clique simples desfaze-la: o duplo clique em cima dela abre o apagar de todos.
+                if (event.detail === 1) multiBeforeClick.current = multiSelectedItems.length > 1 && selectedIdSet.has(item.id) ? multiSelectedItems.map((row) => row.id) : [];
+              }}
               onClick={(event) => clickCartItem(event, item)}
               onContextMenu={(event) => {
                 event.preventDefault();
@@ -3119,7 +3125,18 @@ function PdvSaleScreen(props: {
                 props.setSelectedItemIds?.([item.id]);
                 setItemMenu({ x: event.clientX, y: event.clientY, item });
               }}
-              onDoubleClick={() => runItemAction("remove", item)}
+              onDoubleClick={() => {
+                const previous = multiBeforeClick.current;
+                multiBeforeClick.current = [];
+                const batch = previous.includes(item.id) ? visibleCart.filter((row) => previous.includes(row.id) && selectableForBatch(row)) : [];
+                if (batch.length > 1) {
+                  props.setSelectedItemIds?.(batch.map((row) => row.id));
+                  setItemMenu(null);
+                  setBatchRequest({ kind: "remove", items: batch });
+                  return;
+                }
+                void runItemAction("remove", item);
+              }}
             >
               <div className="pdv-cart-product-cell">
                 <strong>{index + 1}. {item.productName}</strong>
@@ -4141,7 +4158,7 @@ export function PdvReceiptDraftModal({
         <div className="modal-head">
           <div>
             <span className="settings-overline">{payableAccount ? "Recibo de conta a pagar" : customerBalance ? "Recibo de contas a receber" : receivable ? "Conta a receber" : "Recibo nao fiscal"}</span>
-            <strong>{statement ? customerName : receivable ? receivable.customerName : sale.tableNumber ? `Mesa ${String(sale.tableNumber).padStart(3, "0")}` : "Venda"}</strong>
+            <strong>{statement ? customerName : receivable ? receivable.customerName : sale.tableNumber ? `Mesa ${formatTableNumber(sale.tableNumber)}` : "Venda"}</strong>
             <p>{payableAccount ? `Falta pagar: ${money(Math.max(0, sale.total - sale.payments.reduce((sum, payment) => sum + payment.amount, 0)))}` : customerBalance ? `${sale.items.length} conta(s) · total a receber ${money(sale.total)}` : receivable ? `Saldo atual: ${money(receivable.balance)}` : "Confira os dados antes de imprimir."}</p>
           </div>
           <button className="icon-button" aria-label="Fechar recibo" onClick={onClose} disabled={busy}><X size={18} /></button>
@@ -4504,7 +4521,7 @@ export function PaymentModal({
             {showDescription && (
               <label className="pdv-payment-description">
                 <span>Nome da pessoa / identificacao deste pagamento</span>
-                <input autoFocus value={observations} maxLength={120} onChange={(event) => setObservations(event.target.value)} placeholder="Ex.: Joao, Maria ou Pessoa 1" />
+                <input value={observations} maxLength={120} onChange={(event) => setObservations(event.target.value)} placeholder="Ex.: Joao, Maria ou Pessoa 1" />
                 <small>Este nome ficara no historico e no recibo individual deste fechamento.</small>
               </label>
             )}
@@ -5217,7 +5234,7 @@ function PartialValueModal({
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Fechamento parcial</span>
-            <h1>Mesa {String(table.number).padStart(3, "0")}</h1>
+            <h1>Mesa {formatTableNumber(table.number)}</h1>
             <p>Informe o valor que sera recebido agora. A mesa continua aberta.</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
@@ -5759,7 +5776,7 @@ function TransferListModal({
               setTemporaryTargetSubtable(shouldCreateTemporary);
             }}>
               {tables.map((table) => (
-                <option key={table.number} value={table.number}>Mesa {String(table.number).padStart(3, "0")} - {table.status}{table.number === sourceTableNumber ? " (mesa atual)" : ""}</option>
+                <option key={table.number} value={table.number}>Mesa {formatTableNumber(table.number)} - {table.status}{table.number === sourceTableNumber ? " (mesa atual)" : ""}</option>
               ))}
             </select>
           </label>
@@ -5903,7 +5920,7 @@ function PartialItemsModal({
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Fechamento parcial</span>
-            <h1>Mesa {String(table.number).padStart(3, "0")}</h1>
+            <h1>Mesa {formatTableNumber(table.number)}</h1>
             <p>Escolha os produtos e quantidades que serao pagos agora.</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
@@ -6674,7 +6691,7 @@ function TableCloseMenu({
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Fechar conta</span>
-            <h1>{heading || `${scopeLabel ? `${scopeLabel} · ` : "Mesa "}${String(table?.number ?? 0).padStart(3, "0")}`}</h1>
+            <h1>{heading || `${scopeLabel ? `${scopeLabel} · ` : "Mesa "}${formatTableNumber(table?.number ?? 0)}`}</h1>
             <p>Divida por pessoas se precisar. Desconto e acrescimo ficam na tela de pagamento.</p>
           </div>
           <button className="pdv-icon-button" onClick={onCancel}><X size={18} /></button>
@@ -7906,7 +7923,7 @@ function CustomerDetailModal({
                 return (
                   <article key={receivable.id} className={`status-${receivable.status.toLocaleLowerCase("pt-BR").replace(/\s+/g, "-")}`}>
                     <div className="pdv-customer-account-head">
-                      <div><strong>{receivable.description || (receivable.tableNumber ? `Mesa ${String(receivable.tableNumber).padStart(3, "0")}` : "Conta a receber")}</strong><span>{receivable.tableNumber ? `Mesa ${String(receivable.tableNumber).padStart(3, "0")} | ` : ""}{new Date(receivable.createdAt).toLocaleString("pt-BR")} | {receivable.status}</span></div>
+                      <div><strong>{receivable.description || (receivable.tableNumber ? `Mesa ${formatTableNumber(receivable.tableNumber)}` : "Conta a receber")}</strong><span>{receivable.tableNumber ? `Mesa ${formatTableNumber(receivable.tableNumber)} | ` : ""}{new Date(receivable.createdAt).toLocaleString("pt-BR")} | {receivable.status}</span></div>
                       <b>{money(receivable.balance)}</b>
                     </div>
                     <div className="pdv-customer-account-values"><span>Original {money(receivable.originalAmount)}</span><span>Recebido {money(receivable.receivedAmount)}</span><span>{receivable.dueDate ? `Vence ${receivable.dueDate.split("-").reverse().join("/")}` : "Sem vencimento"}</span></div>
@@ -8264,7 +8281,7 @@ function HistoryScreen({
       </div>
       <FinancialGrid id="history" rows={sales} selectedId={highlighted?.id} onSelect={(sale) => setHighlightedId(sale.id)} onOpen={setSelectedSale} columns={[
         { key: "date", label: "Data / hora", value: (sale) => sale.createdAt, render: (sale) => new Date(sale.createdAt).toLocaleString("pt-BR") },
-        { key: "account", label: "Atendimento", required: true, value: (sale) => `${sale.type} ${sale.tableNumber || ""}`, render: (sale) => <div className="finance-cell-title"><strong>{sale.type}{sale.tableNumber ? ` ${String(sale.tableNumber).padStart(3, "0")}` : ""}</strong><small>{sale.description || `${sale.items.length} item(ns)`}</small></div> },
+        { key: "account", label: "Atendimento", required: true, value: (sale) => `${sale.type} ${sale.tableNumber || ""}`, render: (sale) => <div className="finance-cell-title"><strong>{sale.type}{sale.tableNumber ? ` ${formatTableNumber(sale.tableNumber)}` : ""}</strong><small>{sale.description || `${sale.items.length} item(ns)`}</small></div> },
         { key: "payment", label: "Pagamento", value: (sale) => sale.payments.map((payment) => `${payment.method}: ${money(payment.amount)}`).join(" + ") },
         { key: "amount", label: "Valor", numeric: true, required: true, value: (sale) => sale.total, render: (sale) => <strong>{money(sale.total)}</strong> },
         { key: "status", label: "Situação", value: (sale) => sale.status, render: (sale) => <FinancialStatus value={sale.status} /> },
@@ -8960,7 +8977,7 @@ function SaleDetailModal({ sale, onClose, onCancel, canCancel = true }: { sale: 
         <div className="pdv-section-head">
           <div>
             <span className="pdv-eyebrow">Detalhes da venda</span>
-            <h1>{sale.type}{sale.tableNumber ? ` ${String(sale.tableNumber).padStart(3, "0")}` : ""}</h1>
+            <h1>{sale.type}{sale.tableNumber ? ` ${formatTableNumber(sale.tableNumber)}` : ""}</h1>
             <p>{new Date(sale.createdAt).toLocaleString("pt-BR")} | {sale.status}</p>
           </div>
           <button className="pdv-icon-button" onClick={onClose}><X size={18} /></button>

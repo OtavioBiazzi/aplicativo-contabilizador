@@ -61,7 +61,6 @@ export function LocalTableOptions({ client }: { client: boolean }) {
     <label><span>Fechar conta sem lembrete (comanda já retirada)</span><select aria-label="Fechar conta sem lembrete" value={preferences.skipReminderKey} onChange={(e) => save({ skipReminderKey: e.target.value as LocalTablePreferences["skipReminderKey"] })}>
       <option value="bracket">Tecla ] º (ao lado do Enter) em vez do Enter</option><option value="shift">Segurar Shift ao finalizar</option><option value="ctrl">Segurar Ctrl ao finalizar</option><option value="off">Desativado</option>
     </select></label>
-    <label className="switch-line reminder-sync-line"><input type="checkbox" checked={preferences.syncAcknowledge} onChange={(e) => save({ syncAcknowledge: e.target.checked })} />Ao confirmar em OK aqui, remover também dos outros computadores</label>
     <label><span>Não avisar nestas mesas</span><input value={exceptions} placeholder="Ex.: 47 ou 47+ ou 10-15, 47" aria-invalid={!validTableExceptions(exceptions)} onChange={(e) => { setExceptions(e.target.value); if (validTableExceptions(e.target.value)) save({ excludedTables: e.target.value }); }} /></label>
     <small>{validTableExceptions(exceptions) ? "47+ significa da mesa 47 em diante. O aviso fica pendente até confirmar em OK, inclusive após reabrir o app." : "Use números, intervalos como 10-15 ou 47+. A última configuração válida foi mantida."}</small>
   </section>;
@@ -152,7 +151,7 @@ export function TableCloseReminders({ client, deviceName, hidden, loadAcks, chil
     window.addEventListener("table-closed-notice", listener);
     window.addEventListener("table-close-ack", ackListener);
     const off = window.caixa.onTableClosed((notice) => receive(notice, "ipc"));
-    // Quem estava desconectado quando o OK foi dado confere a lista do servidor ao abrir, a cada 20 s e ao voltar a janela.
+    // Quem estava desconectado quando o OK foi dado confere a lista do servidor ao abrir, a cada 10 s e ao voltar a janela.
     let disposed = false;
     const syncAcks = () => {
       if (!loadAcks || !read().length) return;
@@ -168,7 +167,7 @@ export function TableCloseReminders({ client, deviceName, hidden, loadAcks, chil
       }).catch(() => undefined);
     };
     syncAcks();
-    const ackTimer = window.setInterval(syncAcks, 20000);
+    const ackTimer = window.setInterval(syncAcks, 10000);
     window.addEventListener("focus", syncAcks);
     const offAck = window.caixa.onTableCloseAck ? window.caixa.onTableCloseAck((id) => acknowledge(id)) : () => undefined;
     return () => { disposed = true; window.clearInterval(ackTimer); window.removeEventListener("focus", syncAcks); off(); offAck(); window.removeEventListener("table-closed-notice", listener); window.removeEventListener("table-close-ack", ackListener); };
@@ -183,7 +182,9 @@ export function TableCloseReminders({ client, deviceName, hidden, loadAcks, chil
     const next = notices.filter((n) => n.id !== notice.id);
     localStorage.setItem(key, JSON.stringify(next));
     setNotices(next);
-    if (preferences.syncAcknowledge) window.dispatchEvent(new CustomEvent(TABLE_CLOSE_ACK_REQUEST, { detail: notice.id }));
+    // 0.4.24: o OK sempre remove dos outros computadores (antes dependia de uma opcao por computador,
+    // e com ela desmarcada no servidor o lembrete ficava no cliente).
+    window.dispatchEvent(new CustomEvent(TABLE_CLOSE_ACK_REQUEST, { detail: notice.id }));
   };
   const showReminders = !hidden && preferences.reminders !== "off" && notices.length > 0;
   if (!showReminders && !children) return null;

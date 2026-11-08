@@ -178,6 +178,8 @@ export interface PrivacySettings {
   enabledProfileId?: string;
   disabledProfileId?: string;
   activeProfileId?: string;
+  /** 0.4.24: com a privacidade desativada, o valor nao aparece grande no topo, so na caixa que abre ao clicar no Total. Vale so para este computador. */
+  totalInMenuOnly?: boolean;
 }
 
 export interface AppSettings {

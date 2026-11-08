@@ -17532,3 +17532,24 @@ body {
   color: var(--muted) !important;
   -webkit-text-fill-color: var(--muted) !important;
 }
+
+/* 0.4.24: mesa avulsa, ao lado do "+", com borda tracejada para nao parecer uma mesa numerada. */
+.pdv-table-card.loose-table {
+  border-style: dashed;
+}
+.pdv-table-card.loose-table > strong {
+  font-size: 1.05em;
+  letter-spacing: 0.02em;
+}
+
+/* 0.4.24: valor do Total do dia so dentro da caixa, na parte de baixo. */
+.total-popover > .total-popover-value {
+  border-bottom: 0;
+  border-top: 1px solid var(--line);
+  margin-top: 2px;
+  padding-top: 9px;
+}
+.total-popover > .total-popover-value strong {
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}

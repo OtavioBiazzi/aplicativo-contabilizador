@@ -142,4 +142,20 @@ with sync_playwright() as p:
     assert sizes['small'][1] < sizes['normal'][1], sizes
     prefs(c, skipReminderKey='bracket', reminderSize='normal', **base)
     print('PASS reminder size setting shrinks the box (normal/compact/small):', sizes)
+
+    # 7) Caso relatado (0.4.24): servidor "só neste computador" (e a antiga opcao de sincronizar desmarcada),
+    #    cliente "todos". Servidor fecha a 47 e da OK no servidor: some no cliente tambem.
+    c.set_viewport_size({'width': 1366, 'height': 768})
+    prefs(s, **{**base, 'reminderSource': 'mine', 'syncAcknowledge': False})
+    prefs(c, **{**base, 'reminderSource': 'all'})
+    reload(s); reload(c)
+    open_with_item(47)
+    close_on_server(47, 'Enter')
+    expect(cards(s).filter(has_text='Mesa 47')).to_have_count(1)
+    expect(cards(c).filter(has_text='Mesa 47')).to_have_count(1, timeout=8000)
+    s.get_by_role('button', name='Confirmar retirada da comanda da mesa 47', exact=True).click()
+    expect(cards(s).filter(has_text='Mesa 47')).to_have_count(0)
+    expect(cards(c).filter(has_text='Mesa 47')).to_have_count(0, timeout=8000)
+    prefs(s, **base)
+    print('PASS server "only mine" + client "all": OK on the server removes it on the client (even with the old sync option off)')
     assert not errors, errors

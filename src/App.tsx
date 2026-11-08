@@ -78,6 +78,7 @@ import type { PdvCashShift, PdvCustomer, PdvCustomerDraft, PdvDataVersion, PdvOp
 import { readReceiptPrintDestination, saveReceiptPrintDestination, type ReceiptPrintTarget } from "./shared/receiptPrintPreference";
 import { downloadFinancialCsv } from "./shared/financialExport";
 import { inFinancialPeriod, supplierBalanceKey, type FinancialDateField } from "./shared/financialDates";
+import { formatTableNumber } from "./shared/tableLabel";
 import {
   buildReportDataset,
   createReportRecords,
@@ -2659,6 +2660,8 @@ export function App() {
     : summary;
   const quickEntryStorageScope = quickEntryStorageScopeForSession(remoteSession);
   const canUseTotalMenu = canViewRemoteTotals;
+  // Sem privacidade, mas com "so na caixa": o topo nao mostra o valor; ele aparece embaixo da caixa do Total.
+  const totalOnlyInMenu = Boolean(settings.privacy.totalInMenuOnly) && !settings.privacy.hideHeaderTotal && canViewRemoteTotals;
   const helpServerIp = server.ips.find((ip) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) || server.ips[0] || "localhost";
 
   if (IS_FLOATING_WINDOW) {
@@ -2740,8 +2743,8 @@ export function App() {
             }}
           >
             <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total do dia"}</span>
-            <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "private-value" : ""}>
-              {settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Privado" : formatCurrency(displaySummary.total)}
+            <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals || totalOnlyInMenu ? "private-value" : ""}>
+              {settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Privado" : totalOnlyInMenu ? "Clique para ver" : formatCurrency(displaySummary.total)}
             </strong>
             <small>{displaySummary.count} lancamentos{remoteSession ? " no servidor" : ""}</small>
           </button>
@@ -2753,6 +2756,7 @@ export function App() {
               <button type="button" onClick={() => { setHistoryFocus({ date: currentDateKey, nonce: Date.now() }); requestNavigation("history"); setTotalMenuOpen(false); }}><History size={16} />Historico de hoje</button>
               <button type="button" onClick={() => { setOpenTablesSummary(true); setTotalMenuOpen(false); }}><Utensils size={16} />Mesas em aberto</button>
               <button type="button" onClick={() => { setSettingsWindowCategory("privacy"); setSettingsFocus({ category: "privacy", nonce: Date.now() }); requestNavigation("settings"); setTotalMenuOpen(false); }}><Settings size={16} />Ajustes de privacidade</button>
+              {totalOnlyInMenu && <div className="total-popover-value"><span>Total do dia</span><strong>{formatCurrency(displaySummary.total)}</strong></div>}
             </div>
           )}
         </div>
@@ -3246,7 +3250,7 @@ export function App() {
         )}
       </main>
 
-      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary hideTotals={settings.privacy.hideHeaderTotal} todayTotal={displaySummary.total} tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} />}
+      {openTablesSummary && canViewRemoteTotals && <OpenTablesSummary hideTotals={settings.privacy.hideHeaderTotal} todayTotal={displaySummary.total} todayCount={displaySummary.count} tables={(remoteSession ? remotePdvSnapshot : pdvSnapshot)?.tables || []} onClose={() => setOpenTablesSummary(false)} />}
 
       {importPreview && (
         <ImportPreviewModal
@@ -3833,7 +3837,7 @@ function DashboardPanel({
           </button>
           <button onClick={onOpenTables}>
             <Utensils size={18} />
-            <span><strong>{openTables.length} mesa(s) aberta(s)</strong><small>{openTables.slice(0, 5).map((table) => String(table.number).padStart(3, "0")).join(", ") || "Nenhuma mesa em atendimento."}</small></span>
+            <span><strong>{openTables.length} mesa(s) aberta(s)</strong><small>{openTables.slice(0, 5).map((table) => formatTableNumber(table.number)).join(", ") || "Nenhuma mesa em atendimento."}</small></span>
           </button>
         </aside>
       </div>
@@ -5326,7 +5330,7 @@ function HistoryReceiptModal({
         <div className="modal-head">
           <div>
             <span className="settings-overline">Recibo nao fiscal</span>
-            <strong>{sale.tableNumber ? `Mesa ${String(sale.tableNumber).padStart(3, "0")}` : "Venda"}</strong>
+            <strong>{sale.tableNumber ? `Mesa ${formatTableNumber(sale.tableNumber)}` : "Venda"}</strong>
             <p>{new Date(sale.createdAt).toLocaleString("pt-BR")} | {formatCurrency(sale.total)}</p>
           </div>
           <button className="icon-button" onClick={onClose} disabled={busy}><X size={18} /></button>

@@ -3,6 +3,7 @@ import { RollingMeter } from "./performanceMeter.js";
 import { joinSaleLabels } from "../src/shared/saleDescription.js";
 import { adaptAutomaticDescription } from "../src/shared/automaticDescription.js";
 import { matchesTableNumberFilter } from "../src/shared/tableNumberFilter.js";
+import { LOOSE_TABLE_NUMBER } from "../src/shared/tableLabel.js";
 ﻿import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
@@ -1525,16 +1526,31 @@ export class PdvStore {
     tableNumber = this.normalizeTableNumber(tableNumber);
     validateCartItems(items);
     const db = this.requireDb();
-    for (const item of items) {
-      if (selectAll(db, "SELECT item_id FROM closed_table_items WHERE item_id = ?", [item.id]).length) {
-        throw new Error("Esta conta já foi fechada em outro terminal. Atualize a mesa antes de continuar.");
-      }
-    }
     const currentSession = selectAll<{ id: string; status: PdvTableStatus; subtablesJson: string }>(
       db,
       "SELECT id, status, subtables_json AS subtablesJson FROM table_sessions WHERE table_number = ? LIMIT 1",
       [tableNumber]
     )[0];
+    // 0.4.24: outro computador fechou uma submesa (ou parte da conta) desta mesma mesa enquanto este
+    // computador lancava itens em outra submesa. Os itens ja fechados saem deste salvamento em silencio e
+    // o resto (inclusive o que acabou de ser lancado aqui) e gravado; antes o salvamento inteiro falhava
+    // e os ultimos itens lancados se perdiam ao sair da mesa.
+    const closedInThisSession = new Set<string>();
+    for (const item of items) {
+      const closed = selectAll<{ sessionId: string }>(db, "SELECT table_session_id AS sessionId FROM closed_table_items WHERE item_id = ?", [item.id])[0];
+      if (!closed) continue;
+      if (currentSession && closed.sessionId === currentSession.id && Array.isArray(baseItemIds)) {
+        closedInThisSession.add(item.id);
+        continue;
+      }
+      throw new Error("Esta conta já foi fechada em outro terminal. Atualize a mesa antes de continuar.");
+    }
+    if (closedInThisSession.size) {
+      const closedSubtables = new Set(items.filter((item) => closedInThisSession.has(item.id) && item.subtableName).map((item) => item.subtableName as string));
+      const stillOpen = new Set(parseSubtableNames(currentSession?.subtablesJson));
+      items = items.filter((item) => !closedInThisSession.has(item.id));
+      if (subtables) subtables = subtables.filter((name) => !closedSubtables.has(name) || stillOpen.has(name) || items.some((item) => item.subtableName === name));
+    }
     if (expectedSessionId && currentSession?.id !== expectedSessionId) {
       throw new Error("Esta mesa foi fechada ou reaberta em outro terminal. Atualize a mesa antes de continuar.");
     }
@@ -2234,8 +2250,8 @@ export class PdvStore {
       items.push(item);
       itemsByTable.set(row.tableNumber, items);
     });
-    return Array.from({ length: tableCount }, (_, index) => {
-      const number = index + 1;
+    // A mesa avulsa (999) entra sempre por ultimo, logo antes do "+" no mapa.
+    return [...Array.from({ length: tableCount }, (_, index) => index + 1), LOOSE_TABLE_NUMBER].map((number) => {
       const session = byNumber.get(number);
       const items = itemsByTable.get(number) || [];
       const remainingTotal = roundMoney(items.reduce((total, item) => total + unpaidItemTotal(item), 0));
@@ -2811,6 +2827,7 @@ export class PdvStore {
   private normalizeTableNumber(value: number): number {
     const tableNumber = Number(value);
     const maxTables = Math.max(1, Math.min(300, this.getSettings().tableCount || DEFAULT_PDV_SETTINGS.tableCount));
+    if (tableNumber === LOOSE_TABLE_NUMBER) return tableNumber;
     if (!Number.isInteger(tableNumber) || tableNumber < 1 || tableNumber > maxTables) {
       throw new Error(`Mesa invalida. Informe um numero entre 1 e ${maxTables}.`);
     }

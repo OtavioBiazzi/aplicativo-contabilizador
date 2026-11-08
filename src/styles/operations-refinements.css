@@ -77,3 +77,9 @@ body > .pdv-context-menu { z-index: 2000; min-width: 270px; max-width: min(340px
 .performance-meter .performance-card span { font-size: 12px; font-weight: 800; color: var(--muted); }
 .performance-meter .performance-card strong { font-size: 20px; color: var(--text); }
 .performance-meter .performance-card small { font-size: 11px; line-height: 1.35; color: var(--muted); }
+/* 0.4.24: previsao de lancamentos (3 caixas), mesmo visual da projecao de valores. */
+.open-tables-launches { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin:0 14px 12px; }
+.open-tables-launches > div { display:flex; justify-content:space-between; align-items:center; gap:10px; border:1px solid var(--line); padding:9px 11px; background:var(--panel); }
+.open-tables-launches strong { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.open-tables-launches > div:last-child strong { color:var(--accent); font-size:19px; }
+@media (max-width: 720px) { .open-tables-launches { grid-template-columns:1fr; } }
