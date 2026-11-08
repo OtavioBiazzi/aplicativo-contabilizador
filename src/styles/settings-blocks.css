@@ -1,0 +1,56 @@
+/* 0.4.25: telas de configuracao em blocos, no estilo da Privacidade. */
+#root .settings-blocks { display: grid; gap: 12px; width: 100%; min-width: 0; }
+#root .settings-block { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); background: var(--panel); min-width: 0; }
+#root .settings-block > header { display: grid; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+#root .settings-block > header strong { font-size: .92rem; color: var(--text); }
+#root .settings-block > header small { color: var(--muted); font-size: .76rem; line-height: 1.4; }
+#root .settings-block-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; align-items: start; min-width: 0; }
+#root .settings-block-body > .wide, #root .settings-block-body > .settings-block-note, #root .settings-block-body > .settings-presets-row { grid-column: 1 / -1; }
+
+#root .settings-block label.settings-option { display: flex; align-items: flex-start; gap: 10px; min-height: 100%; padding: 11px 12px; border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; box-sizing: border-box; }
+#root .settings-option input { width: 16px; height: 16px; margin: 2px 0 0; flex: 0 0 auto; accent-color: var(--accent); }
+#root .settings-option > span { display: grid; gap: 3px; color: var(--text); font-size: .82rem; min-width: 0; }
+#root .settings-option > span strong { font-weight: 600; }
+#root .settings-option > span small { color: var(--muted); font-size: .75rem; line-height: 1.4; }
+#root .settings-option:has(input:disabled) { opacity: .6; cursor: default; }
+
+#root .settings-block .settings-field { display: grid; gap: 5px; min-width: 0; font-size: .8rem; color: var(--text); }
+#root .settings-field > label { display: grid; gap: 5px; min-width: 0; }
+#root .settings-field > label > span { color: var(--muted); font-size: .75rem; }
+#root .settings-field > small { color: var(--muted); font-size: .72rem; line-height: 1.4; }
+#root .settings-block :is(.settings-field input:not([type="checkbox"]):not([type="range"]):not([type="color"]), .settings-field select) {
+  width: 100%; min-width: 0; height: 34px; padding: 5px 8px; box-sizing: border-box;
+  background: var(--panel-2); color: var(--text); -webkit-text-fill-color: var(--text);
+  border: 1px solid var(--line); border-radius: 1px; font: inherit; font-size: .82rem;
+}
+#root .settings-field input[type="range"] { width: 100%; accent-color: var(--accent); }
+#root .settings-field input[aria-invalid="true"] { border-color: var(--danger, #d64545); }
+
+#root .settings-presets-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+#root .settings-presets-row > span { color: var(--muted); font-size: .75rem; margin-right: 4px; }
+#root .settings-presets-row button { height: 32px; padding: 4px 12px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 1px; font-size: .78rem; cursor: pointer; }
+#root .settings-presets-row button:hover { border-color: var(--accent); }
+#root .settings-block-note { margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.4; }
+#root .settings-weekdays { display: flex; flex-wrap: wrap; gap: 6px; }
+#root .settings-weekdays label { display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; border: 1px solid var(--line); background: var(--panel-2); font-size: .78rem; cursor: pointer; }
+
+/* Dentro da janela de configuracao, o cabecalho proprio da tela do PDV repetia o titulo da categoria. */
+#root .settings-panel .pdv-settings-screen.settings-embedded > .pdv-section-head { display: none; }
+#root .settings-panel .pdv-settings-screen.settings-embedded .pdv-settings-content { overflow: visible; max-height: none; padding: 0; }
+
+@media (max-width: 760px) {
+  #root .settings-block-body { grid-template-columns: minmax(0, 1fr); }
+}
+#root .local-visual-settings.settings-blocks { grid-template-columns: minmax(0, 1fr); padding: 0; gap: 12px; background: transparent; border: 0; }
+#root .settings-panel .settings-group:has(> .settings-blocks) { padding: 0; border: 0; background: transparent; }
+/* Campos da tela do PDV dentro da janela de configuracao: mesmo fundo escuro dos outros campos. */
+#root .settings-panel .pdv-settings-screen.settings-embedded :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), select, textarea) {
+  background: var(--panel-2); color: var(--text); -webkit-text-fill-color: var(--text); border: 1px solid var(--line); border-radius: 1px;
+}
+/* Uma rolagem so: a tela do PDV embutida cresce com o conteudo e quem rola e a janela de configuracao. */
+#root .settings-panel .settings-group.pdv-settings-panel:has(.pdv-settings-screen.settings-embedded) { height: auto; max-height: none; overflow: visible; padding: 0; border: 0; background: transparent; }
+#root .settings-panel .pdv-settings-panel:has(.pdv-settings-screen.settings-embedded) :is(.pdv-shell, .pdv-workspace) { height: auto; max-height: none; min-height: 0; overflow: visible; border: 0; background: transparent; }
+#root .settings-panel .pdv-settings-screen.settings-embedded { height: auto; max-height: none; overflow: visible; padding: 0; border: 0; background: transparent; }
+#root .settings-panel .pdv-settings-panel:has(.local-visual-settings.settings-blocks) { height: auto; max-height: none; overflow: visible; padding: 0; border: 0; background: transparent; }
+#root .settings-panel .pdv-settings-panel:has(.local-visual-settings.settings-blocks) :is(.pdv-shell, .pdv-workspace) { height: auto; max-height: none; min-height: 0; overflow: visible; border: 0; background: transparent; }
+#root .settings-panel .local-visual-settings.settings-blocks { gap: 12px; }

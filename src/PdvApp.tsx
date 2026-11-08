@@ -1,4 +1,5 @@
 import { dispatchTableClosed, suppressCloseNotice, useLocalTablePreferences } from "./components/TableCloseReminders";
+import { SettingsBlock, SettingsCheck, SettingsField } from "./components/SettingsBlocks";
 import { KeyboardSelect } from "./components/KeyboardSelect";
 import { createPortal } from "react-dom";
 import { duplicateReceivableDraft, buildReceivableAccountReceipt } from "./shared/financialAccountActions";
@@ -8514,22 +8515,33 @@ function ClientVisualSettingsScreen({ snapshot, settings, onChange, externalActi
     const productSizes = { compact: { gridColumns: 7, categoryColumns: 7, productCardHeight: 52, categoryCardHeight: 44 }, normal: { gridColumns: 5, categoryColumns: 5, productCardHeight: 60, categoryCardHeight: 52 }, comfortable: { gridColumns: 5, categoryColumns: 5, productCardHeight: 76, categoryCardHeight: 62 } };
     changeDraft(scope === "tables" ? tableSizes[preset] : productSizes[preset]);
   };
-  return <section className="pdv-panel local-visual-settings" aria-label={scope === "tables" ? "Visual das mesas" : "Visual de venda e produtos"}>
-    <div className="local-visual-intro"><strong>{scope === "tables" ? "Grade e status das mesas" : "Grade de produtos e categorias"}</strong><p>Ajustes somente deste computador. Não alteram os outros terminais.</p></div>
-    <div className="pdv-visual-presets" aria-label="Tamanhos prontos"><span>Tamanho</span>{(["compact", "normal", "comfortable"] as const).map((preset, index) => <button type="button" key={preset} onClick={() => applyPreset(preset)}>{["Compacto", "Normal", "Confortável"][index]}</button>)}</div>
+  const presets = <div className="settings-presets-row" aria-label="Tamanhos prontos"><span>Tamanhos prontos</span>{(["compact", "normal", "comfortable"] as const).map((preset, index) => <button type="button" key={preset} onClick={() => applyPreset(preset)}>{["Compacto", "Normal", "Confortável"][index]}</button>)}</div>;
+  return <section className="pdv-panel local-visual-settings settings-blocks" aria-label={scope === "tables" ? "Visual das mesas" : "Visual de venda e produtos"}>
     {scope === "tables" ? <>
-      <label className="pdv-setting-line"><span>Mesas por linha</span><select value={draft.tableColumns || 9} onChange={(event) => changeDraft({ tableColumns: Number(event.target.value) })}>{[5, 6, 7, 8, 9, 10, 11, 12].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label className="pdv-setting-line"><span>Altura das mesas</span><input type="number" min={58} max={130} value={draft.tableCardHeight || 96} onChange={(event) => changeDraft({ tableCardHeight: Number(event.target.value || 96) })} /></label>
-      <label className="pdv-switch-line pdv-local-visual-toggle"><input type="checkbox" checked={Boolean(draft.hideTableStatusDescriptions)} onChange={(event) => changeDraft({ hideTableStatusDescriptions: event.target.checked })} /><span><strong>Mostrar somente indicadores das mesas</strong><small>Oculta os textos de status; o significado continua disponível ao passar o mouse.</small></span></label>
-      <label className="pdv-switch-line pdv-local-visual-toggle"><input type="checkbox" checked={Boolean(draft.hideTableStatusLegend)} onChange={(event) => changeDraft({ hideTableStatusLegend: event.target.checked })} /><span><strong>Ocultar legenda de status</strong><small>Remove a barra de legenda abaixo da grade.</small></span></label>
-      <label className="pdv-switch-line pdv-local-visual-toggle"><input type="checkbox" aria-label="Ocultar o botão + da grade de mesas" disabled={!onSharedQuickValue || quickValueSaving} checked={Boolean(snapshot.settings.hideTableQuickValue)} onChange={async (event) => { if (!onSharedQuickValue) return; setQuickValueSaving(true); try { await onSharedQuickValue(event.target.checked); } finally { setQuickValueSaving(false); } }} /><span><strong>Ocultar o botão + da grade de mesas</strong><small>{onSharedQuickValue ? "Vale para todos os computadores (servidor e clientes) e é salvo na hora." : "Vale para todos os computadores. Somente o servidor, ou um cliente com permissão para editar configurações, pode alterar."}</small></span></label>
+      <SettingsBlock title="Grade das mesas" description="Tamanho do mapa de mesas. Só neste computador; não altera os outros.">
+        {presets}
+        <SettingsField label="Mesas por linha"><select value={draft.tableColumns || 9} onChange={(event) => changeDraft({ tableColumns: Number(event.target.value) })}>{[5, 6, 7, 8, 9, 10, 11, 12].map((value) => <option key={value} value={value}>{value}</option>)}</select></SettingsField>
+        <SettingsField label="Altura das mesas"><input type="number" min={58} max={130} value={draft.tableCardHeight || 96} onChange={(event) => changeDraft({ tableCardHeight: Number(event.target.value || 96) })} /></SettingsField>
+      </SettingsBlock>
+      <SettingsBlock title="Status das mesas" description="Textos e legenda das cores. Só neste computador.">
+        <SettingsCheck checked={Boolean(draft.hideTableStatusDescriptions)} onChange={(checked) => changeDraft({ hideTableStatusDescriptions: checked })} label="Mostrar somente indicadores" hint="Esconde os textos de status; o significado aparece ao passar o mouse." />
+        <SettingsCheck checked={Boolean(draft.hideTableStatusLegend)} onChange={(checked) => changeDraft({ hideTableStatusLegend: checked })} label="Ocultar a legenda de status" hint="Tira a barra de legenda abaixo do mapa." />
+      </SettingsBlock>
+      <SettingsBlock title="Botão + do mapa" description={onSharedQuickValue ? "Vale para todos os computadores (servidor e clientes) e é salvo na hora." : "Vale para todos os computadores. Só o servidor, ou um cliente com permissão para editar configurações, pode alterar."}>
+        <SettingsCheck ariaLabel="Ocultar o botão + da grade de mesas" disabled={!onSharedQuickValue || quickValueSaving} checked={Boolean(snapshot.settings.hideTableQuickValue)} onChange={async (checked) => { if (!onSharedQuickValue) return; setQuickValueSaving(true); try { await onSharedQuickValue(checked); } finally { setQuickValueSaving(false); } }} label="Ocultar o botão + da grade de mesas" hint="O + abre o lançamento de valor rápido." />
+      </SettingsBlock>
     </> : <>
-      <label className="pdv-setting-line"><span>Produtos por linha</span><select value={draft.gridColumns || 5} onChange={(event) => changeDraft({ gridColumns: Number(event.target.value) })}>{[4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label className="pdv-setting-line"><span>Categorias por linha</span><select value={draft.categoryColumns || 5} onChange={(event) => changeDraft({ categoryColumns: Number(event.target.value) })}>{[3, 4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label className="pdv-setting-line"><span>Altura dos produtos</span><input type="number" min={44} max={110} value={draft.productCardHeight || 74} onChange={(event) => changeDraft({ productCardHeight: Number(event.target.value || 74) })} /></label>
-      <label className="pdv-setting-line"><span>Altura das categorias</span><input type="number" min={36} max={90} value={draft.categoryCardHeight || 64} onChange={(event) => changeDraft({ categoryCardHeight: Number(event.target.value || 64) })} /></label>
-      <label className="pdv-setting-line"><span>Fonte dos produtos: {draft.productFontSize || 14}px</span><input type="range" min={10} max={20} step={1} value={draft.productFontSize || 14} onChange={(event) => changeDraft({ productFontSize: Number(event.target.value) })} /></label>
-      <label className="pdv-switch-line pdv-local-visual-toggle"><input type="checkbox" checked={Boolean(draft.vibrantMode)} onChange={(event) => changeDraft({ vibrantMode: event.target.checked })} /><span><strong>Visual vibrante neste computador</strong><small>Mais destaque nas seleções, status e alertas.</small></span></label>
+      <SettingsBlock title="Produtos e categorias" description="Tamanho da tela de venda. Só neste computador; não altera os outros.">
+        {presets}
+        <SettingsField label="Produtos por linha"><select value={draft.gridColumns || 5} onChange={(event) => changeDraft({ gridColumns: Number(event.target.value) })}>{[4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></SettingsField>
+        <SettingsField label="Categorias por linha"><select value={draft.categoryColumns || 5} onChange={(event) => changeDraft({ categoryColumns: Number(event.target.value) })}>{[3, 4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></SettingsField>
+        <SettingsField label="Altura dos produtos"><input type="number" min={44} max={110} value={draft.productCardHeight || 74} onChange={(event) => changeDraft({ productCardHeight: Number(event.target.value || 74) })} /></SettingsField>
+        <SettingsField label="Altura das categorias"><input type="number" min={36} max={90} value={draft.categoryCardHeight || 64} onChange={(event) => changeDraft({ categoryCardHeight: Number(event.target.value || 64) })} /></SettingsField>
+        <SettingsField label={`Fonte dos produtos: ${draft.productFontSize || 14}px`}><input type="range" min={10} max={20} step={1} value={draft.productFontSize || 14} onChange={(event) => changeDraft({ productFontSize: Number(event.target.value) })} /></SettingsField>
+      </SettingsBlock>
+      <SettingsBlock title="Este computador" description="Não é enviado para os clientes nem para o servidor.">
+        <SettingsCheck checked={Boolean(draft.vibrantMode)} onChange={(checked) => changeDraft({ vibrantMode: checked })} label="Visual vibrante" hint="Mais destaque nas seleções, status e alertas." />
+      </SettingsBlock>
     </>}
     {!externalActionsRef && <div className="pdv-action-row"><button type="button" disabled={!dirty} onClick={discardChanges}>Descartar</button><button type="button" disabled={!dirty} onClick={() => void saveChanges()}>Salvar alterações</button></div>}
   </section>;
@@ -8629,7 +8641,7 @@ function AdvancedScreen({ snapshot, clientMode = false, readOnly = false, client
     data: { title: "Dados locais do PDV", description: "Consulte o banco local e gerencie importacoes e exportacoes." }
   };
   return (
-    <section className="pdv-panel pdv-settings-screen">
+    <section className={`pdv-panel pdv-settings-screen ${hideNavigation ? "settings-embedded" : ""}`}>
       <div className="pdv-section-head">
         <div>
           <span className="pdv-eyebrow">Configuracao do PDV</span>
@@ -8650,133 +8662,89 @@ function AdvancedScreen({ snapshot, clientMode = false, readOnly = false, client
       </div>}
 
       <div className="pdv-settings-content">
-        {section === "tables" && <div className="pdv-settings-form">
-          <Utensils size={22} />
-          <div><strong>Estrutura das mesas</strong><span>Quantidade, ordenacao e contas separadas.</span></div>
-          <label className="pdv-setting-line">
-            <span>Quantidade de mesas</span>
-            <input type="number" min={1} max={300} value={draft.tableCount} onChange={(event) => changeDraft({ tableCount: Number(event.target.value || 47) })} />
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={draft.subtablesEnabled} onChange={(event) => changeDraft({ subtablesEnabled: event.target.checked })} />
-            Ativar submesas/contas separadas
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.rememberLastSubtable)} onChange={(event) => changeDraft({ rememberLastSubtable: event.target.checked })} />
-            Reabrir cada mesa na ultima submesa selecionada
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={draft.tablePeopleEnabled} onChange={(event) => changeDraft({ tablePeopleEnabled: event.target.checked })} />
-            Perguntar quantidade de pessoas ao abrir mesa
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.allowOfflineTables)} onChange={(event) => changeDraft({ allowOfflineTables: event.target.checked })} />
-            Permitir mesas offline no cliente
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.partialCloseEnabled)} onChange={(event) => changeDraft({ partialCloseEnabled: event.target.checked })} />
-            Mostrar Fechar parcial no fechamento da mesa (para separar contas, prefira transferir para uma submesa)
-          </label>
+        {section === "tables" && <div className="settings-blocks">
+          <SettingsBlock title="Estrutura das mesas" description="Quantas mesas aparecem no mapa e como as contas separadas funcionam. A mesa S/N sempre aparece a mais, antes do +.">
+            <SettingsField label="Quantidade de mesas" hint="De 1 a 300.">
+              <input type="number" min={1} max={300} value={draft.tableCount} onChange={(event) => changeDraft({ tableCount: Number(event.target.value || 47) })} />
+            </SettingsField>
+            <SettingsCheck checked={draft.subtablesEnabled} onChange={(checked) => changeDraft({ subtablesEnabled: checked })} label="Ativar submesas (contas separadas)" hint="Permite dividir a mesa em comandas com nome, cada uma fechada à parte." />
+            <SettingsCheck checked={Boolean(draft.rememberLastSubtable)} onChange={(checked) => changeDraft({ rememberLastSubtable: checked })} label="Reabrir na última submesa usada" hint="Ao voltar para a mesa, já entra na submesa em que você estava." />
+          </SettingsBlock>
+          <SettingsBlock title="Abrir e fechar mesa" description="O que o caixa pergunta e mostra ao abrir e ao fechar a conta.">
+            <SettingsCheck checked={draft.tablePeopleEnabled} onChange={(checked) => changeDraft({ tablePeopleEnabled: checked })} label="Perguntar quantas pessoas ao abrir a mesa" />
+            <SettingsCheck checked={Boolean(draft.partialCloseEnabled)} onChange={(checked) => changeDraft({ partialCloseEnabled: checked })} label="Mostrar Fechar parcial no fechamento" hint="Para separar contas, prefira transferir os itens para uma submesa." />
+          </SettingsBlock>
+          <SettingsBlock title="Rede" description="Como os computadores clientes se comportam quando perdem a conexão com o servidor.">
+            <SettingsCheck checked={Boolean(draft.allowOfflineTables)} onChange={(checked) => changeDraft({ allowOfflineTables: checked })} label="Permitir mesas offline no cliente" hint="O cliente guarda os lançamentos e envia quando a conexão voltar." />
+          </SettingsBlock>
         </div>}
 
-        {section === "appearance" && <div className="pdv-settings-form">
-          <LayoutGrid size={22} />
-          <div><strong>Tamanho do PDV</strong><span>Estas medidas controlam os produtos e as categorias. O visual das mesas fica em Mesas → Visual.</span></div>
-          <div className="pdv-visual-presets" aria-label="Densidade visual padrao do PDV">
-            <span>Aplicar medidas prontas</span>
-            <button onClick={() => applyVisualPreset("compact")}>Compacto</button>
-            <button onClick={() => applyVisualPreset("normal")}>Normal</button>
-            <button onClick={() => applyVisualPreset("comfortable")}>Confortavel</button>
-          </div>
-          <label className="pdv-setting-line">
-            <span>Ordem dos produtos</span>
-            <select value={draft.productSortDirection || "az"} onChange={(event) => changeDraft({ productSortDirection: event.target.value as "az" | "za" })}>
-              <option value="az">A a Z</option>
-              <option value="za">Z a A</option>
-            </select>
-          </label>
-          <label className="pdv-setting-line"><span>Produtos por linha</span><select value={draft.gridColumns || 5} onChange={(event) => changeDraft({ gridColumns: Number(event.target.value) })}>{[4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-          <label className="pdv-setting-line"><span>Categorias por linha</span><select value={draft.categoryColumns || 5} onChange={(event) => changeDraft({ categoryColumns: Number(event.target.value) })}>{[3, 4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-          <label className="pdv-setting-line"><span>Altura dos produtos</span><input type="number" min={44} max={110} value={draft.productCardHeight || 74} onChange={(event) => changeDraft({ productCardHeight: Number(event.target.value || 74) })} /></label>
-          <label className="pdv-setting-line"><span>Fonte dos produtos: {draft.productFontSize || 14}px</span><input type="range" min={10} max={20} step={1} value={draft.productFontSize || 14} onChange={(event) => changeDraft({ productFontSize: Number(event.target.value) })} /></label>
-          <label className="pdv-setting-line"><span>Altura das categorias</span><input type="number" min={36} max={90} value={draft.categoryCardHeight || 64} onChange={(event) => changeDraft({ categoryCardHeight: Number(event.target.value || 64) })} /></label>
-          <label className="pdv-setting-line"><span>Produtos por pagina na consulta</span><input type="number" min={10} max={100} step={5} value={draft.productLookupPageSize || 30} onChange={(event) => changeDraft({ productLookupPageSize: Number(event.target.value || 30) })} /></label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.productLookupQuantitiesEnabled)} onChange={(event) => changeDraft({ productLookupQuantitiesEnabled: event.target.checked })} />
-            Permitir informar a quantidade de cada produto na consulta multipla
-          </label>
-          <label className="pdv-switch-line pdv-local-visual-toggle">
-            <input type="checkbox" checked={Boolean(clientVisualSettings.vibrantMode)} onChange={(event) => onClientVisualSettingsChange?.({ vibrantMode: event.target.checked })} />
-            <span><strong>Visual vibrante neste computador</strong><small>Mais saturacao nos status, selecoes e alertas. Esta opcao nao e enviada para clientes nem para o servidor.</small></span>
-          </label>
+        {section === "appearance" && <div className="settings-blocks">
+          <SettingsBlock title="Tamanho dos produtos e categorias" description="Medidas da tela de venda. O visual das mesas fica em Mesas → Visual.">
+            <div className="settings-presets-row"><span>Medidas prontas</span>
+              <button type="button" onClick={() => applyVisualPreset("compact")}>Compacto</button>
+              <button type="button" onClick={() => applyVisualPreset("normal")}>Normal</button>
+              <button type="button" onClick={() => applyVisualPreset("comfortable")}>Confortável</button>
+            </div>
+            <SettingsField label="Produtos por linha"><select value={draft.gridColumns || 5} onChange={(event) => changeDraft({ gridColumns: Number(event.target.value) })}>{[4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></SettingsField>
+            <SettingsField label="Categorias por linha"><select value={draft.categoryColumns || 5} onChange={(event) => changeDraft({ categoryColumns: Number(event.target.value) })}>{[3, 4, 5, 6, 7, 8, 9, 10].map((value) => <option key={value} value={value}>{value}</option>)}</select></SettingsField>
+            <SettingsField label="Altura dos produtos"><input type="number" min={44} max={110} value={draft.productCardHeight || 74} onChange={(event) => changeDraft({ productCardHeight: Number(event.target.value || 74) })} /></SettingsField>
+            <SettingsField label="Altura das categorias"><input type="number" min={36} max={90} value={draft.categoryCardHeight || 64} onChange={(event) => changeDraft({ categoryCardHeight: Number(event.target.value || 64) })} /></SettingsField>
+            <SettingsField label={`Fonte dos produtos: ${draft.productFontSize || 14}px`}><input type="range" min={10} max={20} step={1} value={draft.productFontSize || 14} onChange={(event) => changeDraft({ productFontSize: Number(event.target.value) })} /></SettingsField>
+            <SettingsField label="Ordem dos produtos">
+              <select value={draft.productSortDirection || "az"} onChange={(event) => changeDraft({ productSortDirection: event.target.value as "az" | "za" })}>
+                <option value="az">A a Z</option>
+                <option value="za">Z a A</option>
+              </select>
+            </SettingsField>
+          </SettingsBlock>
+          <SettingsBlock title="Consulta de produtos" description="A janela de busca que lista vários produtos de uma vez.">
+            <SettingsField label="Produtos por página"><input type="number" min={10} max={100} step={5} value={draft.productLookupPageSize || 30} onChange={(event) => changeDraft({ productLookupPageSize: Number(event.target.value || 30) })} /></SettingsField>
+            <SettingsCheck checked={Boolean(draft.productLookupQuantitiesEnabled)} onChange={(checked) => changeDraft({ productLookupQuantitiesEnabled: checked })} label="Informar a quantidade de cada produto" hint="Na consulta múltipla, cada produto ganha um campo de quantidade." />
+          </SettingsBlock>
+          <SettingsBlock title="Este computador" description="Não é enviado para os clientes nem para o servidor.">
+            <SettingsCheck checked={Boolean(clientVisualSettings.vibrantMode)} onChange={(checked) => onClientVisualSettingsChange?.({ vibrantMode: checked })} label="Visual vibrante" hint="Mais saturação nos status, seleções e alertas." />
+          </SettingsBlock>
         </div>}
 
-        {section === "operation" && <div className="pdv-settings-form">
-          <Settings size={22} />
-          <div><strong>Lancamento e pagamento</strong><span>Preferencias usadas em Venda e Mesas.</span></div>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.stackIdenticalItems)} onChange={(event) => changeDraft({ stackIdenticalItems: event.target.checked })} />
-            Juntar produtos iguais no carrinho
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.individualUnitItems)} onChange={(event) => changeDraft({ individualUnitItems: event.target.checked })} />
-            Exibir cada unidade individualmente
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={draft.complementsEnabled} onChange={(event) => changeDraft({ complementsEnabled: event.target.checked })} />
-            Ativar complementos
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={draft.groupComplementsWithProduct ?? true} onChange={(event) => changeDraft({ groupComplementsWithProduct: event.target.checked })} />
-            Mostrar adicionais junto ao produto principal
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.partialPaymentDescriptionEnabled)} onChange={(event) => changeDraft({ partialPaymentDescriptionEnabled: event.target.checked })} />
-            Solicitar descricao nos pagamentos parciais
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={draft.fullPaymentIdentificationEnabled !== false} onChange={(event) => changeDraft({ fullPaymentIdentificationEnabled: event.target.checked })} />
-            Mostrar identificacao da pessoa no fechamento total
-          </label>
-          <label className="pdv-switch-line">
-            <input type="checkbox" checked={Boolean(draft.skipPaymentConfirmation)} onChange={(event) => changeDraft({ skipPaymentConfirmation: event.target.checked })} />
-            Finalizar pagamento sem pedir confirmacao
-          </label>
-          <label className="pdv-setting-line">
-            <span>Controle de abertura e fechamento do caixa</span>
-            <select value={draft.cashControlMode || "automatic"} onChange={(event) => changeDraft({ cashControlMode: event.target.value as "automatic" | "manual" })}>
-              <option value="automatic">Automatico, como hoje</option>
-              <option value="manual">Exigir abertura antes da primeira venda</option>
-            </select>
-          </label>
-          <label className="pdv-setting-line">
-            <span>Aproximacao da divisao por pessoas e produtos</span>
-            <select value={draft.roundingStep || 0.01} onChange={(event) => changeDraft({ roundingStep: Number(event.target.value) })}>
-              <option value={0.01}>Sem aproximacao</option>
-              <option value={0.05}>R$ 0,05</option>
-              <option value={0.1}>R$ 0,10</option>
-              <option value={0.25}>R$ 0,25</option>
-              <option value={0.5}>R$ 0,50</option>
-              <option value={1}>R$ 1,00</option>
-            </select>
-            <small>Tambem define como o valor e aproximado ao distribuir produtos entre submesas.</small>
-          </label>
-          <label className="pdv-setting-line">
-            <span>Aproximar tambem ao dividir um item entre pessoas</span>
-            <select value={draft.splitItemRounding ? "on" : "off"} onChange={(event) => changeDraft({ splitItemRounding: event.target.value === "on" })}>
-              <option value="off">Nao, dividir exato nos centavos</option>
-              <option value="on">Sim, usar a aproximacao acima</option>
-            </select>
-            <small>A ultima parte fica com a diferenca, entao o total do item nao muda. Da para ligar ou desligar na hora, na janela de dividir.</small>
-          </label>
-          <label className="pdv-setting-line">
-            <span>Direcao da aproximacao</span>
-            <select value={draft.roundingDirection || "nearest"} onChange={(event) => changeDraft({ roundingDirection: event.target.value as "nearest" | "up" | "down" })}>
-              <option value="nearest">Mais proximo</option>
-              <option value="up">Sempre para cima</option>
-              <option value="down">Sempre para baixo</option>
-            </select>
-          </label>
+        {section === "operation" && <div className="settings-blocks">
+          <SettingsBlock title="Carrinho" description="Como os produtos aparecem na lista da venda e da mesa.">
+            <SettingsCheck checked={Boolean(draft.stackIdenticalItems)} onChange={(checked) => changeDraft({ stackIdenticalItems: checked })} label="Juntar produtos iguais" hint="Lançar o mesmo produto de novo soma na mesma linha." />
+            <SettingsCheck checked={Boolean(draft.individualUnitItems)} onChange={(checked) => changeDraft({ individualUnitItems: checked })} label="Mostrar cada unidade em uma linha" />
+            <SettingsCheck checked={draft.complementsEnabled} onChange={(checked) => changeDraft({ complementsEnabled: checked })} label="Ativar complementos" hint="Adicionais escolhidos junto com o produto." />
+            <SettingsCheck checked={draft.groupComplementsWithProduct ?? true} onChange={(checked) => changeDraft({ groupComplementsWithProduct: checked })} label="Mostrar adicionais junto do produto" />
+          </SettingsBlock>
+          <SettingsBlock title="Pagamento" description="O que a tela de pagamento pede e como ela termina.">
+            <SettingsCheck checked={draft.fullPaymentIdentificationEnabled !== false} onChange={(checked) => changeDraft({ fullPaymentIdentificationEnabled: checked })} label="Mostrar identificação da pessoa no fechamento total" hint="Campo opcional com o nome, que vai para o histórico e o recibo." />
+            <SettingsCheck checked={Boolean(draft.partialPaymentDescriptionEnabled)} onChange={(checked) => changeDraft({ partialPaymentDescriptionEnabled: checked })} label="Pedir descrição nos pagamentos parciais" />
+            <SettingsCheck checked={Boolean(draft.skipPaymentConfirmation)} onChange={(checked) => changeDraft({ skipPaymentConfirmation: checked })} label="Finalizar sem pedir confirmação" hint="Com a conta paga, Enter já finaliza." />
+            <SettingsField label="Abertura e fechamento do caixa">
+              <select value={draft.cashControlMode || "automatic"} onChange={(event) => changeDraft({ cashControlMode: event.target.value as "automatic" | "manual" })}>
+                <option value="automatic">Automático, como hoje</option>
+                <option value="manual">Exigir abertura antes da primeira venda</option>
+              </select>
+            </SettingsField>
+          </SettingsBlock>
+          <SettingsBlock title="Divisão e aproximação" description="Como os valores são arredondados ao dividir a conta entre pessoas, submesas ou um item.">
+            <SettingsField label="Aproximar a divisão em" hint="Vale para dividir por pessoas e para distribuir produtos entre submesas.">
+              <select value={draft.roundingStep || 0.01} onChange={(event) => changeDraft({ roundingStep: Number(event.target.value) })}>
+                <option value={0.01}>Sem aproximação</option>
+                <option value={0.05}>R$ 0,05</option>
+                <option value={0.1}>R$ 0,10</option>
+                <option value={0.25}>R$ 0,25</option>
+                <option value={0.5}>R$ 0,50</option>
+                <option value={1}>R$ 1,00</option>
+              </select>
+            </SettingsField>
+            <SettingsField label="Direção da aproximação">
+              <select value={draft.roundingDirection || "nearest"} onChange={(event) => changeDraft({ roundingDirection: event.target.value as "nearest" | "up" | "down" })}>
+                <option value="nearest">Mais próximo</option>
+                <option value="up">Sempre para cima</option>
+                <option value="down">Sempre para baixo</option>
+              </select>
+            </SettingsField>
+            <SettingsCheck checked={Boolean(draft.splitItemRounding)} onChange={(checked) => changeDraft({ splitItemRounding: checked })} label="Aproximar também ao dividir um item entre pessoas" hint="A última parte fica com a diferença, então o total do item não muda. Dá para ligar ou desligar na hora, na janela de dividir." />
+          </SettingsBlock>
         </div>}
 
         {section === "printing" && <div className="pdv-settings-form pdv-print-settings-form">

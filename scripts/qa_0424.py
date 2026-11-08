@@ -38,8 +38,8 @@ with sync_playwright() as p:
         return s.locator('.pdv-table-card').filter(has=s.get_by_text(label, exact=True))
 
     # 1) Submesa fechada em outro computador.
-    items = s.evaluate(seed, [48, [['Item Ana', 'Ana'], ['Item Fernando', 'Fernando']], ['Ana', 'Fernando']])
-    result = s.evaluate("""async(items)=>{const n=48; const snap=await window.caixa.getPdvSnapshot(); const t=snap.tables.find(t=>t.number===n);
+    items = s.evaluate(seed, [46, [['Item Ana', 'Ana'], ['Item Fernando', 'Fernando']], ['Ana', 'Fernando']])
+    result = s.evaluate("""async(items)=>{const n=46; const snap=await window.caixa.getPdvSnapshot(); const t=snap.tables.find(t=>t.number===n);
       const ana=items.find(i=>i.subtableName==='Ana');
       await window.caixa.savePdvTablePartial(n,[ana],[{id:crypto.randomUUID(),method:'Pix',amount:10}],0,crypto.randomUUID(),'',{kind:'subtable',subtableName:'Ana',sessionId:t.sessionId});
       const extra={...items[1],id:crypto.randomUUID(),productName:'Item novo Fernando'};
@@ -108,7 +108,7 @@ with sync_playwright() as p:
     expect(launches).to_contain_text('Faltam lançar')
     left = launches.locator(':scope > div').nth(1).locator('strong').inner_text()
     assert int(left) == expected, (left, expected)
-    row48 = s.locator('.open-tables-list tr').filter(has_text='Mesa 048')
+    row48 = s.locator('.open-tables-list tr').filter(has_text='Mesa 046')
     expect(row48.locator('td').nth(3)).to_have_text('1')
     expect(s.locator('.open-tables-list tr').filter(has_text='Mesa S/N')).to_have_count(1)
     s.screenshot(path='outputs/qa-close-reminders-20261101/0424-open-tables.png')
@@ -119,16 +119,45 @@ with sync_playwright() as p:
     original = s.evaluate("async()=>(await window.caixa.getSnapshot()).settings.privacy")
     s.evaluate("async()=>{const snap=await window.caixa.getSnapshot(); await window.caixa.saveSettings({...snap.settings, privacy:{...snap.settings.privacy, enabled:false, hideHeaderTotal:false, totalInMenuOnly:true}});}")
     reload()
-    expect(s.locator('.professional-total .topbar-card-button strong')).to_have_text('Clique para ver')
+    expect(s.locator('.professional-total .topbar-card-button')).to_contain_text('Hoje')
+    expect(s.locator('.professional-total .topbar-card-button strong')).to_have_text(re.compile(r'^\d+ lançamentos?$'))
+    expect(s.locator('.professional-total .topbar-card-button')).to_contain_text('Total na caixinha')
     s.locator('.professional-total .topbar-card-button').click()
     expect(s.locator('.total-popover .total-popover-value strong')).to_contain_text('R$')
     s.screenshot(path='outputs/qa-close-reminders-20261101/0424-total-menu.png')
+    # 0.4.25: com a opcao marcada, Esconder/Mostrar valores deixa a caixa aberta e a linha embaixo vira Privado/valor.
+    s.get_by_role('button', name='Esconder valores', exact=True).click()
+    expect(s.locator('.total-popover .total-popover-value strong')).to_have_text('Privado')
+    expect(s.locator('.professional-total .topbar-card-button strong')).to_have_text(re.compile(r'^\d+ lançamentos?$'))
+    s.screenshot(path='outputs/qa-close-reminders-20261101/0425-total-menu-private.png')
+    s.get_by_role('button', name='Mostrar valores', exact=True).click()
+    expect(s.locator('.total-popover .total-popover-value strong')).to_contain_text('R$')
+    s.screenshot(path='outputs/qa-close-reminders-20261101/0425-total-menu-open.png')
     s.evaluate("async(o)=>{const snap=await window.caixa.getSnapshot(); await window.caixa.saveSettings({...snap.settings, privacy:{...o, enabled:false, hideHeaderTotal:false, totalInMenuOnly:false}});}", original)
     reload()
-    expect(s.locator('.professional-total .topbar-card-button strong')).not_to_have_text('Clique para ver')
+    # Sem a opcao: como antes, a caixa fecha ao trocar e nao tem a linha embaixo.
+    s.locator('.professional-total .topbar-card-button').click()
+    expect(s.locator('.total-popover .total-popover-value')).to_have_count(0)
+    s.get_by_role('button', name='Esconder valores', exact=True).click()
+    expect(s.locator('.total-popover')).to_have_count(0)
+    s.locator('.professional-total .topbar-card-button').click()
+    s.get_by_role('button', name='Mostrar valores', exact=True).click()
+    reload()
+    expect(s.locator('.professional-total .topbar-card-button strong')).to_contain_text('R$')
     s.evaluate("async(o)=>{const snap=await window.caixa.getSnapshot(); await window.caixa.saveSettings({...snap.settings, privacy:o});}", original)
+    # 0.4.25: tela de privacidade em blocos (abre pelo Ajustes de privacidade da caixa).
+    s.locator('.professional-total .topbar-card-button').click()
+    s.get_by_role('button', name='Ajustes de privacidade', exact=True).click()
+    blocks = s.locator('.privacy-block')
+    expect(blocks).to_have_count(2)
+    expect(blocks.nth(0)).to_contain_text('Total do dia neste computador')
+    expect(blocks.nth(0).locator('.privacy-option')).to_contain_text('Mostrar o valor só dentro da caixinha')
+    expect(blocks.nth(1)).to_contain_text('Perfis de privacidade')
+    blocks.nth(0).scroll_into_view_if_needed()
+    s.screenshot(path='outputs/qa-close-reminders-20261101/0425-privacy-settings.png')
+    reload()
     print('PASS privacy "total only in the box": header hides the value, the Total box shows it at the bottom')
 
-    s.evaluate("async()=>{for(const n of [44,48,999]){const t=(await window.caixa.getPdvSnapshot()).tables.find(t=>t.number===n); if(t&&t.items.length) await window.caixa.cancelPdvTable(n);}}")
+    s.evaluate("async()=>{for(const n of [44,46,999]){const t=(await window.caixa.getPdvSnapshot()).tables.find(t=>t.number===n); if(t&&t.items.length) await window.caixa.cancelPdvTable(n);}}")
     reload()
     assert not errors, errors

@@ -121,7 +121,7 @@ with sync_playwright() as p:
     while not (client_data/'print-probe/jobs.jsonl').exists() and monotonic()<deadline:sleep(.1)
     assert (client_data/'print-probe/jobs.jsonl').exists(), 'Client did not receive the queued receipt'
     close_module(server);server.locator('.topbar-card-button').click()
-    server.get_by_role('button',name='Desativar privacidade',exact=True).click()
+    server.get_by_role('button',name='Mostrar valores',exact=True).click()
     expect(server.locator('.topbar-card-button')).not_to_contain_text('Privado')
     expect(client.locator('.topbar-card-button')).to_contain_text('Privado')
     print('PASS disabling privacy on server does not change client activation')

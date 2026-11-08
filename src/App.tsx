@@ -2,6 +2,7 @@ import { dispatchTableClosed, dispatchTableCloseAck, LocalTableOptions, TABLE_CL
 import type { TableClosedNotice } from "./shared/closeReminders";
 import { duplicatePayableDraft, buildPayableReceipt } from "./shared/financialAccountActions";
 import { PrivacyProfiles } from "./components/PrivacyProfiles";
+import { SettingsBlock, SettingsCheck, SettingsField } from "./components/SettingsBlocks";
 import { togglePrivacy, privacyEnabled, historyValuesHidden, mergeRemotePrivacy } from "./shared/privacy";
 import { historyPaymentAmount } from "./shared/paymentScope";
 import { HistoryPaymentsEditor } from "./components/HistoryPaymentsEditor";
@@ -32,6 +33,7 @@ import {
   Edit3,
   ExternalLink,
   Eye,
+  EyeOff,
   FileSpreadsheet,
   FolderOpen,
   History,
@@ -1741,7 +1743,8 @@ export function App() {
       privacy: togglePrivacy(settings.privacy)
     };
     setSettings(next);
-    setTotalMenuOpen(false);
+    // Com "total so na caixa", o valor aparece/some ali embaixo; a caixa fica aberta para ver na hora.
+    if (!settings.privacy.totalInMenuOnly) setTotalMenuOpen(false);
     try {
       await saveSettings(next, { silent: true });
     } catch (error) {
@@ -2661,7 +2664,7 @@ export function App() {
   const quickEntryStorageScope = quickEntryStorageScopeForSession(remoteSession);
   const canUseTotalMenu = canViewRemoteTotals;
   // Sem privacidade, mas com "so na caixa": o topo nao mostra o valor; ele aparece embaixo da caixa do Total.
-  const totalOnlyInMenu = Boolean(settings.privacy.totalInMenuOnly) && !settings.privacy.hideHeaderTotal && canViewRemoteTotals;
+  const totalInMenu = Boolean(settings.privacy.totalInMenuOnly) && canViewRemoteTotals;
   const helpServerIp = server.ips.find((ip) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip)) || server.ips[0] || "localhost";
 
   if (IS_FLOATING_WINDOW) {
@@ -2742,21 +2745,28 @@ export function App() {
               setModulesMenuOpen(false);
             }}
           >
-            <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total do dia"}</span>
-            <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals || totalOnlyInMenu ? "private-value" : ""}>
-              {settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Privado" : totalOnlyInMenu ? "Clique para ver" : formatCurrency(displaySummary.total)}
-            </strong>
-            <small>{displaySummary.count} lancamentos{remoteSession ? " no servidor" : ""}</small>
+            {totalInMenu ? <>
+              {/* "So na caixa": o topo mostra o dia e os lancamentos; o valor (ou Privado) fica dentro da caixa. */}
+              <span>Hoje</span>
+              <strong>{displaySummary.count} {displaySummary.count === 1 ? "lançamento" : "lançamentos"}</strong>
+              <small>Total na caixinha{remoteSession ? " · servidor" : ""}</small>
+            </> : <>
+              <span>{settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Total oculto" : "Total do dia"}</span>
+              <strong className={settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "private-value" : ""}>
+                {settings.privacy.hideHeaderTotal || !canViewRemoteTotals ? "Privado" : formatCurrency(displaySummary.total)}
+              </strong>
+              <small>{displaySummary.count} lancamentos{remoteSession ? " no servidor" : ""}</small>
+            </>}
           </button>
           {totalMenuOpen && canUseTotalMenu && (
             <div className="total-popover" role="menu">
-              <div><strong>Hoje</strong><span>{displaySummary.count} lancamento(s)</span></div>
-              <button type="button" onClick={toggleHeaderPrivacy}><Eye size={16} />{privacyEnabled(settings.privacy) ? "Desativar privacidade" : "Ativar privacidade"}</button>
-              <button type="button" onClick={openTodayReport}><BarChart3 size={16} />Relatorio deste dia</button>
-              <button type="button" onClick={() => { setHistoryFocus({ date: currentDateKey, nonce: Date.now() }); requestNavigation("history"); setTotalMenuOpen(false); }}><History size={16} />Historico de hoje</button>
+              <div><strong>Hoje</strong><span>{displaySummary.count} {displaySummary.count === 1 ? "lançamento" : "lançamentos"}</span></div>
+              <button type="button" onClick={toggleHeaderPrivacy}>{privacyEnabled(settings.privacy) ? <Eye size={16} /> : <EyeOff size={16} />}{privacyEnabled(settings.privacy) ? "Mostrar valores" : "Esconder valores"}</button>
+              <button type="button" onClick={openTodayReport}><BarChart3 size={16} />Relatório de hoje</button>
+              <button type="button" onClick={() => { setHistoryFocus({ date: currentDateKey, nonce: Date.now() }); requestNavigation("history"); setTotalMenuOpen(false); }}><History size={16} />Histórico de hoje</button>
               <button type="button" onClick={() => { setOpenTablesSummary(true); setTotalMenuOpen(false); }}><Utensils size={16} />Mesas em aberto</button>
               <button type="button" onClick={() => { setSettingsWindowCategory("privacy"); setSettingsFocus({ category: "privacy", nonce: Date.now() }); requestNavigation("settings"); setTotalMenuOpen(false); }}><Settings size={16} />Ajustes de privacidade</button>
-              {totalOnlyInMenu && <div className="total-popover-value"><span>Total do dia</span><strong>{formatCurrency(displaySummary.total)}</strong></div>}
+              {totalInMenu && <div className="total-popover-value"><span>Total do dia</span><strong className={settings.privacy.hideHeaderTotal ? "private-value" : ""}>{settings.privacy.hideHeaderTotal ? "Privado" : formatCurrency(displaySummary.total)}</strong></div>}
             </div>
           )}
         </div>
@@ -7822,22 +7832,19 @@ function SettingsPanel({
           </label>
         </section>}
 
-        {category === "appearance" && selectedSectionTab === "notifications" && <section className="settings-group wide active-category">
-          <h3>Avisos gerais</h3>
-          <p className="settings-note">Mensagens informativas deste computador. Lembretes de comandas ficam em Mesas → Lembretes; erros de operação continuam sendo exibidos.</p>
-          <label className="field"><span>Tempo dos avisos</span>
-            <select value={draft.notificationDurationMs || 3200} onChange={(event) => update("notificationDurationMs", Number(event.target.value))}>
-              <option value={1800}>Rapido (1,8 s)</option>
-              <option value={3200}>Padrao (3,2 s)</option>
-              <option value={5000}>Demorado (5 s)</option>
-              <option value={8000}>Lento (8 s)</option>
-            </select>
-          </label>
-          <label className="switch-line">
-            <input type="checkbox" checked={draft.notificationsEnabled !== false} onChange={(event) => update("notificationsEnabled", event.target.checked)} />
-            Ativar notificacoes e avisos informativos
-          </label>
-        </section>}
+        {category === "appearance" && selectedSectionTab === "notifications" && <section className="settings-group wide active-category"><div className="settings-blocks">
+          <SettingsBlock title="Avisos gerais" description="Mensagens informativas que aparecem no canto da tela deste computador. Erros de operação sempre aparecem; os lembretes de comandas ficam em Mesas → Lembretes.">
+            <SettingsCheck checked={draft.notificationsEnabled !== false} onChange={(checked) => update("notificationsEnabled", checked)} label="Mostrar avisos informativos" hint="Ex.: mesa salva, venda finalizada, conexão restabelecida." />
+            <SettingsField label="Tempo na tela">
+              <select value={draft.notificationDurationMs || 3200} onChange={(event) => update("notificationDurationMs", Number(event.target.value))}>
+                <option value={1800}>Rápido (1,8 s)</option>
+                <option value={3200}>Padrão (3,2 s)</option>
+                <option value={5000}>Demorado (5 s)</option>
+                <option value={8000}>Lento (8 s)</option>
+              </select>
+            </SettingsField>
+          </SettingsBlock>
+        </div></section>}
 
         <section className={categoryClass("floating", "settings-group wide")} {...remoteSectionProps("floating")}>
           <h3>Barra fixa classica</h3>

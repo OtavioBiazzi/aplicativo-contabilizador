@@ -24,7 +24,7 @@ with sync_playwright() as p:
   expect(page.get_by_role('combobox',name='Mesas por linha',exact=True)).to_have_count(0)
   expect(page.get_by_text('Ocultar legenda de status',exact=True)).to_have_count(0)
   page.get_by_role('tab',name='Avisos gerais',exact=True).click()
-  expect(page.get_by_role('combobox',name='Tempo dos avisos',exact=True)).to_be_visible()
+  expect(page.get_by_role('combobox',name='Tempo na tela',exact=True)).to_be_visible()
   expect(page.locator('.local-table-options')).to_have_count(0)
  print('PASS Appearance groups interface, product layout and general notices; no table settings duplicated')
  # Product appearance on restricted client must save to client-only storage on tab switch.

@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { SettingsBlock, SettingsField } from "./SettingsBlocks";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { DEFAULT_TABLE_PREFERENCES, SKIP_REMINDER_KEYS, closedHere, isOwnCloseNotice, shouldRemind, validTableExceptions, type CloseNoticeSource, type LocalTablePreferences, type TableClosedNotice } from "../shared/closeReminders";
 
@@ -42,28 +43,44 @@ export function LocalTableOptions({ client }: { client: boolean }) {
   const save = (patch: Partial<LocalTablePreferences>) => {
     saveTablePreferences(client, patch);
   };
-  return <section className="local-table-options">
-    <h3>Lembretes de comandas</h3>
-    <p>Configuração local: não altera os outros clientes nem o servidor.</p>
-    <label><span>Avisar para retirar a comanda após fechar</span><select value={preferences.reminders} onChange={(e) => save({ reminders: e.target.value as LocalTablePreferences["reminders"] })}>
-      <option value="off">Desativado</option><option value="always">Todos os dias</option><option value="weekdays">Dias da semana</option>
-    </select></label>
-    {preferences.reminders === "weekdays" && <div className="reminder-weekdays">{["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((day, index) => <label key={day}><input type="checkbox" checked={preferences.weekdays.includes(index)} onChange={(e) => save({ weekdays: e.target.checked ? [...preferences.weekdays, index] : preferences.weekdays.filter((d) => d !== index) })} />{day}</label>)}</div>}
-    <label><span>Avisar fechamentos feitos</span><select aria-label="Avisar fechamentos feitos" value={preferences.reminderSource} onChange={(e) => save({ reminderSource: e.target.value === "all" || e.target.value === "others" ? e.target.value : "mine" })}>
-      <option value="mine">Só neste computador</option><option value="others">Só nos outros computadores</option><option value="all">Em todos os computadores</option>
-    </select></label>
-    <label><span>Tamanho dos lembretes</span><select aria-label="Tamanho dos lembretes" value={preferences.reminderSize} onChange={(e) => save({ reminderSize: e.target.value as LocalTablePreferences["reminderSize"] })}>
-      <option value="normal">Normal</option><option value="compact">Compacto</option><option value="small">Pequeno</option>
-    </select></label>
-    <label><span>Lembretes visíveis antes de rolar</span><select aria-label="Lembretes visíveis antes de rolar" value={preferences.visibleLimit} onChange={(e) => save({ visibleLimit: Number(e.target.value) })}>
-      {[1, 2, 3, 4, 5, 6, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
-    </select></label>
-    <label><span>Fechar conta sem lembrete (comanda já retirada)</span><select aria-label="Fechar conta sem lembrete" value={preferences.skipReminderKey} onChange={(e) => save({ skipReminderKey: e.target.value as LocalTablePreferences["skipReminderKey"] })}>
-      <option value="bracket">Tecla ] º (ao lado do Enter) em vez do Enter</option><option value="shift">Segurar Shift ao finalizar</option><option value="ctrl">Segurar Ctrl ao finalizar</option><option value="off">Desativado</option>
-    </select></label>
-    <label><span>Não avisar nestas mesas</span><input value={exceptions} placeholder="Ex.: 47 ou 47+ ou 10-15, 47" aria-invalid={!validTableExceptions(exceptions)} onChange={(e) => { setExceptions(e.target.value); if (validTableExceptions(e.target.value)) save({ excludedTables: e.target.value }); }} /></label>
-    <small>{validTableExceptions(exceptions) ? "47+ significa da mesa 47 em diante. O aviso fica pendente até confirmar em OK, inclusive após reabrir o app." : "Use números, intervalos como 10-15 ou 47+. A última configuração válida foi mantida."}</small>
-  </section>;
+  const exceptionsValid = validTableExceptions(exceptions);
+  return <div className="local-table-options settings-blocks">
+    <SettingsBlock title="Quando lembrar" description="Depois de fechar uma conta, aparece um lembrete para retirar a comanda até alguém dar OK. Configuração só deste computador.">
+      <SettingsField label="Lembrar de retirar a comanda">
+        <select value={preferences.reminders} onChange={(e) => save({ reminders: e.target.value as LocalTablePreferences["reminders"] })}>
+          <option value="off">Desativado</option><option value="always">Todos os dias</option><option value="weekdays">Só em alguns dias</option>
+        </select>
+      </SettingsField>
+      <SettingsField label="Avisar fechamentos feitos">
+        <select aria-label="Avisar fechamentos feitos" value={preferences.reminderSource} onChange={(e) => save({ reminderSource: e.target.value === "all" || e.target.value === "others" ? e.target.value : "mine" })}>
+          <option value="mine">Só neste computador</option><option value="others">Só nos outros computadores</option><option value="all">Em todos os computadores</option>
+        </select>
+      </SettingsField>
+      {preferences.reminders === "weekdays" && <div className="settings-weekdays wide" aria-label="Dias com lembrete">{["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((day, index) => <label key={day}><input type="checkbox" checked={preferences.weekdays.includes(index)} onChange={(e) => save({ weekdays: e.target.checked ? [...preferences.weekdays, index] : preferences.weekdays.filter((d) => d !== index) })} />{day}</label>)}</div>}
+      <SettingsField wide label="Não avisar nestas mesas" hint={exceptionsValid ? "Ex.: 47 (só a 47), 47+ (da 47 em diante) ou 10-15. Separe com vírgula." : "Use números, intervalos como 10-15 ou 47+. A última configuração válida foi mantida."}>
+        <input value={exceptions} placeholder="Ex.: 47 ou 47+ ou 10-15, 47" aria-invalid={!exceptionsValid} onChange={(e) => { setExceptions(e.target.value); if (validTableExceptions(e.target.value)) save({ excludedTables: e.target.value }); }} />
+      </SettingsField>
+    </SettingsBlock>
+    <SettingsBlock title="Fechar sem lembrete" description="Para quando a comanda já foi retirada na hora do fechamento: a conta fecha sem lembrete em nenhum computador e já conta como OK.">
+      <SettingsField label="Fechar conta sem lembrete">
+        <select aria-label="Fechar conta sem lembrete" value={preferences.skipReminderKey} onChange={(e) => save({ skipReminderKey: e.target.value as LocalTablePreferences["skipReminderKey"] })}>
+          <option value="bracket">Tecla ] º (ao lado do Enter) em vez do Enter</option><option value="shift">Segurar Shift ao finalizar</option><option value="ctrl">Segurar Ctrl ao finalizar</option><option value="off">Desativado</option>
+        </select>
+      </SettingsField>
+    </SettingsBlock>
+    <SettingsBlock title="Aparência dos lembretes" description="Tamanho do quadro no canto da tela. Em telas pequenas, como 1300 ou 1366, o Compacto ou o Pequeno atrapalham menos.">
+      <SettingsField label="Tamanho dos lembretes">
+        <select aria-label="Tamanho dos lembretes" value={preferences.reminderSize} onChange={(e) => save({ reminderSize: e.target.value as LocalTablePreferences["reminderSize"] })}>
+          <option value="normal">Normal</option><option value="compact">Compacto</option><option value="small">Pequeno</option>
+        </select>
+      </SettingsField>
+      <SettingsField label="Lembretes visíveis antes de rolar">
+        <select aria-label="Lembretes visíveis antes de rolar" value={preferences.visibleLimit} onChange={(e) => save({ visibleLimit: Number(e.target.value) })}>
+          {[1, 2, 3, 4, 5, 6, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
+      </SettingsField>
+    </SettingsBlock>
+  </div>;
 }
 
 /** Mesas fechadas com Shift: a comanda ja foi retirada, entao o proximo aviso dela nao vira lembrete. */

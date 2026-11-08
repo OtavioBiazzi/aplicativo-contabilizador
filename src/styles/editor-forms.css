@@ -1,0 +1,20 @@
+/* 0.4.25: janelas de cadastro (produto, cliente, contas a receber e a pagar) dentro dos modulos.
+   Sem linhas esticadas para preencher a altura, largura de leitura e botoes logo abaixo do formulario. */
+#root .financial-inline-editor { align-items: flex-start; justify-content: center; }
+#root .financial-inline-editor > section { width: 100%; max-width: 1240px; height: auto; max-height: 100%; margin-inline: auto; flex: 0 1 auto; }
+#root .module-window-body .simple-payable-editor { max-width: 1240px; height: auto; max-height: 100%; margin-inline: auto; }
+#root .financial-inline-editor :is(.pdv-customer-editor-scroll, .pdv-editor-grid, .pdv-financial-editor-grid),
+#root .module-window-body .simple-payable-editor :is(form, .simple-payable-grid, .payable-editor-grid) { align-content: start; }
+
+/* Secoes do cadastro de cliente no estilo dos blocos de configuracao. */
+#root .pdv-customer-editor-scroll { gap: 12px; }
+#root .pdv-customer-editor-scroll > .pdv-editor-section { gap: 12px; padding: 14px; border: 1px solid var(--line); background: var(--panel); align-content: start; }
+#root .pdv-customer-editor-scroll .pdv-editor-section-title { display: grid; gap: 3px; height: auto; min-height: 0; padding: 0 0 10px; border-bottom: 1px solid var(--line); background: transparent; }
+#root .pdv-customer-editor-scroll .pdv-editor-section-title strong { height: auto; font-size: .92rem; color: var(--text); }
+#root .pdv-customer-editor-scroll .pdv-editor-section-title small { display: block; color: var(--muted); font-size: .76rem; line-height: 1.4; }
+#root .pdv-customer-editor-scroll .pdv-customer-active-line { display: flex; align-items: center; gap: 10px; height: auto; min-height: 0; padding: 11px 12px; border: 1px solid var(--line); background: var(--panel-2); }
+/* As areas de rolagem internas tinham base 0 (flex: 1 1 0); com a janela do tamanho do conteudo, elas medem o conteudo. */
+#root .financial-inline-editor > section > :not(.pdv-action-row):not(.pdv-section-head),
+#root .module-window-body .simple-payable-editor > :not(footer):not(.modal-actions) { flex: 0 1 auto; min-height: 0; }
+/* Mais forte que a regra antiga de simple-finance.css, que esticava contas a receber/pagar na tela toda. */
+#root .module-window-body .financial-inline-editor > :is(.simple-payable-editor, .pdv-financial-editor-modal, .pdv-receivable-full-editor) { width: 100%; max-width: 1240px; height: auto; max-height: 100%; margin-inline: auto; }
