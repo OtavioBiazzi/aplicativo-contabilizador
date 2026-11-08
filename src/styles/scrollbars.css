@@ -1,0 +1,18 @@
+/* 0.4.26: rolagem igual no app todo. Mais fina, sem setas, arredondada e sempre visivel.
+   As propriedades padrao (scrollbar-width/color) tem prioridade sobre ::-webkit-scrollbar no Chromium,
+   entao voltam para auto onde nao for uma barra escondida de proposito. */
+:root {
+  --scroll-track: color-mix(in srgb, var(--line, #2a3a4d) 45%, transparent);
+  --scroll-thumb: color-mix(in srgb, var(--muted, #8a9bb0) 80%, transparent);
+  --scroll-thumb-hover: color-mix(in srgb, var(--accent, #2f8cff) 80%, transparent);
+}
+*:not(.floating-tab-strip):not(.pdv-table-search-matches) { scrollbar-width: auto !important; scrollbar-color: auto !important; }
+*::-webkit-scrollbar { width: 10px !important; height: 10px !important; background: transparent !important; }
+*::-webkit-scrollbar-track { background: var(--scroll-track) !important; border-radius: 10px; margin: 2px; }
+*::-webkit-scrollbar-thumb { background: var(--scroll-thumb) !important; background-clip: padding-box !important; border: 2px solid transparent !important; border-radius: 10px !important; min-height: 36px; min-width: 36px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover) !important; background-clip: padding-box !important; }
+*::-webkit-scrollbar-thumb:active { background: var(--accent, #2f8cff) !important; background-clip: padding-box !important; }
+*::-webkit-scrollbar-button { display: none !important; width: 0 !important; height: 0 !important; }
+*::-webkit-scrollbar-corner { background: transparent !important; }
+/* Barras escondidas de proposito continuam escondidas. */
+.floating-tab-strip::-webkit-scrollbar, #root .pdv-table-search-matches::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }

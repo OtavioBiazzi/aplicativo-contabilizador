@@ -13,6 +13,7 @@ import "./styles/table-close-reminders.css";
 import "./styles/checkout.css";
 import "./styles/settings-blocks.css";
 import "./styles/editor-forms.css";
+import "./styles/scrollbars.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
