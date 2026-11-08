@@ -3375,19 +3375,20 @@ function PdvSaleScreen(props: {
         {splitItem && (
           <SplitItemModal
             item={splitItem}
+            rounding={{ step: props.snapshot.settings.roundingStep || 0.01, direction: props.snapshot.settings.roundingDirection || "nearest" }}
+            roundingDefault={Boolean(props.snapshot.settings.splitItemRounding)}
             onCancel={() => setSplitItem(null)}
-            onConfirm={(people, singleShare) => {
+            onConfirm={(people, singleShare, rounded) => {
               const totalCents = Math.round(splitItem.total * 100);
               const discountCents = Math.round(splitItem.discount * 100);
-              const baseTotalCents = Math.floor(totalCents / people);
-              const totalRemainder = totalCents % people;
+              const partCents = splitItemCents(totalCents, people, rounded ? { step: props.snapshot.settings.roundingStep || 0.01, direction: props.snapshot.settings.roundingDirection || "nearest" } : undefined);
               const baseDiscountCents = Math.floor(discountCents / people);
               const discountRemainder = discountCents % people;
               const parts = Array.from({ length: people }, (_, index): PdvCartItem => ({
                 ...splitItem,
                 id: crypto.randomUUID(),
                 quantity: roundQuantity(splitItem.quantity / people),
-                total: (baseTotalCents + (index >= people - totalRemainder ? 1 : 0)) / 100,
+                total: partCents[index] / 100,
                 discount: (baseDiscountCents + (index >= people - discountRemainder ? 1 : 0)) / 100,
                 paidQuantity: 0,
                 measureLabel: `Parte ${index + 1}/${people}`,
@@ -3495,22 +3496,48 @@ function PdvSaleScreen(props: {
   );
 }
 
+/**
+ * Valores (em centavos) das partes de um item dividido. Sem aproximacao: centavos restantes nas ultimas partes.
+ * Com aproximacao: cada parte arredondada ao multiplo escolhido e a ultima fica com a diferenca, entao o total
+ * do item continua exato. Se a ultima parte ficaria negativa, volta para a divisao exata.
+ */
+function splitItemCents(totalCents: number, people: number, rounding?: { step: number; direction: RoundDirection }): number[] {
+  const exact = () => {
+    const base = Math.floor(totalCents / people);
+    const remainder = totalCents % people;
+    return Array.from({ length: people }, (_, index) => base + (index >= people - remainder ? 1 : 0));
+  };
+  if (!rounding || !(rounding.step > 0.01)) return exact();
+  const share = Math.round(roundToMultiple(totalCents / 100 / people, rounding.step, rounding.direction) * 100);
+  const last = totalCents - share * (people - 1);
+  if (share <= 0 || last < 0) return exact();
+  return [...Array.from({ length: people - 1 }, () => share), last];
+}
+
 function SplitItemModal({
   item,
+  rounding,
+  roundingDefault = false,
   onCancel,
   onConfirm
 }: {
   item: PdvCartItem;
+  /** Aproximacao configurada (Configuracoes > aproximacao da divisao). */
+  rounding?: { step: number; direction: RoundDirection };
+  roundingDefault?: boolean;
   onCancel: () => void;
-  onConfirm: (people: number, singleShare: boolean) => void;
+  onConfirm: (people: number, singleShare: boolean, rounded: boolean) => void;
 }) {
   const [people, setPeople] = useState(2);
   const [singleShare, setSingleShare] = useState(false);
+  const canRound = Boolean(rounding && rounding.step > 0.01);
+  const [rounded, setRounded] = useState(canRound && roundingDefault);
   const totalCents = Math.round(item.total * 100);
-  const baseCents = Math.floor(totalCents / people);
-  const remainder = totalCents % people;
-  const parts = Array.from({ length: people }, (_, index) => (baseCents + (index >= people - remainder ? 1 : 0)) / 100);
-  useModalConfirmShortcut(() => onConfirm(people, singleShare), onCancel, people >= 2);
+  const cents = splitItemCents(totalCents, people, rounded ? rounding : undefined);
+  const parts = cents.map((value) => value / 100);
+  const remainder = rounded ? 0 : totalCents % people;
+  const directionLabel = rounding?.direction === "up" ? "para cima" : rounding?.direction === "down" ? "para baixo" : "mais próximo";
+  useModalConfirmShortcut(() => onConfirm(people, singleShare, rounded), onCancel, people >= 2);
   return (
     <div className="pdv-modal-backdrop pdv-nested-backdrop">
       <section className="pdv-payment-modal pdv-split-item-modal" tabIndex={-1} autoFocus>
@@ -3542,10 +3569,16 @@ function SplitItemModal({
           <input type="checkbox" checked={singleShare} onChange={(event) => setSingleShare(event.target.checked)} />
           <span><strong>Lancar somente uma parte no carrinho</strong><small>Substitui o produto original por uma unica parte com o preco ja dividido.</small></span>
         </label>
+        {canRound && (
+          <label className="pdv-split-single-option">
+            <input type="checkbox" checked={rounded} onChange={(event) => setRounded(event.target.checked)} />
+            <span><strong>Aproximar os valores ({money(rounding!.step)}, {directionLabel})</strong><small>A última parte fica com a diferença, para o total do item continuar exato.</small></span>
+          </label>
+        )}
         {remainder > 0 && <small className="pdv-split-item-note">Os {remainder} centavo(s) restantes foram distribuidos nas ultimas partes.</small>}
         <div className="pdv-action-row">
           <button className="pdv-danger-button" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="pdv-primary-button" type="button" onClick={() => onConfirm(people, singleShare)}>{singleShare ? "Lancar uma parte" : "Dividir item"}</button>
+          <button className="pdv-primary-button" type="button" onClick={() => onConfirm(people, singleShare, rounded)}>{singleShare ? "Lancar uma parte" : "Dividir item"}</button>
         </div>
       </section>
     </div>
@@ -8710,6 +8743,14 @@ function AdvancedScreen({ snapshot, clientMode = false, readOnly = false, client
               <option value={1}>R$ 1,00</option>
             </select>
             <small>Tambem define como o valor e aproximado ao distribuir produtos entre submesas.</small>
+          </label>
+          <label className="pdv-setting-line">
+            <span>Aproximar tambem ao dividir um item entre pessoas</span>
+            <select value={draft.splitItemRounding ? "on" : "off"} onChange={(event) => changeDraft({ splitItemRounding: event.target.value === "on" })}>
+              <option value="off">Nao, dividir exato nos centavos</option>
+              <option value="on">Sim, usar a aproximacao acima</option>
+            </select>
+            <small>A ultima parte fica com a diferenca, entao o total do item nao muda. Da para ligar ou desligar na hora, na janela de dividir.</small>
           </label>
           <label className="pdv-setting-line">
             <span>Direcao da aproximacao</span>

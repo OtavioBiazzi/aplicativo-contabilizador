@@ -405,6 +405,8 @@ export interface PdvSettings {
   groupComplementsWithProduct?: boolean;
   roundingStep?: number;
   roundingDirection?: "nearest" | "up" | "down";
+  /** Dividir item entre pessoas tambem usa a aproximacao (a ultima parte fica com a diferenca). */
+  splitItemRounding?: boolean;
   receiptPaperWidth?: "58" | "80" | "a4" | "custom";
   receiptCustomPaperWidthMm?: number;
   receiptCustomPaperHeightMm?: number;

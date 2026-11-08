@@ -131,3 +131,7 @@ body:has(.pdv-modal-backdrop, .module-window, .managerial-menu, .open-tables-bac
 .table-close-reminders-list::-webkit-scrollbar-thumb { background: rgba(150, 170, 190, 0.35); border-radius: 4px; }
 .table-close-reminders-list:hover::-webkit-scrollbar-thumb { background: rgba(150, 170, 190, 0.75); }
 .table-close-reminders-list { scrollbar-width: auto; scrollbar-color: auto; }
+
+/* 0.4.23: tamanho configuravel (Lembretes de comandas > Tamanho dos lembretes), util em telas ~1300. */
+.table-close-reminders.size-compact { zoom: 0.85; }
+.table-close-reminders.size-small { zoom: 0.72; }

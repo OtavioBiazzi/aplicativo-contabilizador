@@ -2836,7 +2836,7 @@ export function App() {
         </div>
       )}
 
-      <TableCloseReminders client={Boolean(remoteSession)} loadAcks={loadCloseNoticeAcks} hidden={insideOperationalTable || activeTab !== "tables" || modulesMenuOpen}>
+      <TableCloseReminders client={Boolean(remoteSession)} deviceName={remoteSession?.deviceName} loadAcks={loadCloseNoticeAcks} hidden={insideOperationalTable || activeTab !== "tables" || modulesMenuOpen}>
         {toast && <Toast toast={toast} />}
       </TableCloseReminders>
       <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>

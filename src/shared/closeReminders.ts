@@ -18,19 +18,31 @@ export function isOwnCloseNotice(notice: TableClosedNotice, source: CloseNoticeS
   return notice.originKind !== "client";
 }
 
+/**
+ * Fechamento feito neste computador? Diferente de isOwnCloseNotice, reconhece tambem a copia que volta
+ * pela rede para o cliente que fechou (mesmo nome de aparelho).
+ */
+export function closedHere(notice: TableClosedNotice, source: CloseNoticeSource, client: boolean, deviceName?: string): boolean {
+  if (source === "self") return true;
+  if (source === "ipc") return notice.originKind !== "client";
+  return client && Boolean(deviceName) && notice.originKind === "client" && notice.originDevice === deviceName;
+}
+
 export interface LocalTablePreferences {
   reminders: "off" | "always" | "weekdays";
   weekdays: number[];
   excludedTables: string;
   hideQuickValue: boolean;
-  /** Avisar somente fechamentos feitos neste computador, ou de todos. */
-  reminderSource: "mine" | "all";
+  /** Avisar fechamentos feitos neste computador, so nos outros, ou em todos. */
+  reminderSource: "mine" | "others" | "all";
   /** Confirmar em OK aqui tambem remove o lembrete nos outros computadores conectados. */
   syncAcknowledge: boolean;
   /** Quantos lembretes ficam visiveis antes de virar lista com rolagem. */
   visibleLimit: number;
   /** Como finalizar a conta dando a comanda como ja retirada (sem lembrete). */
   skipReminderKey: SkipReminderKey;
+  /** Tamanho do quadro de lembretes (telas pequenas). */
+  reminderSize: "normal" | "compact" | "small";
 }
 
 /** "bracket": a tecla ] º ao lado do Enter finaliza sem lembrete; shift/ctrl: segurar ao finalizar. */
@@ -38,7 +50,7 @@ export type SkipReminderKey = "bracket" | "shift" | "ctrl" | "off";
 export const SKIP_REMINDER_KEYS: SkipReminderKey[] = ["bracket", "shift", "ctrl", "off"];
 
 export const DEFAULT_TABLE_PREFERENCES: LocalTablePreferences = {
-  reminders: "off", weekdays: [0, 6], excludedTables: "", hideQuickValue: false, reminderSource: "mine", syncAcknowledge: true, visibleLimit: 4, skipReminderKey: "bracket"
+  reminders: "off", weekdays: [0, 6], excludedTables: "", hideQuickValue: false, reminderSource: "mine", syncAcknowledge: true, visibleLimit: 4, skipReminderKey: "bracket", reminderSize: "normal"
 };
 
 /** Accepts exact numbers, closed ranges and open-ended ranges, without expanding them. */

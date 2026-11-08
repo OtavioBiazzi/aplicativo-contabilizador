@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { DEFAULT_TABLE_PREFERENCES, SKIP_REMINDER_KEYS, isOwnCloseNotice, shouldRemind, validTableExceptions, type CloseNoticeSource, type LocalTablePreferences, type TableClosedNotice } from "../shared/closeReminders";
+import { DEFAULT_TABLE_PREFERENCES, SKIP_REMINDER_KEYS, closedHere, isOwnCloseNotice, shouldRemind, validTableExceptions, type CloseNoticeSource, type LocalTablePreferences, type TableClosedNotice } from "../shared/closeReminders";
 
 export function tablePreferencesKey(client: boolean) { return `caixa.local-tables.${client ? "client" : "server"}`; }
 export function readTablePreferences(client: boolean): LocalTablePreferences {
@@ -11,8 +11,9 @@ export function readTablePreferences(client: boolean): LocalTablePreferences {
       weekdays: Array.isArray(value.weekdays) ? value.weekdays.filter((day: number) => Number.isInteger(day) && day >= 0 && day <= 6) : [0, 6],
       excludedTables: typeof value.excludedTables === "string" && validTableExceptions(value.excludedTables) ? value.excludedTables : "",
       hideQuickValue: value.hideQuickValue === true,
-      reminderSource: value.reminderSource === "all" ? "all" : "mine",
+      reminderSource: value.reminderSource === "all" || value.reminderSource === "others" ? value.reminderSource : "mine",
       syncAcknowledge: value.syncAcknowledge !== false,
+      reminderSize: value.reminderSize === "compact" || value.reminderSize === "small" ? value.reminderSize : "normal",
       skipReminderKey: SKIP_REMINDER_KEYS.includes(value.skipReminderKey) ? value.skipReminderKey : DEFAULT_TABLE_PREFERENCES.skipReminderKey,
       visibleLimit: Number.isInteger(value.visibleLimit) && value.visibleLimit >= 1 && value.visibleLimit <= 10 ? value.visibleLimit : DEFAULT_TABLE_PREFERENCES.visibleLimit
     };
@@ -48,8 +49,11 @@ export function LocalTableOptions({ client }: { client: boolean }) {
       <option value="off">Desativado</option><option value="always">Todos os dias</option><option value="weekdays">Dias da semana</option>
     </select></label>
     {preferences.reminders === "weekdays" && <div className="reminder-weekdays">{["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((day, index) => <label key={day}><input type="checkbox" checked={preferences.weekdays.includes(index)} onChange={(e) => save({ weekdays: e.target.checked ? [...preferences.weekdays, index] : preferences.weekdays.filter((d) => d !== index) })} />{day}</label>)}</div>}
-    <label><span>Avisar fechamentos feitos</span><select aria-label="Avisar fechamentos feitos" value={preferences.reminderSource} onChange={(e) => save({ reminderSource: e.target.value === "all" ? "all" : "mine" })}>
-      <option value="mine">Só neste computador</option><option value="all">Em todos os computadores</option>
+    <label><span>Avisar fechamentos feitos</span><select aria-label="Avisar fechamentos feitos" value={preferences.reminderSource} onChange={(e) => save({ reminderSource: e.target.value === "all" || e.target.value === "others" ? e.target.value : "mine" })}>
+      <option value="mine">Só neste computador</option><option value="others">Só nos outros computadores</option><option value="all">Em todos os computadores</option>
+    </select></label>
+    <label><span>Tamanho dos lembretes</span><select aria-label="Tamanho dos lembretes" value={preferences.reminderSize} onChange={(e) => save({ reminderSize: e.target.value as LocalTablePreferences["reminderSize"] })}>
+      <option value="normal">Normal</option><option value="compact">Compacto</option><option value="small">Pequeno</option>
     </select></label>
     <label><span>Lembretes visíveis antes de rolar</span><select aria-label="Lembretes visíveis antes de rolar" value={preferences.visibleLimit} onChange={(e) => save({ visibleLimit: Number(e.target.value) })}>
       {[1, 2, 3, 4, 5, 6, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
@@ -95,7 +99,7 @@ function readList(key: string): string[] {
  * Dock do canto inferior direito: avisos temporarios (children) em cima e lembretes de comanda embaixo,
  * com a mesma aparencia e sem sobreposicao.
  */
-export function TableCloseReminders({ client, hidden, loadAcks, children }: { client: boolean; hidden: boolean; /** OKs ja dados em qualquer computador, guardados no servidor. */ loadAcks?: () => Promise<string[]>; children?: ReactNode }) {
+export function TableCloseReminders({ client, deviceName, hidden, loadAcks, children }: { client: boolean; /** Nome deste aparelho como cliente, para reconhecer os proprios fechamentos que voltam pela rede. */ deviceName?: string; hidden: boolean; /** OKs ja dados em qualquer computador, guardados no servidor. */ loadAcks?: () => Promise<string[]>; children?: ReactNode }) {
   const key = `${tablePreferencesKey(client)}.pending`;
   const seenKey = `${key}.seen`;
   const collapsedKey = `${tablePreferencesKey(client)}.collapsed`;
@@ -121,6 +125,8 @@ export function TableCloseReminders({ client, hidden, loadAcks, children }: { cl
       // Fechamentos de outros computadores so contam com a opcao "todos".
       // Nao marca como visto: a copia local do proprio fechamento ainda pode chegar depois.
       if (preferences.reminderSource === "mine" && !isOwnCloseNotice(notice, source)) return;
+      // "Só nos outros": ignora o que foi fechado aqui.
+      if (preferences.reminderSource === "others" && closedHere(notice, source, client, deviceName)) return;
       if (readList(seenKey).includes(notice.id)) return;
       const next = [...read(), notice];
       localStorage.setItem(key, JSON.stringify(next));
@@ -166,7 +172,7 @@ export function TableCloseReminders({ client, hidden, loadAcks, children }: { cl
     window.addEventListener("focus", syncAcks);
     const offAck = window.caixa.onTableCloseAck ? window.caixa.onTableCloseAck((id) => acknowledge(id)) : () => undefined;
     return () => { disposed = true; window.clearInterval(ackTimer); window.removeEventListener("focus", syncAcks); off(); offAck(); window.removeEventListener("table-closed-notice", listener); window.removeEventListener("table-close-ack", ackListener); };
-  }, [key, seenKey, client, loadAcks]);
+  }, [key, seenKey, client, deviceName, loadAcks]);
   const preferences = useLocalTablePreferences(client);
   const toggleCollapsed = () => {
     const next = !collapsed;
@@ -183,7 +189,7 @@ export function TableCloseReminders({ client, hidden, loadAcks, children }: { cl
   if (!showReminders && !children) return null;
   return <div className="notification-dock">
     {children}
-    {showReminders && <aside className={`table-close-reminders ${collapsed ? "is-collapsed" : ""}`} aria-label="Comandas a retirar" aria-live="polite" style={{ "--reminder-limit": preferences.visibleLimit } as CSSProperties}>
+    {showReminders && <aside className={`table-close-reminders ${collapsed ? "is-collapsed" : ""} size-${preferences.reminderSize}`} aria-label="Comandas a retirar" aria-live="polite" style={{ "--reminder-limit": preferences.visibleLimit } as CSSProperties}>
       <button type="button" key={collapsed ? `collapsed-${pulse}` : "open"} className={`table-close-reminders-head ${collapsed && pulse ? "has-news" : ""}`} aria-expanded={!collapsed} aria-label={collapsed ? `Mostrar ${notices.length} lembrete(s) de comanda` : "Minimizar lembretes de comanda"} title={collapsed ? "Mostrar lembretes" : "Minimizar lembretes"} onClick={toggleCollapsed}>
         <span>Comandas ({notices.length})</span>{collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </button>

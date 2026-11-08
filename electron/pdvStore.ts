@@ -2732,6 +2732,7 @@ export class PdvStore {
       frequentCategoryEnabled: parseBooleanSetting(map.get("frequent_category_enabled"), false),
       hideTableQuickValue: parseBooleanSetting(map.get("hide_table_quick_value"), false),
       partialCloseEnabled: parseBooleanSetting(map.get("partial_close_enabled"), false),
+      splitItemRounding: parseBooleanSetting(map.get("split_item_rounding"), false),
       cashControlMode: map.get("cash_control_mode") === "manual" ? "manual" : "automatic"
     };
   }
