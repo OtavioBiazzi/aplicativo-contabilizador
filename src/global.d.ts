@@ -120,6 +120,7 @@ export interface CaixaApi {
   onSettingsChanged: (callback: (settings: AppSettings) => void) => () => void;
   onTableClosed: (callback: (notice: TableClosedNotice) => void) => () => void;
   ackTableClosed: (id: string) => Promise<void>;
+  getCloseNoticeAcks?: () => Promise<string[]>;
   onTableCloseAck: (callback: (id: string) => void) => () => void;
   onPdvChanged: (callback: () => void) => () => void;
 }

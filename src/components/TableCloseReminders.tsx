@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { DEFAULT_TABLE_PREFERENCES, isOwnCloseNotice, shouldRemind, validTableExceptions, type CloseNoticeSource, type LocalTablePreferences, type TableClosedNotice } from "../shared/closeReminders";
+import { DEFAULT_TABLE_PREFERENCES, SKIP_REMINDER_KEYS, isOwnCloseNotice, shouldRemind, validTableExceptions, type CloseNoticeSource, type LocalTablePreferences, type TableClosedNotice } from "../shared/closeReminders";
 
 export function tablePreferencesKey(client: boolean) { return `caixa.local-tables.${client ? "client" : "server"}`; }
 export function readTablePreferences(client: boolean): LocalTablePreferences {
@@ -13,6 +13,7 @@ export function readTablePreferences(client: boolean): LocalTablePreferences {
       hideQuickValue: value.hideQuickValue === true,
       reminderSource: value.reminderSource === "all" ? "all" : "mine",
       syncAcknowledge: value.syncAcknowledge !== false,
+      skipReminderKey: SKIP_REMINDER_KEYS.includes(value.skipReminderKey) ? value.skipReminderKey : DEFAULT_TABLE_PREFERENCES.skipReminderKey,
       visibleLimit: Number.isInteger(value.visibleLimit) && value.visibleLimit >= 1 && value.visibleLimit <= 10 ? value.visibleLimit : DEFAULT_TABLE_PREFERENCES.visibleLimit
     };
   } catch { return { ...DEFAULT_TABLE_PREFERENCES }; }
@@ -53,10 +54,25 @@ export function LocalTableOptions({ client }: { client: boolean }) {
     <label><span>Lembretes visíveis antes de rolar</span><select aria-label="Lembretes visíveis antes de rolar" value={preferences.visibleLimit} onChange={(e) => save({ visibleLimit: Number(e.target.value) })}>
       {[1, 2, 3, 4, 5, 6, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
     </select></label>
+    <label><span>Fechar conta sem lembrete (comanda já retirada)</span><select aria-label="Fechar conta sem lembrete" value={preferences.skipReminderKey} onChange={(e) => save({ skipReminderKey: e.target.value as LocalTablePreferences["skipReminderKey"] })}>
+      <option value="bracket">Tecla ] º (ao lado do Enter) em vez do Enter</option><option value="shift">Segurar Shift ao finalizar</option><option value="ctrl">Segurar Ctrl ao finalizar</option><option value="off">Desativado</option>
+    </select></label>
     <label className="switch-line reminder-sync-line"><input type="checkbox" checked={preferences.syncAcknowledge} onChange={(e) => save({ syncAcknowledge: e.target.checked })} />Ao confirmar em OK aqui, remover também dos outros computadores</label>
     <label><span>Não avisar nestas mesas</span><input value={exceptions} placeholder="Ex.: 47 ou 47+ ou 10-15, 47" aria-invalid={!validTableExceptions(exceptions)} onChange={(e) => { setExceptions(e.target.value); if (validTableExceptions(e.target.value)) save({ excludedTables: e.target.value }); }} /></label>
     <small>{validTableExceptions(exceptions) ? "47+ significa da mesa 47 em diante. O aviso fica pendente até confirmar em OK, inclusive após reabrir o app." : "Use números, intervalos como 10-15 ou 47+. A última configuração válida foi mantida."}</small>
   </section>;
+}
+
+/** Mesas fechadas com Shift: a comanda ja foi retirada, entao o proximo aviso dela nao vira lembrete. */
+const suppressedTables = new Map<number, number>();
+export function suppressCloseNotice(tableNumber: number) {
+  if (Number.isInteger(tableNumber) && tableNumber > 0) suppressedTables.set(tableNumber, Date.now() + 120000);
+}
+function takeSuppression(tableNumber: number): boolean {
+  const until = suppressedTables.get(tableNumber);
+  if (!until) return false;
+  suppressedTables.delete(tableNumber);
+  return until > Date.now();
 }
 
 export function dispatchTableClosed(notice: TableClosedNotice, source: CloseNoticeSource = "self") {
@@ -79,7 +95,7 @@ function readList(key: string): string[] {
  * Dock do canto inferior direito: avisos temporarios (children) em cima e lembretes de comanda embaixo,
  * com a mesma aparencia e sem sobreposicao.
  */
-export function TableCloseReminders({ client, hidden, children }: { client: boolean; hidden: boolean; children?: ReactNode }) {
+export function TableCloseReminders({ client, hidden, loadAcks, children }: { client: boolean; hidden: boolean; /** OKs ja dados em qualquer computador, guardados no servidor. */ loadAcks?: () => Promise<string[]>; children?: ReactNode }) {
   const key = `${tablePreferencesKey(client)}.pending`;
   const seenKey = `${key}.seen`;
   const collapsedKey = `${tablePreferencesKey(client)}.collapsed`;
@@ -93,7 +109,15 @@ export function TableCloseReminders({ client, hidden, children }: { client: bool
     setNotices(read());
     const receive = (notice: TableClosedNotice, source: CloseNoticeSource) => {
       const preferences = readTablePreferences(client);
-      if (!notice || !notice.id || !Number.isInteger(notice.tableNumber) || notice.tableNumber < 1 || !shouldRemind(preferences, notice)) return;
+      if (!notice || !notice.id || !Number.isInteger(notice.tableNumber) || notice.tableNumber < 1) return;
+      if (readList(seenKey).includes(notice.id)) return;
+      if (takeSuppression(notice.tableNumber)) {
+        // Conta como OK: some daqui e dos outros computadores.
+        markSeen(notice.id);
+        window.dispatchEvent(new CustomEvent(TABLE_CLOSE_ACK_REQUEST, { detail: notice.id }));
+        return;
+      }
+      if (!shouldRemind(preferences, notice)) return;
       // Fechamentos de outros computadores so contam com a opcao "todos".
       // Nao marca como visto: a copia local do proprio fechamento ainda pode chegar depois.
       if (preferences.reminderSource === "mine" && !isOwnCloseNotice(notice, source)) return;
@@ -104,8 +128,9 @@ export function TableCloseReminders({ client, hidden, children }: { client: bool
       setNotices(next);
       setPulse((value) => value + 1);
     };
+    // O OK dado em outro computador sempre remove aqui; a opcao "remover tambem dos outros" vale para quem clica.
     const acknowledge = (id: string) => {
-      if (!id || !readTablePreferences(client).syncAcknowledge) return;
+      if (!id) return;
       markSeen(id);
       const current = read();
       if (!current.some((n) => n.id === id)) return;
@@ -121,9 +146,27 @@ export function TableCloseReminders({ client, hidden, children }: { client: bool
     window.addEventListener("table-closed-notice", listener);
     window.addEventListener("table-close-ack", ackListener);
     const off = window.caixa.onTableClosed((notice) => receive(notice, "ipc"));
+    // Quem estava desconectado quando o OK foi dado confere a lista do servidor ao abrir, a cada 20 s e ao voltar a janela.
+    let disposed = false;
+    const syncAcks = () => {
+      if (!loadAcks || !read().length) return;
+      void loadAcks().then((ids) => {
+        if (disposed || !Array.isArray(ids)) return;
+        const done = new Set(ids);
+        const current = read();
+        const next = current.filter((n) => !done.has(n.id));
+        if (next.length === current.length) return;
+        current.filter((n) => done.has(n.id)).forEach((n) => markSeen(n.id));
+        localStorage.setItem(key, JSON.stringify(next));
+        setNotices(next);
+      }).catch(() => undefined);
+    };
+    syncAcks();
+    const ackTimer = window.setInterval(syncAcks, 20000);
+    window.addEventListener("focus", syncAcks);
     const offAck = window.caixa.onTableCloseAck ? window.caixa.onTableCloseAck((id) => acknowledge(id)) : () => undefined;
-    return () => { off(); offAck(); window.removeEventListener("table-closed-notice", listener); window.removeEventListener("table-close-ack", ackListener); };
-  }, [key, seenKey, client]);
+    return () => { disposed = true; window.clearInterval(ackTimer); window.removeEventListener("focus", syncAcks); off(); offAck(); window.removeEventListener("table-closed-notice", listener); window.removeEventListener("table-close-ack", ackListener); };
+  }, [key, seenKey, client, loadAcks]);
   const preferences = useLocalTablePreferences(client);
   const toggleCollapsed = () => {
     const next = !collapsed;

@@ -13,6 +13,7 @@ import { DeferredTask } from "./deferredTask.js";
 import { LedgerExporter } from "./exporter.js";
 import { readLedgerImport } from "./importer.js";
 import { LocalServer } from "./localServer.js";
+import { CloseNoticeAcks } from "./closeNoticeAcks.js";
 import { PdvExporter, writeTableXlsx } from "./pdvExporter.js";
 import { buildPdvReceiptHtml, printPdvReceipt, printPdvReceiptDirect } from "./pdvReceipt.js";
 import { configureCoseDellAbadiaComplements, normalizeImportedProducts, readPdvProductsFromXlsx } from "./productImporter.js";
@@ -45,6 +46,7 @@ let pdvStore: PdvStore;
 let exporter: LedgerExporter;
 let localServer: LocalServer;
 let logger: DiagnosticLogger;
+let closeNoticeAcks: CloseNoticeAcks;
 let floatingBoundsSaveTimer: NodeJS.Timeout | null = null;
 let floatingRememberBounds = true;
 let restoringFloatingBounds = false;
@@ -566,6 +568,7 @@ async function bootstrap() {
   pdvStore = new PdvStore(dataDirectory);
   exporter = new LedgerExporter(dataDirectory);
   logger = new DiagnosticLogger(dataDirectory);
+  closeNoticeAcks = new CloseNoticeAcks(dataDirectory);
   await store.initialize();
   await pdvStore.initialize();
   await logger.info("Aplicativo iniciado", `Versao ${app.getVersion()}`);
@@ -703,6 +706,7 @@ async function bootstrap() {
       sendToAll("server:changed", localServer.getState());
     },
     acknowledgeCloseNotice: (id) => publishCloseNoticeAck(id),
+    getCloseNoticeAcks: () => closeNoticeAcks.load(),
     onRemoteSettingsChange: () => {
       sendToAll("settings:changed");
     },
@@ -761,6 +765,7 @@ function publishTableClosed(sale: PdvSale, subtableName: string | undefined, ori
 /** Confirmacao de retirada da comanda: remove o lembrete no servidor e em todos os clientes conectados. */
 function publishCloseNoticeAck(id: string) {
   if (!id || typeof id !== "string" || id.length > 200) return;
+  void closeNoticeAcks.add(id);
   sendToAll("pdv:table-close-ack", id);
   localServer.broadcast({ type: "close-notice-ack", id });
 }
@@ -924,6 +929,8 @@ function registerIpc() {
   ipcMain.handle("pdv:ackTableClosed", async (_event, id: string) => {
     publishCloseNoticeAck(String(id || ""));
   });
+
+  ipcMain.handle("pdv:getCloseNoticeAcks", async () => closeNoticeAcks.load());
 
   ipcMain.handle("pdv:transferTableItems", async (_event, sourceTableNumber: number, targetTableNumber: number, selections: PdvTransferSelection[], operationId?: string): Promise<PdvCartItem[]> => {
     const items = await pdvStore.transferTableItems(sourceTableNumber, targetTableNumber, selections, operationId || randomUUID());

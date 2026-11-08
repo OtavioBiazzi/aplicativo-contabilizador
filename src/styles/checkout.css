@@ -418,3 +418,9 @@ body > .pdv-context-menu .pdv-batch-menu-item { white-space: nowrap; }
   max-height: 150px;
   font-size: clamp(30px, 5.2vh, 56px);
 }
+
+/* 0.4.23: em telas ate ~1500x820 (1366x768, 1300...) a tela de pagamento ocupava a tela inteira.
+   Reduz tudo na mesma proporcao: fica com o mesmo aspecto, so que menor e com folga em volta. */
+@media (max-width: 1500px), (max-height: 820px) {
+  #root .pdv-payment-modal.pdv-checkout { zoom: 0.88; }
+}

@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld("caixa", {
     return () => ipcRenderer.removeListener("settings:changed", handler);
   },
   ackTableClosed: (id: string) => ipcRenderer.invoke("pdv:ackTableClosed", id),
+  getCloseNoticeAcks: (): Promise<string[]> => ipcRenderer.invoke("pdv:getCloseNoticeAcks"),
   onTableCloseAck: (callback: (id: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, id: string) => callback(id);
     ipcRenderer.on("pdv:table-close-ack", handler);

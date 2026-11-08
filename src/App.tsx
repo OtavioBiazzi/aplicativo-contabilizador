@@ -1781,6 +1781,12 @@ export function App() {
     return (text ? JSON.parse(text) : {}) as T;
   };
 
+  // OKs guardados no servidor: quem estava desconectado na hora do OK tambem remove o lembrete.
+  const loadCloseNoticeAcks = useMemo(() => remoteSession
+    ? async () => (await remoteRequest<{ ids?: string[] }>(remoteSession, "/api/pdv/close-notices/acks")).ids || []
+    : async () => (window.caixa.getCloseNoticeAcks ? window.caixa.getCloseNoticeAcks() : []),
+  [remoteSession?.baseUrl, remoteSession?.password]);
+
   // Lembretes de comanda: OK em um computador remove dos outros (servidor por IPC, cliente pela rede).
   useEffect(() => {
     const send = (event: Event) => {
@@ -2830,7 +2836,7 @@ export function App() {
         </div>
       )}
 
-      <TableCloseReminders client={Boolean(remoteSession)} hidden={insideOperationalTable || activeTab !== "tables" || modulesMenuOpen}>
+      <TableCloseReminders client={Boolean(remoteSession)} loadAcks={loadCloseNoticeAcks} hidden={insideOperationalTable || activeTab !== "tables" || modulesMenuOpen}>
         {toast && <Toast toast={toast} />}
       </TableCloseReminders>
       <main className={`workspace ${pdvMainTab ? "pdv-direct-workspace" : activeTab !== "sale" ? "admin-workspace" : ""}`}>

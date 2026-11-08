@@ -19,6 +19,8 @@ interface LocalServerOptions {
   appVersion: string;
   /** Um computador confirmou a retirada da comanda; repassar para todos. */
   acknowledgeCloseNotice: (id: string) => void;
+  /** Lembretes ja confirmados em OK, para quem estava desconectado na hora. */
+  getCloseNoticeAcks: () => Promise<string[]>;
   permissions: ServerPermissions;
   getSettings: () => Promise<AppSettings>;
   saveSettings: (settings: AppSettings) => Promise<AppSettings>;
@@ -243,6 +245,10 @@ export class LocalServer {
       const body = JSON.stringify(await this.options.getPdvSnapshot(normalizeEntryLimit(request.query.salesLimit)));
       this.snapshotMeter.add(await sendJsonCompressed(request, response, body));
       this.snapshotMs = performance.now() - startedAt;
+    });
+
+    app.get("/api/pdv/close-notices/acks", this.authorize("view"), async (_request, response) => {
+      response.json({ ids: await this.options.getCloseNoticeAcks() });
     });
 
     app.post("/api/pdv/close-notices/:id/ack", this.authorize("view"), (request, response) => {

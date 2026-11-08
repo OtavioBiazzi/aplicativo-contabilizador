@@ -1,4 +1,4 @@
-import { dispatchTableClosed } from "./components/TableCloseReminders";
+import { dispatchTableClosed, suppressCloseNotice, useLocalTablePreferences } from "./components/TableCloseReminders";
 import { KeyboardSelect } from "./components/KeyboardSelect";
 import { createPortal } from "react-dom";
 import { duplicateReceivableDraft, buildReceivableAccountReceipt } from "./shared/financialAccountActions";
@@ -663,6 +663,8 @@ export function PdvApp({
   const lastPersistedTableMeta = useRef<{ number: number; people: number; note: string } | null>(null);
   const lastPersistedTableItemIds = useRef<string[]>([]);
   const isRemoteClient = Boolean(remoteSession);
+  // Preferencias locais dos lembretes (tecla para fechar sem lembrete).
+  const localTablePreferences = useLocalTablePreferences(isRemoteClient);
   const canConfigureServer = !isRemoteClient || Boolean(remoteSession?.permissions?.allowClientCustomization);
   const canConfigureProducts = !isRemoteClient || Boolean(remoteSession?.permissions?.manageProducts);
   const remoteTablesActive = Boolean(remoteSession && tab === "tables");
@@ -2263,6 +2265,7 @@ export function PdvApp({
           onSaveCustomer={savePdvCustomer}
           skipConfirmation={Boolean(snapshot.settings.skipPaymentConfirmation)}
           title={checkoutTarget.kind === "direct" && checkoutTarget.manual ? "Receber valor avulso" : "Pagamento"}
+          skipReminderKey={checkoutTarget.kind === "direct" ? "off" : localTablePreferences.skipReminderKey}
           accountLabel={checkoutTarget.kind === "direct"
             ? checkoutTarget.manual ? undefined : (checkoutTarget.saleType || directSaleMode) === "Onibus" ? "Ônibus" : "Venda"
             : checkoutTarget.kind === "table-scope" && checkoutTarget.scope.kind === "subtable"
@@ -2307,7 +2310,9 @@ export function PdvApp({
               setCheckoutTarget(null);
             }
           }}
-          onConfirm={async (payments, observations) => {
+          onConfirm={async (payments, observations, options) => {
+            // Finalizado com a tecla de "comanda ja retirada" (] ou Shift/Ctrl, configuravel): sem lembrete.
+            if (options?.skipReminder && checkoutTarget.kind !== "direct") suppressCloseNotice(checkoutTarget.table.number);
             const completePayment = async () => {
               if (checkoutTarget.kind === "direct") {
                 await confirmDirectSale(payments, checkoutTarget.items || cart, checkoutTarget.saleType, checkoutTarget.operationId, checkoutTarget.manual ? 0 : checkoutTarget.discount ?? discount);
@@ -4158,6 +4163,7 @@ export function PaymentModal({
   discountEditor,
   title = "Pagamento",
   accountLabel,
+  skipReminderKey = "off",
   confirmLabel = "Finalizar conta",
   skipConfirmation = false,
   onCancel,
@@ -4177,12 +4183,19 @@ export function PaymentModal({
   title?: string;
   /** Conta que esta sendo paga (Mesa 005, Venda, Onibus), mostrada ao lado do titulo. */
   accountLabel?: string;
+  /** Tecla que finaliza dando a comanda como ja retirada (configurada em Lembretes de comandas). */
+  skipReminderKey?: "bracket" | "shift" | "ctrl" | "off";
   confirmLabel?: string;
   skipConfirmation?: boolean;
   onCancel: () => void;
-  onConfirm: (payments: PdvPayment[], observations?: string) => void | Promise<void>;
+  /** skipReminder: finalizado segurando Shift, a comanda ja foi retirada (sem lembrete). */
+  onConfirm: (payments: PdvPayment[], observations?: string, options?: { skipReminder?: boolean }) => void | Promise<void>;
 }) {
   const [payments, setPayments] = useState<PdvPayment[]>(initialPayments);
+  // Comanda ja retirada (sem lembrete): tecla ] ao lado do Enter, ou Shift/Ctrl segurado ao finalizar.
+  const modifierHeld = useRef(false);
+  const skipArmed = useRef(false);
+  const finishRef = useRef<() => void>(() => undefined);
   const [paymentEntryMethod, setPaymentEntryMethod] = useState<PdvPaymentMethod | null>(null);
   const [editingPayment, setEditingPayment] = useState<PdvPayment | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -4248,7 +4261,9 @@ export function PaymentModal({
     finishLocked.current = true;
     setSubmitting(true);
     try {
-      await onConfirm(payments.map((payment) => ({ ...payment, description: observations.trim() || payment.description })), observations);
+      const skipReminder = skipArmed.current || modifierHeld.current;
+      skipArmed.current = false;
+      await onConfirm(payments.map((payment) => ({ ...payment, description: observations.trim() || payment.description })), observations, { skipReminder });
     } catch (error) {
       finishLocked.current = false;
       setSubmitting(false);
@@ -4258,6 +4273,31 @@ export function PaymentModal({
       setSubmitting(false);
     }
   };
+
+  finishRef.current = () => { void finish(); };
+  useEffect(() => {
+    if (skipReminderKey === "off") return;
+    const track = (event: KeyboardEvent) => {
+      modifierHeld.current = skipReminderKey === "shift" ? event.shiftKey : skipReminderKey === "ctrl" ? event.ctrlKey : false;
+    };
+    const keydown = (event: KeyboardEvent) => {
+      track(event);
+      // Tecla ] º (ABNT2, ao lado do Enter): faz o mesmo que o Enter de finalizar, sem lembrete.
+      if (skipReminderKey !== "bracket" || event.repeat || !(event.key === "]" || event.key === "}" || event.code === "Backslash")) return;
+      if (paymentEntryMethod || notice || customerPickerOpen || submitting || busy || remaining > 0.009) return;
+      event.preventDefault();
+      event.stopPropagation();
+      skipArmed.current = true;
+      finishRef.current();
+    };
+    const reset = () => { modifierHeld.current = false; };
+    window.addEventListener("keydown", keydown, true);
+    window.addEventListener("keyup", track, true);
+    window.addEventListener("blur", reset);
+    return () => { window.removeEventListener("keydown", keydown, true); window.removeEventListener("keyup", track, true); window.removeEventListener("blur", reset); };
+  }, [skipReminderKey, paymentEntryMethod, notice, customerPickerOpen, submitting, busy, remaining]);
+  // Cancelar a confirmacao desarma o "sem lembrete".
+  useEffect(() => { if (!confirming && !submitting) skipArmed.current = false; }, [confirming]);
 
   const handleReceiveKeyDown = (event: React.KeyboardEvent) => {
     const paymentShortcut: Record<string, PdvPaymentMethod> = {
@@ -4386,10 +4426,9 @@ export function PaymentModal({
               <strong>Escolha a forma de pagamento</strong>
               <div className="pdv-payment-methods">
                 {CHECKOUT_PAYMENT_METHODS.map((item, index) => (
-                  <button key={item} aria-label={`${checkoutMethodLabel(item) === item ? item : `${item} - ${checkoutMethodLabel(item)}`} (F${index + 1})`} title={item === "Conta a receber" && !selectedCustomerId ? "Escolha o cliente em Pesquisar para liberar" : undefined} className={`${focusedPaymentIndex === index ? "active" : ""} ${item === "Conta a receber" && !selectedCustomerId ? "needs-customer" : ""}`.trim()} aria-selected={focusedPaymentIndex === index} disabled={remaining <= 0.009 || (item === "Conta a receber" && !selectedCustomerId)} onClick={() => { setFocusedPaymentIndex(index); openPaymentMethod(item); }}>
+                  <button key={item} aria-label={`${checkoutMethodLabel(item) === item ? item : `${item} - ${checkoutMethodLabel(item)}`} (F${index + 1})`} title={item === "Conta a receber" && !selectedCustomerId ? `Escolha o cliente em Pesquisar para liberar (F${index + 1})` : `${checkoutMethodLabel(item)} (F${index + 1})`} className={`${focusedPaymentIndex === index ? "active" : ""} ${item === "Conta a receber" && !selectedCustomerId ? "needs-customer" : ""}`.trim()} aria-selected={focusedPaymentIndex === index} disabled={remaining <= 0.009 || (item === "Conta a receber" && !selectedCustomerId)} onClick={() => { setFocusedPaymentIndex(index); openPaymentMethod(item); }}>
                     {checkoutMethodIcon(item)}
                     <span>{checkoutMethodLabel(item)}</span>
-                    <small>F{index + 1}</small>
                   </button>
                 ))}
               </div>
@@ -4460,7 +4499,7 @@ export function PaymentModal({
             <div className="pdv-checkout-figure received"><span>Recebido</span><strong>{money(received)}</strong></div>
             <div className="pdv-checkout-figure change"><span>Troco</span><strong>{money(change)}</strong></div>
             <div className="pdv-checkout-actions">
-              <button className="pdv-primary-button" disabled={busy || submitting || (payments.length > 0 && remaining > 0.009)} onClick={finish}>
+              <button className="pdv-primary-button" title={skipReminderKey === "bracket" ? "Tecla ] (ao lado do Enter): finaliza com a comanda já retirada, sem lembrete." : skipReminderKey === "shift" ? "Segure Shift ao finalizar para dar a comanda como já retirada, sem lembrete." : skipReminderKey === "ctrl" ? "Segure Ctrl ao finalizar para dar a comanda como já retirada, sem lembrete." : undefined} disabled={busy || submitting || (payments.length > 0 && remaining > 0.009)} onClick={finish}>
                 <Check size={18} /> {busy || submitting ? "Salvando..." : confirmLabel}
               </button>
               <button className="pdv-danger-button" disabled={busy || submitting} onClick={cancelSafely}><X size={18} /> Voltar</button>
@@ -4656,9 +4695,9 @@ function CustomerPickerModal({ customers, selectedId, onSaveCustomer, onCancel, 
       <section className="pdv-payment-modal pdv-customer-picker" role="dialog" aria-modal="true" aria-label="Cadastro de clientes">
         <header className="pdv-checkout-titlebar"><h1>Cadastro de Clientes</h1><button className="pdv-icon-button" aria-label="Fechar pesquisa de clientes" onClick={onCancel}><X size={18} /></button></header>
         <div className="pdv-customer-picker-toolbar">
-          <button type="button" onClick={startCreate}><UserPlus size={15} /><span>Novo</span><small>F2</small></button>
-          <button type="button" disabled={!highlightedRow} onClick={() => startEdit(highlightedRow)}><Pencil size={15} /><span>Alterar</span><small>F3</small></button>
-          <button type="button" disabled={!highlightedRow} onClick={() => choose(highlightedRow)}><Check size={15} /><span>Selecionar</span><small>Enter</small></button>
+          <button type="button" title="Novo (F2)" onClick={startCreate}><UserPlus size={15} /><span>Novo</span></button>
+          <button type="button" title="Alterar (F3)" disabled={!highlightedRow} onClick={() => startEdit(highlightedRow)}><Pencil size={15} /><span>Alterar</span></button>
+          <button type="button" title="Selecionar (Enter)" disabled={!highlightedRow} onClick={() => choose(highlightedRow)}><Check size={15} /><span>Selecionar</span></button>
         </div>
           <>
             <div className="pdv-customer-picker-filters">
@@ -6629,9 +6668,9 @@ function TableCloseMenu({
           </div>
         </div>
         <div className="pdv-action-row">
-          <button className={`pdv-primary-button ${actions[focusedAction] === "total" ? "keyboard-focus" : ""}`} onClick={closeTotal}>Fechar total <small>F1</small></button>
-          {partialEnabled && <button className={`pdv-ghost-button ${actions[focusedAction] === "partial" ? "keyboard-focus" : ""}`} onClick={onPartialItems}>Fechar parcial <small>F2</small></button>}
-          <button className={`pdv-danger-button ${actions[focusedAction] === "cancel" ? "keyboard-focus" : ""}`} onClick={onCancel}>Voltar <small>Esc</small></button>
+          <button className={`pdv-primary-button ${actions[focusedAction] === "total" ? "keyboard-focus" : ""}`} title="Fechar total (F1)" onClick={closeTotal}>Fechar total</button>
+          {partialEnabled && <button className={`pdv-ghost-button ${actions[focusedAction] === "partial" ? "keyboard-focus" : ""}`} title="Fechar parcial (F2)" onClick={onPartialItems}>Fechar parcial</button>}
+          <button className={`pdv-danger-button ${actions[focusedAction] === "cancel" ? "keyboard-focus" : ""}`} title="Voltar (Esc)" onClick={onCancel}>Voltar</button>
         </div>
       </section>
     </div>

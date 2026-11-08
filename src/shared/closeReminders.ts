@@ -29,10 +29,16 @@ export interface LocalTablePreferences {
   syncAcknowledge: boolean;
   /** Quantos lembretes ficam visiveis antes de virar lista com rolagem. */
   visibleLimit: number;
+  /** Como finalizar a conta dando a comanda como ja retirada (sem lembrete). */
+  skipReminderKey: SkipReminderKey;
 }
 
+/** "bracket": a tecla ] º ao lado do Enter finaliza sem lembrete; shift/ctrl: segurar ao finalizar. */
+export type SkipReminderKey = "bracket" | "shift" | "ctrl" | "off";
+export const SKIP_REMINDER_KEYS: SkipReminderKey[] = ["bracket", "shift", "ctrl", "off"];
+
 export const DEFAULT_TABLE_PREFERENCES: LocalTablePreferences = {
-  reminders: "off", weekdays: [0, 6], excludedTables: "", hideQuickValue: false, reminderSource: "mine", syncAcknowledge: true, visibleLimit: 4
+  reminders: "off", weekdays: [0, 6], excludedTables: "", hideQuickValue: false, reminderSource: "mine", syncAcknowledge: true, visibleLimit: 4, skipReminderKey: "bracket"
 };
 
 /** Accepts exact numbers, closed ranges and open-ended ranges, without expanding them. */
